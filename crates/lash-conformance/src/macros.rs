@@ -9,6 +9,7 @@ mod tool_call_identity;
 mod tool_child;
 mod turn_crash;
 mod turn_ingress;
+mod usage_accounting;
 mod vm_broker;
 
 /// Expansion machinery for the runtime-persistence registration macros.
@@ -116,17 +117,11 @@ macro_rules! runtime_persistence_tests {
             (commit_rejects_carried_nondefault_byte_budget, "root"),
             (commit_rejects_follow_on_bytes_over_budget, "root"),
             (commit_rejects_agent_frame_bytes_over_budget, "root"),
-            (commit_rejects_usage_delta_bytes_over_budget, "root"),
             (commit_rejects_turn_result_bytes_over_budget, "root"),
             (commit_with_every_payload_family_inside_budget_succeeds, "root"),
-            (load_hydrates_checkpoint_and_usage, "hydrated"),
-            (load_retains_reasoning_only_usage, "root"),
-            (load_retains_usage_dispositions_and_rebuilds_outstanding_attempts, "root"),
+            (load_hydrates_checkpoint, "hydrated"),
             (checkpoint_restore_rejects_turn_index_without_increment_headroom, "root"),
             (checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows, "root"),
-            (load_rejects_token_usage_overflow, "root"),
-            (usage_delta_identity_is_idempotent_across_commits, "root"),
-            (usage_ordinal_reuse_with_different_payload_survives_receipt_replay, "root"),
             (execution_state_replace_then_clear_removes_the_live_checkpoint_ref, "execution-state-replace-then-clear"),
             (checkpoint_rejects_unknown_component_ref, "checkpoint-unknown-ref"),
             (session_read_loads_persisted_history, "branchy"),
@@ -331,6 +326,7 @@ macro_rules! process_registry_tests {
                 (a_process_event_batch_is_one_commit, "process-event-batch"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (count_events_through_counts_every_event_at_any_top_bound, "count-events-through-top-bound"),
+                (signal_admission_retains_its_identity_and_selected_wait, "signal-admission"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (wake_subscription_is_indexed_and_retargetable, "wake-subscription"),
                 (lifecycle_status_and_outcome_fold, "lifecycle-fold"),
@@ -377,7 +373,6 @@ macro_rules! process_registry_tests {
                 (consumer_hold_prevents_destructive_prune_until_settlement, "consumer-hold-retention"),
                 (later_segment_recovery_refuses_without_terminal_mutation, "later-segment-recovery"),
                 (every_execution_write_refuses_a_superseded_invocation_without_mutation, "invocation-write-matrix"),
-                (a_trigger_delivery_pin_holds_its_row_until_released, "trigger-delivery-pin"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
                 (a_session_close_reaps_the_turn_scopes_that_never_became_roots, "never-root-turn-scopes"),
@@ -699,8 +694,8 @@ macro_rules! effect_group_cancelled_child_terminal_tests {
 
 /// The fixture yields `(guard, make, witness, make_foreign)`: the witness is
 /// how this host proves its active-wait registration before the quiescence
-/// law asks for retirement (`effect_host_journaled_wait_registration_witness`
-/// for a store journal), and `make_foreign` builds a host over another
+/// law asks for retirement, through the server double's wait registration
+/// or a live Restate handler, and `make_foreign` builds a host over another
 /// substrate, whose registry did not mint this host's keys.
 #[macro_export]
 macro_rules! effect_host_await_event_tests {
@@ -961,6 +956,8 @@ macro_rules! process_trigger_retention_tests {
             (trigger_capture_route_and_compaction_refusal_matrix, "trigger-capture-compaction-matrix"),
             (trigger_delivery_recovery, "trigger-delivery-recovery"),
             (trigger_delivery_pinned_recovery, "trigger-delivery-pinned-recovery"),
+            (trigger_delivery_pin, "trigger-delivery-pin"),
+            (trigger_delivery_start_admission, "trigger-delivery-start-admission"),
             (trigger_delivery_refusal, "trigger-delivery-refusal"),
         ]);
     };
@@ -1246,6 +1243,7 @@ macro_rules! process_prune_start_staging_tests {
     ($fixture:block) => {
         $crate::process_prune_start_staging_tests!(@catalogue $fixture; [
             (prune_and_late_transfer_fences, "process-prune-referrer-fence"),
+            (two_starts_share_one_captured_environment, "shared-captured-environment"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1395,6 +1393,7 @@ macro_rules! artifact_referrer_tests {
         $crate::artifact_referrer_tests!(@catalogue $fixture; [
             (publication_racing_frame_end_is_fenced, "artifact-referrer-publication-race"),
             (host_pins_reclaim_and_fence, "artifact-referrer-host-pins"),
+            (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
             (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);
@@ -1915,25 +1914,6 @@ macro_rules! append_tombstone_tests {
     };
 }
 
-#[macro_export]
-macro_rules! append_receipt_envelope_tests {
-    ($fixture:block) => {
-        $crate::append_receipt_envelope_tests!(@catalogue $fixture; [
-            (append_receipt_mixed_usage_envelope, "append-receipt-mixed-usage"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(store).await;
-            }
-        )*
-    };
-}
-
 /// The fixture supplies a store plus the backend's own persisted-receipt rewrite, applied
 /// outside the runtime.
 #[macro_export]
@@ -1971,27 +1951,6 @@ macro_rules! append_receipt_identity_corruption_tests {
                 let (_guard, store, corrupt) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, corrupt).await;
-            }
-        )*
-    };
-}
-
-/// Register cancelled-append usage publication. The fixture supplies a store
-/// plus the backend's own commit-seam pause.
-#[macro_export]
-macro_rules! append_usage_cancellation_tests {
-    ($fixture:block) => {
-        $crate::append_usage_cancellation_tests!(@catalogue $fixture; [
-            (append_usage_cancellation_publishes_exactly_once, "append-usage-cancellation"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store, arm_and_wait) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(store, arm_and_wait).await;
             }
         )*
     };
@@ -2090,6 +2049,9 @@ macro_rules! attachment_referrer_tests {
         attachment_prefix_pin_keeps_the_session_edge_until_unpin,
         session_referrer_waits_for_graph_retirement,
         condemnation_needs_no_edge_and_no_pending_write,
+        skipped_attachment_referrer_kind_cannot_authorize_delete,
+        truncated_attachment_root_page_cannot_authorize_delete,
+        complete_attachment_roots_cover_every_kind_and_exhaust_pages,
     ]); };
     (@laws $fixture:block; [$($law:ident),* $(,)?]) => { $(
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2148,5 +2110,60 @@ macro_rules! checkpoint_profile_tests {
             let (_guard, stores) = $fixture;
             $crate::registration_macro_support::$law(stores).await;
         }
+    };
+}
+
+/// Register the claimed-page wake isolation laws on a backend.
+#[macro_export]
+macro_rules! wake_delivery_isolation_tests {
+    ($fixture:block) => {
+        $crate::wake_delivery_isolation_tests!(@laws $fixture; [
+            bad_wake_source_does_not_strand_claimed_siblings,
+            expired_wakes_settle_without_reading_bad_sources,
+            transient_wake_source_retries_release_claims_and_keep_expiry,
+            wake_defer_failure_does_not_strand_claimed_siblings,
+            bad_wake_source_page_recovers_after_restart,
+            lost_bad_source_claim_does_not_settle_the_new_owner,
+        ]);
+    };
+    (@laws $fixture:block; [$($law:ident),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, factory, registry, clock, backend) = $fixture;
+                $crate::registration_macro_support::$law(factory, registry, clock, backend).await;
+            }
+        )*
+    };
+}
+
+/// Owner-scoped usage accounting laws. The fixture returns its guard and store handles.
+#[macro_export]
+macro_rules! usage_ledger_store_tests {
+    ($fixture:block) => {
+        mod usage_ledger {
+            use super::*;
+            $crate::usage_ledger_store_tests!(@register $fixture;
+                identical_settlement_retry_is_a_no_op,
+                conflicting_payload_is_a_typed_conflict_and_appends_nothing,
+                a_correction_has_its_own_identity,
+                each_fact_counts_once_under_any_grouping_order_and_repeat,
+                admission_is_idempotent_and_retirement_fences_it,
+                settlement_resolves_superseded_runs_unknown,
+                a_late_settlement_supersedes_retirement,
+                accounting_writes_never_touch_head_fence_or_receipts,
+                retention_reclaims_only_retired_owners_before_the_horizon,
+                reads_select_by_owner_without_a_committed_turn,
+            );
+        }
+    };
+    (@register $fixture:block; $($law:ident),+ $(,)?) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, fixture) = $fixture;
+                $crate::usage_ledger::$law(&fixture).await;
+            }
+        )+
     };
 }

@@ -734,7 +734,7 @@ mod tests {
             .send(request.clone(), None)
             .await
             .expect("response");
-        let original = read_http_body_text(response.body, None, "read response")
+        let original = read_http_body_text(response.body, 16 * 1024 * 1024, None, "read response")
             .await
             .expect("original response body");
         assert!(original.contains(REQUEST_SECRET));
@@ -776,9 +776,10 @@ mod tests {
         replay_script.request_match = ProviderWireRequestMatch::default();
         let replay = ScriptedLlmHttpTransport::new(replay_script).expect("valid replay script");
         let replayed = replay.send(request, None).await.expect("replayed response");
-        let replayed_body = read_http_body_text(replayed.body, None, "read replay")
-            .await
-            .expect("replayed body");
+        let replayed_body =
+            read_http_body_text(replayed.body, 16 * 1024 * 1024, None, "read replay")
+                .await
+                .expect("replayed body");
         assert_eq!(replayed.status, 429);
         assert!(replayed_body.contains(REDACTED));
         assert!(replayed_body.contains("kept"));
@@ -819,7 +820,7 @@ mod tests {
             .await
             .expect("response before recording is finalized");
 
-        let error = read_http_body_text(response.body, None, "read response")
+        let error = read_http_body_text(response.body, 16 * 1024 * 1024, None, "read response")
             .await
             .expect_err("invalid matcher must prevent recording");
         assert_eq!(error.kind, ProviderFailureKind::Validation);

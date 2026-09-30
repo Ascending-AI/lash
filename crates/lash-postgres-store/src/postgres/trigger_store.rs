@@ -262,7 +262,7 @@ pub(crate) struct TriggerSql {
     /// `trigger_occurrences` statements only PostgreSQL issues.
     occurrence_postgres: OccurrencePostgresStatements,
     /// `trigger_deliveries` statements both backends issue verbatim.
-    delivery: DeliveryStatements,
+    pub(crate) delivery: DeliveryStatements,
     /// `trigger_deliveries` statements only PostgreSQL issues.
     pub(crate) delivery_postgres: DeliveryPostgresStatements,
     /// `trigger_mutation_receipts` statements both backends issue verbatim.

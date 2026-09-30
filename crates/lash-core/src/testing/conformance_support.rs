@@ -3,15 +3,10 @@
 pub use crate::attachments::PersistenceReferrersAdapter;
 pub use crate::runtime::default_queued_drain_policy;
 pub use crate::runtime::effect::GroupExecutors;
+pub use crate::runtime::reconcile_pruned_trigger_deliveries_interleaved;
 pub use crate::runtime::state::RuntimeCheckpointComponents;
 pub use crate::runtime::state::{append_session_nodes_to_state_with_clock, boundary_operation};
 pub use crate::runtime::turn_control::{ActiveTurnControl, TurnCancelPeekIdentity};
-pub use crate::runtime::{
-    PendingTokenLedgerEntry, StagedTokenLedger, append_receipt_mixed_usage_envelope_conformance,
-    append_usage_cancellation_exactly_once_conformance,
-    reconcile_pruned_trigger_deliveries_interleaved, record_token_usage_shared,
-    stage_token_ledger_shared,
-};
 
 /// Project a store commit refusal through the production runtime boundary.
 ///

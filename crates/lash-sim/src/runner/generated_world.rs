@@ -86,7 +86,7 @@ struct SuspendingTurn {
     resolution_at: u64,
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
-    store_factory: Arc<dyn DeploymentStore>,
+    reopen: crate::content_oracle::ReopenHandles,
 }
 
 /// What the durable-content oracle needs from a suspend session after its
@@ -97,15 +97,16 @@ struct FinishedSuspend {
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
     tool_result: crate::content_oracle::ToolResultContent,
-    store_factory: Arc<dyn DeploymentStore>,
+    reopen: crate::content_oracle::ReopenHandles,
 }
 
 struct GeneratedRuntimeSession {
     _core: lash::LashCore,
     /// The session's own engine: its core's drive runs every turn of it.
     engine: crate::backend::SimEngine,
-    /// The engine's session factory, for reading the session back.
-    reopen_factory: Arc<dyn DeploymentStore>,
+    /// The engine's session factory and accounting, for reading the session
+    /// back.
+    reopen: crate::content_oracle::ReopenHandles,
     session: lash::LashSession,
     transport: Arc<ScriptedLlmHttpTransport>,
     provider_schedule: ScriptedTransportSchedule,
@@ -180,7 +181,7 @@ impl GeneratedRuntimeWorld {
         (
             crate::backend::SimEngine,
             lash::Backend,
-            Arc<dyn DeploymentStore>,
+            crate::content_oracle::ReopenHandles,
         ),
         FixedScriptRunnerError,
     > {
@@ -190,13 +191,13 @@ impl GeneratedRuntimeWorld {
                 (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
             });
         let engine = crate::backend::SimEngine::new(seed).await?;
-        let reopen_factory = lash::Backend::session_store_factory(&engine.backend());
+        let reopen = crate::content_oracle::ReopenHandles::over(&engine.backend());
         let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
             .observing(self.durable_writes.clone())
             .into();
         self.session_engines
             .insert(alias.to_string(), engine.clone());
-        Ok((engine, backend, reopen_factory))
+        Ok((engine, backend, reopen))
     }
 
     /// The run's history for the global invariants: the delivered boundaries,
@@ -273,12 +274,11 @@ impl GeneratedRuntimeWorld {
         self.durable_writes.clone()
     }
 
-    /// Emitted, committed and reopened content for every runtime and suspend
-    /// session, each read back through its own engine's session factory.
+    /// Emitted, delivered and reopened content for every runtime and suspend
+    /// session, each read back through its own engine's storage.
     pub(super) async fn content_evidence(
         &self,
     ) -> Result<Vec<crate::content_oracle::SessionContent>, FixedScriptRunnerError> {
-        let writes = self.checkpoint_write_events();
         let mut sessions = Vec::new();
         for (alias, session) in &self.sessions {
             sessions.push(
@@ -287,8 +287,7 @@ impl GeneratedRuntimeWorld {
                     session.transport.as_ref(),
                     &session.provider_scripts,
                     Vec::new(),
-                    &writes,
-                    session.reopen_factory.as_ref(),
+                    &session.reopen,
                 )
                 .await?,
             );
@@ -300,8 +299,7 @@ impl GeneratedRuntimeWorld {
                     suspend.transport.as_ref(),
                     &suspend.scripts,
                     vec![suspend.tool_result.clone()],
-                    &writes,
-                    suspend.store_factory.as_ref(),
+                    &suspend.reopen,
                 )
                 .await?,
             );
@@ -379,7 +377,7 @@ impl GeneratedRuntimeWorld {
         let scripts = runtime_scripts_for_turns(provider_kind, &provider_turns)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let provider_scripts = scripts.clone();
-        let (engine, backend, reopen_factory) = self.session_engine(&event.actor_alias).await?;
+        let (engine, backend, reopen) = self.session_engine(&event.actor_alias).await?;
         let provider_schedule = ScriptedTransportSchedule::new();
         let (core, transport, provider_kind) =
             runtime_core_for_scripts(scripts, backend, Some(provider_schedule.clone()))?;
@@ -398,7 +396,7 @@ impl GeneratedRuntimeWorld {
             GeneratedRuntimeSession {
                 _core: core,
                 engine,
-                reopen_factory,
+                reopen,
                 session,
                 transport,
                 provider_schedule,
@@ -1067,8 +1065,7 @@ impl GeneratedRuntimeWorld {
         let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(
             suspend_scripts.clone(),
         )?);
-        let (turn_engine, backend, suspend_store_factory) =
-            self.session_engine(&session_alias).await?;
+        let (turn_engine, backend, suspend_reopen) = self.session_engine(&session_alias).await?;
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -1162,7 +1159,7 @@ impl GeneratedRuntimeWorld {
                 resolution_at,
                 transport,
                 scripts: suspend_scripts,
-                store_factory: suspend_store_factory,
+                reopen: suspend_reopen,
             },
         );
         Ok(json!({
@@ -1311,7 +1308,7 @@ impl GeneratedRuntimeWorld {
                 &turn.tool_name,
                 &resolution,
             ),
-            store_factory: Arc::clone(&turn.store_factory),
+            reopen: turn.reopen.clone(),
         });
         Ok(json!({
             "session": event.actor_alias,
@@ -1347,8 +1344,7 @@ pub(super) async fn session_content(
     transport: &ScriptedLlmHttpTransport,
     scripts: &[ProviderWireScript],
     emitted_tool_results: Vec<crate::content_oracle::ToolResultContent>,
-    writes: &[CheckpointWriteEvent],
-    reopen: &dyn DeploymentStore,
+    reopen: &crate::content_oracle::ReopenHandles,
 ) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
     let exchanged = transport.exchanges()?.len();
     let emitted_attempts = scripts
@@ -1367,11 +1363,16 @@ pub(super) async fn session_content(
         session: session.to_string(),
         emitted_attempts,
         emitted_tool_results,
-        committed_usage: crate::content_oracle::committed_usage(writes, session)
-            .map_err(FixedScriptRunnerError::Assertion)?,
-        reopened: crate::content_oracle::reopen_session(reopen, session)
+        delivered_usage: crate::content_oracle::delivered_usage(reopen.usage.as_ref(), session)
             .await
             .map_err(FixedScriptRunnerError::Assertion)?,
+        reopened: crate::content_oracle::reopen_session(
+            reopen.sessions.as_ref(),
+            reopen.usage.as_ref(),
+            session,
+        )
+        .await
+        .map_err(FixedScriptRunnerError::Assertion)?,
     })
 }
 

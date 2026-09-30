@@ -2,64 +2,34 @@
 
 ## Status
 
-Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
-passages are historical under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
-The non-SQL decision and host-policy rules here survive.
+Accepted and implemented. Restate is the only effect engine
+([ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
+the group authority this ADR names is the Restate `EffectGroupIndex` object and
+its durable waits, and the SQL stores hold storage only. A process opener is
+its minted `ProcessId`
+([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
+Queued-work admission and recovery are
+[ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s, and
+process recovery is [ADR 0110](0110-the-engine-owns-process-recovery.md)'s.
+Every tool child is an attempt ([ADR 0116](0116-tools-are-opaque.md)).
 
-Decided 2026-09-21 (FIG-3392). **Implemented.** FIG-2266 built the invocation
-driver; FIG-3396 the accepted-work and protected-close recovery, in four ordered
-parts — FIG-3408 (§3, the retained child request), FIG-3409 (§4/§5, the
-linearization point, commit order and discharge), FIG-3410 (§7, closing and
-deletion exclusion) and FIG-3411 (§6, §8, §12, §13, carriage and handover);
-FIG-3394 the incarnation binding §1 validates; and FIG-3395 the aggregate oracle
-that froze the pre-cutover baseline.
-
-Amended 2026-09-25 (FIG-3607, PR-1): §1's process opener is the minted
-`ProcessId` ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
-The id is never reused, so the incarnation binding FIG-3394 validated is
-subsumed by the id itself: a process opener is `Process { process_id }`, and a
-request whose enclosing process is not its opener's id is refused as before.
-
-FIG-3397 was the integration landing, in three slices. Integration (a) formed
-every product tool batch as a durable group of tool children on all four tiers;
-(b) deleted the batch path the groups replaced; (c) accepted `Promise.race` and
-`Promise.any`, with the consumer mode on the Lashlang ability boundary (§10),
-timer children (§11), the opener's end closing and incorporating its groups at
-turn end, process terminal and session deletion (§6, §7), recovery of a live
-opener's losers after its worker dies (W5), segment reattachment and the
-per-opener bound (§9). The clause statuses below say what each slice
-delivered.
-
-Amended 2026-09-24: the **holds today** / **new** labels and the "What exists
-today" section record the code on 2026-09-21, before these landings. Where a
-body paragraph still says something does not exist, the clause's *Status* line
-and this header are current; the stale clause statuses are corrected inline.
-
-Amends [ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md),
+This ADR refines [ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md),
 [ADR 0042](0042-tool-attempts-are-atomic.md),
 [ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md),
 [ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md),
 [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
-and [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md), each
-of which carries the matching amendment and links here. Supersedes FIG-1416
-ruling 3 for unfinished tool execution at normal opener end, and for nothing
-else.
-
-Amended 2026-09-24 (FIG-3669), **partly implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: the `EffectReplayRowStore` group operations, the
-SQL tiers' finalization, the store drain and the SQL crash windows; the
-lifecycle contract stays, as an engine obligation. FIG-3861 removed the SQLite SQL effect engine and its rows; descriptions of it below are historical. Session and process lease passages await their own cutovers.
+and [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) for
+tool children of effect groups; each of them links here. A loser of an
+aggregate belongs to its opener and does not run past the opener's end as
+implicit durable background work; work that must outlive the opener is an
+explicit process.
 
 ## Context
 
 [ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)
 made concurrent settlement a durable group at the effect-host seam and left one
 question open: what happens to a tool child that lost a race when its opener
-ends or dies. That question was ruled under FIG-1538 after two endpoints were
-rejected.
+ends or dies. Two endpoints are rejected below.
 
 **A (reduced)** made a loser durably host-owned, finishing after its opener
 ended. It buys unobserved post-turn side effects: a `send_email` that loses to a
@@ -78,30 +48,6 @@ The **hybrid** below is the smallest endpoint that breaks no standing law. It
 costs more than B-prime by exactly the recovery ownership B-prime could not
 actually delete.
 
-### What exists today, and what does not
-
-*(Written 2026-09-21. Every item listed under "What does not exist" below has
-since landed; `calls.rs` now accepts `Promise.race` and `Promise.any`.)*
-
-This ADR builds on real primitives and specifies a lifecycle that does not yet
-exist. The distinction matters section by section, so each clause is labelled
-**holds today** or **new**, and this ADR never claims a target as current
-behaviour.
-
-The primitives that exist: the durable group record and its rank counter; the
-host-registered `GroupExecutors` resolver; the loser drain over unsettled group
-children; the in-process committed-final protection and source-ordered intent
-drain gate; started-process possession and its segment handover; the shared
-token ledger; the Durable Wait seam. *(The native host's scope-liveness fence
-was listed here; FIG-3585 deleted it with the native host.)*
-
-What does not exist: any production caller of `open_effect_group`; a durable
-child request; production recovery of accepted tool children; a durable
-live→closing transition; deletion exclusion for a closing group;
-`Promise.race`/`Promise.any` at all, which
-`crates/lash-typescript/src/lower/calls.rs` still refuses with `"Unsupported:
-Promise.{method} requires durable partial-settlement ordering (FIG-1416)."`
-
 ### Anchors
 
 Anchors quote a path and source text, never a line number: a line pin rots on
@@ -115,8 +61,7 @@ a quoted phrase either still exists or visibly does not.
 **live.** Aggregate selection cancels nothing; a losing child keeps running,
 exactly as a losing promise does in ECMA-262. Worker loss does not end an
 opener: an accepted child is *recovered* while its opener lives, from durable
-input on every tier. No tier holds a child only in memory: FIG-3585 deleted the
-native tier, and every host journals (ADR 0102 D1, kept by ADR 0104).
+input. Every host journals, so no child is held only in memory (§14).
 
 **closing.** Entered by a durable transition (§7), not by a worker dying. New
 tool work stops, cancel-eligible attempts become cancel-decided, and every
@@ -137,66 +82,26 @@ turn latency bound follows from the cancel grace.
 
 ### 1. Logical opener identity
 
-**An opener is `Turn(session_id, turn_id)`, `QueueDrain(session_id, drain_id)`
-or `Process(ProcessRef { process_id, incarnation })`.** Its identity is stable
-across worker attempts and segments, and it changes on process re-registration.
+**An opener is `Turn { session_id, turn_id }`, `QueueDrain { session_id,
+drain_id }` or `Process { process_id }`.** `EffectOpener`
+(`crates/lash-core-store/src/effect_opener.rs`) is that identity. It is stable
+across worker attempts and segments. A process opener is the process's minted
+id, which is never reused (ADR 0107), so a process registered later can never
+share it and alias another process's groups, closes or cancellation fences.
 
-**A queued-work drain is a durable logical opener.** Session persistence
-admits its `ExecutionScope::QueueDrain` before provider or tool effects.
-Automatic retries reuse the pending admission; explicit `drain_id` or
-`turn_id` names that admission and its first physical turn. A settled explicit
-identity returns its receipt without consuming later arrivals.
-
-One admission can run several physical turns. Its recorded physical ordinal,
-turn ID and turn index advance atomically with each physical `RuntimeCommit`.
-Frame handoffs and work withheld at terminal checkpoints retain the same
-opener across worker replacement. Group identity, retained authority,
-cancellation and retirement bind that exact opener throughout the run.
-
-Admission membership records ordered references to existing queue rows.
-Selection is frozen before execution, so new arrivals and changed batching
-limits cannot change a replayed physical turn. A retryable failure retains
-ownership. A terminal disposition records its result and settles assigned
-work; hosts can explicitly abandon an unfinished submission under the current
-session lane. Ordinary direct execution refuses while queued ownership is
-unfinished. Admission receipts remain until session deletion, whose permanent
-deleted-session tombstone prevents identity reuse.
-
-### Queued-run recovery
-
-An automatic drain resumes the session's pending admission before considering a new submission. The admission retains the selected order, execution configuration, physical turn ID and turn index. Changed batching limits affect new admissions. Changed execution configuration returns the non-retryable `QueuedRunConfigurationChanged` error while preserving the admission. The host restores the recorded configuration or explicitly abandons the run before direct execution can proceed.
-
-Exact selection uses the same admission owner. Its default identity is generated at admission, independently of the first requested batch ID. An explicit ID must repeat its original exact request. An incomplete exact selection fails before assigning a partial selection; it does not consume the unmatched rows. A retry with the same explicit identity returns the recorded failure receipt. A corrected request needs a new identity.
-
-`QueuedTurnDrain::Replayed` carries terminal evidence and does not produce a new turn. An explicit retry never consumes later arrivals. Callers that need to reconstruct a rendered answer read the committed transcript. `SelectedQueuedWorkDrainOutcome::receipt` carries the equivalent terminal evidence for an exact drain.
-
-Physical retry exhaustion leaves the durable admission pending. Hosts can inspect `session.durable().pending_queued_run()` and wake or drain the session again without enqueueing input. If recovery is no longer wanted, the host calls `session.abandon_queued_run` with the run's scope, revision and reason; the session claims its execution lane for the call, and a lane held elsewhere is refused as busy. That operation retains failed-terminal evidence and cancels only the run's assigned work. Checkpoint assignments commit with their claims and remain part of the admission after physical claim generations rotate; unrelated raw claims remain untouched. A stale revision is refused. Abandonment is a terminal settlement, so it ends the drain like every other one (ADR 0094, FIG-3560): §7's closing groups under the drain scope settle, then the end receipt lands and the drain's `Cancel` children are swept. Direct execution resumes after terminal disposition.
-
-Receipts share the session's existing retention lifetime. There is no queued-run TTL or implicit supersede. A permanently deleted session identity cannot admit new work.
+**A queued-work drain is a durable logical opener.** A turn started with a
+`drain_id` and no turn id runs its whole effect tree under
+`ExecutionScope::QueueDrain`, and the opener lives until the drain ends, not
+until its first physical turn does. Group identity, retained authority,
+cancellation and retirement bind that exact opener throughout the drain.
+Admission, selection, retry and abandonment of queued work are ADR 0101's.
 
 **`SessionDelete` and `RuntimeOperation` scopes are not openers and run no
-cells.** A scope that is none of the three is refused with a typed error rather
-than given an invented identity: widening this set is an amendment to this
-section, which is how the drain arm arrived. Group identity, retained
+cells.** A scope that is none of the three is refused with a typed
+`EffectOpenerError` rather than given an invented identity: widening what an
+opener is changes this section, never a fallback. Group identity, retained
 authority, cancellation, usage attribution and retirement all bind that exact
-opener. A retired or mismatched incarnation is refused, never rebound to the
-current process carrying the same name.
-
-**Today's execution scope does not establish that identity.**
-`crates/lash-sansio/src/effect_identity.rs` defines `ExecutionScope::Process {
-process_id }` with no incarnation, while
-`crates/lash-core-store/src/process_identity.rs` defines `ProcessRef {
-process_id, incarnation }` precisely to "Pin a reusable process name to one
-store-minted incarnation", and ADR 0094 renders a process Parent Scope as
-`process_id#incarnation` (both retired: ADR 0107 names a process by its minted
-id, and ADR 0108 replaces the Parent Scope with a recorded Lifetime). A group key — for a lashlang aggregate
-`{scope_id}:group:` then the issuing command's positional key
-`{namespace}:lk2:{k:010}` (FIG-3586), for any other caller
-`{scope_id}:group:{parent_effect_id}:{batch_id}` — is a string shape,
-not an incarnation binding. Reusing
-a process name can therefore alias a prior close, cancellation fence or group.
-**FIG-3394 binds the incarnation into the shared group and child identity;
-FIG-3396 validates it during recovery.**
+opener.
 
 **A process-backed session turn runs its cells under the process opener.** A
 `ProcessInput::SessionTurn` row — what every `agents.spawn` child is — creates a
@@ -204,70 +109,72 @@ child session and runs one turn of it under the *process's* scope: the process
 session runner
 (`crates/lash-core/src/runtime/session_manager/process_runners/session.rs`)
 stamps the create request `caused_by` the process and admits the child's first
-turn only under the process scope, which session initialisation passes through
-untouched (`crates/lash-core/src/runtime/session_manager/session_init.rs`). So
-that child turn's cells are opened by the process and not by the child turn: a
-worker retry keeps the incarnation and reuses the journal, while a
-re-registration under the same name is a different opener. The incarnation
-reaches the cell because the process runner admits the controller with an
-`AdmittedScope` that pairs the scope with the `ProcessRef` the authority CAS
-returned (FIG-3430) — and a process-scoped execution that carries no
-admitted incarnation is refused rather than opened on the reusable name. Found
-by FIG-3394, when refusing a process scope outright took every subagent cell's
-first tool call out: the child's `task.fail(...)` came back as "has no logical
-opener", its driver re-asked the provider to the cap, and the parent read
-`Stopped(MaxTurns)` instead of the child's own reason.
+turn under the process scope. So that child turn's cells are opened by the
+process and not by the child turn: a worker retry keeps the process id and
+reuses the journal.
 
-**One derivation, and no name lookup (FIG-3417).** `EffectOpener` is the single
-owner vocabulary, and it is derived exactly once — `EffectOpener::for_scope`
-(`crates/lash-core-store/src/effect_opener.rs`) — from the admitted
-`ExecutionScope` plus the `ProcessRef` the process runner pinned onto it. Every
-surface that must name the owner calls it: the lifecycle parent a child start
-declares, the recorded attempt a tool body runs inside, and the host identities
-the Lashlang bridges mint. There is no second derivation, and none of it asks a
-registry. `ProcessQuery::resolve_process_ref` is a host-facing *name* lookup —
-it answers "the current incarnation of this name" — and using it for owner
-derivation is the rebind defect this section refuses: under same-name
-re-registration the current incarnation is the *successor*, and prior work
-would rebind to it. A recovery path validating a retained pair uses
-`ProcessQuery::get_process_ref`, which answers the exact
-`(process_id, incarnation)` or refuses it as superseded. The incarnation stays
-beside `ExecutionScope`, never inside it: the scope remains the claim address
-and the pin is the admission-time fact. Where the derived opener is minted into
-a key preimage or an embedded id, `EffectOpener::identity_encoding` — the
-length-prefixed canonical form — is the only encoding; `render` is the
-diagnostic projection and is free to collide.
+**One derivation, and no name lookup.** `EffectOpener` is the single owner
+vocabulary, and it is derived exactly once — `EffectOpener::for_scope` — from
+the `AdmittedScope`. Every surface that must name the owner calls it: the
+lifecycle parent a child start declares, the recorded attempt a tool body runs
+inside, and the host identities the Lashlang bridges mint. There is no second
+derivation, and none of it asks a registry. It is an enum with a `kind` tag
+rather than a rendered string because a turn's scope identity is free-form text
+that can spell a process opener's rendering exactly; untagged, the two openers
+would mint one identity. Where the derived opener is minted into a key preimage
+or an embedded id, `EffectOpener::identity_encoding` — the length-prefixed
+canonical form — is the only encoding; `render` is the diagnostic projection
+and is free to collide.
 
 **A dead worker is neither live-ended nor closed.** Recovery classifies an
-opener by the durable closing fact of §7, never by the liveness of a lease. The
-existing drain guard is explicitly local and cannot answer this:
-`crates/lash-core-execution/src/runtime/effect/group_drain.rs` says "A group this
-process is still working is refused outright", and then immediately limits it —
-"These guards see only what this process can see. A group open in *another*
-process is not distinguishable from a closed one here, which is why closedness is
-the caller's knowledge".
+opener by the durable closing fact of §7, never by the liveness of a lease or
+by what one process can see: a group open in another process is not
+distinguishable from a closed one by a local guard, so closedness is the
+group authority's fact.
 
 **Ordinal carriage.** A lashlang aggregate is addressed by the issue ordinal of
-the command that formed it (ADR 0103, FIG-3586), which rides the VM
-continuation: a process body's ordinals live in `ReplayOrdinalsState::commands`
-inside the `LashlangSegmentState` its runtime serializes at a boundary, so two
-identical `race` calls straddling a segment boundary take different ordinals.
-The aggregate's instruction pointer, its occurrence and the opener occurrence
-that earlier keys carried are gone from every key; `occurrence_counters` stays
-on the continuation as trace and graph metadata only.
+the command that formed it (ADR 0103), which rides the VM continuation: a
+process body's ordinals live in `ReplayOrdinalsState::commands` inside the
+`LashlangSegmentState` its runtime serializes at a boundary, so two identical
+`race` calls straddling a segment boundary take different ordinals. No key
+carries the aggregate's instruction pointer or an occurrence;
+`occurrence_counters` stays on the continuation as trace and graph metadata
+only.
 
-*Status.* The positional group key and its continuation carriage hold
-(FIG-3586). **Implemented** (FIG-3394): the opener identity above is
-validated at recovery.
+**The aggregate group key is positional.** A lashlang aggregate's group key is
+the opener's group prefix followed by the issuing command's key:
+`{scope_id}:group:P:{k:010}`, `P` the run's replay namespace (ADR 0103). It
+carries no content, compiler output or parent effect id, and it keeps the
+opener's `{scope_id}:group:` prefix, so the opener's end finishes the groups a
+crashed cell formed exactly as it finishes any other it owns. A
+recorded-frontier read asks for the group rows under that prefix and reads them
+back as the commands that formed them. Its children are `P:{k:010}:child:{i}`,
+`i` the leaf's first-appearance index; its timers' admission sample is
+`P:{k:010}:timers-admitted`. Because the key is positional, an aggregate whose
+arguments, grant or timer layout changed still meets its journal.
+
+`batch_id` stays on the group as a **checked fact**: a content digest (identity
+family `lash.aggregate-content`) over the tool calls and the timers' positions
+and durations, with no instruction pointer or call site. The lashlang caller
+opens its group with `GroupReopen::RetainedContent`: a reopen must match the
+recorded shape (§3, W1) **and** every offered child must be the retained child
+at its position, compared as canonical envelopes, or the open refuses before
+any child is claimed — re-typed by the run to `lashlang_cell_replay_divergence`.
+Other callers use `RetainedShape` and the
+`{scope_id}:group:{parent_effect_id}:{batch_id}` key, whose batch id is
+`TOOL_BATCH_FAMILY_VERSION` 3. Both key shapes carry the opener's scope, so no
+two openers share a group although the group authority is keyed by the group
+key alone.
 
 ---
 
 ### 2. Invocation driver
 
 **A tool child is a replayable invocation driver.** Retry, completion-key
-derivation, deferred await and the orchestrating lane are *coordination* and run
-at handler level on the child's own admitted controller. Only atomic attempts run
-inside recorded bodies.
+derivation and deferred await are *coordination* and run at handler level on the
+child's own admitted controller. Only atomic attempts run inside recorded bodies.
+Every tool child runs one recorded attempt under its driver
+([ADR 0116](0116-tools-are-opaque.md)).
 
 This is ADR 0042's structural rule unchanged — "A recorded body must not emit
 commands into an ordinal-addressed journal" — and it is the reason coordination
@@ -286,23 +193,24 @@ separately specified cooperative path (§4), not by the engine reaching into it.
 **One resolver answers "what runs this child" for first dispatch and for
 recovery.** ADR 0065 already made the registered `GroupExecutors` resolver
 normative, and the code has it:
-`crates/lash-core-execution/src/runtime/effect/group_drain.rs` resolves through
-`fn executor_for(&self, envelope: &RuntimeEffectEnvelope)`. **No caller-closure
+`crates/lash-core-execution/src/runtime/effect/group_executors.rs` resolves
+through `fn executor_for`. **No caller-closure
 route is reintroduced**: a caller vector answers only first dispatch, while
 retry, drain, a resuming process and a fresh handler execution all run with no
 caller in scope.
 
-**On Restate, children become `call` children of the parent with the child's
-replay key as the idempotency key.** When this ADR was decided they were not:
-every group child was dispatched one-way (`.send()`), and the pinned VM's
-implicit cancellation covers tracked `call` children while deliberately exempting
-one-way sends, so implicit cancellation covered zero group children. It never
-becomes the sole close protocol now that it does cover them (§4).
+**On Restate, children are `call` children of the dispatch with the child's
+replay key as the idempotency key.** The pinned VM's implicit cancellation
+covers tracked `call` children, and it is never the sole close protocol (§4).
 
-*Status.* The resolver seam and the recorded-body rule **hold today**, and the
-handler-level driver now holds on all four tiers — in-process (FIG-2266 C1)
-and Restate (C2) — with `call`-child dispatch and idempotency-keyed identity
-holding alongside it.
+**The dispatch registers its children in one index step.** It issues every child
+call, then records the full position-to-invocation map and moves the group to
+ready in one exclusive index handler, which resolves every ADMIT wake and READY
+together; nothing is awaited before that step. ADMIT is notification only: a
+child is admitted by a fresh read that finds its own recorded id. The adopted
+dispatcher's id is kept, so a retirement before registration cancels the
+dispatch and the child calls it tracks, and a retired group is never made
+ready.
 
 ---
 
@@ -313,14 +221,13 @@ ownership, and adds only what environment capture lacks.** Capture already
 publishes under an owner —
 `crates/lash-core-execution/src/session/execution_context.rs` exposes
 `captured_process_execution_env_ref(&self, owner: &crate::ArtifactOwner)` — and
-what it captures is two fields:
+what it captures is the session's plugin options, policy and recorded render:
 `crates/lash-core-store/src/process_identity.rs` defines
-`ProcessExecutionEnvSpec { plugin_options, policy }`.
+`ProcessExecutionEnvSpec { plugin_options, policy, render }`.
 
-Two fields are not a tool execution descriptor. The child request adds the
-admitted grant (kept separate today:
-`crates/lash-core-execution/src/tool_provider.rs` carries `pub struct
-PreparedToolBatchCall { pub call, pub replay_suffix, pub execution_grant:
+That is not a tool execution descriptor. The child request adds the admitted
+grant (kept separate: `crates/lash-core-execution/src/tool_provider.rs` carries
+`pub struct PreparedToolBatchCall { pub call, pub execution_grant:
 Option<Box<ToolExecutionGrant>> }`, and the grant holds `source_id` and
 `execution_binding`), the admitted scope, lineage, and cancellation authority.
 
@@ -329,8 +236,8 @@ accepted membership and a reconstructible request for every unique child,
 including unclaimed children**: input, replay identity, admitted grant, the exact
 opener and scope, lineage, cancellation authority and environment reference. A
 persisted accepted group may never exist without discoverable complete input.
-This is a real gap, not a restatement: `EffectGroupRecord` in
-`crates/lash-core-execution/src/runtime/effect/group_journal.rs` stores "How many
+The group record alone cannot supply it: `EffectGroupRecord` in
+`crates/lash-core-execution/src/runtime/effect/group.rs` stores "How many
 children the group has", a count, and nothing that reconstructs one.
 
 **Environment bytes are protected under `ArtifactOwner::Execution` through their
@@ -353,13 +260,10 @@ under a durable owner and then persists the reference … so a retirement must
 surface at publish time rather than hand back a reference to bytes the fence
 already reclaimed." A child request is on the durable side of that split.
 
-#### Amendment (FIG-3408): what a reconstructible request contains
+#### What a reconstructible request contains
 
-The clause above names the facts a child request carries. Building the shape
-forced four decisions that the clause did not settle, recorded here so a later
-reader does not re-derive them differently. **Status: the shape is minted and
-frozen; nothing produces or consumes it yet** — the handler-level driver is
-FIG-2266's and group formation is FIG-3397's.
+The clause above names the facts a child request carries. The shape settles
+four further questions.
 
 **A tool child needs a command of its own.** ADR 0065 recorded that "groups
 introduce no new command variant, because what is new is the *composition
@@ -367,10 +271,10 @@ above* attempts". That holds for every child the journal could already name and
 fails for a tool child. `crates/lash-core-execution/src/runtime/effect/envelope.rs`
 carries `ToolAttempt { call, execution_grant, attempt, max_attempts }` — the
 atomic body of *one* attempt, so a driver expressed as one could not retry,
-because a second attempt is a second envelope with a second hash — and
-`ToolBatch { batch }`, the whole batch a group replaces. §2's invocation driver
-is neither. The retained request is therefore the payload of a new
-`ToolInvocation` command rather than a second record beside an existing one:
+because a second attempt is a second envelope with a second hash. §2's
+invocation driver is not an attempt. The retained request is therefore the
+payload of its own `ToolInvocation` command rather than a second record beside
+an existing one:
 one shape, so the recorded authority and the hashed envelope cannot disagree.
 
 **1. An ungranted call pins its admitted manifest.** A reopen may not consult
@@ -387,18 +291,10 @@ cases are one field with two arms, not two optional fields, because "neither"
 and "both" are not states a child can be in. No retry policy is stored beside
 the manifest, since the manifest already holds it.
 
-**1b. The opener is a typed identity, not a scope.** §1's opener is
-`Turn(session_id, turn_id)` or `Process(ProcessRef { process_id, incarnation })`,
-and `ExecutionScope::Process` carries only `process_id`, so a retained scope
-leaves recovery-time validation nothing to validate and lets a re-registered
-name alias its predecessor's groups and fences. `EffectOpener`
-(`crates/lash-core-store/src/effect_opener.rs`) is that identity, shared by this
-request, by recovery, and by FIG-3394's Lashlang host bridges. It is an enum
-with a `kind` tag rather than a rendered string because a turn's scope identity
-is free-form text that can spell `{process_id}#{incarnation}` exactly; untagged,
-the two openers would mint one identity. The child's *claim address* stays an
-`ExecutionScope`, which is what the journal fences a row on. An enclosing
-process is likewise a `ProcessRef`, never a bare name.
+**1b. The opener is a typed identity, not a scope.** The request records §1's
+`EffectOpener`, the identity shared by this request, by recovery and by the
+Lashlang host bridges. The child's *claim address* stays an `ExecutionScope`,
+which is what the journal fences a row on.
 
 **2. Completion routing is recorded, not re-derived.** Completion-key
 preparation answers `Issued | NotNeeded | Unsupported` from two live inputs —
@@ -407,8 +303,8 @@ whether the host routes completions durably. Both are deployment facts at
 recovery time and admission facts at formation time. The request records which
 of `inline` or `durable` the child was admitted under, so a recovered child
 never derives a key nothing will resolve. The request's cancellation authority
-is required, so every child names the binding that may cancel it. FIG-3585
-deleted the `process-lifetime` routing with the native tier (§14).
+is required, so every child names the binding that may cancel it.
+`ToolChildCompletionRouting` has exactly those two arms.
 
 **2b. The cancellation authority is a validated identity.** It is the value
 `turn_control_binding_id_for_scope` mints and `binding_id_admits_scope` checks —
@@ -436,16 +332,9 @@ sender and the clock.
 **4. Turn context is never recorded.** `TurnContext` holds only live runtime
 correlation and has no `Serialize`. The request carries no correlation; process
 runners construct their tool dispatch with `TurnContext::default()`. Per-send
-prompts live in durable `RunSpec` overrides, and the retired live prompt and
-selected-drain fields are deleted (FIG-4226). The live
-plugin inputs a tool once read through `ToolContext::plugin_input` are deleted
-(ADR 0101 A6, FIG-3837). So the request records no turn-context payload and
-needs no refusal.
-
-*Status.* Capture, ownership and the separate grant hold. **Implemented**
-(FIG-3408, FIG-3396, FIG-3397): retained accepted membership, the
-reconstructible request and environment protection through the last
-dependency; the `ToolInvocation` command is produced and consumed.
+prompts live in durable `RunSpec` overrides, and a tool reads no live plugin
+input (ADR 0101). So the request records no turn-context payload and needs no
+refusal.
 
 ---
 
@@ -459,16 +348,28 @@ record. Signalling the body and the bounded local grace *follow* the cancel
 decision and cannot reverse it. **A final record found after recovery is
 protected even if its in-memory commit notification was never published.**
 
-The in-process machinery was local, not durable, and the difference was the
-work. *(FIG-3397 deleted the code quoted here with the batch path.)*
-`crates/lash-core-execution/src/session/tool_execution/batch.rs`
-short-circuited its own grace with `if final_result_committed.is_committed() {
-return tool_call.await; }` before arming `Duration::from_millis(50)`, and
-`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` publishes
-that signal where the terminal is sealed — `begin_final_drain` "Publishes this
-child's committed final result and waits for its turn to drain the declared
-intents". That is a `tokio::sync::watch` send followed by a gate wait: correct in
-one process, and not an arbitration primitive across a crash.
+The point is the group authority's exclusive `commit_child` handler, and the
+decision is journaled in its answer. An in-process signal — a watch send
+followed by a gate wait — is correct in one process and is not an arbitration
+primitive across a crash, so none is used.
+
+**Every tool child is an attempt, and two parked shapes add obligations at the
+point.**
+
+- **Declared starts.** A child that parks on `PendingResolver::DeclaredStart`
+  launches the start before its terminal is armed. The launch is the start's
+  own journaled admission, `process:start:{start key}`, under the call's
+  cancel fence, so exactly one of the launch and a cancel decision lands
+  first, and a launch admitted before the decision still realizes on a
+  redrive (`crates/lash-core-execution/src/tool_dispatch/pending_resolver.rs`).
+  The launch reserves no rank: the child's terminal rank is reserved only when
+  the result or the cancel reaches the point
+  ([ADR 0116](0116-tools-are-opaque.md) §3.2).
+- **Cancel obligations.** A cancelled or timed-out child parked on a
+  runtime-owned resolver with `CancelHint::CancelExternalWork` records a
+  cancel obligation in the cancel disposition's commit, and drains it before
+  it settles `Cancelled` ([ADR 0116](0116-tools-are-opaque.md) §3.4). An
+  unresolved child stays cancellable.
 
 #### Transition table
 
@@ -497,13 +398,7 @@ never requires proof of physical stop.
 **Cancellation forbids new unprotected semantic admission under the cancelled
 invocation.** It does **not** undo already-admitted commands and does not cancel
 committed descendant obligations; those retain authority to finish under the
-original opener. This matters because an orchestrating child has no attempt frame
-of its own — ADR 0042 says `batch` and `spawn_agent` "have no `ToolAttempt` frame
-of their own", and "every journal command it issues is a direct child of the
-enclosing process invocation" — so an *uncommitted* orchestrator can already
-contain committed descendants and recorded semantic commands. **Orchestrating
-children are classified by their retained command and child obligations, never by
-an invented outer `ToolAttempt`.**
+original opener.
 
 Subject to that, the fence covers four sinks: child dispatch, nested semantic
 writes (triggers, process registration, the live possession and usage buffers for
@@ -516,28 +411,24 @@ admitted child.
 
 **Neither close nor cancellation acknowledgement permits deletion.** Retirement
 requires discharged obligations, no retained consumer dependency, and a surviving
-identity fence. The quiescence read is the shape of the right question —
-`crates/lash-store-sql/src/effect.rs` defines `scope_is_quiescent` over an
-`in_progress` replay row, a group whose `grp.children > (SELECT COUNT(*) …)`, and
-an `await_event_waits` row with `terminal_json IS NULL`, in one statement because
-"quiescence is the one question whose answer spans both families" — but it is not
-today wired to session deletion (§7).
+identity fence. A scope is quiescent only when no recorded effect is executing
+and every recorded group's index reports no unsettled child
+(`scope_effects_and_groups_are_quiescent` in
+`crates/lash-restate/src/durable_wait.rs`); session deletion's own exclusion is
+§7's.
 
 **Restate's engine cancellation is never the sole close protocol.** The pinned
 shared core cancels tracked child calls from inside `do_await` without consulting
-any Lash commit fence, so switching `.send()` to `.call()` does not protect a
+any Lash commit fence, so dispatching children with `.call()` does not protect a
 committed final by itself. The journaled cooperative path and retained
 protected-work recovery must preserve this section's rules even when implicit
 cancellation interrupts a child invocation.
 
-*Status.* **Implemented** (FIG-3396). The durable linearization point and the
-cancel disposition landed in FIG-3409, the nested-admission fence in FIG-3470,
-and the completion-delivery fence in FIG-3568: the substrate that owns a
-child's cancel decision closes the child's completion key in the same step, so
-a late `resolve` of that key is refused with
+**The completion-delivery fence closes the key with the decision.** The
+substrate that owns a child's cancel decision closes the child's completion key
+in the same step, so a late `resolve` of that key is refused with
 `RuntimeEffectGroupChildCancelDecided`, writes nothing, and leaves the recorded
-disposition `Cancel` (W17). The deletion exclusion is §7's. The local
-committed-final protection and the 50 ms grace hold as before.
+disposition `Cancel` (W17).
 
 ---
 
@@ -548,101 +439,117 @@ and its required projection.** Publishing a rank earlier would let a consumer
 observe a settlement whose declared effects have not happened, and then checkpoint
 past it.
 
-#### Intents are admitted in final-commit order, not in source order
+#### Intents are admitted in rank order, not in source order
 
-**Within a group, a child's intent drain is admitted in the order its final
-record won the §4 linearization point.** That order is durable, monotonic per
-group, assigned at the moment a final record commits, and journaled; a child never
-waits on a sibling that has not committed its final record. It is the order
-in which the group's children may emit nested semantic commands, and therefore
-the order a replay must reproduce.
+**The §4 linearization point reserves the child's settlement rank.** A final
+record that wins the point takes the group's next rank in the same serialized
+step, and a cancel decision takes the next rank the same way; a retried commit or
+cancel allocates nothing. The rank is durable, monotonic per group and journaled
+in the commit's answer. There is one order, the order of §4 decisions; commit
+order is that order restricted to committed children. **The seat publishes the
+reserved rank** — after the child's drain and projection — and allocates
+nothing, so seats may land out of rank order.
 
-The drain waits on the drained wake of only the last-committed unseated blocker.
-That wait covers every lower-committed sibling: a blocker seats only after every
-lower one has seated, or the group retires and releases every barrier. The
-`drain_barrier_is_transitive` law pins this rule. The commit-order and rankability
-semantics above are unchanged.
+**A read is served only inside the seated prefix.** A rank is served only when
+every rank up to it has seated — to the consuming await and to the cursorless
+read alike — and a run read serves from the asked rank to the last rank of that
+prefix. A consumer therefore observes ranks in rank order and never observes a
+child before it is rankable; a replay serves exactly the run its journal
+recorded.
 
-This replaces the cross-child **source** order of 2026-09-21, which cannot be
-carried into groups; the code quoted below was deleted by FIG-3397. `settle_terminal_attempt` in
-`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` calls
-`slot.begin_final_drain().await` for **every** terminal attempt, whether or not it
-declared a single intent, and `BatchIntentDrainGate::wait_for` parks until `next
-== index`. So every terminal leaf of a batch today settles in source order, and
-first-settled selection is reachable only when the source-first child *parks*
-(a deferred completion) or fails during preparation — which is exactly what the
-FIG-3395 oracle measured. Carried into groups unchanged, `Promise.race([slow(),
-fast()])` could never resolve with `fast`, and one hung source-first tool would
-stop every later sibling from ever becoming rankable. `race` and `any` would be
-accepted and useless.
+**Within a group, a child's intent drain is admitted in rank order.** A child
+that declared intents admits its drain only once all lower committed siblings
+have seated, or retirement releases the wait; a child never waits on a sibling
+that has not committed. That is the order in which the group's children may emit
+nested semantic commands, and therefore the order a replay must reproduce. The
+barrier names every unseated committed sibling ranked below the child, and the
+waits on their drained wakes are issued together, one round trip whatever the
+barrier's size; the `drain_barrier_is_transitive` law pins it. A child that
+declared no intent and won its own commit neither reads the barrier nor waits at
+its seat. A child whose commit answer is `AlreadyCommitted` — the point was won by
+an earlier invocation, whose declarations this one cannot know — waits at the
+barrier before its drain or its seat. Retirement is a release, not proof of
+seating: the semantic-admission fence (§4) still refuses any intent under a
+retired group. The closing wait (§7) reads the barrier past the last rank.
 
-**Source order was a determinism device, not a product law.** Intent realization
+**Rank order, not source order, because source order cannot be carried into
+groups.** A source-ordered drain gate makes every terminal leaf settle in source
+order: `Promise.race([slow(), fast()])` could never resolve with `fast`, and one
+hung source-first tool would stop every later sibling from ever becoming
+rankable, so `race` and `any` would be accepted and useless.
+
+**Source order is a determinism device, not a product law.** Intent realization
 is journal-first and happens *after* the `ToolAttempt` is sealed, so on an
-ordinal-addressed tier those commands land in the parent's journal and their
-cross-sibling order must be replay-stable or the replay meets a mismatch. Before
-groups the only replay-stable order available was source order: completion order
-was "derived from a `FuturesUnordered` yield order in process" and journaled only
-when the whole batch record sealed (ADR 0065's Context), so a redrive re-raced and
-could produce a different permutation. ADR 0065 exists to make settlement order a
-durable fact, and once the final-commit order is itself durable it is an available
-deterministic order — so the device is no longer needed and its cost is no longer
-paid.
+ordinal-addressed journal those commands land in the parent's journal and their
+cross-sibling order must be replay-stable or the replay meets a mismatch. An
+in-process completion order derived from a `FuturesUnordered` yield is not
+replay-stable: a redrive re-races and can produce a different permutation.
+ADR 0065 makes settlement order a durable fact, and the durable rank order is
+replay-stable, so it is the order used.
 
 Three consequences are stated rather than discovered:
 
-- **Rank order equals commit order.** Drains proceed in commit order and rank is
-  allocated after a child's drain, so the two agree; only the *duration* of a
-  drain varies, never the order. Cancel-decided children still route through for
-  rank like any other terminal (ADR 0065), so rank covers more children than
-  commit order does.
-- **`Promise.all`'s intent realization order changes** from source order to
-  completion order. This is observable — two children that each start a process
-  now register in completion order — and it is what ECMA-262 hosts do: side
-  effects inside `a()` and `b()` happen as each settles, not in argument order.
+- **Rank order equals commit order.** The rank is reserved at the commit, so the
+  two agree by construction; only the *duration* of a drain varies, never the
+  order. Cancel-decided children take a rank at their decision like any other
+  terminal (ADR 0065), so rank covers more children than commit order does, and
+  **rank order is decision order**: a cancel decided while a committed sibling
+  still drains ranks after that sibling. For example, A commits and stalls in its
+  drain (rank 1 reserved); the opener closes with `Cancel`, which decides B (rank
+  2, seated at once); the group is reopened. B's cancellation is not observable
+  until A seats — ranks 1 and 2 both read as not settled — and then the run is A,
+  B.
+- **`Promise.all` realizes intents in commit order**, not source order. This is
+  observable — two children that each start a process register in commit order —
+  and it is what ECMA-262 hosts do: side effects inside `a()` and `b()` happen as
+  each settles, not in argument order.
 - **The standalone Lashlang list-batch follows the same rule**, because it is the
-  same batch path. Its *consumer* surface is unchanged: it keeps its existing
-  all-results wait and its first-settled rejection selection (§10 L7). Only the
-  order in which its leaves' declarations are admitted moves.
+  same batch path. Its *consumer* surface is §10 L7's; only the order in which its
+  leaves' declarations are admitted is this section's.
 
-**ADR 0042's "drains its declarations in source order" is untouched.** That clause
-is about the declarations *of one attempt*, admitted in the order the provider
-listed them, and it stays exactly as it is. The cross-child order this section
-changes is a batch-level mechanism that no ADR ever recorded.
+**ADR 0042's "drains its declarations in source order" holds.** That clause is
+about the declarations *of one attempt*, admitted in the order the provider
+listed them. This section orders children, not one attempt's declarations.
 
 #### Discharge is a recorded fact
 
-**A group's source slot is durably discharged only after its required intent
-outcomes are recorded, or after cancellation proves it has no remaining protected
-admission obligation. Losing a task or a lease is not discharge.** The in-process
-gate discharges from `Drop` — `IntentDrainGuard` is "One child's exactly-once
-claim on its slot … Holding the guard is the claim; dropping it discharges the
-slot" — which is right for a process-local future and **wrong** if copied into
-durable recovery, where a crash would release an earlier protected slot before its
-intents finish.
+**A child's place in rank order is durably discharged only after its required
+intent outcomes are recorded, or after cancellation proves it has no remaining
+protected admission obligation. Losing a task or a lease is not discharge.** A
+discharge from `Drop` is right for a process-local future and **wrong** for
+durable recovery, where a crash would release an earlier protected place before
+its intents finish.
 
 **A child with no remaining intent admission is admitted and discharged
-immediately**, without ever blocking a sibling: an attempt that declared nothing,
-and a timer or parked wait with no remaining admission, take their place in commit
-order and release it in the same step.
+immediately**: an attempt that declared nothing, and a timer or parked wait with
+no remaining admission, take their place in rank order and release it at their
+seat. An unseated one still holds the barrier of a later child that drains
+intents.
+
+**A fallback seat over an already-committed child waits at the barrier and seats
+its refusal.** A generation refusal or an expired attach (§8) that reaches a
+child whose final an earlier invocation committed finds the point taken, waits
+until all lower committed siblings have seated or retirement releases it, and
+then seats its typed refusal at the reserved rank. The committed final's
+undrained intents are not realized.
 
 **What is refused is an undefined barrier**, in particular any rule of the form
 "drain every already-settled sibling", which is either circular or adds a barrier
 behind an unrelated sibling.
 
-The existing gate is a `Mutex` plus a `Notify`: two Restate handlers cannot share
-it and a crash past a checkpoint loses it, so commit order and discharge must be
-representable durably — as facts in the existing group authority, not as a new
-scheduler.
+A process-local gate — a `Mutex` plus a `Notify` — cannot be shared by two
+Restate handlers and is lost by a crash past a checkpoint, so rank order and
+discharge are durable facts in the group authority, not a new scheduler.
 
 **Across the resumed continuation and running losers there is no total order, and
 none is invented.** Existing target transaction order decides, and the
 consumer-visible observation prefix is journaled (§6). **No turn-wide intent
 scheduler.**
 
-*Status.* **Implemented** (FIG-3409, FIG-3397): commit order (`next_commit_seq`),
-durable discharge and the journaled observation prefix replace the source-ordered
-in-process gate, which FIG-3397 deleted. A deferred child's §4 point is its
-completion resolution; it releases at discharge after projection (FIG-3609).
+A deferred child's §4 point is its completion resolution; it releases its place
+at discharge, after projection. The index reserves the rank in `commit_child`
+(`reserve_rank`) and serves reads through `seated_prefix`
+(`crates/lash-restate/src/effect_group/state_record.rs`).
 
 ---
 
@@ -665,17 +572,16 @@ after realization but before incorporation reconstructs the recorded child
 outcomes and follows this protocol. This orders *observations*, not target writes,
 and adds no global intent scheduler.
 
-Possession is the authority this protects.
-`crates/lash-core-execution/src/session/process_handles.rs` explains what its
-absence cost: "A start declared as a tool intent is realized in `tool_dispatch`,
-which holds no runtime execution context, so nothing recorded it and the child was
-unreachable to the very run that started it — `await handle` refused with
-`ProcessNotVisible`". `record_processes_started_by_intents` takes possession "from
-the same realized outcome the bound value's projection is taken from", and
-`crates/lash-core-execution/src/session/execution_context.rs` carries it across a
-boundary through `restore_started_process_ids` and `started_process_ids`.
+Possession is the authority this protects. A start declared as a tool intent is
+realized in `tool_dispatch`, which holds no runtime execution context, so a
+group child's settlement carries its started processes *in its outcome*
+(`crates/lash-core-execution/src/runtime/effect/tool_settlement.rs`), and the
+opener takes possession from the same realized outcome the bound value's
+projection is taken from. `crates/lash-core-execution/src/session/execution_context.rs`
+carries possession across a boundary through `restore_started_process_ids` and
+`started_process_ids`.
 
-Two consequences the arc adds. **A Restate child mutating its own possession set
+Two consequences follow. **A Restate child mutating its own possession set
 grants the parent nothing** — its settlement must carry the semantic facts. And
 **already-realized starts and triggers are not erased by refusing a late
 completion**: the refusal suppresses delivery of a result, never the world, and
@@ -684,20 +590,17 @@ ADR 0094 governs any process that really started.
 **Losing values stay unreturned.** Incorporation concerns facts the runtime owns —
 possession, trigger evidence, usage — never a value the model did not select.
 
-*Status.* **Implemented** (FIG-3411, FIG-3397). A consumer journals the prefix
+**The prefix record precedes its application.** A consumer journals the prefix
 it consumed as an `IncorporateGroupSettlements` record before applying it, and
 an opener's phase contexts share one `IncorporationLedger`, so a loser's facts
 incorporated at the opener's end never re-apply the winner's. Losers settle
-while the opener lives and are incorporated at its end (§7 step 2); the ledger
-rides a Lashlang segment handover, and a turn's ledger rides each of its
-journaled checkpoints, so a turn resumed after its worker died — which serves
-its completed cells from the journal and re-runs none of their
-incorporations — restores what those cells incorporated and never incorporates
-a rank twice. The conformance law
-`a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks` runs
-the opener inside a real Restate handler, on the server double and live
-(FIG-4094): it journals rank 1's record, crashes, lets rank 2 settle, and the
-redelivered handler's replay incorporates rank 1 alone.
+while the opener lives and are incorporated at its end (§7); the ledger rides a
+Lashlang segment handover, and a turn's ledger rides each of its journaled
+checkpoints, so a turn resumed after its worker died — which serves its
+completed cells from the journal and re-runs none of their incorporations —
+restores what those cells incorporated and never incorporates a rank twice. A
+handler that journals rank 1's record, crashes, and is redelivered after rank 2
+settles incorporates rank 1 alone on replay.
 
 ---
 
@@ -710,7 +613,7 @@ whenever that fact exists, even if no turn commit, process terminal or parent-en
 row exists.
 
 Without it recovery cannot tell closing from live. A crash after closing began and
-before the terminal leaves neither of the facts an earlier draft proposed — a
+before the terminal leaves neither of the other candidate facts — a
 terminal outcome or an ADR 0094 parent-end ledger row — and ADR 0094 independently
 documents a turn-commit-before-ledger-row window. Such an opener would be
 classified live and would permit retries this section forbids.
@@ -727,10 +630,10 @@ resumes the first incomplete step:
 3. record parent end (ADR 0094);
 4. complete retirement.
 
-**A close deadline is an attempt-local drain budget**, supplied as
-controller construction-time input beside the segment effect budget — the shape
-`crates/lash-restate/src/controller/mod.rs` already uses for
-`segment_effect_budget`, whose default is `10_000`. It **starts when that
+**A close deadline is an attempt-local drain budget**, `EffectGroupDrainBudget`
+(30 s by default), supplied as controller construction-time input beside the
+segment effect budget in `crates/lash-restate/src/controller/mod.rs`. It
+**starts when that
 attempt's cancel decision commits**, not when closing began and not when the
 group opened, so a slow sibling cannot consume another child's budget. On expiry
 the attempt is logically cancelled and **closing stays recorded and discoverable
@@ -739,35 +642,27 @@ that would fence out the remaining obligations. **Changing the budget never
 changes committed obligations**: a redrive under a different budget still owes
 every declaration the first attempt recorded.
 
-The drain's queue is the journal, not a second table:
-`crates/lash-core-execution/src/runtime/effect/group_drain.rs` states "Nothing is
-enqueued. The drain's work list is
-`EffectReplayRowStore::read_unsettled_group_children` … No synthetic queued-work
-item, no `work_kind`, and no table exists for this."
+The drain's queue is the group authority's own record of unsettled children,
+not a second table: nothing is enqueued, and no synthetic queued-work item
+exists for it.
 
 **No fresh attempt retries after close** except what is necessary to recover a
 committed obligation.
 
-**Session deletion must exclude an accepted or closing group.** *(Implemented by
-FIG-3410; see the Status below. The rest of this paragraph records the gap as
-it stood on 2026-09-21.)* Both SQL session-retirement paths delete effect-group rows —
-`crates/lash-store-sql/src/effect/group.rs` carries `delete_by_session = "DELETE
-FROM runtime_effect_group WHERE session_id = ?1"` — and the refusal that does
-exist, in `crates/lash-sqlite-store/src/session_deletion.rs`, counts
-`turn_cancel_closure_authorizations`, which is a turn-cancel closure obligation
-and not a group-closing one. **FIG-3396 must extend the existing
-deletion/lifecycle authority so accepted and closing groups retain their required
-storage and environment ownership until settlement.** Current session retirement
-is not evidence of that protection.
+**Session deletion excludes an accepted or closing group.** Every refusal is
+asked before anything is closed: an effect group that is live or closing pins
+the session with `EffectGroupLifecyclePinned`
+(`crates/lash-core/src/runtime/session_close.rs`), so accepted and closing groups
+keep their storage and environment ownership until settlement (W16).
 
-#### What this supersedes, exactly
+#### Unfinished tool execution at opener end
 
-FIG-1416 ruling 3 assigned losers to the queued-work driver under both
-dispositions and rejected leaving them on the opening scope's task set. **That
-ruling is superseded for unfinished tool execution at normal opener end, and for
-nothing else.** Recovery ownership of protected settlement stays, as do the drain,
-the disposition-at-open rule and the work-driver seam. The owner gives up implicit
-durable background tools and keeps the explicit process.
+Losers are not assigned to the queued-work driver and do not run past opener
+end on the opening scope's task set: unfinished tool execution at normal opener
+end is closed by the opener (this section), and only that. Recovery ownership of
+protected settlement stays, as do the drain, the disposition-at-open rule and
+the work-driver seam. The owner has no implicit durable background tools; it
+has the explicit process.
 
 **Opener-close cancellation is a host lifetime contract.** Within a live opener,
 letting losers run *is* Promise semantics. The divergence is at opener end, and
@@ -779,39 +674,26 @@ Node scheduling or lifetime equivalence, and opener close fences further
 unprotected Lash semantic writes without guaranteeing that external I/O already
 issued stops.
 
-*Status.* The drain, disposition-at-open and work-driver seam **hold today**. The
-durable closing transition, the finalization sequence, the drain budget and the
-deletion exclusion are **implemented on the SQL tiers** (FIG-3410; the native
-tier that also carried them was deleted by FIG-3585):
-`runtime_effect_group.lifecycle` carries `closing`/`settled` under a
-compare-and-set, finalization resumes from a recorded step cursor, and session
-retirement refuses a live or closing group. Step 2's opener-side incorporation
-is defined as one applicator call per settled rank —
-`RuntimeExecutionContext::incorporate_tool_settlement` under
-`SettlementSource::GroupRank { group_key, rank, child_replay_key }` (FIG-3411) —
-whose `IncorporationLedger` makes the resumed re-run idempotent. The opener's
-own exit path supplies that applicator (FIG-3397): a turn's terminal checkpoint
-and every final turn exit, and every process terminal, close the groups the
+**The opener's end runs this sequence.** On Restate the group authority's
+index is the closing record: `close` moves the group to `Closed` under the
+recorded disposition in one exclusive step, and finalization resumes from what
+the index recorded. The opener-side incorporation is one applicator call per
+settled rank — `RuntimeExecutionContext::incorporate_tool_settlement` under
+`SettlementSource::GroupRank { group_key, rank, child_replay_key }` — whose
+`IncorporationLedger` makes a resumed re-run idempotent.
+`RuntimeExecutionContext::close_opener_groups`
+(`crates/lash-core-execution/src/session/opener_groups.rs`) is that end, run by
+every final turn exit and every process terminal: it closes the groups the
 opener still holds under `Cancel` — a group whose consumer was cancelled among
-them, so a rank that lands after the cancel is still the opener's — close the
-`live` groups the journal holds under its scope whose keys this opener formed,
-resume the `closing` ones an earlier end recorded and never finished, finalize
-each with a `ContextFinalizationSteps` over the opener's own execution context,
-and then incorporate every one's settled ranks — after finalization, because the finalizer `close` spawns carries
-no opener steps and either may record step 2 first; the ledger and the
-journaled prefix record make the second run a no-op. A group under the same
-scope that the opener did not form — one a queue drain's epilogue owns — is not
-the opener's to close or finish. A turn or process segment resumed after its
-worker died recovers the accepted children of its live groups when it starts
-(W5), republishing its content-addressed execution environment first so a
-recovered child resolves the reference its request recorded, and session
-deletion refuses a live or closing group **before** it deletes anything. The queue-drain
-epilogue is the first production caller of `resume_closing_groups`: a drain
-resumes its scope's closing groups before writing its own end
-(FIG-3419, ADR 0094's amendment). When a settled drain's end is withheld by a
-group whose work another host owes, the work driver's parent-end pass re-runs
-that epilogue once the work settles (FIG-3563), so the drain's closing groups
-are resumed from recovery as well as from the drain itself.
+them, so a rank that lands after the cancel is still the opener's — closes the
+live groups the journal holds under its scope whose keys this opener formed,
+waits at each group's drain barrier until no committed child still owes its
+drain, and then incorporates every group's settled ranks through the journaled
+`IncorporateGroupSettlements` record. A group under the same scope that the
+opener did not form is not the opener's to close or finish. A turn or process segment resumed after its worker died
+recovers the accepted children of its live groups when it starts (W5),
+republishing its content-addressed execution environment first so a recovered
+child resolves the reference its request recorded.
 
 ---
 
@@ -847,11 +729,11 @@ attach is reachable from Rust only through the ingress client. Retention default
 of 24 hours exist in the server configuration; a default is **not** an admitted
 deployment guarantee, so the failure path is normative and the window is not.
 
-*Status.* **Implemented** (FIG-3411, FIG-3397). Retained child ids, the typed
-expired-attachment failure (`RuntimeEffectGroupChildAttachExpired`) and
-retained results are served from the group authority on every tier; a Lashlang
-segment carries each outstanding group's key and consumed cursor, and its
-successor reattaches through `EffectGroupHandle::restored`.
+Retained child ids, the typed expired-attachment failure
+(`RuntimeEffectGroupChildAttachExpired`) and retained results are served from
+the group authority; a Lashlang segment carries each outstanding group's key and
+consumed cursor, and its successor reattaches through
+`EffectGroupHandle::restored`.
 
 ---
 
@@ -892,21 +774,20 @@ available. Retirement stays group-atomic (ADR 0065 N3).
 **Backend command headroom is a per executing controller/segment bound, not one
 days-long opener counter.** Admission includes a finite controller-specific upper
 bound for parent-side dispatch, observation, cancellation, incorporation and
-handover commands. **FIG-3397 names those accounting units and their release
-conditions before deciding whether mid-aggregate VM suspension is necessary**; it
-is not assumed here.
+handover commands; the accounting units below bound them.
 
 **No universal result-byte cap follows.** ADR 0025 says the segmentation guarantee
 "does not claim that every effect result has a universal byte ceiling", and that a
 universal byte rejection "would be a separate product contract". Intent payloads
-keep their existing hard admission bounds. The only width ceiling today is
-protocol-side: `crates/lash-protocol-standard/src/lib.rs` has `const
-BATCH_MAX_TOOL_CALLS: usize = 25`, and neither it nor the segment budget specifies
-retained-work admission.
+keep their existing hard admission bounds. A `batch` wrapper takes at most
+`BATCH_MEMBER_CEILING` (64) members, configurable downward
+(`crates/lash-protocol-standard/src/lib.rs`), and the flattened group is
+admitted whole against the retained-work bound
+([ADR 0116](0116-tools-are-opaque.md) §2.5).
 
-*Status.* **Implemented** (FIG-3397). A boundary is never declined for an
-unsettled child: the handover carries the opener's outstanding group cursors.
-A completed group retires as a whole under a live opener: when a new group
+A boundary is never declined for an unsettled child: the handover carries the
+opener's outstanding group cursors. A completed group retires as a whole under a
+live opener: when a new group
 would pass the bound, the opener retires its oldest held group — its losers run
 to their own terminals, their ranks are incorporated, the group is closed and
 its units released — and tries again, so the bound refuses only when nothing
@@ -914,11 +795,10 @@ is left to retire. The recorded settlements are the identity fence a reopen is
 served from, and the point of retirement is a fact of the opener's own
 deterministic history, so a replay retires the same groups at the same point.
 
-*Amendment (FIG-3397): the accounting units and the bound.* The retained-work
-unit is the **unique child execution** — a tool invocation or a timer — from
-its group's acceptance to the moment its opener no longer depends on it: the
-group was consumed to exhaustion and incorporated, it was retired, or the
-opener ended. Operand
+**The accounting units and the bound.** The retained-work unit is the **unique
+child execution** — a tool invocation or a timer — from its group's acceptance
+to the moment its opener stops depending on it: the group is consumed to
+exhaustion and incorporated, it is retired, or the opener ends. Operand
 positions are not host work; the position-to-child mapping lives in the VM
 (§10 L4). An opener reserves a group's units before the group is journaled or
 any child dispatched, reuses the reservation when the same group is formed
@@ -936,7 +816,8 @@ outstanding group. All are finite in the group's width and the width is bounded
 per opener, so an aggregate adds a bounded number of commands between two
 segment-boundary checks and **mid-aggregate VM suspension is not necessary**.
 
-*Amendment (FIG-3548, retired by FIG-3585).* FIG-3548 made the journal-less native tier retain every reaped group's settled record until its scope retired. FIG-3585 deleted that tier; every host reopens a closed group from its journal, so a reopen after close serves the recorded settlements regardless of finalizer timing.
+Every host reopens a closed group from its journal, so a reopen after close
+serves the recorded settlements regardless of finalizer timing.
 
 ---
 
@@ -984,12 +865,13 @@ prefix can answer** (§11 clause 3). The prefix and the mapping survive replay.
 `{status:"cancelled"}` smuggled into an `allSettled` array, no placeholder for a
 child that did not settle.
 
-**L7 — the standalone Lashlang list-batch await is unchanged.** It retains its
-existing all-results wait and its first-settled rejection selection; ADR 0086's
-comprehension rules are untouched. Changing that surface requires its own ruling.
+**L7 — a Lashlang-native aggregate reports its first written rejection.** Every
+Lashlang-native aggregate, the standalone list-batch included, asks for every
+result (`AllSettled` at the boundary) and reports its first *written* unwrapped
+rejection. Only the TypeScript `Promise.*` aggregates carry an ECMA consumer
+mode. ADR 0086's comprehension rules are untouched.
 
-*Status.* **Implemented** (FIG-3397). `AbilityOp::ResourceOperationBatch`
-carries the consumer mode and answers with `ResourceOperationBatchOutcome`'s
+`AbilityOp::ResourceOperationBatch` carries the consumer mode and answers with `ResourceOperationBatchOutcome`'s
 four arms — `AllResults`, `Selected`, `SettledValue`, `ExhaustedRejections`;
 infrastructure failure and cancellation are the ability's `Err`, which the VM
 raises as the uncatchable `AggregateHostControl` terminal — no guest `catch`
@@ -997,14 +879,6 @@ sees it — and a live controller error is also recorded as the enclosing
 execution's nested effect error, so the cell aborts and is redriven rather than
 committing an outcome its aggregate never answered. The VM deduplicates a handle
 written twice into one leaf and expands its outcome to every position.
-
-*Amendment (FIG-3397): L7 ruled.* The standalone list-batch had selected its
-rejection in **written** order while this law said "first-settled", and the
-compile-time literal batch had selected by settlement order. One rule now holds
-for every Lashlang-native aggregate, which is what the list-batch already did:
-it asks for every result (`AllSettled` at the boundary) and reports its first
-*written* unwrapped rejection. Only the TypeScript `Promise.*` aggregates carry
-an ECMA consumer mode, and `first_settled_rejection` is deleted.
 
 ---
 
@@ -1037,12 +911,12 @@ second encoding is added for timers.
    code 13 on an unsettled top-level await: the program's semantics are ECMA's,
    and the host's lifetime ends. It is **not** a catchable exception and **not** a
    registered ECMA deviation; it is a host lifetime contract, recorded in ADR 0062
-   beside opener close. FIG-3397 names the error code.
+   beside opener close. The error code is
+   `RuntimeErrorCode::AggregateAwaitUnsettled` (`aggregate_await_unsettled`).
 6. **`Promise.any([])` rejects with an `AggregateError` whose `errors` is
    empty**, as ECMA-262 specifies, and needs no group.
-   `crates/lashlang/src/runtime/heap/validation.rs` already refuses an
-   "AggregateError object … missing its errors list" and a non-aggregate error that
-   "carries AggregateError errors".
+   `crates/lashlang/src/runtime/heap/validation.rs` refuses a non-aggregate error
+   that "carries AggregateError errors".
 7. **`Promise.all([])` and `Promise.allSettled([])` return `[]`.**
 8. **`AggregateError.errors` is input-ordered**, not settlement-ordered. Settlement
    order decides *which* rejection an unwrapping aggregate reports (L2); it never
@@ -1059,7 +933,7 @@ second encoding is added for timers.
     that driver. Its census row indexes the deviation; it is **not** executable
     evidence of callback semantics.
 
-*Status.* **Implemented** (FIG-3397), clauses 1–8. An unawaited `sleep(ms)`
+An unawaited `sleep(ms)`
 mints a pending timer under the one handle encoding; its aggregate records the
 deadline once from a journaled clock sample and admits a `Sleep { Until }`
 child. A timer carries no identity of its own, so an aggregate that holds one
@@ -1073,12 +947,10 @@ into its group identity: two timer aggregates at two sites are two groups. The c
 ### 12. Durable Wait as a child
 
 **`processes.await(h)` is a resumable child on the existing Durable Wait protocol.**
-ADR 0095 said it "is never a batch child", written against the *atomic* batch whose
-children had to settle inside one resource operation. A group child is an
-independently durable unit with no such bound, so the sentence changes meaning: the
-wait is a child of this kind — resumable, retained across segments, not subject to
-the cancel grace a running attempt is, because there is no attempt body to
-interrupt.
+A group child is an independently durable unit that need not settle inside one
+resource operation, so the wait is a child of this kind — resumable, retained
+across segments, not subject to the cancel grace a running attempt is, because
+there is no attempt body to interrupt.
 
 **Selection never cancels the wait.** A winning timer in
 `race([processes.await(job), sleep(10_000)])` leaves the losing wait **admitted
@@ -1103,7 +975,7 @@ Routing is unchanged:
 equivalence it documents, that "`await processes.await({ handle })` answers exactly
 what `await handle`".
 
-*Status.* **Implemented** (FIG-3397). `processes.await` is admitted as a group
+`processes.await` is admitted as a group
 tool child whose attempt parks on the Durable Wait at once, so there is no
 attempt body for a cancel grace to interrupt; selection leaves it admitted, and
 the opener's close cancels and releases the wait without cancelling the
@@ -1148,23 +1020,19 @@ the parent's ledger, so its usage travels as a semantic fact on its settlement.
 **No generic durable trace bus.** Semantic usage rides the existing usage path;
 live trace delivery stays best-effort.
 
-*Status.* **Implemented** (FIG-2266, FIG-3411, FIG-3397). Usage deltas are
+Usage deltas are
 charged once per `UsageDeltaIdentity`; a loser's usage is incorporated at its
 opener's end, before the opener's accounting commits.
 
 ---
 
-### 14. No native tier
+### 14. Every host journals
 
-**Every tier journals.** This section once specified a native tier: this
-lifecycle with references in memory instead of rows on disk, an owned opener
-supervisor, scope liveness counted in process, and completion keys that died with
-the process. FIG-3585 deleted that tier with the native effect host
-([ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md) D1, kept by
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)).
-Nothing in this ADR is held only in memory: an accepted child, a settled group
-record and a closing transition are durable facts on every tier, and OS process
-death is worker loss (W18).
+**No group state is held only in memory.** An accepted child, a settled group
+record and a closing transition are durable facts in the group authority and
+the journal ([ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md) D1,
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)),
+so OS process death is worker loss (W18) and recovery reads the journal.
 
 ---
 
@@ -1190,24 +1058,22 @@ both.
 | W13 | segment handover: continuation committed, successor not started | ADR 0025's three handover requirements apply unchanged, and outstanding children are reattached by the successor (§8). Handover does not enter closing. |
 | W14 | child handler death with the opener alive | The child invocation is retried or reattached by invocation id. Abandonment is never inferred from a dead handler. |
 | W15 | attach retention expired before the successor attached | A typed recovery failure. Never a re-execution of an opaque tool body, never a synthesized terminal. |
-| W16 | session delete requested while the group is accepted or closing | Refused until settled (§7, FIG-3410). |
+| W16 | session delete requested while the group is accepted or closing | Refused until settled (§7). |
 | W17 | a late completion arrives after the cancel decision committed | Refused, typed, with **no journal write**; the refusal's evidence survives retirement. Already-admitted descendant commands are not undone (§4). |
-| W18 | OS process death | No tier holds group state only in memory (§14), so process death is worker loss: recovery reads the journal. |
-| W19 | **final record committed and its commit-order position assigned, crash before the drain runs** | Recovery drains in the **recorded** commit order and never re-derives it from whatever completes first on the redrive. The position is a durable fact assigned at the §4 linearization point, not a property of the run that observed it. |
-| W20 | **two finals commit concurrently** | The linearization point serializes them, so exactly one takes the lower position, and both positions are durable before either drain begins. A tie is not resolvable by source index, by wall clock or by whichever writer returned first; if the point cannot order them it has not committed either. |
+| W18 | OS process death | No host holds group state only in memory (§14), so process death is worker loss: recovery reads the journal. |
+| W19 | **final record committed and its rank reserved, crash before the drain runs or before the seat** | Recovery drains in the **recorded** rank order and seats the reserved rank; it never re-derives the order from whatever completes first on the redrive and never allocates a rank at the seat. The rank is a durable fact assigned at the §4 linearization point, not a property of the run that observed it. |
+| W20 | **two finals commit concurrently, or a final and a cancel decision** | The linearization point serializes them, so exactly one takes the lower rank, and both ranks are durable before either drain begins. A tie is not resolvable by source index, by wall clock or by whichever writer returned first; if the point cannot order them it has not committed either. A cancel decided after a commit ranks after it and is observed only once that commit seats. |
 
 ---
 
 ### Worked examples
 
-lash TypeScript dialect. "Today" is `main`.
+lash TypeScript dialect.
 
 **1. Fan-out.** `await Promise.all([fetch_doc("a"), fetch_doc("b"), fetch_doc("c")])`
-was concurrent on SQLite and Postgres and **serial on Restate** when this ADR
-was decided, because the Restate batch took a serial branch. It is now three
-concurrent children on every tier (FIG-3397 deleted the serial branch), and a redrive
-replays the same settlement order from the ranks. No
-loser exists. FIG-3400 pins the parallelism by rendezvous.
+runs three concurrent children, and a redrive replays the same settlement order
+from the ranks. No loser exists. `crates/lash-restate/src/tests/tool_batch_parallelism_on_the_double.rs` pins
+the parallelism by rendezvous.
 
 **2. Timeout, then keep working.**
 `const r = await Promise.race([slow_search(q), sleep(5000)]); …; finish(answer);`
@@ -1223,7 +1089,7 @@ and uncommitted at `finish`. Closing records, then `search_b`'s cancel decision
 commits and its body is signalled. **If cancellation wins arbitration, the child is
 logically cancelled after the bounded local grace; physical I/O may continue, and
 finalization still waits for every protected obligation and for accounting. No
-successful-turn latency bound follows from the 50 ms grace.**
+successful-turn latency bound follows from the grace.**
 
 **4. Side-effecting loser.**
 `const sent = await Promise.race([send_email(msg), sleep(2000)]); finish(…);`
@@ -1259,10 +1125,9 @@ under ADR 0094 (§12).
 and selects over the durable futures; the child handler runs the existing per-leaf
 coordinator **at handler level**, with atomic attempts inside `ctx.run` and
 coordination outside it (§2). The parent's own selection order serves as rank only
-while the whole consumption stays inside that invocation (§8). The ingress
-long-poll — unjournaled HTTP held open for the child's whole life — is removed in
-the same cutover as its journaled replacement, never before, and implicit engine
-cancellation never becomes the sole close protocol (§4).
+while the whole consumption stays inside that invocation (§8). No unjournaled
+ingress long-poll is held open for a child's life, and implicit engine
+cancellation is never the sole close protocol (§4).
 
 ## Alternatives rejected
 
@@ -1286,92 +1151,34 @@ needs its rank, discharge and projection authority (§4).
 
 ## Consequences
 
-- **Three facts replace one.** Child disposition, child rankability, and the
+- **Three facts, not one.** Child disposition, child rankability, and the
   opener's phase are separate; an implementation that derives any of them from
-  another will be wrong at a crash boundary.
-- **`race` and `any` become useful rather than merely accepted.** Carrying the
-  cross-child source-order intent gate into groups would have made
-  `Promise.race([slow(), fast()])` unable to resolve with `fast`, and one hung
-  source-first tool would have blocked every sibling from ranking. Commit order
-  removes that, at the cost of one observable change: `Promise.all`'s intent
-  realization moves from source order to completion order, which is what an
-  ECMA-262 host does anyway. FIG-3395's oracle holds the pre-cutover baseline
-  (`sqlite_terminal_leaves_settle_in_source_order`) so the move is measured, not
-  assumed.
+  another is wrong at a crash boundary.
+- **`race` and `any` are useful, not merely accepted.** Rank order lets
+  `Promise.race([slow(), fast()])` resolve with `fast`, and a hung sibling
+  blocks no other sibling from ranking. The cost is one observable rule:
+  `Promise.all` realizes intents in commit order, not source order, which is
+  what an ECMA-262 host does anyway.
 - **Closing is a durable fact with its own crash windows.** W9–W12 exist only
   because the transition is recorded; without it they are indistinguishable from a
   live opener.
-- **`ExecutionScope::Process` is not sufficient identity.** FIG-3394 must bind the
-  incarnation; until it does, group identity can alias across a process
-  re-registration.
-- **Session deletion gains an obligation.** Today both SQL retirement paths delete
-  group rows and neither consults a closing group.
-- **Cancellation stops becoming a usage eraser.** Known usage survives a cancelled
+- **A process opener is its minted id.** Group identity cannot alias across
+  process registrations, because the id is never reused (ADR 0107).
+- **Session deletion carries an obligation.** A live or closing group pins the
+  session until it settles (§7, W16).
+- **Cancellation is not a usage eraser.** Known usage survives a cancelled
   attempt, and unknown stays unknown under ADR 0032.
 - **`Promise.race([])` ends the cell.** The program's semantics are ECMA's — the
   promise never settles — and the host reports a typed unsettled-await failure
   rather than parking forever.
-- **The bound is a reservation protocol, not a number.** FIG-3397 names the
-  accounting units and their release conditions before mid-aggregate suspension is
-  considered.
+- **The bound is a reservation protocol, not a number.** §9 names the
+  accounting units and their release conditions, and mid-aggregate VM
+  suspension is not necessary.
 
-## Amendment (FIG-3586): the aggregate group key is positional
+## Model usage accounting
 
-Amended 2026-09-23. A lashlang aggregate's group key is the opener's group
-prefix followed by the issuing command's key: `{scope_id}:group:P:{k:010}`,
-`P` the run's replay namespace (ADR 0103). It is positional, with no content,
-compiler output or parent effect id in it, and it keeps the opener's
-`{scope_id}:group:` prefix, so the opener's end finishes the groups a crashed
-cell formed exactly as it finishes any other it owns. A recorded-frontier read
-asks for the group rows under that prefix and reads them back as the commands
-that formed them. Its children are
-`P:{k:010}:child:{i}`, `i` the leaf's first-appearance index; its timers'
-admission sample is `P:{k:010}:timers-admitted`. The earlier key embedded
-`batch_id` and an occurrence, so an aggregate whose arguments, grant or timer
-layout changed missed the journal, opened a fresh group and ran every child
-live.
-
-`batch_id` stays on the group as a **checked fact**: a content digest
-(identity family `lash.aggregate-content`) over the tool calls and the timers'
-positions and durations, with no instruction pointer or call site. The
-lashlang caller opens its group with `GroupReopen::RetainedContent`: a reopen
-must match the recorded shape (§3, W1) **and** every offered child must be the
-retained child at its position, compared as canonical envelopes, or the open
-refuses before any child is claimed — re-typed by the run to
-`lashlang_cell_replay_divergence`. Other callers keep `RetainedShape` and the
-`{scope_id}:group:{parent_effect_id}:{batch_id}` key, whose batch id is
-`TOOL_BATCH_FAMILY_VERSION` 3. Both key shapes carry the opener's scope, so no
-two openers share a group row although the group table is keyed by the group
-key alone.
-
-## Amendment (FIG-3562, 2026-09-29): every tool child is an attempt
-
-[ADR 0116](0116-tools-are-opaque.md) deletes the orchestrating lane, so §2's list of coordination loses "the
-orchestrating lane", and §4's special classification of orchestrating children
-("no attempt frame of their own", classified by retained command and child
-obligations) no longer has a subject. Every tool child runs one recorded
-attempt under its driver. Two rules are added:
-
-- **Declared starts.** A child that parks on `PendingResolver::DeclaredStart`
-  seals its declaration with a launch obligation at §4's linearization point,
-  before any realization. Exactly one of the launch seal and a cancel
-  disposition commits first. The launch takes its turn in §5's final-commit
-  drain order and releases it once the receipt is recorded, before parking.
-  The child's terminal rank is allocated only when the result or the cancel
-  resolves it ([ADR 0116](0116-tools-are-opaque.md) §3.2).
-- **Cancel obligations.** A cancelled or timed-out child parked on a
-  runtime-owned resolver with `CancelHint::CancelExternalWork` records a
-  cancel obligation in the cancel disposition's commit, and drains it before
-  it settles `Cancelled` ([ADR 0116](0116-tools-are-opaque.md) §3.4). An unresolved child stays cancellable.
-
-The width ceiling quoted from `crates/lash-protocol-standard/src/lib.rs` is
-superseded: a `batch` wrapper takes at most 64 members, configurable
-downward, and the flattened group is admitted whole against the retained-work
-bound ([ADR 0116](0116-tools-are-opaque.md) §2.5).
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 11: The queued-run recovery sketch below is historical. `QueuedRun` is
-gone; [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
-governs ingress and [ADR 0110](0110-the-engine-owns-process-recovery.md) governs
-process recovery.
+Tool-child usage rides on no settlement and is not charged at
+incorporation (§13). Each `ToolAttempt` entry's usage run delivers the facts
+of its nested calls through the accounting continuation of [ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md), and a
+nested call's unreported attempt is a fact. Settlements, captures and the
+incorporation ledger carry no usage.

@@ -107,7 +107,13 @@ async fn run_attachment_usage_gate(
     assert!(lash::attachments::AttachmentId::parse("../escape").is_err());
     let missing_id = lash::attachments::AttachmentId::parse("missing-workbench-attachment")
         .expect("valid attachment id");
-    match attachment_store.get(&missing_id).await {
+    match attachment_store
+        .get(
+            &missing_id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
+        .await
+    {
         Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {
             assert_eq!(id, missing_id);
         }
@@ -159,7 +165,10 @@ async fn run_attachment_usage_gate(
         other => panic!("uploaded PNG must retain image dimensions, got {other:?}"),
     }
     let stored: lash::persistence::StoredAttachment = attachment_store
-        .get(&uploaded.attachment.id)
+        .get(
+            &uploaded.attachment.id,
+            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        )
         .await
         .expect("read uploaded bytes from workbench attachment store");
     assert_eq!(stored.bytes, png_bytes);

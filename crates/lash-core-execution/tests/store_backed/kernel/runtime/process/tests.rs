@@ -10,10 +10,10 @@ use crate::runtime::process::{
 };
 use crate::{Lifetime, ProcessId, ProcessRegistry, SessionId, StoreSet as _};
 
-use crate::support::memory_store_set;
+use crate::support::sqlite_memory_store_set;
 
 async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-    memory_store_set().await.process_registry()
+    sqlite_memory_store_set().await.process_registry()
 }
 
 fn registration(_id: &str) -> ProcessRegistration {
@@ -163,7 +163,7 @@ async fn register_after_prune(registry: &Arc<dyn ProcessRegistry>) -> (ProcessId
 
 #[tokio::test]
 async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
-    let backend = memory_store_set().await;
+    let backend = sqlite_memory_store_set().await;
     let registry = backend.process_registry();
     let cleanup_ledger = backend.artifact_cleanup();
     let registration = ProcessRegistration::new(
@@ -440,7 +440,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
 /// `ProcessExecutionEnvStore` classifies by code.
 #[tokio::test]
 async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
-    let backend = memory_store_set().await;
+    let backend = sqlite_memory_store_set().await;
     let store = backend.process_env_store();
     let spec = ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),

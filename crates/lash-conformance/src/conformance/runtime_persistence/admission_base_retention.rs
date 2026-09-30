@@ -35,7 +35,7 @@ async fn commit_generation(
     ));
     commit_runtime_state_for_test(
         store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state),
         owner,
     )
     .await

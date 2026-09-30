@@ -35,3 +35,5 @@ mod session_lifecycle_growth;
 mod tool_child_source;
 
 mod reopen_generation;
+
+mod typed_errors;

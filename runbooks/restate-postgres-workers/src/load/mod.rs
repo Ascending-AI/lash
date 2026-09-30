@@ -22,6 +22,7 @@ mod fault_verify;
 pub mod measurements;
 pub mod red_side;
 pub mod tools;
+mod upgrade_verify;
 pub mod verify;
 pub mod worker;
 

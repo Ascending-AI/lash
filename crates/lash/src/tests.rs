@@ -52,6 +52,21 @@ pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) ->
 /// back for its terminal verb. An existing or deleted id is left as it is,
 /// so the verb that follows reports it. Tests about creation call
 /// [`SessionBuilder::create`](crate::SessionBuilder::create) themselves.
+/// The session owner's usage once every run it admitted is resolved: the
+/// engine delivers each spending effect's settlement after the effect is
+/// journaled, asynchronously to the turn (ADR 0125), so a read taken the
+/// moment a turn returns can precede its last settlement.
+pub(crate) async fn settled_usage(session: &crate::LashSession) -> Result<lash_core::OwnerUsage> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let usage = session.usage().await?;
+        if usage.completeness.is_settled() || std::time::Instant::now() >= deadline {
+            return Ok(usage);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 pub(crate) trait CreatedSession: Sized {
     async fn created(self) -> Self;
 }
@@ -177,7 +192,6 @@ pub(crate) async fn backend_seeded_with_config(
     state.ensure_agent_frame_initialized();
     let mut commit = lash_core::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         seed_operation("head"),
     );
     commit.config = config;
@@ -203,7 +217,6 @@ pub(crate) async fn set_head_provider_id(
     .expect("the seeded session has a head");
     let mut commit = lash_core::RuntimeCommit::persisted_state_with_operation_for_testing(
         &loaded.state,
-        &[],
         seed_operation("provider"),
     );
     commit.config = loaded.config;
@@ -1198,6 +1211,7 @@ fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPl
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         backend,
     )
 }
@@ -1230,9 +1244,10 @@ pub(crate) use harness::{
     AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend,
     double_backend_explicit_reconcile, double_backend_over, double_backend_over_explicit_reconcile,
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, latest_double,
-    memory_store_backend, memory_store_set, mock_model_spec, model_spec, output_into_cancelled_by,
-    redeploy, restate_double, retry_when_claim_frees, run_async_test_on_stack_budget,
-    serve_processes, settle_session_drive, store_backend_with_clock, turn_input_states,
+    mock_model_spec, model_spec, output_into_cancelled_by, redeploy, restate_double,
+    retry_when_claim_frees, run_async_test_on_stack_budget, serve_processes, settle_session_drive,
+    sqlite_memory_store_backend, sqlite_memory_store_set, store_backend_with_clock,
+    turn_input_states,
 };
 #[cfg(feature = "rlm")]
 mod adr_claims;
@@ -1242,6 +1257,7 @@ mod aggregate_await_comprehension;
 #[cfg(feature = "rlm")]
 mod aggregate_oracle;
 mod commit_superseded;
+mod deleted_session_root_replay;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
 mod failure_settlement;

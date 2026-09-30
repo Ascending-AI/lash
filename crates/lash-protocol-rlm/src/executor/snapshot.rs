@@ -78,6 +78,8 @@ const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before d
 
 #[derive(Debug, Error)]
 pub(crate) enum RlmSnapshotError {
+    #[error("worker snapshot service is unavailable: {0}")]
+    WorkerUnavailable(lash_vm_client::PoolError),
     #[error("RLM snapshot envelope exceeds the maximum MessagePack nesting depth of {limit}")]
     EnvelopeDepthLimitExceeded { limit: usize },
     #[error("non-canonical RLM snapshot envelope at `{location}`: {reason}")]

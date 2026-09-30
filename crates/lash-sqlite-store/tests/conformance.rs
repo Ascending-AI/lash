@@ -1,8 +1,8 @@
 //! Runs the shared conformance suites against SQLite file backends.
 //!
 //! The suite proper lives in `conformance/suite.rs` and is registered twice
-//! (ADR 0102): here over file backends, and in `conformance_memory.rs` over
-//! named in-memory ones. What else stays here needs a database file by
+//! (ADR 0102): here over file store sets, and in `conformance_memory.rs` over
+//! named memory store sets. What else stays here needs a database file by
 //! nature: a legacy schema seeded before the first open, a path spelling, a
 //! second OS process, or a WAL snapshot read.
 

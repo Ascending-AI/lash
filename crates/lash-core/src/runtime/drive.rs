@@ -18,7 +18,11 @@
 //! frontier; a redrive honours the recorded verdict at every position
 //! (FIG-4058), and the turn's fenced commit meets a head that moved since as
 //! a typed refusal. The check cannot select new work or change the admission's
-//! recorded base (ADR 0105 §2).
+//! recorded base (ADR 0105 §2). A follow-on recovery root records its
+//! decision instead, `RecoverFollowOn`, whose body raises the recovery count
+//! and retains the head the follow-on's turn runs on, and whose answer, with
+//! that head and the turn's index, the root drives on every replay (FIG-4361,
+//! FIG-4380).
 //! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
 //! helper in the drive.
 //!
@@ -184,19 +188,19 @@ impl DriveRootRun {
         owes_follow_on: bool,
     ) -> Option<DriveCommit> {
         let commit = crate::store::TurnCommitId::of_physical_turn(&self.root, turn)?;
-        let (stop, terminal) = match outcome {
-            crate::TurnOutcome::Finished(_) => (None, true),
-            crate::TurnOutcome::Stopped(stop) => (Some(stop.clone()), true),
-            crate::TurnOutcome::AgentFrameSwitch { .. } => (None, false),
-        };
+        // A frame switch ends no root; its root goes on in the next physical
+        // turn.
+        let ended = crate::store::RootCommittedOutcome::of_turn_outcome(outcome);
         Some(DriveCommit {
             fence: self.fence.clone(),
             root: self.root.clone(),
-            terminal: (terminal && !owes_follow_on).then(|| crate::store::RootTerminalWrite {
-                root: self.root.clone(),
-                commit,
-                turn: turn.clone(),
-                stop,
+            terminal: ended.filter(|_| !owes_follow_on).map(|outcome| {
+                crate::store::RootTerminalWrite {
+                    root: self.root.clone(),
+                    commit,
+                    turn: turn.clone(),
+                    outcome,
+                }
             }),
         })
     }
@@ -418,7 +422,11 @@ pub async fn admit_drive_retired(
 /// O1) — and the seal's recorded body answers the session's retirement, which
 /// every redrive of the run decodes. A seal an earlier attempt recorded
 /// answers what it answered then: a superseded or lost admission is the
-/// refused root it was. `controller` serves the root's
+/// refused root it was. A root it recorded sealed goes on headless, through
+/// the recorded steps an earlier attempt may have journaled after the seal:
+/// an input- or queued-headed root's admission and head inspection, a
+/// command root's reads of its command lane (FIG-4346), and a follow-on
+/// recovery root's decision (FIG-4361). `controller` serves the root's
 /// [`drive_root_scope`](crate::engine::drive_root_scope).
 #[doc(hidden)]
 pub async fn run_admitted_root_retired(
@@ -427,35 +435,53 @@ pub async fn run_admitted_root_retired(
 ) -> Result<RootOutcome, DriveAbort> {
     let scope = controller.admitted_scope().clone();
     let verdict = Box::pin(mark_and_seal_root(controller, &scope, &admitted, None)).await?;
-    retired_root_outcome(&admitted, verdict)
-}
-
-/// What a root answers whose session retired before it ran: the refused root
-/// its seal recorded, or, for a seal that recorded the admission sealed, the
-/// retirement. A root sealed before its session's close is one the close
-/// ended and whose execution it released, so no run of it goes on.
-fn retired_root_outcome(
-    admitted: &Admitted,
-    verdict: crate::engine::SealVerdict,
-) -> Result<RootOutcome, DriveAbort> {
-    match verdict {
-        crate::engine::SealVerdict::Sealed(_) => Err(DriveAbort::Refused(
-            RuntimeError::new(
-                RuntimeErrorCode::SessionDeleted,
-                format!(
-                    "root `{}` of session `{}` was sealed before its session retired; its execution ended with the session's close",
-                    admitted.root(),
-                    admitted.session()
-                ),
-            )
-            .with_cause(crate::RuntimeErrorCause::SessionDeleted {
-                session_id: admitted.session().clone(),
-            }),
-        )),
-        verdict => Ok(RootOutcome::Refused {
+    if !matches!(verdict, crate::engine::SealVerdict::Sealed(_)) {
+        return Ok(RootOutcome::Refused {
             root: admitted.root().clone(),
             verdict,
-        }),
+        });
+    }
+    let headless = root::HeadlessRoot::Retired;
+    match admitted.work().clone() {
+        crate::engine::AdmittedWork::Input { head } => {
+            Box::pin(root::run_headless_root(
+                controller,
+                &admitted,
+                &crate::store::AdmittedHead::Input(head),
+                headless,
+            ))
+            .await
+        }
+        crate::engine::AdmittedWork::Queued { head } => {
+            Box::pin(root::run_headless_root(
+                controller,
+                &admitted,
+                &crate::store::AdmittedHead::Batch(head),
+                headless,
+            ))
+            .await
+        }
+        crate::engine::AdmittedWork::Commands { .. } => {
+            Box::pin(root::run_headless_commands_root(
+                controller, &admitted, headless,
+            ))
+            .await
+        }
+        crate::engine::AdmittedWork::FollowOn {
+            follow_on,
+            attempts,
+        } => {
+            Box::pin(root::run_headless_follow_on_root(
+                controller,
+                &admitted,
+                &root::FollowOnWork {
+                    turn: &follow_on,
+                    attempts,
+                },
+                headless,
+            ))
+            .await
+        }
     }
 }
 
@@ -736,12 +762,18 @@ impl LashRuntime {
                 break stop;
             }
             let work = admitted.work().clone();
+            // Every root this loop admits runs inline, in the execution of
+            // the drive's controller: no engine run of the root holds it
+            // (FIG-4403).
             let run = Box::pin(self.run_admitted_root_step(
                 controller,
                 admitted,
                 sinks,
                 live,
                 RootClose::Inline,
+                crate::store::RootExecutor::Inline {
+                    scope: controller.execution_scope().clone(),
+                },
             ))
             .await?;
             let stop = rules.after(&work, &run.outcome);
@@ -834,11 +866,14 @@ impl LashRuntime {
         close: RootClose<'_>,
     ) -> Result<RootRun, DriveAbort> {
         let mut attempt = EngineAttempt::enter(self);
-        let run = Box::pin(
-            attempt
-                .runtime
-                .run_admitted_root_step(controller, admitted, sinks, None, close),
-        )
+        let run = Box::pin(attempt.runtime.run_admitted_root_step(
+            controller,
+            admitted,
+            sinks,
+            None,
+            close,
+            crate::store::RootExecutor::Root,
+        ))
         .await;
         attempt.returned = true;
         run
@@ -911,7 +946,7 @@ impl LashRuntime {
                 DriveAbort::Retry(crate::runtime::runtime_error_from_store_commit(error))
             })?;
         match end {
-            crate::store::RefusedRootEnd::Ended(_) => {
+            crate::store::RootEnd::Ended(_) => {
                 tracing::info!(
                     session_id = %self.state.session_id,
                     root = %run.root,
@@ -921,8 +956,8 @@ impl LashRuntime {
                 );
                 run.mark_terminal_written();
             }
-            crate::store::RefusedRootEnd::AlreadyEnded(_) => run.mark_terminal_written(),
-            crate::store::RefusedRootEnd::Superseded => {
+            crate::store::RootEnd::AlreadyEnded(_) => run.mark_terminal_written(),
+            crate::store::RootEnd::Superseded => {
                 tracing::info!(
                     session_id = %self.state.session_id,
                     root = %run.root,
@@ -931,7 +966,7 @@ impl LashRuntime {
                     "a refused run a later admission superseded leaves its root to that admission"
                 );
             }
-            crate::store::RefusedRootEnd::Unknown => {}
+            crate::store::RootEnd::Unknown => {}
         }
         Ok(())
     }
@@ -966,7 +1001,8 @@ impl LashRuntime {
     /// correlation and lineage): it cannot cross the durable boundary, so it
     /// is re-attached when the root's admission drives that input. `close`
     /// says where the root's scope close runs once its terminal evidence is
-    /// durable.
+    /// durable, and `executor` names the execution that runs the root, which
+    /// the root's admission records (FIG-4403).
     pub(crate) async fn run_admitted_root_step(
         &mut self,
         controller: &ScopedEffectController<'_>,
@@ -974,6 +1010,7 @@ impl LashRuntime {
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
         close: RootClose<'_>,
+        executor: crate::store::RootExecutor,
     ) -> Result<RootRun, DriveAbort> {
         let store = self.drive_store()?;
         let root = admitted.root().clone();
@@ -1020,6 +1057,7 @@ impl LashRuntime {
                     sinks,
                     live,
                     &fence,
+                    executor,
                 ))
                 .await
             }
@@ -1031,6 +1069,7 @@ impl LashRuntime {
                     sinks,
                     None,
                     &fence,
+                    executor,
                 ))
                 .await
             }
@@ -1044,9 +1083,12 @@ impl LashRuntime {
                 Box::pin(self.run_follow_on_root(
                     &root_controller,
                     &admitted,
-                    &follow_on,
-                    attempts,
+                    &root::FollowOnWork {
+                        turn: &follow_on,
+                        attempts,
+                    },
                     sinks,
+                    &fence,
                 ))
                 .await
             }

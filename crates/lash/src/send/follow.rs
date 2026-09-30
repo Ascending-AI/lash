@@ -5,11 +5,12 @@
 //! subject from the store on every wake: the engine's drive barrier, a
 //! commit or queue change on the observation, a settled root's report landing
 //! in this process's mailbox, and a bounded poll. Once it knows its root, it
-//! also holds one open wait on the root's published terminal, which answers
-//! a root that ran in another process as soon as it settles; a follower with
-//! no resident runtime probes for that root at the poll floor (FIG-3981). It
-//! never answers from events: a follower whose replay window is gone still
-//! answers from the store.
+//! also holds one open wait on the root's published terminal, which wakes it
+//! as soon as a root that ran in another process settles; a follower with no
+//! resident runtime probes for that root at the poll floor (FIG-3981). It
+//! never answers from events or from the wait: a follower whose replay window
+//! is gone still answers from the store, and so does one whose engine cannot
+//! answer the wait (FIG-4345).
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -276,26 +277,30 @@ async fn moved_ask(
     }
 }
 
-/// One open wait on the adopted root's published terminal (FIG-3981).
+/// One open wait on the adopted root's published terminal (FIG-3981): a
+/// wake, never an answer.
 ///
 /// A root that ran in another process deposits no report here and publishes
 /// nothing on this process's replay, so without the wait its follower learns
 /// that it settled only from a store poll that backs off to a second. The
 /// wait is held while a store read has just shown the root undecided and no
 /// run in this process may still deposit the root's report: that deposit
-/// answers first, with the full report. The wait is registered, so it holds nothing past its root: the
-/// commit's publish answers it, and a root that ended without that commit
-/// is retired, which releases it. Retirement never cancels a terminal the
-/// root's ending commit still publishes (FIG-4025).
+/// answers first, with the full report. A published terminal wakes the
+/// follower, which reads the answer from the store: the root's commit is
+/// durable before its terminal is published. The wait is registered, so it
+/// holds nothing past its root: the commit's publish answers it, and a root
+/// that ended without that commit is retired, which releases it. Retirement
+/// never cancels a terminal the root's ending commit still publishes
+/// (FIG-4025). Every follower's wait on one physical turn shares one waiter
+/// in the engine, however often followers attach and drop it (FIG-4345).
 struct TerminalWait {
-    /// The root's physical turn waited on: a frame switch continues the root
-    /// in its next physical turn.
+    /// The root's physical turn waited on: a root that goes on past a
+    /// committed turn (a frame switch, a follow-on) goes on in its next
+    /// physical turn.
     ordinal: u64,
     wait: Option<AwaitedTerminal>,
     /// The pause before the next wait, after one that failed.
     pause: Option<Duration>,
-    /// The outcome the root's final physical turn committed with.
-    settled: Option<TurnOutcome>,
     /// A physical turn published a failure, or its wait was released: the
     /// store reads decide what follows (a park, a redrive, or the root's
     /// end), with no wait held.
@@ -308,17 +313,15 @@ impl TerminalWait {
             ordinal: 0,
             wait: None,
             pause: None,
-            settled: None,
             ended: false,
         }
     }
 
     /// Hold the wait on `root`'s current physical turn, unless one is held,
-    /// the root's terminal is already known, or a run in this process may
+    /// no further terminal will be published, or a run in this process may
     /// still deposit the root's report.
     fn hold(&mut self, ctx: &SendContext, root: &TurnId) {
         if self.wait.is_some()
-            || self.settled.is_some()
             || self.ended
             || mailbox::may_deposit(ctx.parts.work.store_binding(), &ctx.parts.session_id, root)
         {
@@ -350,8 +353,9 @@ impl TerminalWait {
         }
     }
 
-    /// Take the held wait's answer. The follower resolves after each: the
-    /// read holds the next wait while the root is undecided.
+    /// Take the held wait's answer. The follower resolves from the store
+    /// after each: a root that settled answers there, and a read that still
+    /// shows the root undecided holds the next wait.
     fn answered(
         &mut self,
         ctx: &SendContext,
@@ -359,11 +363,9 @@ impl TerminalWait {
     ) {
         self.wait = None;
         match answer {
-            Ok(TurnTerminal::Committed {
-                outcome: TurnOutcome::AgentFrameSwitch { .. },
-                ..
-            }) => self.ordinal = self.ordinal.saturating_add(1),
-            Ok(TurnTerminal::Committed { outcome, .. }) => self.settled = Some(outcome),
+            // The turn committed: the store answers a root it ended, and a
+            // root it did not end goes on in its next physical turn.
+            Ok(TurnTerminal::Committed { .. }) => self.ordinal = self.ordinal.saturating_add(1),
             // A failed turn publishes no further terminal, and neither does
             // a root whose retirement (or its session's revocation) released
             // the wait.
@@ -388,14 +390,13 @@ impl TerminalWait {
 }
 
 /// Where a follower stands in its subject's live activity: the replay
-/// cursor to go on from, whether it has observed any of the root's activity,
-/// and the gaps it has met so far. A windowed follower hands its position to
-/// the next window; the host's Restate wait journals it between probes.
+/// cursor to go on from, and whether it has observed any of the root's
+/// activity. A windowed follower hands its position to the next window; the
+/// host's Restate wait journals it between probes.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Position {
     pub(crate) cursor: SessionCursor,
     pub(crate) observed: bool,
-    pub(crate) gaps: Vec<LiveReplayGap>,
 }
 
 impl Position {
@@ -403,22 +404,27 @@ impl Position {
         Self {
             cursor,
             observed: false,
-            gaps: Vec::new(),
         }
     }
 }
 
 /// What one follow answered.
 pub(super) enum Followed {
-    /// The subject stopped moving.
+    /// The subject stopped moving. Its gaps are the ones this follow met.
     Answered(Box<SendOutcome>),
-    /// The window closed first: go on from here.
-    Pending(Position),
+    /// The window closed first: go on from `position`. `gaps` are the ones
+    /// this window met, and only those: the caller keeps what earlier
+    /// windows met, so a journaled window never records them again.
+    Pending {
+        position: Position,
+        gaps: Vec<LiveReplayGap>,
+    },
 }
 
 /// A follower's live replay: its subscription, the cursor it last read, and
-/// the gaps it met. A gap is reported, then the follower resubscribes at the
-/// replay's current head, so a gap is bounded to what the replay lost.
+/// the gaps it met in this follow. A gap is reported, then the follower
+/// resubscribes at the replay's current head, so a gap is bounded to what the
+/// replay lost.
 struct Observation {
     replay: Replay,
     last_cursor: SessionCursor,
@@ -430,7 +436,7 @@ impl Observation {
         let mut observation = Self {
             replay: Replay::Ended,
             last_cursor: from.cursor,
-            gaps: from.gaps,
+            gaps: Vec::new(),
         };
         observation.resubscribe(ctx, tap).await;
         observation
@@ -497,10 +503,12 @@ pub(super) async fn follow(
     window: Option<Duration>,
 ) -> Result<Followed> {
     let deadline = window.map(|window| tokio::time::Instant::now() + window);
-    let start_cursor = from.cursor.clone();
     let mut adoption = Adoption::new(subject);
     let observed_before = from.observed;
     let mut observation = Observation::subscribe(ctx, from, tap).await;
+    // Where this follow's observation starts: past the gap, when the cursor
+    // it was handed is gone, so a later window never meets that gap again.
+    let start_cursor = observation.last_cursor.clone();
     let mut request = subject.drive_request();
     let mut drive = Some(await_drive(ctx, &request, None));
     let mut drive_stopped: Option<tokio::time::Instant> = None;
@@ -555,17 +563,10 @@ pub(super) async fn follow(
                 .await
                 .map(|outcome| Followed::Answered(Box::new(outcome)));
             }
-            let resolution = match (&adoption.root, &terminal.settled, subject) {
-                // The open wait saw the root's final terminal published: the
-                // same terminal the store read would wait for.
-                (Some(root), Some(outcome), _) => Resolution::Settled {
-                    root: root.clone(),
-                    outcome: outcome.clone(),
-                },
+            let resolution = match subject {
                 // The input's report landing answers at once, whatever the
-                // store read is waiting on: a settled root's terminal read
-                // waits for its publication (FIG-3979).
-                (_, _, Subject::Input(receipt)) => tokio::select! {
+                // store read is doing (FIG-3979).
+                Subject::Input(receipt) => tokio::select! {
                     resolution = resolve::resolve_input(&ctx.parts, receipt) => resolution?,
                     () = mailbox::settled_root_held(
                         ctx.parts.work.store_binding(),
@@ -573,7 +574,7 @@ pub(super) async fn follow(
                         &receipt.input_id,
                     ) => continue,
                 },
-                (_, _, Subject::Root(root)) => resolve::resolve_root(&ctx.parts, root).await?,
+                Subject::Root(root) => resolve::resolve_root(&ctx.parts, root).await?,
             };
             match resolution {
                 Resolution::Settled { root, outcome } => {
@@ -695,11 +696,13 @@ pub(super) async fn follow(
                 } else {
                     start_cursor
                 };
-                return Ok(Followed::Pending(Position {
-                    cursor,
-                    observed: observed_before || !adoption.collected.is_empty(),
+                return Ok(Followed::Pending {
+                    position: Position {
+                        cursor,
+                        observed: observed_before || !adoption.collected.is_empty(),
+                    },
                     gaps: observation.gaps,
-                }));
+                });
             }
             poll_at = tokio::time::Instant::now() + poll;
         }

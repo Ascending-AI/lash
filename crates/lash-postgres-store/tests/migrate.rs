@@ -2,8 +2,8 @@
 //!
 //! The runner is the operational step that owns what worker open deliberately
 //! refuses to: provisioning a fresh database and carrying a stamped catalog
-//! forward. Each case runs against a scratch schema, so nothing here touches
-//! the shared test database's catalog.
+//! forward. Each case owns an isolated database and a scratch schema, so its
+//! catalog changes and database-wide advisory locks cannot block other cases.
 
 #![expect(
     clippy::expect_used,
@@ -16,6 +16,7 @@
 
 use lash_postgres_store::{MigrateError, MigrationPhase, MigrationRefusal, PostgresStorage};
 use sqlx::{Connection, PgConnection, Row};
+use std::time::{Duration, Instant};
 
 #[allow(dead_code)]
 mod support;
@@ -200,10 +201,10 @@ async fn record_component(database_url: &str, schema: &str, version: i32) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
@@ -256,14 +257,15 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
         .close()
         .await;
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_migrate_rerun_is_a_no_op() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
@@ -290,6 +292,7 @@ async fn a_migrate_rerun_is_a_no_op() {
         "a rerun writes no new ledger rows"
     );
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 /// The fleet epoch the scratch schema records, or `None` without a row.
@@ -313,10 +316,10 @@ async fn recorded_fleet_epoch(url: &str) -> Option<i32> {
 /// refuses typed and stays unrecorded, and a migrate rerun seeds it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
     let seed = lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable());
@@ -377,14 +380,15 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
     assert_eq!(storage.fleet_format(), seed);
     storage.pool().close().await;
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dry_run_reports_the_plan_and_changes_nothing() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
@@ -410,14 +414,15 @@ async fn a_dry_run_reports_the_plan_and_changes_nothing() {
         "a current catalog has nothing pending: {replan:?}"
     );
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn migrate_advances_a_stamped_predecessor_component() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
     rewind_to_previous_component(&database_url, &schema).await;
@@ -511,6 +516,7 @@ async fn migrate_advances_a_stamped_predecessor_component() {
         .close()
         .await;
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 /// Component 139 (FIG-3607) re-keys the process relations, which no expand
@@ -521,10 +527,10 @@ async fn migrate_advances_a_stamped_predecessor_component() {
 /// move.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_component_without_an_expand_step_is_refused() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
     let found = 138;
@@ -580,14 +586,15 @@ async fn a_component_without_an_expand_step_is_refused() {
         "a refused migrate records no step"
     );
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn later_phases_refuse_an_uninstalled_catalog_and_wait_for_finalize() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
@@ -647,14 +654,15 @@ async fn later_phases_refuse_an_uninstalled_catalog_and_wait_for_finalize() {
         "a later phase that waits records no step"
     );
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_migrates_serialize_and_converge() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
 
@@ -675,14 +683,15 @@ async fn concurrent_migrates_serialize_and_converge() {
     );
     assert_eq!(ledger_rows(&url).await.len(), 1 + COMPONENT_EXPANDS.len());
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_catalog_below_the_migration_floor_is_refused_not_recreated() {
-    let Some(database_url) = support::database_url() else {
-        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+    let Some(database) = migrator_database().await else {
         return;
     };
+    let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
     // A catalog stamped far below what the expand catalog reaches has no
@@ -727,4 +736,181 @@ async fn a_catalog_below_the_migration_floor_is_refused_not_recreated() {
         "a refused migrate runs no DDL"
     );
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
+}
+
+/// Catalog laws use a database of their own because the advisory key is
+/// database-wide, even when the catalog under test is a scratch schema.
+async fn migrator_database() -> Option<lash_postgres_store::testing::IsolatedDatabase> {
+    let Some(database_url) = support::database_url() else {
+        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+        return None;
+    };
+    Some(lash_postgres_store::testing::IsolatedDatabase::create(&database_url).await)
+}
+
+async fn hold_migrator_lock(database_url: &str) -> PgConnection {
+    let mut holder = PgConnection::connect(database_url)
+        .await
+        .expect("connect migrator lock holder");
+    let (namespace, key) = PostgresStorage::schema_advisory_lock_key();
+    sqlx::query("SELECT pg_advisory_lock($1, $2)")
+        .bind(namespace)
+        .bind(key)
+        .execute(&mut holder)
+        .await
+        .expect("hold migrator lock from a second connection");
+    holder
+}
+
+async fn observe_migrator_wait(holder: &mut PgConnection) {
+    let (namespace, key) = PostgresStorage::schema_advisory_lock_key();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let waiting = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS (SELECT 1 FROM pg_locks
+                 WHERE locktype = 'advisory' AND NOT granted
+                   AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                   AND classid = $1::int::oid AND objid = $2::int::oid AND objsubid = 2)",
+            )
+            .bind(namespace)
+            .bind(key)
+            .fetch_one(&mut *holder)
+            .await
+            .expect("observe the migrator queued on the held lock");
+            if waiting {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the migrator must queue on the advisory lock");
+}
+
+async fn migrate_waits_past_inherited_timeouts(dry_run: bool) {
+    let Some(database) = migrator_database().await else {
+        return;
+    };
+    let database_url = database.url();
+    let schema = create_scratch_schema(database_url).await;
+    let url = scratch_url(database_url, &schema);
+    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("provision before testing advisory acquisition");
+    let ledger_before = ledger_rows(&url).await;
+    // Restrictive deployment settings must not turn a short advisory wait
+    // into Contended or a statement cancellation. Keep the holder alive for
+    // longer than both inherited bounds, after observing the actual waiter.
+    let url = format!("{url}%20-clock_timeout%3D100ms%20-cstatement_timeout%3D2s");
+    let mut holder = hold_migrator_lock(database_url).await;
+    let runner = async {
+        if dry_run {
+            PostgresStorage::plan_migrations(&url, MigrationPhase::Expand).await
+        } else {
+            PostgresStorage::migrate(&url, MigrationPhase::Expand).await
+        }
+    };
+    let (namespace, key) = PostgresStorage::schema_advisory_lock_key();
+    let (result, ()) = tokio::join!(runner, async {
+        observe_migrator_wait(&mut holder).await;
+        // PostgreSQL releases the lock in the same command that delays it;
+        // scheduling the test's cleanup cannot extend the intended hold.
+        sqlx::raw_sql(&format!(
+            "SELECT pg_sleep(2.1); SELECT pg_advisory_unlock({namespace}, {key})"
+        ))
+        .execute(&mut holder)
+        .await
+        .expect("release the holder after waiting past the inherited timeouts");
+    });
+    holder
+        .close()
+        .await
+        .expect("close the migrator lock holder");
+    let ledger_after = ledger_rows(&url).await;
+    drop_scratch_schema(database_url, &schema).await;
+    drop(database);
+    assert_eq!(
+        ledger_after, ledger_before,
+        "a waiting rerun or plan changes no ledger rows"
+    );
+    let report = result.expect("migrate succeeds after the holder releases within 30 seconds");
+    assert!(
+        report.executed.is_empty(),
+        "a rerun or plan applies no step: {report:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn migrate_waits_for_a_holder_despite_inherited_timeouts() {
+    migrate_waits_past_inherited_timeouts(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn migrate_dry_run_waits_for_a_holder_despite_inherited_timeouts() {
+    migrate_waits_past_inherited_timeouts(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn migrate_refuses_a_holder_only_after_the_documented_bound() {
+    let Some(database) = migrator_database().await else {
+        return;
+    };
+    let database_url = database.url();
+    let schema = create_scratch_schema(database_url).await;
+    let url = scratch_url(database_url, &schema);
+    let mut holder = hold_migrator_lock(database_url).await;
+    let started = Instant::now();
+    let mut runner = Box::pin(PostgresStorage::migrate(&url, MigrationPhase::Expand));
+    tokio::select! {
+        result = &mut runner => panic!("migrator must queue before refusing: {result:?}"),
+        () = observe_migrator_wait(&mut holder) => {},
+    }
+    // Connection setup and host scheduling have their own startup allowance;
+    // the acquisition deadline starts after PostgreSQL reports the waiter.
+    let result = tokio::time::timeout(Duration::from_secs(35), runner).await;
+    let elapsed = started.elapsed();
+    let tables = scratch_lash_table_count(database_url, &schema).await;
+    holder.close().await.expect("release held migrator lock");
+    drop_scratch_schema(database_url, &schema).await;
+    drop(database);
+    let result = result.expect("the server bounds advisory acquisition at 30 seconds");
+    assert!(
+        matches!(
+            result,
+            Err(MigrateError::Store(
+                lash_core_execution::StoreError::Contended
+            ))
+        ),
+        "a holder past the bound must return typed Contended: {result:?}"
+    );
+    assert!(
+        elapsed >= Duration::from_secs(30),
+        "refused too early: {elapsed:?}"
+    );
+    assert_eq!(tables, 0, "a timed-out migrator changes no catalog objects");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_a_queued_migrator_leaves_no_lock_behind() {
+    let Some(database) = migrator_database().await else {
+        return;
+    };
+    let database_url = database.url();
+    let schema = create_scratch_schema(database_url).await;
+    let url = scratch_url(database_url, &schema);
+    let mut holder = hold_migrator_lock(database_url).await;
+    let mut runner = Box::pin(PostgresStorage::migrate(&url, MigrationPhase::Expand));
+    tokio::select! {
+        result = &mut runner => panic!("migrator must queue before cancellation: {result:?}"),
+        () = observe_migrator_wait(&mut holder) => {},
+    }
+    drop(runner);
+    holder.close().await.expect("release the migrator lock");
+    let report = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("the next migrator acquires the lock and provisions the catalog");
+    assert_eq!(report.executed.len(), 1 + COMPONENT_EXPANDS.len());
+    drop_scratch_schema(database_url, &schema).await;
+    drop(database);
 }

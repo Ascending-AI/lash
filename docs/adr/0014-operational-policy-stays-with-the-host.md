@@ -1,159 +1,26 @@
-# Operational Policy Stays With the Host; Lash Exposes Levers
+# Operational policy stays with the host and Lash exposes levers
 
 ## Status
 
-accepted. The *Lease Timings* bullet is superseded in part by
-[ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md):
-queued-work and turn-input claims are no longer TTL leases with a renewal API —
-they pin a session-execution-lease generation for claimability and handoff.
-`LeaseTimings` governs only the true lease lanes.
-
-The FIG-1056 plugin-lifecycle ruling also narrows this ADR's shutdown rejection:
-a defaulted, fallible per-factory release seam through `LashCore::shutdown()` is
-in. An orchestrating drain remains out; intake, ordering, deadlines, active-turn
-handling, and other host policy do not move into Lash.
-
-Amended 2026-09-27 (FIG-3861, FIG-3863): Restate is the only effect engine.
-The SQL effect-replay and process leases and their failover paths are deleted
-under [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-and [ADR 0110](0110-the-engine-owns-process-recovery.md). The *Lease Timings*
-decision below applies only to the session-execution lease; descriptions of
-the deleted lanes are historical.
-
-Amended 2026-09-28 (FIG-3862, FIG-3864): the session-execution lease — the last
-lane `LeaseTimings` governed — is deleted, and the `LeaseTimings` builder knob
-is removed with it. Interim claims pin the sealed drive epoch instead. The
-*Lease Timings* bullet below is historical; the rest of this ADR stands.
+accepted
 
 ## Decision
 
-Lash ships no shutdown or drain orchestrator. Operational policy — when to stop
-admitting work, how long to drain, when to fail over, what to do with
-stragglers — belongs to the embedding host, which owns the process, its
-signals, and its deployment model. Lash's obligation is that every reasonable
-host policy is implementable through explicit, lash-owned capabilities, because
-the state those capabilities act on (leases, claims, waits, cached transports,
-trace buffers) lives inside lash. The capability set:
+The embedding host owns intake, drain order, deadlines, failover and treatment of stragglers. Lash exposes operations over its own state and resources without orchestrating those policies:
 
-- **Lease Timings**: every remaining runtime *lease* (session execution and
-  durable effect replay) derives its TTL and renewal cadence from one
-  host-configurable `LeaseTimings` on the core builder, validated against the
-  survive-two-missed-renewals invariant (`ttl >= 3 * renew_interval`). The former
-  hardcoded 30s constants are gone. Queued-work and turn-input **claims** are not
-  leases: they carry no TTL and pin the session execution lease generation for
-  claimability and lease-less host views (ADR 0029), rather than inheriting a
-  renewal deadline from `LeaseTimings`.
-- **Quiesce and handoff**: `LashSession::park(self)` flushes dirty state
-  to its bound store and returns a resumable `ParkedSession`;
-  `LashCore::resume` rebuilds it. `LashSession::close(self)` is park-without-
-  a-handle (flush + discard). Both consume the session and fail with
-  `SessionStillInUse` when other live handles exist, making mid-turn quiesce an
-  explicit contract rather than a silent partial flush.
-- **Transport, plugin, and sink release**: `Provider::close()` (default no-op;
-  Codex drains its websocket session cache with real close frames),
-  `LashCore::shutdown()` (walks protocol-factory then common-factory release
-  hooks without draining turns), and
-  `TraceSink::flush()` (default no-op; the OTel sink documents that span-export
-  durability is the host provider's duty).
-- **Durable ingress and obligation ownership**: accepted inputs and commands
-  remain durable ingress under [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md),
-  and [ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md)
-  owns recoverable delivery to the engine. The sealed drive fence owns
-  execution; hosts inspect or cancel durable queued work rather than handing
-  back execution claims. `revoke_durable_waits` resolves the session's current
-  Durable Waits as `Cancelled` without deleting the session.
-- **Trigger reconciliation**: registered subscriptions are durable runtime
-  state. Compiling or executing a module does not publish a current declaration
-  set, and removing a registration call from source does not unregister its
-  subscription. Products that want whole-workflow reconciliation compare
-  registered state themselves and invoke the existing explicit update, delete,
-  or prune operations; Lash does not infer that policy from the latest module.
+- `LashSession::park(self)` flushes and returns a resumable `ParkedSession`; `LashCore::resume` reconstructs it. `close(self)` flushes and discards the handle. Both require sole runtime ownership and return `SessionStillInUse` while other live handles remain.
+- `Provider::close`, factory release through `LashCore::shutdown`, and `TraceSink::flush` expose resource release. Core shutdown resigns recovery leadership, then visits the protocol and common factories, continuing after errors and returning the first error. It does not choose a turn-drain policy.
+- Durable ingress and its delivery obligations remain inspectable and cancellable under ADRs 0101 and 0109. Execution belongs to the sealed drive fence. `revoke_durable_waits` cancels current session waits without deleting the session.
+- Trigger registrations are durable truth. Hosts wanting workflow reconciliation compare registered state and explicitly update, delete or prune it. Compilation does not infer subscription removal.
 
-## Why
+Restate's wait index distinguishes `cancel_all`, which cancels the current set and permits later registration, from `revoke_all`, which retains revocation and rejects future waits. Exact workflow addresses resolve promises; session-bearing scopes also participate in the session index.
 
-A capability audit showed the machinery (fencing, per-turn leases, cancellation,
-observation cursors) was first-class while the host-facing lever layer was not:
-TTLs were compile-time `pub(crate)` constants, the park/resume quiesce primitive
-existed only inside `lash-core`, `close()` silently did less than its name, and
-TTL-gated takeover is the only portable rule for the opaque identities every
-distributed deployment uses. The tempting fix — a `LashCore::shutdown()` drain loop — would
-have moved host policy into the runtime and set the precedent for `health()`,
-`readiness()`, and the rest of framework-hood. Lash's thesis is the opposite:
-the app owns the outer boundaries; lash owns the turn. Lash owns the
-effect-journal contract while the configured substrate owns the journal; the
-same boundary discipline keeps drain policy inside the host.
+## Why and alternatives
+
+A shutdown orchestrator cannot know the host's grace budget, traffic rules or deployment model. It is rejected. Resource-release hooks are accepted because they expose owned operations without choosing ordering policy. A provider hook alone is insufficient because sessions, factories, traces, waits and delivery obligations have separate owners.
 
 ## Consequences
 
-- Hosts compose their own drain: stop admitting turns, cancel or await actives,
-  `park()`/`close()` sessions, `close()` providers, release plugin factories,
-  `flush()` sinks, and exit — each step an explicit call, no hidden drain
-  orchestration.
-- Host drain and failover budgets remain host decisions. The former
-  `LeaseTimings` mechanism is historical under ADR 0104.
-- `AwaitEventResolver` gained `cancel_await_events_for_session` with a
-  loud-failing default, so durable effect hosts (Restate/Temporal adapters)
-  must decide how wait revocation maps onto their engine rather than silently
-  ignoring it. The inline registry (and the SQLite/Postgres boundaries that
-  reuse it) resolves every outstanding wait for the session as `Cancelled`
-  while leaving the session usable. Restate deployments bind
-  `LashDurableWaitWorkflow` for exact-address promise resolution and
-  `LashDurableWaitIndex` for the durable session-to-wait index. `cancel_all`
-  drains the current index while permitting later registration; `revoke_all`
-  drains it and persists a tombstone so session deletion also rejects future
-  waits. All execution scopes use the exact workflow address, while scopes
-  carrying a session id additionally participate in the session index.
-- Anything lash cannot expose as a lever without becoming an orchestrator
-  (signal handling, drain deadlines, readiness endpoints) is host territory
-  rather than API surface.
-- Trigger list operations expose registered subscription truth without
-  current-artifact membership labels. Stable explicit or compiler-generated
-  subscription keys retain idempotent registration behavior; only explicit
-  mutation and existing owner-lifecycle rules remove registrations.
+Hosts compose drain and failover from explicit calls. Signal handling, readiness endpoints and deployment deadlines stay outside Lash. SQL stores provide storage; the engine provides durable execution under ADR 0104. Hosts own auth and security policy. Trigger source declarations do not replace registered subscription state, and Lash does not reset a store automatically.
 
-## Current-trigger manifest cutover
-
-This is a pre-1.0 format break with no compatibility decoder. Module artifacts
-carrying the removed `trigger_key_manifest` field are refused and must be
-recompiled under the current semantic-hash generation. Remote peers negotiate
-the matching protocol version before exchanging the registration shape that no
-longer contains membership. Existing persisted subscription records remain the
-runtime truth and need no rewrite; obsolete manifest rows in generic artifact
-tables are ignored and receive no dual-read or migration path.
-
-Before deploying across an existing durable environment, drain or finish work
-whose captured process environment references an old module artifact, deploy
-one protocol generation together, and recompile/re-register source against the
-new artifacts. If that work cannot be drained or recreated, keep the old binary
-and store snapshot together; the clean-cutover alternative is a fresh store and
-explicit recreation of the desired subscriptions. No Lash startup or
-maintenance command resets a store automatically.
-
-## Considered Alternatives
-
-- **`LashCore::shutdown()` orchestrator.** Rejected in its orchestrating form:
-  drain ordering and deadlines are policy; the runtime absorbing them starts
-  the framework slide and still could not know the host's grace budget. The
-  narrowed, defaulted per-factory resource-release seam is accepted because it
-  exposes a Lash-owned lever without choosing drain policy.
-- **`Provider::shutdown()` hook alone.** Rejected: without the rest of the
-  lever set nothing in core would call it, making it a footgun-by-convention.
-- **Accept the status quo (drop everything, TTL recovers).** Rejected after the
-  audit: TTL-only release put a fixed 30s floor under every drain and failover
-  path and was not a policy the host chose.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 23:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-supersedes the SQL effect-engine assumptions. This ADR still assigns operational
-policy to the host.
-
-## Amendment (FIG-4163, 2026-09-30)
-
-The removed `abandon_queued_work_claim` and `abandon_turn_input_claim` handback APIs are historical under ADRs 0101 and 0109; host shutdown ordering, deadlines and intake policy remain host-owned.
-[`DurableSessionOps`](../../crates/lash-core/src/runtime/durable_queue.rs)
-and [the obligation relay](../../crates/lash-core-execution/src/runtime/drive/relay.rs)
-own ingress mechanics; [`LashCore::shutdown`](../../crates/lash/src/core.rs)
-and `core_shutdown_visits_protocol_then_common_factories_and_continues_after_error`
-in [the plugin tests](../../crates/lash/src/tests/plugin_stack.rs) pin factory release without a host drain policy.
+[Session release](../../crates/lash/src/session.rs), [core shutdown](../../crates/lash/src/core.rs), [durable ingress](../../crates/lash-core/src/runtime/durable_queue.rs) and [wait indexing](../../crates/lash-restate/src/durable_wait.rs) implement these levers.

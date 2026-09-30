@@ -51,7 +51,15 @@ async fn waiting_request_with_sleep(
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(process_env_spec())
+    .with_env_ref(
+        lash_core::publish_process_execution_env(
+            engine.lash_backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(process_env_spec()),
+        )
+        .await
+        .expect("publish captured environment"),
+    )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_extra_event_types([lash_core::ProcessEventType {
         name: "signal.go".to_owned(),
@@ -105,16 +113,13 @@ async fn signal(engine: &Engine, core: &lash::LashCore, id: &ProcessId) {
             let core = core.clone();
             let id = id.clone();
             Box::pin(async move {
-                let event = lash_core::ProcessEventAppendRequest::new(
-                    lash_core::facade_support::process_signal_event_type(SIGNAL)
-                        .expect("signal type"),
+                let signal = lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(id, SIGNAL, "signal-1")
+                        .expect("signal identity"),
                     json!({"go": 1}),
-                )
-                .with_replay_key(
-                    lash_core::facade_support::process_signal_wait_key(&id, SIGNAL, "signal-1"),
                 );
                 core.processes()
-                    .signal(&id, SIGNAL, "signal-1", event, scoped)
+                    .signal(signal, scoped)
                     .await
                     .expect("deliver signal");
             })

@@ -259,6 +259,7 @@ impl DriveParts {
             turn_index: 1,
             generation: None,
             admitted_generation: crate::engine::BuildGeneration::for_test(admitted_generation),
+            executor: crate::store::RootExecutor::Root,
         }
     }
 }

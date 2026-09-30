@@ -95,19 +95,29 @@ impl Lowerer {
             let value = if name == "inputs" {
                 self.lower_trigger_input_template(value)?
             } else if name == "target" {
-                // Two shapes name a process: an inline async arrow — a process
-                // literal the linker lifts where the `target` slot's expected
-                // type is `Process` (the same rule every other process slot
-                // uses) — and a const-bound arrow binding whose read the
-                // linker already lifted. A plain arrow is refused here, before
-                // the linker has to say so.
-                self.lower_call_argument(value)?
+                self.lower_trigger_target(value)?
             } else {
                 self.lower_expr(value)?
             };
             lowered.push((name.into(), value));
         }
         Ok(LashExpr::Record(lowered))
+    }
+
+    fn lower_trigger_target(&mut self, target: &Expr) -> Result<LashExpr, Diagnostic> {
+        if let Expr::Object(properties) = target
+            && let [ObjectProperty::KeyValue(PropertyKey::Static(name), definition)] =
+                properties.as_slice()
+            && name == "definition"
+        {
+            // ADR 0095's Target wraps the process slot; keep literal discovery
+            // inside it while the linker still owns type-directed acceptance.
+            return Ok(LashExpr::Record(vec![(
+                name.as_str().into(),
+                self.lower_call_argument(definition)?,
+            )]));
+        }
+        self.lower_call_argument(target)
     }
 
     /// The two spellings a model reaches for that no longer exist.

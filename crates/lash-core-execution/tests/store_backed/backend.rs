@@ -34,7 +34,7 @@ impl EffectEngine for WrappedEngine {
 
 #[tokio::test]
 async fn backend_ports_remain_coherent_through_wrappers() {
-    let base = crate::support::memory_store_backend().await;
+    let base = crate::support::sqlite_memory_store_backend().await;
     let stores: Arc<dyn StoreSet> = Arc::new(CapturedStores::new(base.stores()));
     let host = base.effect_host();
     let mut engine = Arc::clone(base.engine());
@@ -76,8 +76,8 @@ async fn backend_ports_remain_coherent_through_wrappers() {
             ));
             assert!(Arc::ptr_eq(&clone.trigger_store(), &stores.trigger_store()));
             assert!(Arc::ptr_eq(
-                &clone.process_definition_registry(),
-                &stores.process_definition_registry()
+                &clone.definition_store(),
+                &stores.definition_store()
             ));
             assert!(Arc::ptr_eq(
                 &clone.process_env_store(),
@@ -158,14 +158,15 @@ captured_ports! {
     process_registry: crate::ProcessRegistry,
     process_continuations: crate::ProcessContinuationStore,
     trigger_store: crate::TriggerStore,
-    process_definition_registry: crate::ProcessDefinitionRegistry,
-    process_definitions: crate::ProcessDefinitionStore,
+    definition_store: crate::ProcessDefinitionStore,
     process_env_store: crate::ProcessExecutionEnvStore,
     attachment_store: crate::AttachmentStore,
     attachment_referrers: crate::AttachmentReferrers,
     module_artifacts: crate::ModuleArtifactStore,
     recovery_leader: crate::store::RecoveryLeaderStore,
+    worker_recovery: crate::store::worker_recovery::WorkerRecoveryStore,
     generation_drain: crate::store::generation_drain::GenerationDrainStore,
     artifact_cleanup: crate::store::ArtifactCleanupLedger,
     session_delete_ledger: crate::store::session_delete::SessionDeleteLedger,
+    usage_accounting: crate::UsageAccountingStore,
 }

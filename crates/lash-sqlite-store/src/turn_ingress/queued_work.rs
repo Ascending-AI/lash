@@ -24,7 +24,13 @@ lash_store_sql::statements! {
              FROM queued_work_batches
              WHERE session_id = ?1 AND batch_id = ?2";
 
-        /// Batch `?2` of session `?1`, if it is open.
+        /// Batch `?2` of session `?1`, if it is open and not yet read by the
+        /// command lane.
+        ///
+        /// The command lane takes no binding: a drive that reads a command
+        /// run delivers each row's obligation in its fenced read, and that
+        /// read is the command's admission (FIG-4202). A delivered open
+        /// command is being applied, so a withdrawal no longer reaches it.
         ///
         /// Same lock fork as [`settlement_facts`](Self::settlement_facts).
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
@@ -32,7 +38,8 @@ lash_store_sql::statements! {
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_root IS NULL";
+               AND admitted_root IS NULL
+               AND NOT (work_kind = 'control' AND obligation_state IS 'delivered')";
 
         /// Withdraw batch `?2` of session `?1`, if it is open.
         ///
@@ -44,7 +51,8 @@ lash_store_sql::statements! {
         delete_cancelled = "DELETE FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_root IS NULL";
+               AND admitted_root IS NULL
+               AND NOT (work_kind = 'control' AND obligation_state IS 'delivered')";
 
         /// Session `?1`'s admission candidates with no turn in progress, up to
         /// `?2` of them.

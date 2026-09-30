@@ -56,6 +56,7 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -126,13 +127,21 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
-        lash_core::SessionPolicy {
-            model: model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-    ))
+    .with_env_ref(
+        lash_core::publish_process_execution_env(
+            restate.lash_backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: model_spec(),
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                },
+            )),
+        )
+        .await
+        .expect("publish captured environment"),
+    )
     .with_extra_event_types(
         lash_lashlang_runtime::lashlang_process_event_types()
             .into_iter()

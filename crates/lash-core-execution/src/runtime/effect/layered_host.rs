@@ -54,6 +54,22 @@ pub trait EffectLayer: Send + Sync + 'static {
         inner.owns_commit_backpressure()
     }
 
+    async fn revoke_await_events_for_session(
+        &self,
+        inner: &dyn AwaitEventResolver,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
+        inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn retire_effect_journal(
+        &self,
+        inner: &dyn EffectHost,
+        retirement: EffectJournalRetirement,
+    ) -> Result<usize, RuntimeError> {
+        inner.retire_effect_journal(retirement).await
+    }
+
     async fn execute_effect(
         &self,
         inner: &dyn RuntimeEffectController,
@@ -78,6 +94,15 @@ pub trait EffectLayer: Send + Sync + 'static {
         cancel: crate::runtime::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         inner.await_next_settlement(handle, cancel).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
+        inner.read_group_settlement(group_key, rank).await
     }
 
     async fn close_effect_group(
@@ -293,7 +318,9 @@ impl AwaitEventResolver for LayeredEffectHost {
         &self,
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
+        self.layer
+            .revoke_await_events_for_session(self.inner.await_event_resolver(), session_id)
+            .await
     }
 
     async fn cancel_await_events_for_session(
@@ -338,6 +365,21 @@ impl AwaitEventResolver for LayeredEffectHost {
 impl EffectHost for LayeredEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.inner.turn_control_binding_id()
+    }
+
+    async fn drain_usage_accounting(
+        &self,
+        owner: &crate::RuntimeOwner,
+    ) -> Result<crate::UsageOwnerRetired, RuntimeError> {
+        self.inner.drain_usage_accounting(owner).await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &crate::RuntimeOwner,
+        scope: &ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        self.inner.retire_usage_execution(owner, scope).await
     }
 
     async fn retire_closed_root_waits(
@@ -415,7 +457,9 @@ impl EffectHost for LayeredEffectHost {
         &self,
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        self.inner.retire_effect_journal(retirement).await
+        self.layer
+            .retire_effect_journal(self.inner.as_ref(), retirement)
+            .await
     }
 
     async fn journal_replay(
@@ -570,9 +614,8 @@ impl AwaitEventResolver for LayeredController<'_> {
         &self,
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
-        self.inner
-            .as_ref()
-            .revoke_await_events_for_session(session_id)
+        self.layer
+            .revoke_await_events_for_session(self.inner.as_ref(), session_id)
             .await
     }
 
@@ -715,9 +758,8 @@ impl RuntimeEffectController for LayeredController<'_> {
         group_key: &str,
         rank: u64,
     ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        self.inner
-            .as_ref()
-            .read_group_settlement(group_key, rank)
+        self.layer
+            .read_group_settlement(self.inner.as_ref(), group_key, rank)
             .await
     }
 
@@ -741,11 +783,11 @@ impl RuntimeEffectController for LayeredController<'_> {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.inner
             .as_ref()
-            .await_group_child_drain_admission(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 

@@ -265,6 +265,7 @@ pub(super) async fn rlm_core(
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
     let mut builder = LashCore::rlm_builder(

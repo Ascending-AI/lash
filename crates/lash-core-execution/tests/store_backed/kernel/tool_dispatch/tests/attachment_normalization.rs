@@ -109,7 +109,7 @@ async fn durable_attachment_context<'h>(
     Arc<dyn crate::RuntimeStore>,
     Arc<dyn crate::AttachmentStore>,
 ) {
-    let backend = crate::support::memory_store_backend().await;
+    let backend = crate::support::sqlite_memory_store_backend().await;
     let factory = backend.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
@@ -344,7 +344,9 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     let attachment_store = Arc::clone(&context.attachment_store);
     let execution = crate::RuntimeExecutionContext::new(
         Arc::new(context),
-        crate::support::memory_store_set().await.process_env_store(),
+        crate::support::sqlite_memory_store_set()
+            .await
+            .process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
@@ -509,7 +511,7 @@ async fn transient_manifest_publication_failure_never_reexecutes_the_tool() {
             test_plugins(provider),
         )
         .await;
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let manifest = Arc::new(TransientPublicationManifest {
             fail_completion,
             failures: AtomicUsize::new(0),

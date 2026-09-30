@@ -1277,10 +1277,8 @@ impl Heap {
         let Value::Ref(id) = target else {
             return Err(RuntimeError::PushUnsupported);
         };
-        // Insertions hold an exclusively owned copy like every other durable
-        // store. A reference has already been isolated by the lowering that
-        // produced it; an inline compound is isolated here so it can never enter
-        // a container while another root still holds the same object.
+        // An existing heap reference preserves shared identity. An inline
+        // compound is imported into the heap before it becomes a member.
         let item = if let Value::Ref(id) = item {
             self.get(id)?;
             item

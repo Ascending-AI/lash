@@ -298,7 +298,11 @@ impl World {
             cause: lash_core::store::RootTerminalCause::Committed {
                 commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
                 turn: root.clone(),
-                stop: None,
+                outcome: lash_core::store::RootCommittedOutcome::Finished(
+                    lash_core::facade_support::TurnFinish::AssistantMessage {
+                        text: String::new(),
+                    },
+                ),
             },
             head_revision: None,
             at_ms: 1,
@@ -658,7 +662,11 @@ async fn a_lost_parent_end_delivery_is_retried_and_delivered_once() {
         cause: lash_core::store::RootTerminalCause::Committed {
             commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
             turn: root.clone(),
-            stop: None,
+            outcome: lash_core::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
         },
         head_revision: None,
         at_ms: 1,

@@ -139,8 +139,8 @@ async fn a_faulted_doubles_store_twin_sees_the_fault() {
 /// its store ports and runs no effect.
 #[tokio::test]
 async fn the_storage_only_twins_reach_store_ports_and_run_no_effect() {
-    let stores = super::memory_store_set().await;
-    let backend = super::memory_store_backend().await;
+    let stores = super::sqlite_memory_store_set().await;
+    let backend = super::sqlite_memory_store_backend().await;
     assert_ne!(
         backend.binding_identity(),
         crate::StoreSet::binding_identity(stores.as_ref()).clone(),

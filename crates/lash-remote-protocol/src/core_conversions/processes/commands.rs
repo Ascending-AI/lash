@@ -13,7 +13,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             start_key,
             input,
             lifetime,
-            env_spec,
+            env_ref,
             originator,
             identity,
             wake_session_id,
@@ -50,7 +50,8 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
         if let Some(identity) = identity {
             request = request.with_declared_identity(identity.into());
         }
-        request.env_spec = env_spec.map(TryInto::try_into).transpose()?;
+        request.env_ref =
+            env_ref.map(|reference| lash_core::ProcessExecutionEnvRef::new(reference.as_str()));
         Ok(request)
     }
 }
@@ -72,7 +73,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
         let lash_core::ProcessStartRequest {
             input,
             lifetime,
-            env_spec,
+            env_ref,
             originator,
             identity,
             wake_session_id,
@@ -84,7 +85,9 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             start_key: None,
             input: input.try_into()?,
             lifetime: lifetime.try_into()?,
-            env_spec: env_spec.map(Into::into),
+            env_ref: env_ref
+                .map(|reference| RemoteProcessExecutionEnvRef::parse(reference.as_str()))
+                .transpose()?,
             originator: originator.into(),
             identity: identity.map(Into::into),
             wake_session_id,
@@ -317,34 +320,23 @@ impl TryFrom<RemoteProcessCancelReceipt> for lash_core::ProcessCancelReceipt {
     }
 }
 
-impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessEventAppendRequest {
+impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessSignal {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessSignalRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteProcessSignalRequest {
-            process_id: _,
+            process_id,
             signal_name,
-            signal_id: _,
+            signal_id,
             payload,
-            replay_key,
         } = value;
-        let event_type = lash_core::facade_support::process_signal_event_type(&signal_name)
+        let identity = lash_core::ProcessSignalIdentity::new(process_id, signal_name, signal_id)
             .map_err(|err| RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessSignalRequest",
                 message: err.to_string(),
             })?;
-        Ok(lash_core::ProcessEventAppendRequest {
-            event_type,
-            payload,
-            replay: replay_key.map(|key| lash_core::runtime::RuntimeReplay {
-                key,
-                attribution: None,
-            }),
-            // A remote signal is news to the session by definition: a peer sent
-            // it. Only the runtime's own park announcements withhold the wake.
-            wake_suppressed: false,
-        })
+        Ok(Self::new(identity, payload))
     }
 }
 
@@ -352,16 +344,8 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessCommand {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessSignalRequest) -> Result<Self, Self::Error> {
-        value.validate()?;
-        let process_id = value.process_id.clone();
-        let signal_name = value.signal_name.clone();
-        let signal_id = value.signal_id.clone();
-        let request = value.try_into()?;
         Ok(Self::Signal {
-            process_id,
-            signal_name,
-            signal_id,
-            request,
+            signal: value.try_into()?,
         })
     }
 }

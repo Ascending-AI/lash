@@ -293,8 +293,10 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     // commit taken while every tool is orphaned — FIG-3353's exact question.
     let mut grantless = grantless;
     grantless.stamp_live_plugin_state();
-    Box::pin(
-        grantless.append_session_nodes(lash_core::AppendSessionNodesRequest {
+    Box::pin(crate::runtime_support::apply_host_append(
+        &mut grantless,
+        &double,
+        lash_core::AppendSessionNodesRequest {
             operation_id: "fig3367-grantless-commit".to_string(),
             nodes: vec![lash_core::SessionAppendNode::message(
                 lash_core::PluginMessage::text(
@@ -303,10 +305,9 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
                 ),
             )],
             requires_ancestor_node_id: None,
-        }),
-    )
-    .await
-    .expect("commit while orphaned");
+        },
+    ))
+    .await;
     Box::pin(grantless.park())
         .await
         .expect("park the grantless open");
@@ -487,8 +488,10 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
     // Step 3: enqueue pending input — a real durable commit taken on the
     // grantless open.
     enqueue_only.stamp_live_plugin_state();
-    Box::pin(
-        enqueue_only.append_session_nodes(lash_core::AppendSessionNodesRequest {
+    Box::pin(crate::runtime_support::apply_host_append(
+        &mut enqueue_only,
+        &double,
+        lash_core::AppendSessionNodesRequest {
             operation_id: "fig3353-enqueue-commit".to_string(),
             nodes: vec![lash_core::SessionAppendNode::message(
                 lash_core::PluginMessage::text(
@@ -497,10 +500,9 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
                 ),
             )],
             requires_ancestor_node_id: None,
-        }),
-    )
-    .await
-    .expect("commit on the enqueue-only open");
+        },
+    ))
+    .await;
     Box::pin(enqueue_only.park())
         .await
         .expect("park the enqueue-only open");
@@ -665,8 +667,10 @@ async fn preserve_persisted_open_survives_resident_reload() {
     // reload path — a wholesale `self.state` replacement.
     lash_core::testing::invalidate_resident_session_state_for_testing(&mut enqueue_only);
     enqueue_only.stamp_live_plugin_state();
-    Box::pin(
-        enqueue_only.append_session_nodes(lash_core::AppendSessionNodesRequest {
+    Box::pin(crate::runtime_support::apply_host_append(
+        &mut enqueue_only,
+        &double,
+        lash_core::AppendSessionNodesRequest {
             operation_id: "fig3353-reload-commit".to_string(),
             nodes: vec![lash_core::SessionAppendNode::message(
                 lash_core::PluginMessage::text(
@@ -675,67 +679,9 @@ async fn preserve_persisted_open_survives_resident_reload() {
                 ),
             )],
             requires_ancestor_node_id: None,
-        }),
-    )
-    .await
-    .expect("append through the resident reload");
-    Box::pin(enqueue_only.park())
-        .await
-        .expect("park the enqueue-only open");
-
-    assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
-}
-
-/// A replayed append receipt drives `restore_protocol_session_from_state` —
-/// another wholesale `self.state` replacement followed by
-/// `stamp_live_plugin_state`. The preservation claim must survive it too.
-#[tokio::test(flavor = "multi_thread")]
-async fn preserve_persisted_open_survives_append_receipt_replay() {
-    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let session_id = SessionId::from("fig3353-replay");
-    let store = double_unbound_store(&double).await;
-    let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
-
-    let preserve_env =
-        environment_preserving_tools(&backend, None, lash_core::ToolSourcePolicy::Tolerate);
-    let mut enqueue_only = open_runtime_on(&session_id, &store, &preserve_env)
-        .await
-        .expect("enqueue-only open");
-
-    let request = lash_core::AppendSessionNodesRequest {
-        operation_id: "fig3353-replay-commit".to_string(),
-        nodes: vec![lash_core::SessionAppendNode::message(
-            lash_core::PluginMessage::text(
-                lash_core::session_model::MessageRole::User,
-                "committed once, replayed once",
-            ),
-        )],
-        requires_ancestor_node_id: None,
-    };
-    Box::pin(enqueue_only.append_session_nodes(request.clone()))
-        .await
-        .expect("first append commits");
-    Box::pin(enqueue_only.append_session_nodes(request))
-        .await
-        .expect("the identical append replays its receipt");
-    // A further commit after the replay: the one that would persist the
-    // degraded surface if the marker were lost.
-    enqueue_only.stamp_live_plugin_state();
-    Box::pin(
-        enqueue_only.append_session_nodes(lash_core::AppendSessionNodesRequest {
-            operation_id: "fig3353-after-replay".to_string(),
-            nodes: vec![lash_core::SessionAppendNode::message(
-                lash_core::PluginMessage::text(
-                    lash_core::session_model::MessageRole::User,
-                    "committed after the replay",
-                ),
-            )],
-            requires_ancestor_node_id: None,
-        }),
-    )
-    .await
-    .expect("commit after the replay");
+        },
+    ))
+    .await;
     Box::pin(enqueue_only.park())
         .await
         .expect("park the enqueue-only open");
@@ -1222,8 +1168,10 @@ async fn a_resident_resync_on_a_require_core_reloads_and_reports() {
     let (mut runtime, _surface, _snapshot) =
         live_require_runtime(&backend, &session_id, &store).await;
     // The durable head names the tool; the live surface no longer does.
-    Box::pin(
-        runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
+    Box::pin(crate::runtime_support::apply_host_append(
+        &mut runtime,
+        &double,
+        lash_core::AppendSessionNodesRequest {
             operation_id: "fig3367-live-resync-commit".to_string(),
             nodes: vec![lash_core::SessionAppendNode::message(
                 lash_core::PluginMessage::text(
@@ -1232,10 +1180,9 @@ async fn a_resident_resync_on_a_require_core_reloads_and_reports() {
                 ),
             )],
             requires_ancestor_node_id: None,
-        }),
-    )
-    .await
-    .expect("commit a durable head carrying the tool");
+        },
+    ))
+    .await;
 
     lash_core::testing::invalidate_resident_session_state_for_testing(&mut runtime);
     Box::pin(runtime.reload_invalidated_resident_session_state_for_session())

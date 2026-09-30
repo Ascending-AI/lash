@@ -12,7 +12,6 @@ struct TurnDriverSessionLoan<'slot, 'run> {
 }
 
 pub(super) struct TurnDriverRemainder {
-    pub(super) policy: RuntimeSessionPolicy,
     pub(super) recorded_assembly: RecordedTurnAssembly,
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
@@ -90,7 +89,6 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
     fn reclaim(mut self) -> TurnDriverRemainder {
         let RuntimeTurnDriver {
             session,
-            policy,
             recorded_assembly,
             turn_pipeline,
             llm_calls,
@@ -103,7 +101,6 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
         } = *self.driver.take().expect("turn driver loan is present");
         *self.session = Some(session);
         TurnDriverRemainder {
-            policy,
             recorded_assembly,
             turn_pipeline,
             llm_calls,
@@ -285,7 +282,6 @@ impl LashRuntime {
                 turn_pipeline,
                 recorded_assembly,
                 new_messages: prepared.messages,
-                policy: self.state.effective_policy().clone(),
                 turn_index,
                 trace_turn_id,
             },
@@ -574,7 +570,6 @@ impl LashRuntime {
         );
 
         let TurnDriverRemainder {
-            policy,
             recorded_assembly,
             turn_pipeline,
             llm_calls,
@@ -597,7 +592,6 @@ impl LashRuntime {
                         .with_llm_calls(llm_calls)
                         .with_failure_evidence(failure_evidence),
                     new_messages,
-                    policy: policy.policy,
                     turn_index,
                     trace_turn_id,
                 },

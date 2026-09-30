@@ -55,7 +55,11 @@ impl AttachmentReferrers for Integrator {
 
 #[lash::async_trait]
 impl AttachmentRootSet for Integrator {
-    async fn live_attachment_refs(&self) -> Result<BTreeSet<AttachmentId>, StoreError> {
+    async fn attachment_root_page(
+        &self,
+        source: lash::persistence::AttachmentRootSource,
+        after: Option<&AttachmentId>,
+    ) -> Result<lash::persistence::AttachmentRootPage, StoreError> {
         unreachable!("external signature witness")
     }
     async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
@@ -248,20 +252,6 @@ impl SessionHistoryStore for Integrator {
         session_id: &SessionId,
         node_id: &NodeId,
     ) -> Result<bool, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn load_usage_totals(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionUsageTotals, StoreError> {
-        unreachable!("external signature witness")
-    }
-    async fn load_usage_ledger_page(
-        &self,
-        session_id: &SessionId,
-        after: Option<&UsageLedgerCursor>,
-        limit: NonZeroU32,
-    ) -> Result<UsageLedgerPage, StoreError> {
         unreachable!("external signature witness")
     }
     async fn load_failure_evidence_page(
@@ -510,7 +500,15 @@ impl RootStore for Integrator {
         root: &TurnId,
         refusal: &RuntimeError,
         at_ms: u64,
-    ) -> Result<RefusedRootEnd, StoreError> {
+    ) -> Result<RootEnd, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn end_command_root(
+        &self,
+        fence: &DriveFence,
+        root: &TurnId,
+        at_ms: u64,
+    ) -> Result<RootEnd, StoreError> {
         unreachable!("external signature witness")
     }
     async fn root_of_input(
@@ -632,12 +630,13 @@ impl DeploymentStore for Integrator {
         &self,
         after: Option<&RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<RootRef>, StoreError> {
+    ) -> Result<Vec<OpenRoot>, StoreError> {
         unreachable!("external signature witness")
     }
     async fn end_lost_root(
         &self,
         target: &RootRef,
+        loss: RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<RootTerminal>, StoreError> {
         unreachable!("external signature witness")

@@ -22,11 +22,6 @@ use lash_tool_support::{StaticToolExecute, StaticToolProvider, ToolDefinitionBin
 
 use crate::LashlangSurface;
 
-/// Lowers source text in one dialect to a lashlang program, answering the
-/// rendered refusal on failure. The dialect front end owns the parse (ADR
-/// 0096); this tool owns the link and the declaration.
-pub type ProcessSourceParser = fn(&str) -> Result<lashlang::Program, String>;
-
 /// The `processes.create` tool definition.
 pub fn process_create_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
@@ -57,19 +52,18 @@ pub fn process_create_tool_definition() -> ToolDefinition {
 }
 
 /// The provider a dialect plugin registers to put `processes.create` on the
-/// tool surface: `dialect` is the language id the tool accepts, `parse` its
-/// front end, and `surface` the lashlang host surface a cell of that dialect
-/// links against.
+/// tool surface: `dialect` is the language id the tool accepts, and `surface`
+/// is the host surface the worker links against.
 pub fn process_create_tool_provider(
     dialect: &'static str,
-    parse: ProcessSourceParser,
     surface: LashlangSurface,
+    workers: lash_vm_client::service::Service,
 ) -> StaticToolProvider<ProcessCreateTools> {
     StaticToolProvider::new(
         vec![process_create_tool_definition()],
         ProcessCreateTools {
             dialect,
-            parse,
+            workers,
             surface,
         },
     )
@@ -77,14 +71,34 @@ pub fn process_create_tool_provider(
 
 pub struct ProcessCreateTools {
     dialect: &'static str,
-    parse: ProcessSourceParser,
     surface: LashlangSurface,
+    workers: lash_vm_client::service::Service,
 }
 
 #[async_trait::async_trait]
 impl StaticToolExecute for ProcessCreateTools {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
-        execute_process_create_tool_call(call.context, call.args, self)
+        let recovery = match self
+            .workers
+            .begin_execution(call.context.execution_scope_id())
+            .await
+        {
+            Ok(recovery) => recovery,
+            Err(error) => return refuse(error.to_string()),
+        };
+        let scoped = ProcessCreateTools {
+            workers: recovery.service().clone(),
+            surface: self.surface.clone(),
+            dialect: self.dialect,
+        };
+        if let Err(error) = scoped.workers.mark_running().await {
+            return refuse(error.to_string());
+        }
+        let outcome = execute_process_create_tool_call(call.context, call.args, &scoped);
+        match recovery.settle().await {
+            Ok(()) => outcome,
+            Err(error) => refuse(error.to_string()),
+        }
     }
 }
 
@@ -138,41 +152,27 @@ fn create_definition(
             tools.dialect
         ));
     }
-    let program = (tools.parse)(source)?;
     let empty = lash_core::ToolCatalog::default();
     let environment = tools
         .surface
         .host_environment(catalog.unwrap_or(&empty))
         .map_err(|error| format!("invalid lashlang host tool surface: {error}"))?;
-    let compiled = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source,
-        program,
-        environment: &environment,
-    })
-    .map_err(|error| error.diagnostic().to_string())?;
-    let artifact = compiled.artifact;
-    let mut processes = artifact.exports().processes.keys();
-    let (Some(process_name), None) = (processes.next(), processes.next()) else {
-        return Err(format!(
-            "create_process needs source that defines exactly one process; it defines {}",
-            artifact.exports().processes.len()
-        ));
-    };
-    let identity =
-        lashlang::ProcessDefinitionIdentity::from_artifact_export(&artifact, process_name)
-            .ok_or_else(|| format!("process `{process_name}` is not exported by its module"))?;
-    let bytes = artifact
-        .to_store_bytes()
-        .map_err(|error| format!("failed to encode the process module: {error}"))?;
-    let bytes = String::from_utf8(bytes)
-        .map_err(|error| format!("the process module did not encode as text: {error}"))?;
-    Ok(CreatedDefinition {
-        draft: identity.draft().map_err(|e| e.to_string())?,
-        module: lash_core::DeclaredModuleArtifact {
-            module_ref: artifact.module_ref().as_str().to_owned(),
-            bytes,
-        },
-    })
+    match tools
+        .workers
+        .request(lash_vm_client::service::Request::CreateDefinition {
+            source: source.into(),
+            environment,
+        })
+        .map_err(|e| e.to_string())?
+    {
+        lash_vm_client::service::Response::Definition(created) => Ok(CreatedDefinition {
+            draft: created.draft,
+            module: created.module,
+        }),
+        lash_vm_client::service::Response::CompileRefused { error, .. } => Err(error.to_string()),
+        lash_vm_client::service::Response::Refused { message, .. } => Err(message),
+        other => Err(format!("unexpected worker definition response: {other:?}")),
+    }
 }
 
 fn required_string<'a>(args: &'a Value, field: &str) -> Result<&'a str, String> {
@@ -194,54 +194,19 @@ fn refuse(message: impl std::fmt::Display) -> ToolAttemptOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lashlang::testing::ast_builders as b;
-
-    const DIALECT: &str = "test-dialect";
-
-    fn answer_program(_source: &str) -> Result<lashlang::Program, String> {
-        Ok(crate::lib_tests::process_module(
-            "answer",
-            Vec::new(),
-            lashlang::TypeExpr::Float,
-            b::num(42.0),
-        ))
-    }
-
-    /// A process whose body calls a catalog tool: it links only against a
-    /// catalog that has the tool.
-    fn echo_program(_source: &str) -> Result<lashlang::Program, String> {
-        Ok(crate::lib_tests::process_module(
-            "relay",
-            Vec::new(),
-            lashlang::TypeExpr::Any,
-            b::module_call(
-                &["demo"],
-                "echo",
-                vec![b::record(vec![("text", b::string("hi"))])],
-            ),
-        ))
-    }
-
-    fn no_process(_source: &str) -> Result<lashlang::Program, String> {
-        Ok(b::program(Vec::new()))
-    }
-
-    fn refused(_source: &str) -> Result<lashlang::Program, String> {
-        Err("the dialect refused this source".to_string())
-    }
-
-    fn tools(parse: ProcessSourceParser) -> ProcessCreateTools {
+    const DIALECT: &str = "typescript";
+    const ANSWER: &str = "const answer = async (): Promise<number> => { return 42; };";
+    const ECHO: &str = "const relay = async () => { return await demo.echo({text: 'hi'}); };";
+    fn tools() -> ProcessCreateTools {
         ProcessCreateTools {
             dialect: DIALECT,
-            parse,
             surface: LashlangSurface::default(),
+            workers: lash_vm_client::service::Service::default(),
         }
     }
-
     fn args(dialect: &str) -> Value {
-        serde_json::json!({ "source": "one process", "dialect": dialect })
+        serde_json::json!({ "source": ANSWER, "dialect": dialect })
     }
-
     fn echo_catalog() -> lash_core::ToolCatalog {
         lash_core::ToolCatalog::from_tool_definitions(vec![
             ToolDefinition::raw(
@@ -272,7 +237,7 @@ mod tests {
     fn create_declares_publication_after_its_attempt_commit() {
         let context = lash_core::testing::mock_attempt_context();
         let ToolAttemptOutcome::Done { result, intents } =
-            execute_process_create_tool_call(&context, &args(DIALECT), &tools(answer_program))
+            execute_process_create_tool_call(&context, &args(DIALECT), &tools())
         else {
             panic!("done attempt")
         };
@@ -315,10 +280,7 @@ mod tests {
         ] {
             let mut extra = args(DIALECT);
             extra[key] = serde_json::json!("forbidden");
-            assert!(
-                create_definition(None, &extra, &tools(answer_program)).is_err(),
-                "{key}"
-            );
+            assert!(create_definition(None, &extra, &tools()).is_err(), "{key}");
         }
     }
 
@@ -326,9 +288,12 @@ mod tests {
     /// dispatched with, and is refused without it.
     #[test]
     fn create_links_against_the_dispatch_catalog() {
-        let created =
-            create_definition(Some(&echo_catalog()), &args(DIALECT), &tools(echo_program))
-                .unwrap_or_else(|error| panic!("links against the catalog: {error}"));
+        let created = create_definition(
+            Some(&echo_catalog()),
+            &serde_json::json!({"source":ECHO,"dialect":DIALECT}),
+            &tools(),
+        )
+        .unwrap_or_else(|error| panic!("links against the catalog: {error}"));
         assert_eq!(
             lashlang::ModuleArtifact::from_store_bytes(created.module.bytes.as_bytes())
                 .expect("module")
@@ -337,9 +302,13 @@ mod tests {
                 .len(),
             1
         );
-        let error = create_definition(None, &args(DIALECT), &tools(echo_program))
-            .err()
-            .expect("an empty catalog cannot link the tool call");
+        let error = create_definition(
+            None,
+            &serde_json::json!({"source":ECHO,"dialect":DIALECT}),
+            &tools(),
+        )
+        .err()
+        .expect("an empty catalog cannot link the tool call");
         assert!(error.contains("unknown module `demo`"), "{error}");
     }
 
@@ -349,7 +318,7 @@ mod tests {
         let rendered = refusal(execute_process_create_tool_call(
             &context,
             &args("lua"),
-            &tools(answer_program),
+            &tools(),
         ));
         assert!(
             rendered.contains("cannot compile `lua` source"),
@@ -362,20 +331,25 @@ mod tests {
         let context = lash_core::testing::mock_attempt_context();
         let rendered = refusal(execute_process_create_tool_call(
             &context,
-            &args(DIALECT),
-            &tools(no_process),
+            &serde_json::json!({"source":"let x = 1;","dialect":DIALECT}),
+            &tools(),
         ));
         assert!(rendered.contains("exactly one process"), "{rendered}");
         let rendered = refusal(execute_process_create_tool_call(
             &context,
-            &args(DIALECT),
-            &tools(refused),
+            &serde_json::json!({"source":"(","dialect":DIALECT}),
+            &tools(),
         ));
-        assert!(rendered.contains("the dialect refused"), "{rendered}");
+        assert!(
+            rendered.contains("source")
+                || rendered.contains("expected")
+                || rendered.contains("Expected"),
+            "{rendered}"
+        );
         let rendered = refusal(execute_process_create_tool_call(
             &context,
             &serde_json::json!({ "dialect": DIALECT }),
-            &tools(answer_program),
+            &tools(),
         ));
         assert!(rendered.contains("non-empty `source`"), "{rendered}");
     }
@@ -388,7 +362,7 @@ mod tests {
             definition
                 .manifest
                 .bindings
-                .get(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY),
+                .get(lash_tool_support::TOOL_BINDING_KEY),
             Some(
                 &serde_json::to_value(lash_core::ToolBinding::new(["processes"], "create"))
                     .expect("binding serializes")

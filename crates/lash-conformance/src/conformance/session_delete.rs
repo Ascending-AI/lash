@@ -504,7 +504,7 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
     };
     state.ensure_agent_frame_initialized();
     store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit the session's frame");
     let frame = ObligationKey::ArtifactCleanup {
@@ -560,11 +560,10 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
             sessions: stores.session_store_factory(),
             processes: stores.process_registry(),
             triggers: stores.trigger_store(),
-            definitions: stores.process_definition_registry(),
         }),
         process_env: stores.process_env_store(),
         modules: stores.module_artifacts(),
-        definitions: stores.process_definitions(),
+        definitions: stores.definition_store(),
         engines: admin.process_engines().clone(),
         attachments: stores.attachment_referrers(),
         clock: stores.clock(),

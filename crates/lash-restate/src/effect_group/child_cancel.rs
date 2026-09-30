@@ -78,10 +78,13 @@ pub(crate) fn group_child_cancel_verdict(resolution: Resolution) -> bool {
     )
 }
 
-/// The live watch: an ingress call on the child's cancel wait, kept out of
-/// the child's journal. A wait that ends `Settled` is no cancel, and the
-/// watch stays pending. A transient ingress failure reattaches to the same
-/// durable wait. A definitive refusal ends this watch.
+/// The live watch: an ingress observer of the child's cancel wait, kept out
+/// of the child's journal (`WaitObserver::GroupChildCancel`). A decided
+/// wait answers from its promise without registering, and every watch of one
+/// child shares one server-side waiter, however often it reattaches
+/// (FIG-4345). A wait that ends `Settled` is no cancel, and the watch stays
+/// pending. An attach-ceiling timeout reattaches to the same durable wait.
+/// Other ingress failures reach the caller's shared retry ladder.
 struct IngressChildCancelWatch {
     ingress: RestateIngressClient,
     namespace: crate::RestateNamespace,
@@ -91,29 +94,27 @@ struct IngressChildCancelWatch {
 #[async_trait::async_trait]
 impl lash_core::GroupChildCancelWatch for IngressChildCancelWatch {
     async fn cancelled(&self) -> Result<(), lash_core::RuntimeError> {
-        let address = RestateDurableWaitAddress::for_key(&self.key);
         let request = RestateDurableWaitAwaitRequest {
             key: self.key.clone(),
             deadline: None,
         };
+        let durable_wait_workflow = self
+            .namespace
+            .stable(crate::LashService::DurableWaitWorkflow)
+            .name();
         let resolution = loop {
-            match self
-                .ingress
-                .call_lash_workflow::<_, Resolution>(
-                    &self
-                        .namespace
-                        .stable(crate::LashService::DurableWaitWorkflow)
-                        .name(),
-                    &address.workflow_key,
-                    "await_resolution",
-                    &request,
-                )
-                .await
+            match crate::durable_wait::observe_durable_wait(
+                &self.ingress,
+                &durable_wait_workflow,
+                crate::durable_wait::WaitObserver::GroupChildCancel,
+                &request,
+            )
+            .await
             {
                 Ok(resolution) => break resolution,
-                Err(error) if error.classification() == crate::RestateHttpErrorClass::Transient => {
-                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                }
+                Err(error)
+                    if error.is_timeout()
+                        && error.classification() == crate::RestateHttpErrorClass::Transient => {}
                 Err(error) => {
                     return Err(ingress_group_error(
                         "observe effect-group child cancellation",

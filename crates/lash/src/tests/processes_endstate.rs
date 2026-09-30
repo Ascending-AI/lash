@@ -67,7 +67,11 @@ impl LinkedTestProcess {
             lash_core::Lifetime::Detached,
         )
         .with_host_start_key(start_key)
-        .with_env_spec(process_env_spec())
+        .with_env_ref(
+            (process_env_spec())
+                .stable_ref()
+                .expect("captured environment digest"),
+        )
         .with_extra_event_types(
             lash_lashlang_runtime::lashlang_process_event_types()
                 .into_iter()
@@ -140,11 +144,11 @@ fn signal_request(
     signal_name: &str,
     signal_id: &str,
     payload: serde_json::Value,
-) -> lash_core::ProcessEventAppendRequest {
-    let event_type = lash_core::facade_support::process_signal_event_type(signal_name)
-        .expect("signal event type");
-    lash_core::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-        lash_core::facade_support::process_signal_wait_key(process_id, signal_name, signal_id),
+) -> lash_core::ProcessSignal {
+    lash_core::ProcessSignal::new(
+        lash_core::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)
+            .expect("valid signal identity"),
+        payload,
     )
 }
 
@@ -195,7 +199,8 @@ async fn wait_for_terminal(
     .await
 }
 
-fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {
+async fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {
+    persist_process_env_ref(backend.process_env_store().as_ref()).await;
     let core = process_test_builder(backend).build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     Ok(core)
@@ -210,6 +215,7 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     LashCore::rlm_builder(
@@ -236,7 +242,7 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
 async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<()> {
     let backend = double_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
@@ -365,7 +371,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state)
         .deferring_interrupted_turn_inputs(
             turn_id.clone(),
             settlement.effective_cancellation().cloned(),
@@ -484,7 +490,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         })
         .await
         .expect("serve the SQLite facade store with Restate");
-    let core = process_test_core(double.lash_backend())?;
+    let core = process_test_core(double.lash_backend()).await?;
 
     let session_id = "sqlite-facade-prune-session";
     let source_key = "sqlite-facade-prune-source";
@@ -710,7 +716,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let process_env_store = backend.process_env_store();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {
@@ -822,9 +828,6 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let event = core
         .processes()
         .signal(
-            triggered_process_id,
-            "ready",
-            "host-signal-1",
             signal_request(
                 triggered_process_id,
                 "ready",
@@ -856,7 +859,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let env_ref =
         persist_process_env_ref(core.env.core.durability.process_env_store.as_ref()).await;
     let session_id = "session-trigger-visibility";
@@ -914,9 +917,6 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     wait_for_waiting_signal(&core, process_id, "ready").await;
     core.processes()
         .signal(
-            process_id,
-            "ready",
-            "session-trigger-visibility-signal",
             signal_request(
                 process_id,
                 "ready",
@@ -966,7 +966,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
 async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: string } {
@@ -992,9 +992,6 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let undeclared = core
         .processes()
         .signal(
-            &process_id,
-            "nope",
-            "undeclared-1",
             signal_request(&process_id, "nope", "undeclared-1", serde_json::json!("x")),
             runtime_operation_scope(&core, "signal-validation-undeclared").await,
         )
@@ -1008,9 +1005,6 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let mistyped = core
         .processes()
         .signal(
-            &process_id,
-            "ready",
-            "mistyped-1",
             signal_request(
                 &process_id,
                 "ready",
@@ -1037,9 +1031,6 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "valid-1",
             signal_request(&process_id, "ready", "valid-1", serde_json::json!("done")),
             runtime_operation_scope(&core, "signal-validation-valid").await,
         )
@@ -1057,7 +1048,7 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {
@@ -1101,9 +1092,6 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     assert_eq!(ordinal, 1, "first wait must use ordinal 1");
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "order-1",
             signal_request(&process_id, "ready", "order-1", serde_json::json!(1)),
             runtime_operation_scope(&core, "repeated-waits-signal-1").await,
         )
@@ -1125,9 +1113,6 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     );
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "order-2",
             signal_request(&process_id, "ready", "order-2", serde_json::json!(2)),
             runtime_operation_scope(&core, "repeated-waits-signal-2").await,
         )
@@ -1162,7 +1147,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process child() { finish { from: "child" } }
@@ -1246,7 +1231,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
 async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let session_id = "chain-session";
     let process_id = "chain-parent";
     let process = LinkedTestProcess::new(
@@ -1330,7 +1315,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     let backend = double_backend_explicit_reconcile().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let session_id = "process-outlives-session";
     let process_id = "outliving-process";
     let process = LinkedTestProcess::new(
@@ -1401,9 +1386,6 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
 
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "outliving-host-signal",
             signal_request(
                 &process_id,
                 "ready",
@@ -1722,3 +1704,126 @@ mod event_pages;
 mod lifecycle_observation;
 mod native_process_await;
 mod programs;
+
+/// E7 (FIG-4236, ADR 0125): a process's spend is owned by its runtime's
+/// owner, and the prune drains that owner before the journal goes. A settled
+/// call keeps its fact past the prune, a call still in flight at the prune
+/// resolves `unknown(owner_retired)` rather than staying open, and nothing
+/// admitted after the prune spends under the pruned process.
+#[tokio::test]
+async fn process_calls_are_owned_by_their_runtime_and_drained_at_prune() -> Result<()> {
+    let backend = double_backend().await;
+    let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
+    let accounting = backend.usage_accounting();
+    let core = process_test_core(backend.clone()).await?;
+    let process_id = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                lash_core::ProcessIdentity::new("test"),
+            )),
+        )
+        .await?
+        .id;
+    let owner = lash_core::RuntimeOwner::Process(process_id.clone());
+    let scope = lash_core::ExecutionScope::process(process_id.clone());
+    let admission = |effect: &str| lash_core::UsageRunAdmission {
+        owner: owner.clone(),
+        effect: lash_core::UsageEffectKey::for_effect(
+            &lash_sansio::EffectAddress::new(scope.clone(), effect)
+                .expect("a process effect address"),
+        ),
+        execution_scope_key: scope
+            .journal_identity()
+            .expect("the process scope's journal identity")
+            .key()
+            .to_string(),
+        run: lash_core::UsageRunId::mint(),
+        source: "process-direct".to_string(),
+        model: "process-model".to_string(),
+        admitted_at_ms: 1,
+    };
+    // The process's first direct call was paid and settled.
+    let settled = admission("process-direct-call-0");
+    accounting
+        .admit_usage_run(&settled)
+        .await
+        .expect("admit the process's first call");
+    accounting
+        .settle_usage(
+            &lash_core::UsageSettlement {
+                owner: owner.clone(),
+                effect: settled.effect.clone(),
+                run: settled.run.clone(),
+                facts: vec![lash_core::UsageAttemptFact {
+                    call_ordinal: 0,
+                    provider_attempt: 1,
+                    llm_call_id: lash_core::LlmCallId("process-direct-call-0".to_string()),
+                    source: "process-direct".to_string(),
+                    model: "process-model".to_string(),
+                    outcome: lash_core::AttemptFactOutcome::Reported {
+                        usage: lash_core::TokenUsage {
+                            input_tokens: 30,
+                            output_tokens: 6,
+                            ..lash_core::TokenUsage::default()
+                        },
+                        generation_id: None,
+                    },
+                }],
+                accounting: lash_core::RunAccounting::Complete,
+            },
+            2,
+        )
+        .await
+        .expect("settle the process's paid call");
+    // Its second was dispatched and never settled.
+    accounting
+        .admit_usage_run(&admission("process-direct-call-1"))
+        .await
+        .expect("admit the process's second call");
+    registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await?;
+
+    let report = core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
+    assert_eq!(report.pruned_processes, 1);
+
+    let usage = core.owner_usage(&owner).await?;
+    assert!(usage.completeness.retired, "the prune retired the owner");
+    assert_eq!(usage.completeness.open_runs, 0, "nothing is left open");
+    assert_eq!(
+        usage.completeness.unknown_runs, 1,
+        "the in-flight call is one explicit unknown"
+    );
+    let [row] = usage.rows.as_slice() else {
+        panic!("the settled call's row outlives the prune: {usage:?}");
+    };
+    assert_eq!(row.reported_attempts, 1);
+    assert_eq!(row.usage.input_tokens, 30);
+    let refused = accounting
+        .admit_usage_run(&admission("process-direct-call-2"))
+        .await;
+    assert!(
+        matches!(
+            refused,
+            Err(lash_core::UsageAdmissionError::OwnerRetired { .. })
+        ),
+        "a pruned process admits no further spend: {refused:?}"
+    );
+    Ok(())
+}

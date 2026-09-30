@@ -140,7 +140,6 @@ pub async fn an_obsolete_executor_never_ends_its_successors_root(
                     if overtake {
                         lash_core::testing::runtime_helpers::advance_session_head(
                             &recording,
-                            &[],
                             |state| state.policy = policy,
                         )
                         .await;
@@ -379,6 +378,7 @@ pub async fn inconsistent_divergence_still_parks(
             turn_index: state.turn_index as u64 + 1,
             generation: None,
             admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
+            executor: lash_core::store::RootExecutor::Root,
         })
         .await
         .expect("record the root's admission")

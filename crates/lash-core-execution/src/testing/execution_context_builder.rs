@@ -87,7 +87,7 @@ impl<'run> TestExecutionPorts<'run> {
         self.artifact_ports = Some(crate::runtime::ArtifactReferrerPorts::new(
             modules,
             Arc::clone(&self.process_env_store),
-            backend.process_definitions(),
+            backend.definition_store(),
             backend.attachment_referrers(),
             backend.artifact_cleanup(),
             Arc::clone(&self.clock),
@@ -136,7 +136,6 @@ pub struct TestExecutionContextBuilder<'run> {
     tool_registry: Option<Arc<crate::ToolRegistry>>,
     trigger_router: Option<crate::TriggerRouter>,
     processes: Arc<dyn crate::ProcessService>,
-    process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
     process_engines: crate::ProcessEngineRegistry,
     direct_completions: Option<crate::DirectCompletionClient<'run>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
@@ -242,7 +241,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             tool_registry: None,
             trigger_router: None,
             processes: Arc::new(crate::UnavailableProcessService),
-            process_definitions: None,
             process_engines: match artifact_ports {
                 Some(ports) => process_engines.with_artifact_ports(ports),
                 None => process_engines,
@@ -319,14 +317,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
 
     pub fn processes(mut self, processes: Arc<dyn crate::ProcessService>) -> Self {
         self.processes = processes;
-        self
-    }
-
-    pub fn process_definitions(
-        mut self,
-        process_definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.process_definitions = Some(process_definitions);
         self
     }
 
@@ -582,7 +572,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
                     _ => None,
                 });
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
-            process_definitions: self.process_definitions,
             process_engines: self.process_engines,
             plugins,
             tools: self.provider,

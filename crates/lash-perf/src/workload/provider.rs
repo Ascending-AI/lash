@@ -190,7 +190,7 @@ impl Generator<'_> {
         for schedule in &schedules {
             let schedule = serde_json::to_string(schedule)?;
             source.push_str(&format!(
-                "await triggers.register({{source:load.cron.tick({{schedule:{schedule}}}),target:on_tick,inputs:(event)=>({{event:event}}),name:{schedule}}});\n"
+                "await triggers.register({{source:load.cron.tick({{schedule:{schedule}}}),target:{{definition:on_tick}},inputs:(event)=>({{event:event}}),name:{schedule}}});\n"
             ));
         }
         source.push_str(&format!(

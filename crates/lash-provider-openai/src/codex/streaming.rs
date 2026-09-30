@@ -784,11 +784,11 @@ impl Provider for CodexProvider {
             if !success {
                 let text = read_http_body_text(
                     body,
+                    provider.options.response_body_limit(),
                     timeouts.request_timeout,
                     "Codex response body timed out",
                 )
-                .await
-                .unwrap_or_default();
+                .await?;
                 let message = Self::codex_error_summary(status, &text).unwrap_or_else(|| {
                     format!(
                         "Codex request failed with {}{}",
@@ -835,6 +835,7 @@ impl Provider for CodexProvider {
             if !parse_stream {
                 let text = read_http_body_text(
                     body,
+                    provider.options.response_body_limit(),
                     timeouts.request_timeout,
                     "Codex response body timed out",
                 )

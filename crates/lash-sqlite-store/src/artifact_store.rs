@@ -288,6 +288,46 @@ impl SqliteStore {
         namespace: &str,
         artifact_ref: &str,
     ) -> rusqlite::Result<()> {
+        use lash_core_execution::store::{EnumerationProgress, ReclamationEnumeration};
+        let mut enumeration = ReclamationEnumeration::<
+            lash_core_execution::ArtifactReferrerKind,
+            (lash_core_execution::ArtifactReferrerKind, String),
+        >::new();
+        let mut stmt = tx.prepare_cached(artifact_sql().edges.select_artifact_edges.sql())?;
+        let referrers = stmt
+            .query_map(params![namespace, artifact_ref], |row| {
+                let kind: String = row.get(0)?;
+                let id: String = row.get(1)?;
+                let referrer = decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
+                Ok((referrer.kind(), referrer.canonical_id()))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for kind in lash_core_execution::ArtifactReferrerKind::ALL {
+            enumeration
+                .page(
+                    kind,
+                    0,
+                    referrers
+                        .iter()
+                        .filter(|(source, _)| *source == kind)
+                        .cloned(),
+                    EnumerationProgress::Exhausted,
+                )
+                .map_err(sqlite_conversion_error)?;
+        }
+        let witness = enumeration.finish().map_err(sqlite_conversion_error)?;
+        Self::delete_unreferenced_artifact_tx(tx, namespace, artifact_ref, &witness)
+    }
+
+    fn delete_unreferenced_artifact_tx(
+        tx: &rusqlite::Connection,
+        namespace: &str,
+        artifact_ref: &str,
+        referrers: &lash_core_execution::store::CompleteArtifactReferrers,
+    ) -> rusqlite::Result<()> {
+        if !referrers.is_empty() {
+            return Ok(());
+        }
         let blob_ref: Option<String> = tx
             .query_row(
                 artifact_sql().refs.select_blob_ref.sql(),

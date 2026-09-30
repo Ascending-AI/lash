@@ -558,13 +558,7 @@ fn sample_draft(
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": process_name }),
         },
-        target_identity: crate::ProcessIdentity::for_definition(
-            crate::ProcessDefinitionRef::unclaimed(
-                "test",
-                serde_json::json!({ "process_name": process_name }),
-            ),
-            Some(process_name.to_string()),
-        ),
+        target_identity: crate::ProcessIdentity::labelled("test", Some(process_name.to_string())),
         event_types: Vec::new(),
         input_template: inputs,
         target_label: Some(process_name.to_string()),

@@ -57,6 +57,18 @@ pub enum RuntimeErrorCode {
     /// admission is safe to retry and admits the input once the redrive
     /// settles.
     SessionRedriveUnsettled,
+    /// A head write outside every drive found the session head owned
+    /// (FIG-4202): a bound root, an owed follow-on or an open session
+    /// command. Nothing was written. The owner releases the head at its
+    /// boundary, so the identical write is safe to retry then; a host moves
+    /// the head through a session command instead.
+    SessionHeadOwned,
+    /// A host write that moves a store-backed session's head was called
+    /// directly (FIG-4202): the bound turn owns the head, so the write is a
+    /// session command the drive applies at a turn boundary. Submit it with
+    /// `submit_session_command` and await its settlement; only a storeless
+    /// runtime writes directly.
+    SessionCommandRequired,
     /// The journaled initial drive of a turn cannot drive the input that turn
     /// accepted: another claim of the live lease generation holds it; it is no
     /// longer open because it was settled, cancelled, or pruned by `vacuum()`;
@@ -90,8 +102,8 @@ pub enum RuntimeErrorCode {
     /// The final runtime commit lost the session-head compare-and-swap to a
     /// newer commit. Nothing from the losing commit was published, but the
     /// identical stale commit is not safe to retry: reload the durable head and
-    /// re-establish current lease and claim authority before building new work
-    /// (ADR 0029).
+    /// re-establish current drive and root authority before building new work
+    /// (ADR 0101).
     StoreCommitSuperseded,
     /// The session was deleted before its final runtime commit could publish.
     /// The session id is also retained in [`RuntimeErrorCause::SessionDeleted`]
@@ -103,6 +115,10 @@ pub enum RuntimeErrorCode {
     /// transient miss: retrying the identical lookup cannot change the
     /// answer, so this is terminal.
     SessionCatalogLookupUnsupported,
+    /// A root process start holds a host session-lookup grant for a session
+    /// the catalog does not hold live when the start's recorded admission
+    /// runs. The admission records the refusal, so a replay answers it too.
+    HostSessionNotLive,
     /// The session's durable state is an older generation than this build
     /// admits (FIG-3571, FIG-3619). Under the clean-cutover policy it is
     /// refused before any turn, model, tool or provider effect. A redrive on
@@ -257,6 +273,14 @@ pub enum RuntimeErrorCode {
     /// A host rail was handed a start key of a family lash derives for its
     /// own start paths (ADR 0107): a host mints only host keys.
     StartKeyFamilyRefused,
+    /// A trigger delivery's start found no retained process under its key,
+    /// and the delivery already bound to one (ADR 0107 §5, FIG-4369): the
+    /// bound process was pruned, and the start registers nothing.
+    TriggerDeliveryBound,
+    /// A trigger delivery's start found no retained process under its key,
+    /// and no delivery row (FIG-4369): retention removed the delivery once
+    /// its bound process was pruned, and the start registers nothing.
+    TriggerDeliveryRetired,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
@@ -394,6 +418,13 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolChildRequestOpener,
     RuntimeEffectToolChildRequestVersion,
     RuntimeEffectToolSettlementVersion,
+    /// A provider call was dispatched outside any spending effect's usage run
+    /// (ADR 0125): nothing would account for it, so it is refused before
+    /// dispatch.
+    UsageRunMissing,
+    /// Admitting a spending effect's usage run to storage failed. The attempt
+    /// ends retryably and journals nothing; the engine runs it again.
+    UsageAdmissionFault,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
@@ -582,6 +613,8 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::SessionRedriveUnsettled => "session_redrive_unsettled",
+            Self::SessionHeadOwned => "session_head_owned",
+            Self::SessionCommandRequired => "session_command_required",
             Self::AcceptedTurnInputCeded => "accepted_turn_input_ceded",
             Self::SessionWorkUnavailable => "session_work_unavailable",
             Self::TurnExecutionRequiresReconciledToolSurface => {
@@ -593,6 +626,7 @@ impl RuntimeErrorCode {
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
             Self::SessionCatalogLookupUnsupported => "session_catalog_lookup_unsupported",
+            Self::HostSessionNotLive => "host_session_not_live",
             Self::SessionStateVersionUnsupported => "session_state_version_unsupported",
             Self::SessionStateVersionNewerThanRuntime => "session_state_version_newer_than_runtime",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
@@ -654,6 +688,8 @@ impl RuntimeErrorCode {
             Self::DurableIdentityConflict => "durable_identity_conflict",
             Self::ProcessStartKeyConflict => "process_start_key_conflict",
             Self::StartKeyFamilyRefused => "start_key_family_refused",
+            Self::TriggerDeliveryBound => "trigger_delivery_bound",
+            Self::TriggerDeliveryRetired => "trigger_delivery_retired",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
@@ -747,6 +783,8 @@ impl RuntimeErrorCode {
                 "runtime_effect_tool_child_request_admission"
             }
             Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
+            Self::UsageRunMissing => "usage_run_missing",
+            Self::UsageAdmissionFault => "usage_admission_fault",
             Self::RuntimeEffectToolChildRequestVersion => {
                 "runtime_effect_tool_child_request_version"
             }
@@ -836,6 +874,8 @@ impl RuntimeErrorCode {
         Self::SessionExecutionLeaseLost,
         Self::SessionExecutionLaneBusy,
         Self::SessionRedriveUnsettled,
+        Self::SessionHeadOwned,
+        Self::SessionCommandRequired,
         Self::AcceptedTurnInputCeded,
         Self::SessionWorkUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
@@ -845,6 +885,7 @@ impl RuntimeErrorCode {
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
         Self::SessionCatalogLookupUnsupported,
+        Self::HostSessionNotLive,
         Self::SessionStateVersionUnsupported,
         Self::SessionStateVersionNewerThanRuntime,
         Self::StoreCommitNodeBudgetExceeded,
@@ -902,6 +943,8 @@ impl RuntimeErrorCode {
         Self::DurableIdentityConflict,
         Self::ProcessStartKeyConflict,
         Self::StartKeyFamilyRefused,
+        Self::TriggerDeliveryBound,
+        Self::TriggerDeliveryRetired,
         Self::ProcessNoLongerRetained,
         Self::ProcessRegistryUnavailable,
         Self::ProcessSignalWaitCancelled,
@@ -958,6 +1001,8 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectToolChildRequestAdmission,
         Self::RuntimeEffectToolChildRequestOpener,
         Self::RuntimeEffectToolChildRequestVersion,
+        Self::UsageRunMissing,
+        Self::UsageAdmissionFault,
         Self::RuntimeEffectInvocationSubject,
         Self::RuntimeEffectScopeMismatch,
         Self::RuntimeEffectLocalExecutorMismatch,
@@ -1022,6 +1067,8 @@ impl RuntimeErrorCode {
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "session_redrive_unsettled" => Self::SessionRedriveUnsettled,
+            "session_head_owned" => Self::SessionHeadOwned,
+            "session_command_required" => Self::SessionCommandRequired,
             "accepted_turn_input_ceded" => Self::AcceptedTurnInputCeded,
             "session_work_unavailable" => Self::SessionWorkUnavailable,
             "turn_execution_requires_reconciled_tool_surface" => {
@@ -1033,6 +1080,7 @@ impl RuntimeErrorCode {
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
             "session_catalog_lookup_unsupported" => Self::SessionCatalogLookupUnsupported,
+            "host_session_not_live" => Self::HostSessionNotLive,
             "session_state_version_unsupported" => Self::SessionStateVersionUnsupported,
             "session_state_version_newer_than_runtime" => Self::SessionStateVersionNewerThanRuntime,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
@@ -1094,6 +1142,8 @@ impl RuntimeErrorCode {
             "durable_identity_conflict" => Self::DurableIdentityConflict,
             "process_start_key_conflict" => Self::ProcessStartKeyConflict,
             "start_key_family_refused" => Self::StartKeyFamilyRefused,
+            "trigger_delivery_bound" => Self::TriggerDeliveryBound,
+            "trigger_delivery_retired" => Self::TriggerDeliveryRetired,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
@@ -1187,6 +1237,8 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectToolChildRequestAdmission
             }
             "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
+            "usage_run_missing" => Self::UsageRunMissing,
+            "usage_admission_fault" => Self::UsageAdmissionFault,
             "runtime_effect_tool_child_request_version" => {
                 Self::RuntimeEffectToolChildRequestVersion
             }
@@ -1702,7 +1754,9 @@ impl RuntimeEffectControllerError {
     /// value whose output retention faulted (FIG-1643) — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
     /// definition lookup, FIG-3838), a root's scope close and a session's close,
-    /// whose store faults are the attempt's (FIG-3600), and a process command
+    /// whose store faults are the attempt's (FIG-3600), a trigger delivery's
+    /// admission, whose binding read is the attempt's (FIG-4369), a follow-on
+    /// recovery root's decision (FIG-4361), and a process command
     /// that marked its registry fault retryable (a session deletion's process
     /// cleanup, after its close) can consume derivation retry authority, as
     /// can any step whose cancellation watch was lost
@@ -1721,9 +1775,11 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::AdmitRoot
                 | RuntimeEffectKind::InspectAdmittedHead
+                | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose
+                | RuntimeEffectKind::AdmitTriggerDelivery
                 | RuntimeEffectKind::Process
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
         {

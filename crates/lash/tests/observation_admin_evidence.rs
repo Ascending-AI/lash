@@ -686,8 +686,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::usage::SessionUsageReport| {
         let _ = &value.entry_count;
     });
-    // W0174: lash::usage::SessionUsageReport::from_entries [function]
-    let _ = lash::usage::SessionUsageReport::from_entries;
     // W0175: lash::usage::SessionUsageReport::saturated [field]
     field_witness(|value: &lash::usage::SessionUsageReport| {
         let _ = &value.saturated;
@@ -695,12 +693,6 @@ fn drain_area_witnesses() {
     // W0176: lash::usage::SessionUsageReport::usage [field]
     field_witness(|value: &lash::usage::SessionUsageReport| {
         let _ = &value.usage;
-    });
-    // W0177: lash::usage::TokenLedgerEntry [struct]
-    type_witness::<lash::usage::TokenLedgerEntry>();
-    // W0178: lash::usage::TokenLedgerEntry::model [field]
-    field_witness(|value: &lash::usage::TokenLedgerEntry| {
-        let _ = &value.model;
     });
     // W0179: lash::usage::TokenUsage::checked_add [function]
     let _ = lash::usage::TokenUsage::checked_add;

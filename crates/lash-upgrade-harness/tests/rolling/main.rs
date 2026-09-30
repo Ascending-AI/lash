@@ -19,10 +19,12 @@
 //!    and the hold is cleared, finalize moves `F`, runs the backfill, and
 //!    contract raises the reader floor, which N then refuses.
 //!
-//! SQLite instead drains and stops N before N+1 opens and migrates. It
-//! rolls back by draining and stopping N+1 before N reopens, then re-rolls,
-//! finalizes, and requires the old writer to refuse. Every SQLite turn
-//! checks the serving build and generation. SQLite has no separate contract.
+//! SQLite instead drains and stops N before N+1 opens and migrates. N+1's
+//! open backs up all three databases before it migrates them (FIG-3801),
+//! and nothing after it migrates again. It rolls back by draining and
+//! stopping N+1 before N reopens, then re-rolls, finalizes, and requires the
+//! old writer to refuse. Every SQLite turn checks the serving build and
+//! generation. SQLite has no separate contract.
 //!
 //! Every step must succeed: a refusal outside the ones the choreography
 //! expects fails the run. Nothing is lost or duplicated: every turn is
@@ -295,6 +297,75 @@ fn sqlite_drain(node: &NodeBinary, case: &Case, session: &str, generation: &str)
     })
 }
 
+/// The SQLite store set's migration backups (FIG-3801): each open that
+/// migrates first copies all three databases beside the store, into
+/// `migration-backups/sqlite-backup-*/`, and records the migration in the
+/// backup's `manifest.json`.
+fn sqlite_backups(case: &Case) -> Result<Vec<serde_json::Value>> {
+    let root = case
+        .sqlite_dir()
+        .context("SQLite directory")?
+        .join("migration-backups");
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut backups = Vec::new();
+    for entry in std::fs::read_dir(&root).with_context(|| format!("read {}", root.display()))? {
+        let directory = entry?.path();
+        if !directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("sqlite-backup-"))
+        {
+            continue;
+        }
+        let manifest = directory.join("manifest.json");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&manifest).with_context(|| format!("read {}", manifest.display()))?,
+        )?;
+        for database in manifest["databases"].as_array().into_iter().flatten() {
+            let copy = directory.join(database["file"].as_str().context("a backed-up file")?);
+            let bytes = std::fs::metadata(&copy)
+                .with_context(|| format!("stat the backup copy {}", copy.display()))?
+                .len();
+            ensure!(
+                Some(bytes) == database["bytes"].as_u64() && bytes > 0,
+                "{}: the backup copy is {bytes} bytes, its manifest records {}",
+                copy.display(),
+                database["bytes"]
+            );
+        }
+        backups.push(manifest);
+    }
+    Ok(backups)
+}
+
+/// N+1's first open migrated the store N provisioned, after one complete
+/// backup of every database at N's versions; nothing since migrated again.
+fn require_one_migration_backup(case: &Case, step: &str) -> Result<()> {
+    let backups = sqlite_backups(case)?;
+    ensure!(
+        backups.len() == 1,
+        "{}: {step}: expected N+1's one migration backup, found {backups:?}",
+        case.name
+    );
+    let manifest = &backups[0];
+    let databases = manifest["databases"]
+        .as_array()
+        .context("backed-up databases")?;
+    ensure!(
+        manifest["state"] == "migrated"
+            && databases.len() == 3
+            && databases
+                .iter()
+                .all(|database| database["from"].as_u64() < database["to"].as_u64()),
+        "{}: {step}: the backup does not record a completed migration of all three databases: {manifest}",
+        case.name
+    );
+    println!("{}: {step}: migration backup {manifest}", case.name);
+    Ok(())
+}
+
 fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) -> Result<()> {
     let (n, next) = (&builds.n, &builds.next);
     let session = case.session_id("rolling");
@@ -310,6 +381,11 @@ fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) ->
     )?;
     sqlite_drain(n, case, &session, &n_generation)?;
     n_first.stop()?;
+    ensure!(
+        sqlite_backups(case)?.is_empty(),
+        "{}: N's provisioning took a migration backup",
+        case.name
+    );
 
     let next_first = next.serve(case)?;
     let next_generation = next_first.generation()?.to_owned();
@@ -322,6 +398,7 @@ fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) ->
         "roll",
         Some((next, &next_generation)),
     )?;
+    require_one_migration_backup(case, "roll")?;
     sqlite_drain(next, case, &session, &next_generation)?;
     next_first.stop()?;
 
@@ -395,6 +472,7 @@ fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) ->
     )?;
     sqlite_drain(next, case, &session, &next_generation)?;
     next_again.stop()?;
+    require_one_migration_backup(case, "finalize")?;
     verify_turns(steps, case)
 }
 

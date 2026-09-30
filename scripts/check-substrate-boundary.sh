@@ -33,7 +33,7 @@ containment_forbidden='(^|[^[:alnum:]_])(NoQueuedWork|WakeDeliveryDriver)([^[:al
 fallback_forbidden='ProcessAwaiter::polling|Option[[:space:]]*<[[:space:]]*Arc[[:space:]]*<[[:space:]]*dyn[[:space:]]+(QueuedWorkSubstrate|ProcessWorkSubstrate)[[:space:]]*>[[:space:]]*>|Option[[:space:]]*<[[:space:]]*(ProcessWorkDriver|QueuedWorkDriver)[[:space:]]*>'
 capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys|turn_control_participation|runtime_effect_failure_disposition|effect_journaling|turn_control_authority_owner'
 capability_forbidden="fn[[:space:]]+(${capability_names})([^[:alnum:]_]|$)|\.(${capability_names})[[:space:]]*\(|(^|[^[:alnum:]_])(${capability_names})[[:space:]]*:"
-# Every effect host journals (FIG-3585): the in-process native tier, its
+# Historical, retired in 60e0e86b2a: every effect host journals (FIG-3585): the in-process native tier, its
 # journaling fact, store-delegated turn control and in-memory persistence are
 # deleted, and none of their types may come back under any shape. Restate is
 # the only engine (ADR 0104): the in-process session and process work, its

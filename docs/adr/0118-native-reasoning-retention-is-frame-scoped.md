@@ -59,15 +59,33 @@ decode as provider-default. A missing message-boundary marker decodes as
 never introduce a client-side retention cut. The explicit `true` marker is
 written only for committed `TurnInput` and direct API user messages.
 
-The new fields advance the remote protocol from 59 to 60, session-head metadata
-from 9 to 10, and session-node bodies from 13 to 14. The remote and session-head
-fences refuse their immediate predecessors; the head v10 fence is the durable
-refusal point for the model capability and projected message marker. The node
-generation bump is nominal because the node-body fence is forward-only and an
-`LlmMessage` is not stored in a durable node body. These generations follow the
-admitted-effect-identity cutover on `main`; no silent old-generation migration
-is provided.
+The durable model snapshot carries the selected policy across reopen and
+remote execution. The pre-1.0 version freeze changes shapes in place;
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs
+upgrade read contracts.
 
 This decision does not introduce compaction, overflow recovery, byte budgets,
 a universal HTTP bound, a new continuation abstraction, durable rewrites, or
 retained interpreter state.
+
+## Implementation
+
+- `crates/lash-core-store/src/session_state.rs:1115` refreshes the active
+  frame projection; `crates/lash-core/src/runtime/turn_boundary.rs:542`
+  records the outcome frame switch.
+- `crates/lash-sansio/src/llm/capability.rs:43` defines the independent
+  retention policy; `:350` validates the exact capability and selection.
+- `crates/lash-sansio/src/llm/types.rs:1031` cuts only at explicit user
+  segment markers, refuses orphaned tool results, and strips foreign replay
+  state; `:443` makes an absent marker false.
+- `crates/lash-sansio/src/session_model/message.rs:1628` marks committed
+  turn input during message projection.
+- `crates/lash-provider-openai/src/responses.rs:117` and
+  `crates/lash-provider-openai/src/codex.rs:339` emit native context control.
+- `crates/lash-provider-anthropic/src/request.rs:585` emits native thinking
+  retention.
+
+A token budget measures a different quantity from a provider's thinking-turn
+or context policy. Guessing from a model name cannot establish route support.
+Whole user segments keep call/result relationships intact; removing isolated
+reasoning blocks cannot provide that guarantee.

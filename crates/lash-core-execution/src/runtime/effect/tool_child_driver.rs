@@ -44,10 +44,10 @@
 //! # What the driver does not do
 //!
 //! It holds no in-process drain slot. §5 orders sibling drains by a durable
-//! per-group final-commit order: §4 commits the child's final at the child's
-//! terminal — its final attempt's boundary or its resolved completion — and
-//! §5 admits its drain by the recorded `commit_seq`, which orders it against
-//! every sibling without a process-local gate.
+//! per-group rank: §4 commits the child's final at the child's terminal — its
+//! final attempt's boundary or its resolved completion — and reserves its
+//! rank, and §5 admits a drain with intents by that rank, which orders it
+//! against every sibling without a process-local gate.
 //!
 //! It projects the child's result exactly once, at its own presentation
 //! boundary: the session's ordered presentation steps run once through the
@@ -72,14 +72,14 @@ use super::executor::{
 };
 use super::live_openers::{LiveOpenerContext, LiveOpenerRegistry};
 use super::tool_child::ToolChildRequest;
-use super::tool_settlement::{ToolSettlement, ToolUsageLedger};
+use super::tool_settlement::ToolSettlement;
 use crate::tool_dispatch::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 use crate::{
     AdmittedScope, EffectOpener, ProcessExecutionEnvStore, ToolCatalog, ToolChildExecutionTraceHook,
 };
 
 /// The deployment wiring a tool child needs and its request deliberately does
-/// not record (ADR 0099 §3, amendment 3).
+/// not record (ADR 0099 §3, item 3).
 ///
 /// One value per host, held by the resolver and handed to every child it
 /// routes. Three things, and each is here because the request could not carry
@@ -672,6 +672,7 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let binding = envelope_group_child_binding(&envelope)?;
         let RuntimeEffectCommand::ToolInvocation { request } = envelope.command else {
@@ -758,6 +759,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // Boxed: the driver future carries the whole dispatch, and a group
         // child is spawned per member — 21 kB of stack per pending child is a
@@ -858,7 +860,6 @@ pub(crate) fn rebind_child_dispatch<'run>(
     request: &ToolChildRequest,
     controller: ScopedEffectController<'run>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
-    usage_ledger: &ToolUsageLedger,
 ) -> Result<ToolDispatchContext<'run>, RuntimeEffectControllerError> {
     // The subagent context the serving plugins were built under decides how
     // deep a nested spawn may recurse, and plugins cannot be rebound. A lent
@@ -906,17 +907,18 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // the child's cancel decision commits refuses at the substrate. This is
     // the authority boundary; everything else on this list is attribution.
     child.effect_controller = controller.clone();
-    // Child-local buffers. Their contents ride the child's outcome (§6, §13),
-    // so a child that wrote into the opener's buffers would put its facts
+    // Child-local buffers. Their contents ride the child's outcome (§6), so a
+    // child that wrote into the opener's buffers would put its facts
     // somewhere its settlement cannot carry them from.
     child.checkpoint_messages = crate::tool_dispatch::CheckpointMessageBuffer::default();
     child.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
     // The lent direct-completion client, rebound to the child's recorded
     // authority. What is lent is the live completion *transport*; what is
     // rebound is everything that decides whose call it is — the recorded
-    // session, environment, lineage, admitted controller and usage ledger —
-    // so a managed-LLM call the child makes is journaled under the child's
-    // facts, never the opener's (ADR 0099 §3, §13).
+    // session, environment, lineage and admitted controller — so a
+    // managed-LLM call the child makes is journaled under the child's facts,
+    // never the opener's (ADR 0099 §3). Its spend is accounted by the usage
+    // run of the attempt it runs inside (ADR 0125).
     child.direct_completions = lent.direct_completions.bind_tool_child(
         &request.scope.owner.runtime_owner(),
         &execution_env_spec,
@@ -926,7 +928,6 @@ pub(crate) fn rebind_child_dispatch<'run>(
             .parent_invocation()
             .and_then(|parent| parent.attribution.turn_id.clone()),
         request.lineage.parent_invocation().cloned(),
-        usage_ledger.clone(),
     )?;
     Ok(child)
 }
@@ -935,7 +936,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
 /// recorded at group open, with the child's admitted manifest pinned at its
 /// own id.
 ///
-/// ADR 0099 §3 amendment 1: "An ungranted call pins its admitted manifest. A
+/// ADR 0099 §3 item 1: "An ungranted call pins its admitted manifest. A
 /// reopen may not consult the live Tool Catalog" *for it* — a tool whose
 /// retry policy or argument projection changed between admission and
 /// recovery would otherwise make a recovered child behave unlike the child
@@ -1044,8 +1045,8 @@ fn admitted_tool_drift(
 /// a child takes no in-process slot because the durable group owns the order —
 /// its final commits at the child's terminal — its final attempt's boundary
 /// or its resolved completion — against its own replay row (`child`), and
-/// its drain is admitted by the recorded `commit_seq` barrier before the
-/// first declared intent runs.
+/// a drain with intents is admitted by the barrier on its reserved rank
+/// before the first declared intent runs.
 async fn run_tool_child<'run>(
     host: &ToolChildHost,
     opener: &ChildOpenerContext,
@@ -1091,13 +1092,11 @@ async fn run_tool_child<'run>(
         None => controller,
     };
     let cancel = live.cancellation().child_token();
-    let usage_ledger = ToolUsageLedger::new();
     let dispatch = Arc::new(rebind_child_dispatch(
         live.dispatch().as_ref(),
         request,
         controller,
         execution_env_spec,
-        &usage_ledger,
     )?);
 
     // The cancellation trio is computed once, here, from the *recorded*
@@ -1167,7 +1166,6 @@ async fn run_tool_child<'run>(
     settlement
         .triggers
         .extend(dispatch.trigger_outcomes.drain());
-    settlement.usage.extend(usage_ledger.take());
     if let Some(recorder) = resolved.recorder {
         let mut stream = recorder.finish();
         // What the child's own journaled record holds is referenced, not
@@ -1187,11 +1185,9 @@ async fn run_tool_child<'run>(
     })
 }
 
-/// The environment the child was admitted under, read through a recorded
-/// step on its own controller (FIG-3683): the store is read once, and every
-/// replay of the child executes under the recorded spec instead of reading it
-/// again. A store that did not answer is not recorded; the engine runs the
-/// step again (see `ExecutionEnvLoadExecution`).
+/// Validate and acquire the child's environment in a recorded step, then
+/// resolve its immutable bytes. The child's execution referrer keeps them
+/// available across replay; no journal copies the captured policy.
 async fn load_execution_env(
     host: &ToolChildHost,
     request: &ToolChildRequest,
@@ -1205,7 +1201,7 @@ async fn load_execution_env(
         .session_id()
         .map(crate::RuntimeAttribution::for_session)
         .unwrap_or_else(crate::RuntimeAttribution::none);
-    controller
+    let env_ref = controller
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(address, attribution, replay_key),
@@ -1214,12 +1210,21 @@ async fn load_execution_env(
                 },
             ),
             RuntimeEffectLocalExecutor::execution_env_load(
-                store,
+                Arc::clone(&store),
                 format!("tool child `{}`", request.call.call_id),
             ),
         )
+        .await?
+        .into_execution_env_ref()?;
+    crate::runtime::load_process_execution_env(store.as_ref(), &env_ref)
         .await
-        .and_then(RuntimeEffectOutcome::into_execution_env)
+        .map_err(|error| {
+            super::executor::unresolved_execution_env(
+                &format!("tool child `{}`", request.call.call_id),
+                &env_ref,
+                error,
+            )
+        })
 }
 
 /// Authenticates the recorded authority set against this host before any key
@@ -1455,7 +1460,9 @@ async fn await_journaled_tool_completion(
         processes: dispatch.processes.as_ref(),
         owner: dispatch.owner.runtime_owner(),
         call_id,
-        scope: dispatch.process_scope(),
+        scope: dispatch
+            .process_scope()
+            .with_turn_cancellation(turn_cancel_wait),
         child_trace_hook: None,
     };
     let Some(invocation) =
@@ -1472,12 +1479,16 @@ async fn await_journaled_tool_completion(
             crate::tool_dispatch::ArmedResolver::default(),
         ));
     };
-    let armed = match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
-        crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
-        crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
-            return Ok(unarmed_child_outcome(pending, *failure, armed));
-        }
-    };
+    let (armed, resolved) =
+        match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
+            crate::tool_dispatch::ResolverArming::Armed(armed) => (armed, None),
+            crate::tool_dispatch::ResolverArming::Resolved { resolution, armed } => {
+                (armed, Some(*resolution))
+            }
+            crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+                return Ok(unarmed_child_outcome(pending, *failure, armed));
+            }
+        };
     let resolver = pending.pending.resolved_by.clone();
     // The journaled await's replay key is the settled call's observation key:
     // unique per (parent, call id) and re-derived identically on a redrive
@@ -1490,23 +1501,28 @@ async fn await_journaled_tool_completion(
     // The settled call's observed duration is this resume's live window —
     // the journaled await and pending row carry no clock facts (FIG-3696).
     let settle_started = dispatch.clock.now();
-    let outcome = dispatch
-        .effect_controller
-        .execute_effect(
-            RuntimeEffectEnvelope::new(
-                invocation,
-                RuntimeEffectCommand::AwaitEvent {
-                    key: pending.key.clone(),
-                },
-            ),
-            RuntimeEffectLocalExecutor::await_event_under(
-                turn_cancel_wait,
-                deadline,
-                Arc::clone(&dispatch.clock),
-            ),
-        )
-        .await;
-    let resolution = match outcome.and_then(RuntimeEffectOutcome::into_await_event) {
+    let outcome = if let Some(resolution) = resolved {
+        Ok(resolution)
+    } else {
+        dispatch
+            .effect_controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    invocation,
+                    RuntimeEffectCommand::AwaitEvent {
+                        key: pending.key.clone(),
+                    },
+                ),
+                RuntimeEffectLocalExecutor::await_event_under(
+                    turn_cancel_wait,
+                    deadline,
+                    Arc::clone(&dispatch.clock),
+                ),
+            )
+            .await
+            .and_then(RuntimeEffectOutcome::into_await_event)
+    };
+    let resolution = match outcome {
         Ok(resolution) => resolution,
         // The await's recorded `Failed` terminal replaying is the call's
         // result. Anything else — a replay divergence against its record, a

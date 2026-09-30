@@ -112,6 +112,16 @@ pub struct EngineInvocation {
     pub last_failure: Option<String>,
 }
 
+/// One durable cell a world's stores hold ([`Engine::stored_cells`]).
+#[derive(Clone, Debug)]
+pub struct StoredCell {
+    /// The store, table, column and row, or a table or column declaration.
+    pub location: String,
+    pub bytes: Vec<u8>,
+    /// The JSON documents the bytes decode to as their store writes them.
+    pub documents: Vec<serde_json::Value>,
+}
+
 /// See the module documentation.
 #[derive(Clone, Debug)]
 pub enum Engine {
@@ -124,7 +134,7 @@ pub enum Engine {
 pub struct DoubleBackend {
     pub(super) backend: RestateTestBackend<dyn lash_core::StoreSet>,
     pub(super) sqlite_stores: Option<Arc<lash_sqlite_store::SqliteStoreSet>>,
-    _resources: Option<
+    resources: Option<
         Arc<(
             lash_postgres_store::testing::IsolatedDatabase,
             tempfile::TempDir,
@@ -137,7 +147,7 @@ impl DoubleBackend {
         Self {
             sqlite_stores: Some(Arc::clone(backend.stores())),
             backend: backend.erase_store_type(),
-            _resources: None,
+            resources: None,
         }
     }
 
@@ -167,7 +177,7 @@ impl DoubleBackend {
             Ok(Self {
                 backend,
                 sqlite_stores: None,
-                _resources: Some(Arc::new((database, attachments))),
+                resources: Some(Arc::new((database, attachments))),
             })
         } else {
             lash_restate_test::backend_with_build(seed, config, "crash-world", hooks)
@@ -432,6 +442,77 @@ impl Engine {
         }
     }
 
+    /// `id`'s journal entries, each named and with its stored bytes.
+    pub async fn journal_entries(&self, id: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+        match self {
+            Self::Double(double) => Ok(double
+                .backend
+                .server()
+                .journal(id)
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    (
+                        format!("{index}:{:?}:{}", entry.ty, entry.name.unwrap_or_default()),
+                        entry.payload.to_vec(),
+                    )
+                })
+                .collect()),
+            Self::Live(live) => live
+                .journal_entries(id)
+                .await
+                .map_err(|error| error.to_string()),
+        }
+    }
+
+    /// Every durable cell the world's stores hold, with the documents each
+    /// decodes to: the double's SQLite files or PostgreSQL database, or a
+    /// live world's in-memory SQLite stores.
+    pub async fn stored_cells(&self) -> Result<Vec<StoredCell>, String> {
+        let sqlite = match self {
+            Self::Double(double) => match (&double.sqlite_stores, &double.resources) {
+                (Some(stores), _) => Arc::clone(stores),
+                (None, Some(resources)) => {
+                    let storage = lash_postgres_store::PostgresStorage::connect(resources.0.url())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    return lash_postgres_store::testing::read_stored_cells_for_testing(&storage)
+                        .await
+                        .map(|cells| {
+                            cells
+                                .into_iter()
+                                .map(|cell| StoredCell {
+                                    location: format!("postgres/{}", cell.location),
+                                    bytes: cell.bytes,
+                                    documents: cell.documents,
+                                })
+                                .collect()
+                        });
+                }
+                (None, None) => return Err("the double has no store to read".to_owned()),
+            },
+            Self::Live(live) => Arc::clone(live.stores()),
+        };
+        let mut cells = Vec::new();
+        for database in [
+            lash_sqlite_store::SqliteDatabase::DurableCore,
+            lash_sqlite_store::SqliteDatabase::ProcessRegistry,
+            lash_sqlite_store::SqliteDatabase::Triggers,
+        ] {
+            cells.extend(
+                lash_sqlite_store::testing::read_stored_cells_for_testing(&sqlite, database)?
+                    .into_iter()
+                    .map(|cell| StoredCell {
+                        location: format!("sqlite/{}", cell.location),
+                        bytes: cell.bytes,
+                        documents: cell.documents,
+                    }),
+            );
+        }
+        Ok(cells)
+    }
+
     /// `id`'s journal commands, named.
     pub async fn journal_names(&self, id: &str) -> Vec<String> {
         match self {
@@ -459,7 +540,11 @@ impl Engine {
             Self::Double(double) => {
                 let _ = tokio::time::timeout(budget, double.backend.server().settle()).await;
             }
-            Self::Live(live) => live.settle(budget, Duration::from_millis(100)).await,
+            Self::Live(live) => {
+                let _ =
+                    tokio::time::timeout(budget, live.settle(budget, Duration::from_millis(100)))
+                        .await;
+            }
         }
     }
 

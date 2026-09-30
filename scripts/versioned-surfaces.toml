@@ -214,13 +214,6 @@ description = "canonical create-session semantic-boundary request encoding (FIG-
 manifest = "CreateSessionRequestIdentity"
 
 [[surface]]
-constant = "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION"
-constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
-upgrade = "coexist"
-description = "canonical usage-ledger semantic-boundary request encoding (FIG-2480)"
-manifest = "UsageLedgerRequestIdentity"
-
-[[surface]]
 constant = "TRIGGER_COMMAND_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers.rs"
 upgrade = "coexist"
@@ -329,9 +322,9 @@ description = "stable tool-invocation batch identity"
 
 [[surface]]
 constant = "USAGE_PAYLOAD_FAMILY_VERSION"
-constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
+constant_path = "crates/lash-core-store/src/usage_accounting.rs"
 upgrade = "coexist"
-description = "stable runtime-usage payload identity and persisted encoding tag"
+description = "stable usage fact and correction payload identity (ADR 0125)"
 
 [[surface]]
 constant = "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION"
@@ -605,6 +598,13 @@ constant_path = "crates/lash-restate/src/effect_group/payload.rs"
 upgrade = "migrate"
 description = "stored-format stamp every effect-group payload object-state value carries"
 manifest = "engine:restate.effect_group_payload_format"
+
+[[surface]]
+constant = "USAGE_ACCOUNTING_WIRE_VERSION"
+constant_path = "crates/lash-restate/src/usage_accounting.rs"
+upgrade = "drain"
+description = "Restate usage accounting continuation request bodies: a spending effect's settle send, an execution retirement and an owner drain (ADR 0125); a settle is retained in Restate until a handler reads it"
+manifest = "engine:restate.usage_accounting"
 
 [[surface]]
 constant = "EFFECT_JOURNAL_VERSION"

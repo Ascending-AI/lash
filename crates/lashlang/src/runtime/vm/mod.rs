@@ -35,6 +35,8 @@ mod reference_assignment;
 #[cfg(test)]
 use continuation::TestSuspension;
 pub use continuation::VM_CONTINUATION_FORMAT_VERSION;
+#[cfg(test)]
+pub(crate) use continuation::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use continuation::{
     ContinuationError, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,

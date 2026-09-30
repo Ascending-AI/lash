@@ -484,14 +484,7 @@ pub(super) async fn replay_divergence_mid_turn_fails_the_attempt_retryably_and_c
         "the fixture must suspend with its runtime-effect run unresolved"
     );
 
-    let recorded = RecordedRuntimeEffect {
-        envelope: Arc::new(
-            fig1142_llm_envelope(1)
-                .canonical_form()
-                .expect("canonical first-incarnation envelope"),
-        ),
-        outcome: Ok(fig793_llm_outcome()),
-    };
+    let recorded = fig1142_recorded_llm_call();
     let replay = encode_run_replay(
         workflow_key,
         &input,
@@ -565,14 +558,7 @@ pub(super) async fn an_effect_journal_entry_of_another_generation_parks_before_t
     .expect("capture the model-call run");
     executions.store(0, Ordering::SeqCst);
 
-    let recorded = RecordedRuntimeEffect {
-        envelope: Arc::new(
-            fig1142_llm_envelope(1)
-                .canonical_form()
-                .expect("canonical model-call envelope"),
-        ),
-        outcome: Ok(fig793_llm_outcome()),
-    };
+    let recorded = fig1142_recorded_llm_call();
     let current = journal_entry_value(recorded.clone());
     assert_eq!(
         current["effect_journal_version"],
@@ -1496,14 +1482,15 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
 
 #[tokio::test]
 pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
-    let store = memory_trigger_store().await;
+    // One store set: a delivery's start registers against its row (FIG-4369).
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("store set");
+    let store = stores.trigger_store();
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("process-exec-env store set")
-            .process_env_store();
+        stores.process_env_store();
     let process_env_ref =
         lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let registration = store
@@ -1533,7 +1520,7 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
         registration,
         lash_core::TriggerCommandOutcome::Mutation { .. }
     ));
-    let registry = process_registry();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = stores.process_registry();
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         registry_process_wiring(Arc::clone(&registry)),
@@ -1563,13 +1550,20 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
         workflow_key,
         &input,
         vec![invocation_id.to_string()],
-        vec![serde_json::Value::Bool(true), serde_json::Value::Null],
+        (0..2)
+            .flat_map(|_| [serde_json::Value::Bool(true), serde_json::Value::Null])
+            .collect(),
     )
     .await
     .expect("trigger start should suspend on its terminal delivery call");
     assert_eq!(
         restate_message_types(&suspended).expect("decode trigger suspension"),
         vec![
+            // The emission's journaled admission of the delivery (FIG-4297).
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             // The start's frontier marker (FIG-3779), acknowledged.
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
@@ -1594,7 +1588,7 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec!["begin_effect", "end_effect", "complete"]
+        [["begin_effect", "end_effect"].repeat(2), vec!["complete"]].concat()
     );
     let replay = encode_recorded_commands_with_invocations_replay(
         workflow_key,
@@ -1676,10 +1670,11 @@ pub(super) async fn register_fig811_subscription(
 
 #[tokio::test]
 pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order() {
-    let store = lash_sqlite_store::SqliteStoreSet::memory()
+    // One store set: a delivery's start registers against its row (FIG-4369).
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("open SQLite trigger store")
-        .trigger_store();
+        .expect("store set");
+    let store = stores.trigger_store();
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     let _alpha_id = register_fig811_subscription(
@@ -1713,12 +1708,9 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         "the FIG-811 fixture must contain exactly its alpha and beta subscriptions"
     );
 
-    let registry = process_registry();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = stores.process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("process-exec-env store set")
-            .process_env_store();
+        stores.process_env_store();
     // The fixture environment every subscription draft here records.
     lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let router = lash_core::facade_support::TriggerRouter::new(
@@ -1750,26 +1742,32 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         workflow_key,
         &input,
         invocation_ids.iter().map(ToString::to_string).collect(),
-        vec![
-            serde_json::Value::Bool(true),
-            serde_json::Value::Null,
-            serde_json::Value::Bool(true),
-            serde_json::Value::Null,
-        ],
+        (0..4)
+            .flat_map(|_| [serde_json::Value::Bool(true), serde_json::Value::Null])
+            .collect(),
     )
     .await
     .expect("initial multi-subscription attempt should suspend after both starts");
     assert_eq!(
         restate_message_types(&suspended).expect("decode multi-subscription suspension"),
         vec![
+            // Each delivery journals its admission first (FIG-4297), then its
+            // start: the start's frontier marker (FIG-3779), its
+            // registration, its send and its external reference (ADR 0107).
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-            // Each start journals its frontier marker first (FIG-3779), then
-            // its registration, its send and its external reference (ADR 0107).
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
@@ -1795,13 +1793,7 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec![
-            "begin_effect",
-            "end_effect",
-            "begin_effect",
-            "end_effect",
-            "complete"
-        ]
+        [["begin_effect", "end_effect"].repeat(4), vec!["complete"]].concat()
     );
 
     let replay = encode_recorded_commands_with_invocations_replay(
@@ -1856,7 +1848,11 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
 #[tokio::test]
 pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery_without_a_second_process()
  {
-    let store = memory_trigger_store().await;
+    // One store set: a delivery's start registers against its row (FIG-4369).
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("store set");
+    let store = stores.trigger_store();
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     register_fig811_subscription(
@@ -1866,12 +1862,9 @@ pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery
         &source_key,
     )
     .await;
-    let registry = process_registry();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = stores.process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("process-exec-env store set")
-            .process_env_store();
+        stores.process_env_store();
     // The fixture environment every subscription draft here records.
     lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let router = lash_core::facade_support::TriggerRouter::new(
@@ -1902,7 +1895,10 @@ pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery
         "fig811-client-attempt-one",
         &input,
         vec![workflow_invocation_id.to_string()],
+        // The admission's and the start's effect brackets, then the sink.
         vec![
+            serde_json::Value::Bool(true),
+            serde_json::Value::Null,
             serde_json::Value::Bool(true),
             serde_json::Value::Null,
             serde_json::Value::Null,
@@ -1927,6 +1923,8 @@ pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery
         "fig811-client-attempt-two",
         &input,
         vec![workflow_invocation_id.to_string()],
+        // The delivery is bound: the admission's effect bracket, then the
+        // sink, and no start (FIG-4297).
         vec![
             serde_json::Value::Bool(true),
             serde_json::Value::Null,
@@ -1983,6 +1981,7 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run(
                 .expect("canonical FIG-793 LLM envelope"),
         ),
         outcome: Ok(fig793_llm_outcome()),
+        usage: None,
     };
     (endpoint, suspended, journal_entry_value(recorded))
 }

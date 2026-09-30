@@ -9,6 +9,11 @@
 //! exists in the durable core and in the process registry, and the ledger
 //! routes by the obligation id's `core:`/`registry:` prefix.
 //!
+//! `awaited_journal_key` is the key of the journal the body's delivery awaits
+//! (`ArtifactCleanup::awaited_journal`: its gate, or the journal its guard
+//! plan waits on), or null when it awaits none: the column that journal's
+//! settlement nudges by (ADR 0113 §2.5), since the body is JSON.
+//!
 //! The upsert rule of `arm_cleanup` (a guard inserts only when no row exists;
 //! `Ended` replaces a guard; nothing replaces `Ended`) needs the stored plan,
 //! which is JSON, so a backend reads the row with [`CleanupObligationStatements::select_by_referrer`]
@@ -21,7 +26,7 @@ pub const TABLE: &str = "artifact_cleanup_obligations";
 /// The columns a new row is inserted with, in insert order. The remaining
 /// obligation columns keep their defaults: an inserted row is `due` with no
 /// claim, no attempt and no error.
-pub const INSERT_COLUMNS: &str = "referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms";
+pub const INSERT_COLUMNS: &str = "referrer_kind, referrer_id, cleanup_json, awaited_journal_key, obligation_id, obligation_state, obligation_due_at_ms";
 
 /// The columns a row read by referrer or id returns, in order.
 pub const CLEANUP_COLUMNS: &str =
@@ -31,12 +36,13 @@ crate::statements! {
     /// `artifact_cleanup_obligations` record statements both backends issue
     /// verbatim.
     pub struct CleanupObligationStatements @ "artifact_cleanup" {
-        /// Insert referrer `?1`/`?2`'s cleanup `?3` as obligation `?4`, due at
-        /// `?5`, unless the referrer already has a row. The caller reads the
+        /// Insert referrer `?1`/`?2`'s cleanup `?3`, awaiting journal key
+        /// `?6` (null when it awaits none), as obligation `?4`, due at `?5`,
+        /// unless the referrer already has a row. The caller reads the
         /// affected-row count.
         insert_if_absent = "INSERT INTO artifact_cleanup_obligations
-             (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms)
-             VALUES (?1, ?2, ?3, ?4, 'due', ?5)
+             (referrer_kind, referrer_id, cleanup_json, awaited_journal_key, obligation_id, obligation_state, obligation_due_at_ms)
+             VALUES (?1, ?2, ?3, ?6, ?4, 'due', ?5)
              ON CONFLICT (referrer_kind, referrer_id) DO NOTHING";
 
         /// Referrer `?1`/`?2`'s row: its obligation, state and body.
@@ -50,10 +56,11 @@ crate::statements! {
              WHERE obligation_id = ?1";
 
         /// Replace referrer `?1`/`?2`'s guard with its `Ended` body `?3`,
-        /// re-armed due at `?4` whatever the guard's state: a relay holding
-        /// the guard's claim loses it, and a stalled guard is new work.
+        /// awaiting journal key `?5` (null when it awaits none), re-armed due
+        /// at `?4` whatever the guard's state: a relay holding the guard's claim
+        /// loses it, and a stalled guard is new work.
         replace_guard_with_ended = "UPDATE artifact_cleanup_obligations
-             SET cleanup_json = ?3, obligation_state = 'due', obligation_attempts = 0,
+             SET cleanup_json = ?3, awaited_journal_key = ?5, obligation_state = 'due', obligation_attempts = 0,
                  obligation_due_at_ms = ?4, obligation_claim_token = NULL,
                  obligation_stall_reason = NULL, obligation_last_error = NULL,
                  obligation_settled_at_ms = NULL
@@ -66,6 +73,14 @@ crate::statements! {
              SET obligation_due_at_ms = CASE
                      WHEN obligation_due_at_ms > ?3 THEN ?3 ELSE obligation_due_at_ms END
              WHERE referrer_kind = ?1 AND referrer_id = ?2 AND obligation_state = 'due'";
+
+        /// Make every `due` row awaiting journal key `?1` due by `?2`: the
+        /// journal settled, so it no longer defers them. Like `nudge` it only
+        /// shortens a wait, and leaves claimed and stalled rows.
+        nudge_awaiting_journal = "UPDATE artifact_cleanup_obligations
+             SET obligation_due_at_ms = CASE
+                     WHEN obligation_due_at_ms > ?2 THEN ?2 ELSE obligation_due_at_ms END
+             WHERE awaited_journal_key = ?1 AND obligation_state = 'due'";
 
         /// Whether referrer `?1`/`?2` has a row at all.
         exists = "SELECT EXISTS (

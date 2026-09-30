@@ -1,170 +1,78 @@
 # Hosts register immutable deployments
 
-Lash's durability story on a journaling host rests on an obligation the host
-must meet and that nothing, until now, wrote down: **a deployment's code is
-immutable for as long as any invocation may replay against it.**
-
-Three independent properties assume it, and each degrades silently if it does
-not hold.
-
 ## What assumes it
 
-**Whole-envelope hashing.** A journaled effect records the hash of its full
-envelope, and replay rejects a mismatch (`validate_recorded_effect_envelope`,
-`crates/lash-restate/src/controller/mod.rs`, delegating to
-`validate_replayed_effect_envelope`,
-`crates/lash-core-execution/src/runtime/effect/validation.rs`). This detects lash's own
-nondeterminism bugs, which is why the hash covers content rather than an
-identity tuple. It cannot distinguish "the runtime computed a different
-envelope" from "the code that computed it changed underneath the invocation".
-Mutating a deployment converts a correctness detector into a false alarm, and
-worse, trains readers to dismiss it.
+A deployment's code remains immutable while any invocation may replay against
+it. Replay validates the canonical journaled representation of an effect
+against its hash. A mismatch can mean a runtime divergence or code changing
+beneath an invocation; hash validation alone cannot distinguish the causes.
+Model request content enters that representation by digest, not raw prompt
+bytes.
 
-**The rejection of version markers.** Temporal-style `patched()` gates are
-deliberately absent because they have no job here: an in-flight invocation
-completes against the code it started on, and an invocation that cannot drain
-is forked forward (below) instead of patched in place. An earlier revision of
-this record also called markers *unusable* on positional-correlation grounds;
-that argument was wrong and is retired (2026-08-14). Temporal replays safely
-past inserted version markers by exempting them from its positional
-determinism diff, and DBOS's patch probe consumes no journal position on
-pre-patch history. The mechanism is implementable; it is rejected as a second
-evolution mechanism whose price — version-conditional branches living in
-process code with their own deprecation discipline — buys nothing the fork
-does not already provide.
-
-**Content-addressed module pinning.** A lashlang process resolves its pinned
-`module_ref` for its whole life (`crates/lash-lashlang-runtime/src/process.rs`).
-This gives lash Temporal's build-id behaviour for free — old runs finish on old
-artifacts. Pinning the module while mutating the deployment around it pins the
-wrong half.
+A process also resolves its pinned module artifact for its lifetime. Pinning
+the artifact cannot preserve the handler code around it if the deployment is
+mutated.
 
 ## The obligation
 
-A host must register a new deployment rather than replace the code behind an
-existing one. Evolution is pin-and-drain: publish the new deployment, let
-in-flight invocations finish against the old one, retire it when drained.
+A host registers a new deployment for new code and keeps the old deployment
+available while work remains pinned to it. Registering, ordering and retiring
+deployments are host policy. Lash supplies generation-qualified endpoint
+paths, registration checks and drain reads; it does not decide the operator's
+rollout schedule.
 
-Restate does not enforce this, and an earlier revision of this record claimed
-its deployments were immutable by design; that reading was wrong and is
-retired (2026-08-14). Restate's default deployment update repoints the address
-behind an existing deployment id, its journal-mismatch remedy (RT0016)
-sanctions fixing a deployment's code in place, and graceful deployment
-deletion is unimplemented — deletion is force-only, with no server-side drain
-gate. The obligation is therefore lash discipline that hosts uphold against a
-permissive substrate, for example by never redeploying to a fixed identifier
-in a container platform that treats the image tag as mutable.
+Each journal-bearing Restate service binds a stable name and a
+build-generation name. Stable routing admits work to the current deployment;
+generation routing keeps replay and pinned child work on a compatible build.
+An invocation retains the endpoint where it starts. Different builds need
+different registered endpoint URIs.
 
 ## Invocations that do not drain
 
-Pin-and-drain assumes every deployment eventually empties. A process parked on
-a durable wait can pin its deployment indefinitely, and a fix for code it will
-run after waking cannot reach it by drain. The accepted evolution primitive
-for this case is the journal-prefix fork (ruled 2026-08-14): copy an
-invocation's validated journal prefix into a new invocation pinned to the
-successor deployment, re-arm its durable waits under the new invocation's
-identity, and mark the original forked-from and terminal. The fork point must
-precede the divergent code region, and the existing envelope validation is the
-checker. Fork is a first-class, predicate-targeted primitive: remediating a
-bug across many parked invocations is a bulk fork driven by a drain query, not
-a per-invocation operator ritual.
+A durable wait can retain a deployment indefinitely. ADR 0106 defines
+generation handover and format upgrade, and ADR 0115 defines the operator's
+upgrade protocol. A host starts drain from the replacing build, observes the
+retained generation obligations and retires the old deployment only when the
+required work drains. Parked work needs an explicit operator decision.
 
-Version markers, a monotone logic-version gate, and mixed-version
-co-residency were examined against reference implementations for this case
-and rejected: each embeds version-conditional control flow in process code
-permanently to serve an occasional event, while fork keeps journals
-version-free and evolution at the deployment boundary.
+Version markers and mixed-version branches inside process code are rejected
+as a second evolution mechanism with a permanent deprecation burden. The
+current upgrade contract keeps evolution at the deployment and versioned-state
+boundaries.
 
-## The process handler's journal prefix (FIG-3588)
+## The process handler's journal prefix
 
-A Restate process-segment invocation journals its segment admission — a
-read-only verdict, then the start marker — before anything else, and
-`RESTATE_PROCESS_JOURNAL_VERSION` owns that prefix. An invocation pinned to
-the deployment that started it replays its own prefix. A new-deployment
-handler meeting an input stamped with another generation (or none, which is
-generation 1) refuses it before journaling a command, and the process ends
-`ResumeRefused { RetiredGeneration }`. That refusal of chains an earlier build
-submitted is the current, temporary cutover policy (ADR 0045, amendment
-FIG-3588).
+The process handler journals generation and admission facts before effects.
+A read-only verdict records a nonce; a separate start command writes the
+set-if-absent marker. Only the resulting `SegmentStarted` proof permits the
+segment to execute (ADR 0045).
+
+`RESTATE_PROCESS_JOURNAL_VERSION` and `JOURNAL_LOGIC_EPOCH` participate in the
+build's drain generation. A generation sentinel precedes replay-sensitive
+commands. Generation routing and supported successor windows govern handover;
+a blanket rejection of all successor segments is not the upgrade policy.
 
 ## What is not covered
 
-Restate object state is not part of a replayed journal and does survive a
-deployment upgrade. The versioned-metadata miss is the compatibility boundary
-there, and it is handled explicitly (`load_durable_wait_index_metadata`,
-`crates/lash-restate/src/durable_wait.rs`). That mechanism is unaffected by
-this decision; state migration and code immutability are separate concerns.
-
-One change class cannot ride pin-and-drain at all: bumping the durable-wait
-index identity epoch invalidates shared index state that draining invocations
-still await, so an epoch bump is a stop-the-world cutover — drain, recreate,
-then open — never an overlap.
-
-Identity epoch 4 is such a cutover. Durable-wait requests and indexed state now
-carry the `AwaitEventKey` preimage so handlers derive addresses locally; epoch-3
-state has neither that request shape nor that indexed value. Operators must
-drain and recreate both `LashDurableWaitIndex` and `LashDurableWaitWorkflow`
-state before opening the epoch-4 deployment. There is no tolerant decoder,
-address migration, or dual-deployment window.
-
-Segment handover crosses invocations, so a successor segment is routed to the
-latest deployment. Immutability of any single deployment does not make
-handover artifacts self-describing, which is why they carry their own format
-version rather than leaning on this obligation.
-
-Effect-group children cross invocations the same way, so a child can run on
-a newer build than the turn that opened it. A session-scope child therefore
-checks its owning session's state generation at invocation entry, before it
-admits, reads its journal or dispatches anything, and a generation that build
-refuses settles the child with the typed refusal (FIG-3619). A process-scope
-child needs no such check here: its tool driver routes only where its
-process's opener is live, and the process's own segment gates admitted it
-there.
+Restate object state is outside an invocation journal. Its versioned metadata
+has its own decoder and upgrade obligations. Immutable deployment code does
+not make that state or a handover artifact compatible with a new build.
+ADR 0106 owns the per-format migration or drain decision.
 
 ## Consequences
 
-Hosts that mutate deployments will see replay hash mismatches that look like
-lash nondeterminism bugs but are not, and will lose the guarantee that a
-started invocation completes against consistent code.
+Mutating a deployment can produce replay mismatch without enough evidence to
+attribute it to a runtime defect. The mismatch remains a refusal, not a
+permission to tolerate changed journals. An effect envelope carries no generic
+producer-build fingerprint; the deployment and generation mechanisms do not
+turn that absence into attribution.
 
-Lash cannot detect the violation and does not pretend to: a runtime cannot
-distinguish its own nondeterminism from code changing beneath it. Attribution
-short of detection is possible and is accepted design (ruled 2026-08-09,
-diagnosis only): journaled effect envelopes are to carry a producer build
-fingerprint (accepted, not yet implemented: no envelope carries one today), so a divergence message names which build wrote the journal and
-which is replaying it — same build means a lash bug, different build means
-this obligation was violated — as the lashlang program hash already does one
-layer down. The stamp never gates replay; tolerance of mismatched journals
-stays rejected. For re-executed lashlang runs the fingerprint is carried on the
-run's seal (FIG-3586, ADR 0103): the seal's outcome records the compiler
-version, VM ABI and linked module ref that wrote the journal, and a divergence
-message names them beside the replaying build's. It is attribution only —
-nothing compares it, and replay is gated by the issue-ordinal journal, never by
-the producer.
+[Generation drain reads](../../crates/lash/src/core.rs) expose retained work,
+while retirement remains the host's decision. A host keeps the old deployment
+registered until its required obligations drain.
 
-Lash does not decide deployment routing or retirement, but it now exposes the
-authoritative `LashCore::drain_status(accepting_new_work)` read. After the host
-closes admission, the read counts every retained non-terminal process row,
-including waiting/suspended and retrying work, and every in-flight turn — a
-turn that holds claimed input or a pending queued run — with parked turns
-(a turn stopped by a replay refusal, its claims held; FIG-3586) counted
-separately as well, and returns `drained` only when all of them are zero. A
-parked turn never drains by itself: the operator redeploys the build that wrote
-its journal, cancels it, or forks it. A host must keep the old deployment registered while the
-read is not drained; the read supplies verification, while deployment
-discipline and retirement timing remain host policy.
+## Implementation
 
-Written after three independent reviews of separate subsystems each discovered
-this assumption and none found it stated. Amended 2026-08-14 after a
-reference-benchmarking round corrected the Restate characterization and the
-marker argument, and recorded the fork clause. Amended 2026-09-23 (FIG-3586):
-the producer fingerprint is the seal-carried attribution above, and
-`drain_status` counts parked and in-flight turns.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 16: [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) and
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) supersede
-the fork prescription, epoch-4 reset, child routing and retirement count above.
-The host duty to keep deployed code immutable while its journals may replay
-remains.
+- [Canonical effect validation](../../crates/lash-core-execution/src/runtime/effect/validation.rs).
+- [Deployment routes and registration](../../crates/lash-restate/src/engine.rs).
+- [Process journal prefix and admission](../../crates/lash-restate/src/process/admission.rs).

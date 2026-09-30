@@ -214,6 +214,8 @@ pub(super) struct RecordingContext {
     pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
     pub(super) process_attachments: Mutex<Vec<crate::process_attach::RestateProcessAttachRequest>>,
+    /// Every settle send a recorded spending effect journaled (ADR 0125).
+    pub(super) usage_settlements: Mutex<Vec<crate::usage_accounting::UsageAccountingSettle>>,
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
     pub(super) awaited_replay_keys: Mutex<Vec<String>>,
@@ -470,6 +472,19 @@ impl RecordingContext {
 impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<RecordingContext> {}
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
+    fn send_usage_settlement<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        _owner_key: String,
+        request: crate::usage_accounting::UsageAccountingSettle,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.usage_settlements.lock_recover().push(request);
+        Box::pin(async move { Ok(()) })
+    }
+
     fn attach_process_terminal<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
@@ -533,7 +548,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         _namespace: &'run crate::RestateNamespace,
         _group_key: String,
-        _commit_seq: u64,
+        _rank: u64,
     ) -> Pin<
         Box<
             dyn Future<
@@ -1948,11 +1963,19 @@ impl ReplayableRecordingContext {
                 let envelope: serde_json::Value = serde_json::from_str(recorded.envelope.json())
                     .expect("decode recorded effect envelope");
                 let entry = JournaledEffectRecord::Recorded(recorded);
-                // Retried runs journal the closure's Result. Recorded runs
-                // journal the stamped entry directly.
-                let bytes = if envelope.pointer("/command/type")
-                    == Some(&serde_json::json!("present_tool_result"))
-                {
+                // Retried runs journal the closure's Result: a presentation,
+                // and every spending effect, whose admission fault retries
+                // (ADR 0125). Recorded runs journal the stamped entry directly.
+                let retried = envelope
+                    .pointer("/command/type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|kind| {
+                        matches!(
+                            kind,
+                            "present_tool_result" | "llm_call" | "direct" | "tool_attempt"
+                        )
+                    });
+                let bytes = if retried {
                     serde_json::to_vec(&Ok::<_, String>(entry))
                 } else {
                     serde_json::to_vec(&entry)
@@ -2010,17 +2033,16 @@ impl ReplayableRecordingContext {
 }
 
 /// A journaled step that is not a recorded effect: a process command's
-/// journaled fact (a cancel admission, an await's or attach's existence
-/// guard, a process wait step, a start's registration, obligation claim and
-/// settle, compensation and external reference and their reruns past the
+/// journaled fact (a cancel admission, an await or attachment's terminal
+/// observation, a process wait step, a start's registration, obligation claim
+/// and settle, compensation and external reference and their reruns past the
 /// engine's cancellation, ADR 0107, or a command's
 /// recorded store work, FIG-3827), or the frontier marker a process start or
 /// a sleep journals before it acts (FIG-3779).
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
     [
         ".process-cancel-admission:v1",
-        ".process-await-guard:v1",
-        ".process-attach-guard:v1",
+        ".process-await-observation:v1",
         ".process-signal-append:v1",
         ".process-list:v1",
         ".process-transfer:v1",
@@ -2073,6 +2095,18 @@ impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx>
 }
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
+    fn send_usage_settlement<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        _owner_key: String,
+        _request: crate::usage_accounting::UsageAccountingSettle,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async move { Ok(()) })
+    }
+
     /// Journaled wake verdict (FIG-3149). A live wake records the verdict it
     /// observed; a replayed wake answers from that record, never from live
     /// state, and a journal written before the command existed extends only

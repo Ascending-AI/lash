@@ -5,6 +5,7 @@ exports_files([
     "generate_build_files.py",
     "junit_xml.py",
     "lash_rust.bzl",
+    "libtest_selection.py",
     "target-inventory.json",
     "test_batch_runner.sh",
     "ui_fixtures_runner.sh",
@@ -30,7 +31,7 @@ exports_files(["patches/rules-swift-no-toolchain-registration.patch"])
 test_xml_runner(
     name = "test_xml_runner",
     src = "test_xml_runner.sh",
-    data = ["junit_xml.py"],
+    data = ["junit_xml.py", "libtest_selection.py"],
 )
 
 # The `--run_under` prefix of the PostgreSQL store job's sharded suites
@@ -42,6 +43,7 @@ test_xml_runner(
     src = "postgres_slot_runner.sh",
     data = [
         "junit_xml.py",
+        "libtest_selection.py",
         "test_xml_runner.sh",
     ],
 )

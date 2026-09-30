@@ -133,7 +133,11 @@ impl FakeWorkerPool {
 
 #[async_trait::async_trait]
 impl WorkerSlots for FakeWorkerPool {
-    async fn checkout(&self, _owner: &VmOwner) -> Result<WorkerCheckout, CheckoutRefusal> {
+    async fn checkout(
+        &self,
+        _owner: &VmOwner,
+        _start: &lash_vm_protocol::Start,
+    ) -> Result<WorkerCheckout, CheckoutRefusal> {
         let permit =
             tokio::time::timeout(self.checkout_wait, Arc::clone(&self.slots).acquire_owned())
                 .await
@@ -175,12 +179,14 @@ impl WorkerSlots for FakeWorkerPool {
         })
     }
 
-    async fn release(&self, checkout: WorkerCheckout) {
+    async fn release(&self, checkout: WorkerCheckout) -> Result<(), CheckoutRefusal> {
         self.give_back(checkout, false);
+        Ok(())
     }
 
-    async fn discard(&self, mut checkout: WorkerCheckout) {
+    async fn discard(&self, mut checkout: WorkerCheckout) -> Result<(), CheckoutRefusal> {
         checkout.transport.kill().await;
         self.give_back(checkout, true);
+        Ok(())
     }
 }

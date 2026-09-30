@@ -51,6 +51,7 @@ test_helper_bundle(
     batch = "test_batch_runner.sh",
     batch_launcher = "test_batch_launcher.sh",
     junit = "junit_xml.py",
+    libtest_selection = "libtest_selection.py",
     launcher = "test_launcher.sh",
     postgres = "postgres_slot_runner.sh",
     shard = "test_shard.py",

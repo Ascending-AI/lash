@@ -438,7 +438,7 @@ mod tests {
         assert!(definitions.iter().all(|tool| {
             tool.manifest
                 .bindings
-                .contains_key(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY)
+                .contains_key(lash_tool_support::TOOL_BINDING_KEY)
         }));
     }
 

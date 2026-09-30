@@ -32,6 +32,21 @@ impl lash_core::AwaitEventResolver for FailOnceRetirementHost {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for FailOnceRetirementHost {
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> std::result::Result<lash_core::UsageOwnerRetired, lash_core::RuntimeError> {
+        self.inner.drain_usage_accounting(owner).await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<u64, lash_core::RuntimeError> {
+        self.inner.retire_usage_execution(owner, scope).await
+    }
+
     async fn journal_replay(
         &self,
         journal: &lash_sansio::EffectJournalIdentity,

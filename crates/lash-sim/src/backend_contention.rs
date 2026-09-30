@@ -301,7 +301,7 @@ async fn stale_head_transaction_is_rejected(
         ))
     };
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&current, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&current))
         .await
         .map_err(|err| format!("establish current session head: {err}"))?;
     let stale = RuntimeSessionState {
@@ -312,7 +312,7 @@ async fn stale_head_transaction_is_rejected(
         ))
     };
     let err = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&stale, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&stale))
         .await
         .expect_err("stale-head transaction must fail");
     if !matches!(err, StoreError::HeadRevisionConflict { .. }) {
@@ -349,7 +349,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
     };
     let operation =
         lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final");
-    let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state)
         .with_operation(operation.clone())
         .map_err(|err| format!("stamp final commit: {err}"))?;
     let first = store
@@ -371,7 +371,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let (changed_commit, _) = RuntimeCommit::persisted_state_for_test(&changed_state, &[])
+    let (changed_commit, _) = RuntimeCommit::persisted_state_for_test(&changed_state)
         .with_operation(operation)
         .map_err(|err| format!("stamp changed final commit: {err}"))?;
     let err = store

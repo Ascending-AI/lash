@@ -1,70 +1,17 @@
-# Durable Waits are scoped and resolved by the EffectHost
+# Durable waits are scoped and resolved by the effect host
 
-Amended 2026-09-29 (FIG-4123): a wait key is a deterministic identity, not a
-capability; resolution authority belongs to host ingress (ADR 0014, ADR 0046
-§3).
+## Decision
 
-A turn and a Runtime Process suspend on the same primitive: a one-shot durable
-keyed promise (`AwaitEvent { key }` plus a resolve seam), resolved purely by
-key. The key is derived from the Execution Scope, while the requirements needed
-to run come from that scope's bound Execution Environment. Restate already
-treats waits this way; the inline path currently welds resolution to the Process
-Event log, so Durable Wait resolution moves onto the EffectHost. The Process
-Event log becomes pure observability layered over that promise, not the
-resolution mechanism.
+Turns and Runtime Processes use the same one-shot keyed promise: `AwaitEvent { key }` and the effect host's resolve operation. Execution Scope provides replay, wait, cancellation and trace identity; its bound Execution Environment supplies execution requirements. A wait key identifies a promise. The host controls ingress authorization, as described by ADR 0014 and ADR 0046.
 
-The current code-level `EffectScope` name is promoted to `ExecutionScope`,
-because the scope now owns more than effect-host routing: it is the identity for
-replay, wait keys, cancellation, tracing, and environment binding.
+Restate owns durable suspension and promise settlement. A waiting turn remains the session's active turn and commits no partial transcript merely because it waits. A waiting process records its wait as an observation of running work. Process events describe the wait; they do not resolve it.
 
-## Considered Options
+## Rules and guarantees
 
-- **Make top-level a degenerate process** so every wait has a process to own it.
-  Rejected: a Runtime Process is globally addressable and session-independent; a
-  suspended turn is session-owned and must not inherit process
-  lifecycle/addressability. Unify the mechanism, not the scope.
-- **Keep suspension process-only** and require the agent to `start` a process
-  before any long tool call. Rejected: pushes a runtime optimization into
-  agent-authored structure for the most common case — a long tool call inside a
-  turn — and the agent is not supposed to know or care.
+The promise address derives from the structured scope and wait identity. The first terminal resolution is retained. A repeated resolve returns the recorded terminal result even when its proposed payload differs. Unknown or revoked addresses remain distinguishable from runtime failures. Inbound resolution uses an ordinary object call; retained terminal state supplies deduplication.
 
-## Consequences
+## Alternatives and consequences
 
-- A foreground turn gains a durable suspend point: it may park on a detached
-  tool completion and resume as the same turn, committing only on completion.
-  Bounded, worker-resident turns are no longer guaranteed on the durable tier.
-- A Suspended Turn remains the active session turn. It is observable through
-  session observation, but it is not a Runtime Process and does not commit
-  partial session history while waiting.
-- Native substrate: the EffectHost wait capability is an in-process park (no durable
-  suspension); the optimization is a deliberate no-op there.
-- Execution Scope owns effect/replay/wait/cancel/trace identity. It is not the
-  Execution Environment: processes still run from captured environment refs, and
-  turns run from the session's current environment.
-- The await side uses a deterministic Replay Key. Inbound `resolve` uses an
-  ordinary object call, not a transport Idempotency Key; the serialized wait
-  registry and the keyed promise deduplicate settlement by retaining the
-  first terminal resolution.
-- Resolving a wait is terminal-state idempotent: the first resolution is
-  accepted, duplicate delivery reports the already-recorded terminal result, and
-  unknown or revoked keys are distinguishable without being treated as runtime
-  failures.
-- The process-event/signal resolver ports onto EffectHost `AwaitEvent` as the
-  only path; the process-scoped `AwaitEvent` resolver is deleted, not kept
-  alongside.
+Making a suspended turn a process is rejected because a session-owned turn must not acquire process addressability and lifecycle. Requiring authors to start a process before a long tool call is rejected because suspension is an execution concern. Sharing the promise mechanism preserves those separate ownership rules.
 
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 5: The native in-process park described above is historical.
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-places durable execution on Restate. The separate wait-key authority and seed
-ruling belongs to FIG-4123.
-
-## Amendment (FIG-4163, 2026-09-30)
-
-The transport Idempotency Key description is historical; ordinary inbound object calls converge through keyed-promise and serialized retained-terminal deduplication.
-[The ingress call](../../crates/lash-restate/src/effect_host/ingress.rs),
-[the wait registry's `resolve`](../../crates/lash-restate/src/durable_wait.rs), and
-`effect_host_await_event_duplicate_resolution_is_terminal` in
-[the wait laws](../../crates/lash-conformance/src/conformance/effect_host.rs)
-pin first-resolution retention, including different-payload duplicates.
+The implementation is in [durable wait identities and promises](../../crates/lash-restate/src/durable_wait.rs) and [resolve ingress](../../crates/lash-restate/src/effect_host/ingress.rs). ADR 0012 describes engine journaling and deadline replay.

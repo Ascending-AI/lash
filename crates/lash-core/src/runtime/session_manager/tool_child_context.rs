@@ -35,7 +35,6 @@ impl RuntimeSessionServices {
             session_graph: self.graph_service(),
             processes: self.model_tool_process_service(),
             trigger_router: self.trigger_router(),
-            process_definitions: self.process_definition_registry(),
             process_engines: self.process_engines().clone(),
             effect_controller,
             direct_completions,

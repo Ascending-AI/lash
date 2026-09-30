@@ -261,7 +261,9 @@ mod effect_group_child_cancel;
 mod effect_group_conformance;
 mod effect_group_drain_transitivity;
 mod effect_group_generation_routing;
+mod effect_group_rank_reservation;
 mod effect_group_sdk_preconditions;
+mod effect_group_seat_chain;
 mod effect_group_session_gate;
 mod effect_group_settlement_wakes;
 mod effect_group_shape;
@@ -280,6 +282,7 @@ mod obligation_relay_on_the_double;
 mod parent_end_on_the_double;
 mod process_effect_summary;
 mod process_tool_replay;
+mod remote_turn_cancel;
 mod replay_corpus;
 mod root_control_witnesses;
 mod segment_generation_handoff;
@@ -290,6 +293,8 @@ mod trigger_intent_cutover;
 mod turn_cancel_modes;
 mod turn_crash_on_the_double;
 mod turn_laws_on_the_double;
+mod usage_accounting_on_the_double;
+mod usage_poison;
 mod wait_handoff_generations;
 use endpoint_protocol::{
     RecordedCommand, admission_journal, admitted_invocation_body, durable_wait_index_call_response,
@@ -322,6 +327,7 @@ fn registry_local_executor(
                 lash_lashlang_runtime::LashlangProcessEngine::new(
                     recovery_artifact_store(),
                     lash_lashlang_runtime::LashlangSurface::default(),
+                    RECOVERY_ARTIFACT_BACKEND.worker_recovery(),
                 ),
             )),
     )
@@ -1526,6 +1532,8 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
     }
 }
 
+mod attachment_attach_redrive;
+mod batch_oracle;
 mod cancellation_and_effects;
 mod cancelled_turn_withheld_input_on_the_double;
 mod commit_retry_store;
@@ -1554,9 +1562,11 @@ mod process_registry_core;
 mod process_registry_replay;
 mod process_session_turn_cancel;
 mod process_session_turn_laws;
+mod process_signal_admission;
 mod process_start_engine_cancel;
 mod process_start_replay_on_the_double;
 mod process_start_store_refusals;
+mod process_terminal_await;
 mod process_terminal_obligation_on_the_double;
 mod process_workflow;
 mod recording_context;
@@ -1602,6 +1612,19 @@ struct Fig1142ReplayDivergenceImpl {
     model_version: Arc<AtomicUsize>,
     /// How many times the model call actually ran.
     executions: Arc<AtomicUsize>,
+}
+
+/// The first-incarnation model call's recorded entry: it dispatched nothing.
+fn fig1142_recorded_llm_call() -> crate::controller::RecordedRuntimeEffect {
+    crate::controller::RecordedRuntimeEffect {
+        envelope: Arc::new(
+            fig1142_llm_envelope(1)
+                .canonical_form()
+                .expect("canonical model-call envelope"),
+        ),
+        outcome: Ok(fig793_llm_outcome()),
+        usage: None,
+    }
 }
 
 fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
@@ -1765,3 +1788,6 @@ pub(crate) async fn created_session(
 }
 
 mod admin_namespace_filters;
+mod lost_run_recovery;
+
+mod json_decode_ingress;

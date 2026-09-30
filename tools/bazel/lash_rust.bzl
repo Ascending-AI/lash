@@ -114,6 +114,7 @@ def lash_rust_build_script(
         version,
         data = [],
         extra_data = [],
+        extra_srcs = [],
         build_script_env = {}):
     cargo_build_script(
         name = name,
@@ -128,7 +129,7 @@ def lash_rust_build_script(
         pkg_name = package_name,
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
-        srcs = ["build.rs"] + native.glob(["build/**/*.rs"], allow_empty = True),
+        srcs = ["build.rs"] + native.glob(["build/**/*.rs"], allow_empty = True) + extra_srcs,
         version = version,
         visibility = ["//visibility:public"],
     )

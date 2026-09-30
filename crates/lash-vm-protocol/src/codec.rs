@@ -204,6 +204,17 @@ impl FrameCodec {
         Ok(Some(FRAME_HEADER_BYTES + declared as usize))
     }
 
+    /// Bounds an embedded MessagePack payload before typed decoding.
+    pub fn check_payload(&self, payload: &[u8]) -> Result<(), CodecRefusal> {
+        if payload.len() > self.limits.max_frame_bytes as usize {
+            return Err(CodecRefusal::FrameTooLarge {
+                limit: u64::from(self.limits.max_frame_bytes),
+                declared: payload.len() as u64,
+            });
+        }
+        charge_structure(payload, self.limits)
+    }
+
     fn decode_exact<T: DeserializeOwned>(&self, bytes: &[u8]) -> Result<T, CodecRefusal> {
         let Some(total) = self.frame_len(bytes)? else {
             return Err(CodecRefusal::Truncated {

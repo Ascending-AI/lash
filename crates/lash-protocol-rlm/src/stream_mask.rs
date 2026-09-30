@@ -1,4 +1,4 @@
-//! RLM stream mask: suppresses paired `<typescript>` blocks from the visible
+//! RLM stream mask: suppresses the session dialect's paired cells from the visible
 //! assistant stream and aborts the provider stream as soon as the closing tag
 //! is complete.
 //!
@@ -17,12 +17,12 @@ use lash_core::plugin::{
 use crate::cell_scan::{
     StreamedCellStart, complete_cell_start, complete_end_tag_span, possible_start_tag_suffix_len,
 };
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 
 /// Called by [`crate::plugin::RlmProtocolPlugin::register`] when the session is active.
 pub fn register_stream_mask(
     reg: &mut PluginRegistrar,
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 ) -> Result<(), PluginError> {
     // One provider stream's scan. Only phase 1 touches it: the stream hook
     // fills it and the stream-finished hook hands its end state to the
@@ -108,7 +108,7 @@ enum CellScan {
 }
 
 struct CellDetector {
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
     scan: CellScan,
     visible_prose: String,
 }
@@ -125,12 +125,13 @@ struct RecordedCellScan {
 impl CellDetector {
     #[cfg(test)]
     fn new() -> Self {
-        Self::with_dialect(Arc::new(TypescriptDialect::prompt_only(
+        Self::with_dialect(Arc::new(SessionDialect::prompt_only(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
             lash_lashlang_runtime::LashlangSurface::default(),
         )))
     }
 
-    fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
+    fn with_dialect(dialect: Arc<SessionDialect>) -> Self {
         Self {
             dialect,
             scan: CellScan::Scanning {
@@ -142,7 +143,7 @@ impl CellDetector {
 
     /// Rebuild the detector phase 1 journaled, for the response hook.
     fn from_recorded(
-        dialect: Arc<TypescriptDialect>,
+        dialect: Arc<SessionDialect>,
         recorded: serde_json::Value,
     ) -> Result<Self, PluginError> {
         let RecordedCellScan {
@@ -381,14 +382,14 @@ impl CellDetector {
 
     fn start_event(&mut self) -> PluginRuntimeEvent {
         PluginRuntimeEvent::Custom {
-            name: self.dialect.stream_cell_start_event_name().to_string(),
+            name: self.dialect.stream_cell_start_event_name(),
             payload: serde_json::json!({}),
         }
     }
 
     fn end_event(&mut self) -> PluginRuntimeEvent {
         PluginRuntimeEvent::Custom {
-            name: self.dialect.stream_cell_end_event_name().to_string(),
+            name: self.dialect.stream_cell_end_event_name(),
             payload: serde_json::json!({}),
         }
     }
@@ -782,7 +783,8 @@ mod tests {
 
         // Another worker: a fresh detector rebuilt from the journal alone.
         let mut elsewhere = CellDetector::from_recorded(
-            Arc::new(TypescriptDialect::prompt_only(
+            Arc::new(SessionDialect::prompt_only(
+                std::sync::Arc::new(crate::dialect::TypescriptDialect),
                 lash_lashlang_runtime::LashlangSurface::default(),
             )),
             journaled,

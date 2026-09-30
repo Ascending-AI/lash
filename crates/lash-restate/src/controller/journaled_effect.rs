@@ -239,6 +239,14 @@ where
 
     /// Run a journaled effect's body in its journal slot, recording or
     /// retrying its faults as `engine_faults` says.
+    ///
+    /// A spending effect (`LlmCall`, `Direct`, `ToolAttempt`) runs under a
+    /// usage run the local executor begins, and its recorded entry carries
+    /// the run's usage beside its outcome. Right after the entry — fresh or
+    /// replayed, before the outcome reaches the drive — the controller
+    /// journals the run's one-way settle send to the owner's accounting
+    /// continuation (ADR 0125). An admission fault ends the attempt
+    /// retryably and journals nothing, whatever `engine_faults` says.
     pub(super) async fn record_journaled_run<'run>(
         &'run self,
         invocation: &RuntimeEffectInvocation,
@@ -251,6 +259,8 @@ where
         'ctx: 'run,
     {
         let effect_kind = envelope.command.kind();
+        let spending = lash_core::is_spending_effect(effect_kind);
+        let usage_effect = lash_core::UsageEffectKey::for_effect(envelope.invocation.address());
         let journaled_envelope = Arc::clone(recorded_envelope);
         // A served-only effect (FIG-3719) refuses at the live frontier
         // instead of running: see `live_frontier`.
@@ -259,55 +269,106 @@ where
         let live_give_up = live.clone();
         let body = async move {
             if let Some(live) = &live_body {
-                return live.reached().await;
+                return lash_core::RecordedEffectExecution {
+                    outcome: live.reached().await,
+                    usage: None,
+                    admission_fault: None,
+                };
             }
             execute_restate_journaled_effect(envelope, local_executor).await
         };
         let run = async move {
-            match engine_faults {
-                EngineFaults::Recorded => {
-                    self.record_effect(
+            if engine_faults == EngineFaults::Recorded && !spending {
+                return self
+                    .record_effect(
                         invocation,
                         recorded_envelope,
                         live_give_up,
                         Box::pin(async move {
+                            let executed = body.await;
                             RecordedRuntimeEffect {
                                 envelope: journaled_envelope,
-                                outcome: body.await,
+                                outcome: executed.outcome,
+                                usage: executed.usage,
                             }
                         }),
                     )
-                    .await
-                }
-                EngineFaults::Retried => {
-                    self.record_effect_or_retry(
-                        invocation,
-                        recorded_envelope,
-                        live_give_up,
-                        Box::pin(async move {
-                            match body.await {
-                                Err(fault)
-                                    if fault
-                                        .journal_disposition(effect_kind)
-                                        .is_retryable_derivation() =>
-                                {
-                                    Err(fault.to_string())
-                                }
-                                outcome => Ok(RecordedRuntimeEffect {
-                                    envelope: journaled_envelope,
-                                    outcome,
-                                }),
-                            }
-                        }),
-                    )
-                    .await
-                }
+                    .await;
             }
+            self.record_effect_or_retry(
+                invocation,
+                recorded_envelope,
+                live_give_up,
+                Box::pin(async move {
+                    let lash_core::RecordedEffectExecution {
+                        outcome,
+                        usage,
+                        admission_fault,
+                    } = body.await;
+                    if let Some(fault) = admission_fault {
+                        return Err(fault);
+                    }
+                    match outcome {
+                        Err(fault)
+                            if engine_faults == EngineFaults::Retried
+                                && fault
+                                    .journal_disposition(effect_kind)
+                                    .is_retryable_derivation() =>
+                        {
+                            Err(fault.to_string())
+                        }
+                        outcome => Ok(RecordedRuntimeEffect {
+                            envelope: journaled_envelope,
+                            outcome,
+                            usage,
+                        }),
+                    }
+                }),
+            )
+            .await
         };
-        match live {
-            None => run.await,
-            Some(live) => live.serve(run).await.map_err(RestateEffectError::Refused)?,
-        }
+        let recorded = match live {
+            None => run.await?,
+            Some(live) => live
+                .serve(run)
+                .await
+                .map_err(RestateEffectError::Refused)??,
+        };
+        self.deliver_usage(invocation, &usage_effect, &recorded)
+            .await?;
+        Ok(recorded)
+    }
+
+    /// Journal the recorded run's one-way settle send to its owner's
+    /// accounting continuation. Nothing runs between the effect's entry and
+    /// this send; on a replay the send is matched, never sent again. A send
+    /// is no child of this invocation, so no later cancel, kill, park, fork
+    /// or deletion of it recalls the settlement.
+    async fn deliver_usage(
+        &self,
+        invocation: &RuntimeEffectInvocation,
+        effect: &lash_core::UsageEffectKey,
+        recorded: &RecordedRuntimeEffect,
+    ) -> Result<(), RestateEffectError> {
+        let Some(usage) = &recorded.usage else {
+            return Ok(());
+        };
+        let owner_key = crate::usage_accounting::usage_accounting_object_key(&usage.owner);
+        self.context
+            .send_usage_settlement(
+                &self.namespace,
+                owner_key,
+                crate::usage_accounting::UsageAccountingSettle {
+                    usage_accounting_version:
+                        crate::usage_accounting::USAGE_ACCOUNTING_WIRE_VERSION,
+                    settlement: usage.settlement(effect),
+                },
+            )
+            .await
+            .map_err(|source| RestateEffectError::Terminal {
+                effect: restate_effect_name(invocation),
+                terminal: source,
+            })
     }
 
     /// [`Self::record_effect`] for a step whose engine faults are never its
@@ -391,6 +452,7 @@ where
                         RecordedRuntimeEffect {
                             envelope: journaled_envelope,
                             outcome,
+                            usage: None,
                         }
                     }),
                 )

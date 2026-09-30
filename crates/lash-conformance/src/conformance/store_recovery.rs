@@ -247,7 +247,6 @@ pub async fn checkpoint_survives_before_admission_settlement<F>(
     writer
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &committed_state(&session_id, "checkpoint-committed"),
-            &[],
         ))
         .await
         .expect("commit checkpoint before the root settles");
@@ -274,7 +273,7 @@ pub async fn checkpoint_survives_before_admission_settlement<F>(
     assert_no_second_root(&successor_store, &successor_lease, &resumed).await;
     successor_store
         .commit_runtime_state(final_commit(
-            crate::RuntimeCommit::persisted_state_for_test(&recovered_state, &[]),
+            crate::RuntimeCommit::persisted_state_for_test(&recovered_state),
             &successor_lease,
             completing_admission(&root_of(source), &resumed),
         ))
@@ -301,10 +300,10 @@ where
         seed_and_admit(&writer, &session_id, source, RECOVERY_SUCCESSOR_TTL_MS).await;
     writer
         .commit_runtime_state(final_commit(
-            crate::RuntimeCommit::persisted_state_for_test(
-                &committed_state(&session_id, "atomically-settled"),
-                &[],
-            ),
+            crate::RuntimeCommit::persisted_state_for_test(&committed_state(
+                &session_id,
+                "atomically-settled",
+            )),
             &lease,
             completing_admission(&root_of(source), &admission),
         ))
@@ -353,10 +352,10 @@ where
     let (lease, admission) =
         seed_and_admit(&writer, &session_id, source, RECOVERY_SUCCESSOR_TTL_MS).await;
     let operation = crate::OperationId::turn(&session_id, "recorded-commit", "final");
-    let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(
-        &committed_state(&session_id, "recorded-commit"),
-        &[],
-    )
+    let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(&committed_state(
+        &session_id,
+        "recorded-commit",
+    ))
     .with_operation(operation)
     .expect("stamp recorded commit");
     let commit = final_commit(

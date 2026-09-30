@@ -2,334 +2,180 @@
 
 ## Status
 
-Accepted. Ratified on FIG-3366; extended on FIG-3367 with the tool-restore
-report and the tool-source policy.
-
-Amended 2026-09-23 (FIG-3540), **not adopted** (ADR 0101's FIG-3540 close-out
-keeps the two row classes): under [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) the handle's
-pending-input and queued-work reads, cancels and abandons become one set over
-Session Ingress items, and batch ids become item ids, with no aliases. The split
-between the two authorities is unchanged.
-
-Amended 2026-09-29 (FIG-4112, audit G11): exactly one terminal verb creates,
-and it is the only one that takes session config.
-`core.session(id).create(SessionCreation)` writes the catalog row and the
-initial config head in one store transaction: the spec's model, provider pin,
-prompt, generation and the rest of the `SessionSpec`, the relation (`parent`)
-and the plugin options, which the session's protocol resolves into its
-recorded RLM and plugin session config. It returns the session's Durable
-Session and builds no runtime. An existing id is refused with
-`EmbedError::SessionAlreadyExists` — always, even when a retry states exactly
-the recorded config: the host owns its ids — and a deleted one with
-`StoreError::SessionDeleted`. The store's own insert answer
-(`SessionAdmission::Created` or `Rebound`) decides, so of two racing creates
-exactly one succeeds. `open()`, `durable()`, `open_with_state()`,
-`observe_with_state()` and the engine's drive-open resolve an existing session
-through the catalog's non-creating `lookup_session` and never write a catalog
-row; a missing id is `EmbedError::UnknownSession`. The open builder carries
-only open-time knobs: the tool-source policy, `enqueue_only`, process-local
-plugin factories and a provider resolver that must match the recorded pin
-(`ProviderMismatch` otherwise). Config changes after creation go through
-`update(SessionConfigPatch)` (ADR 0030 as amended by FIG-4099). A host that
-means create-or-open writes it out: create, treat `SessionAlreadyExists` as
-present, then open. The remote protocol gains no verb: the serving host maps a
-`RemoteTurnRequest` to create-or-use, then send, and decides whether a request
-may create. The Decision below is edited to match.
-
-Amended 2026-09-30 (FIG-4163): the FIG-3669 pending-implementation note and
-Session Execution Lease passages are historical under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-and ADR 0101's drive-fence cutover. Restate owns serialized session drives,
-and the sealed drive fence gates execution writes. The live/durable authority
-split remains.
+Accepted.
 
 ## Context
 
-Reaching a session's durable queue required `LashSession`, and the only way to
-get one was `core.session(id).open()`. At the original split, open built a
-whole runtime: it reconciled persisted process-observer intents, admitted and
-leased the store, materialised every plugin, restored the tool registry and
-protocol state, emitted `SessionRestored`, and admitted pending processes. A host
-that only wanted to list pending turn input paid all of it. On a core whose
-plugin stack does not carry a persisted session's tool sources, it also
-orphaned every persisted tool and warned — once per poll (FIG-3353).
-
-The shape was the defect. `LashSession` fused two authorities: the operations
-that need a core able to *run* this session, and the operations that are
-answerable from its store and stay correct beside another process's engine-owned
-session drive. The Session Execution Lease described in the original split is
-historical under ADR 0104. Nothing in the types told a host which was which.
-
-The split was already under way and had drifted. `LashCore::enqueue_turn_input`
-("persist host input without opening a competing session writer"),
-`read_session`, `session_exists` and `session_was_deleted` had each been lifted
-onto `LashCore` one at a time; list and cancel never were. The lifted enqueue
-had diverged from the live one in two ways that mattered: it published no
-`QueueChanged` event, and it acquired its store with `create_store`, which
-writes session metadata on every backend — so enqueueing to an id that had
-never been created silently materialised a session.
+Reading or changing durable queues does not require a runtime capable of
+executing the session. Opening a runtime reconciles tool sources and protocol
+state and materializes plugins. A host that only needs durable input or a
+settled read needs an operation that remains valid beside an engine-owned
+session drive, without performing that runtime initialization.
 
 ## Decision
 
-The session builder has three terminal verbs, and exactly one of them creates.
+The session builder has three principal terminal verbs; exactly one creates.
 
-* `core.session(id).open()` yields the **live session**. It never creates: a
-  missing id is `EmbedError::UnknownSession` (FIG-4112).
-* `core.session(id).durable()` yields a **Durable Session**: no live runtime
-  or execution authority, no plugin session, no tool registry, no lifecycle events, no
-  observer-intent reconcile, no process admission. It never creates.
-* `core.session(id).create(creation)` writes the session's catalog entry and
-  its initial config head — the `SessionCreation`'s spec, relation and
-  plugin options — in one store transaction, and returns its Durable Session.
-  It builds no runtime either. It refuses an existing id with
-  `EmbedError::SessionAlreadyExists`, leaving the recorded metadata, config and
-  Session Relation untouched, and a deleted id with the store's typed
-  `SessionDeleted` (FIG-4112).
+- `core.session(id).create(SessionCreation)` writes the catalog entry and
+  initial config head in one store transaction and returns a Durable Session.
+  The creation supplies the session spec, relation and plugin options. An
+  existing id is `EmbedError::SessionAlreadyExists`, including a matching
+  retry; a deleted id is `StoreError::SessionDeleted`.
+- `core.session(id).durable()` returns a Durable Session handle. Its first
+  operation resolves the existing session; building the handle reads no
+  session state. It builds no live runtime, plugin session or tool registry.
+- `core.session(id).open()` resolves an existing session and builds the live
+  session. A missing id is `EmbedError::UnknownSession`.
 
-The Durable Session owns every operation that is correct beside another
-process's writer: enqueue turn input (validation, driver wake and receipt
-preserved), `pending_turn_inputs`, the three pending-input cancels,
-`queued_work`, `cancel_queued_work_batch`,
-`turn_input_applications` and its remote form, and the settled `read` /
-`exists` / `was_deleted`. They no longer exist on
-`LashSession`, and `LashCore::{enqueue_turn_input, read_session,
-session_exists, session_was_deleted}` no longer exist. There are no forwarding
-shims and no deprecated aliases.
+The store admission answer decides which racing create succeeds. Hosts that
+want create-or-open state that sequence explicitly. Open-time options govern
+tool-source policy, enqueue-only mode, process-local plugin factories and the
+provider resolver. The resolver must match the recorded provider pin. Config
+updates use `SessionConfigPatch`.
 
-An open session reaches the same operations through `session.durable()`. That
-handle is derived from the session's Session Binding: it reuses the binding's
-admitted store and owner-issued ports and never manufactures a catalog, so an
-exact binding keeps today's optional-capability errors (`MissingSessionStore`,
-`SessionCatalogUnavailable`). Both constructions share one implementation per
-operation (`lash_core::facade_support::DurableSessionOps`), which the live
-`RuntimeHandle` also routes its queue methods through, so a queue mutation
-behaves identically whichever handle issued it.
+An open session's `session.durable()` reuses the Session Binding's store and
+owner-issued ports. Catalog-derived and binding-derived handles share
+`DurableSessionOps`, which also implements the runtime's durable queue work.
+
+Sources: `crates/lash/src/session.rs:164`, `:203`, `:254`, `:525`, and `:978`;
+`crates/lash/src/durable_session.rs:103`.
 
 ### Membership rule
 
-An operation belongs to the Durable Session when it is answerable from the
-session's store and remains correct beside another process's engine-owned
-session drive. Everything else stays on the live session or on Session
-Administration:
+The Durable Session owns operations that remain correct beside an engine-owned
+session drive. It exposes `send`, `send_batch`, attachment to accepted input,
+root handles and cancellation; pending-input and queued-work reads and
+cancels; settled input applications; and `read`, `exists` and `was_deleted`.
+User input and non-user queued work remain separate row classes.
 
-* `delete` needs a scoped `SessionDeleteContext` and closure-pin checks.
-* fork names the id as the *destination* and reconciles process observers.
-* live `usage_report` and `read_view` include the in-memory shared token
-  ledger, which no store read can reproduce.
-* `revoke_durable_waits` uses the binding's effect host, not its store.
-* all of `SessionAdmin` drives a live runtime.
+The live session owns runtime configuration and views that include the shared
+in-memory token ledger. Session deletion uses its scoped delete context and
+closure-pin checks. Forking names a destination session and reconciles its
+observers. Runtime administration and effect-host wait revocation require
+their own authority. Restate serializes session drives; the sealed drive fence
+gates execution writes.
 
-`await_queued_work_batch` is **not** part of the handle and was deleted rather
-than moved. It polled `queued_work()`, which hosts already have; its answer —
-"no longer pending" — becomes true as soon as a claim hides the row, before the
-work has run; and it returned the same `()` for drained, cancelled and
-never-existed. The question it looked like it answered ("did my queued command
-take effect") is answered by the Session Observation stream and the read view,
-which are event-driven and carry the outcome.
+Sources: `crates/lash/src/durable_session.rs:209`,
+`crates/lash-core/src/runtime/durable_queue.rs:160`, and
+`crates/lash-restate/src/session_driver.rs`.
 
 ### Acquisition never creates
 
-`durable()` resolves an existing store through the catalog's non-creating seam
-(`lookup_session`), at most once per handle and shared by its clones;
-`admit_session` is unreachable from a Durable Session. Every queue
-operation therefore requires a session id the store already knows. Enqueueing
-to an id that was never created is `EmbedError::UnknownSession`; to a deleted
-one it is `StoreError::SessionDeleted`. Nothing is stored and no driver is
-woken. This is a deliberate behaviour change from `LashCore::enqueue_turn_input`,
-which materialised metadata: a host that enqueued before a first open now
-creates the session first, with `create(creation)`.
+A catalog-derived handle resolves through `lookup_session`, with successful
+acquisition cached in a `OnceCell` shared by its clones. A bound handle reuses
+its admitted store. Queue operations refuse an absent or deleted session
+before acceptance. A lookup failure stays a typed store error rather than
+being reported as absence.
 
-The three settled reads are an exception in *reporting*, not in authority.
-`exists`, `was_deleted` and `read` exist to answer a question *about* an id, so
-an unknown id is their answer — `false`, `false`, `None`, exactly the outcomes
-the removed `LashCore` methods returned — and they write nothing either way.
+Settled reads answer questions about an id: absence yields `false` for
+`exists`, `false` for `was_deleted`, and `None` for `read`; a deletion tombstone
+makes `was_deleted` true. These reads write nothing.
+
+Source: `crates/lash/src/durable_session.rs:187` and `:340`.
 
 ### Observation
 
-Queue mutations publish `QueueChanged` through the core's Live Replay
-publisher, best-effort and only after durable success; a publication failure is
-warned and never fails the mutation. The published revision is the committed
-head read back from the store (`load_session_head_meta`), not
-`read_session_state_version`, which is an encoding marker: a cursor minted from
-the marker corrupts reconnect. A store with no committed head publishes at the
-defined empty-head revision, zero. A failed head read proves no revision:
-publication invalidates the session's replay continuity without stamping a
-queue event or a cursor with a fabricated revision. Existing cursors return
-`Gap(Unavailable)` on replay or subscription, and live subscribers close so
-their existing recovery path reloads the authoritative observation. The
-durable queue mutation remains successful. A recovered snapshot establishes
-a new cursor beyond the gap; later publications use the actual head again.
+After durable queue success, `DurableSessionOps` publishes `QueueChanged`
+best-effort through the configured Live Replay store. Publication failure does
+not fail the mutation. The event uses the committed head revision, supplied
+by admission or read through `load_session_head_meta`; an empty head has
+revision zero. A failed head read invalidates replay continuity instead of
+inventing a revision. Existing cursors then recover through their gap path.
 
-There is no new observation hub. Cross-process visibility of these events is
-therefore exactly the property of the configured Live Replay store, which is
-in-memory — and so process-local — by default.
+The default Live Replay store is process-local. Cross-process visibility
+depends on the host's configured replay store.
 
-## Consequences
+Source: `crates/lash-core/src/runtime/durable_queue.rs:104`.
 
-Polling a session's queue no longer builds a runtime, so it cannot orphan a
-persisted tool, cannot emit `SessionRestored`, and cannot admit processes. The
-FIG-3353 poll costs one store query.
-
-Hosts that relied on enqueue materialising a session must create it first. The
-in-repo callers are migrated with this change; external adopters see a typed
-`UnknownSession` rather than a session that quietly appears.
-
-Two correctly bound stores may address one session at once — that was already
-true and is now first-class. Replacing a binding's owner services is still
-forbidden, which is why the binding-derived handle reuses the binding's ports
-instead of consulting the core.
-
-## Extension (FIG-3367): tool loss at open is a typed fact, with one owner
-
-The Durable Session removed the *reason* a poll orphaned tools. It did not
-answer the other half of FIG-3353: what a host is told when an open really does
-lose them. `ToolRestoreReport` said hosts should surface orphans, and no host
-could — cold open and persisted-state install turned it into a `tracing::warn!`,
-resident re-sync discarded it, and only the explicit host restore returned it.
+## Tool loss at open is a typed fact
 
 ### One owner for installing persisted tool state
 
-`install_persisted_tool_state` in `lash-core` is the single site that reconciles
-a persisted `ToolState` onto a session's registry. The four constructions that
-install — `from_host_state` (every builder open, resume, managed-child
-materialise, queued-work rebuild, remote host open), the host `restore_tool_state`,
-the persisted-state install, and the resident re-sync — call it and none logs
-and drops. Reconcile semantics, the generation rule and the persisted encoding
-are unchanged: the owner classifies what reconcile already decided.
+`install_persisted_tool_state` owns tool-state reconciliation for open, explicit
+host restore, persisted-state install and resident re-sync. It returns a
+`ToolRestoreReport`; the live runtime retains the report for
+`LashSession::tool_restore_report()`. A refused open carries it on the error.
 
 ### The report separates three facts
 
-An unresolved persisted tool id is one of three things, and only the first is
-capability loss:
+The report distinguishes:
 
-* **Lost member** — persisted `member: true`, no live source resolves the id.
-* **Parked opt-out** — unresolved, `member: false`. The host had already turned
-  it off; nothing it could use is missing.
-* **Superseded identity** — a live id owns the old id's model-facing name. The
-  capability is present under a new identity, which is a default member, and the
-  old grant does not transfer.
+- A lost member has persisted `member: true` and no resolving live source.
+- A parked opt-out has no resolving source and persisted `member: false`.
+- A replaced identity has a live tool owning its model-facing name under a
+  different id. The new identity stays a default member; the old grant and
+  opt-out do not transfer.
 
-Only lost members log at warn. Before this, an opt-out counted as loss and a
-replacement was silently invisible, so a refusal built on the old list would
-have rejected intentional opt-outs and waved replacements through.
+Only lost members produce a warning. An orphan preserves the host's member
+bit; effective membership is `member && !orphaned`, so rebind can restore it.
+Alias replacement drops the replaced identity instead of retaining an orphan.
+
+Source: `crates/lash-core-execution/src/tool_registry/rebind.rs:128`.
 
 ### Delivery
 
-* **Open** keeps the report on the runtime; the facade reads it as
-  `LashSession::tool_restore_report()`. A refused open carries it on the typed
-  error instead.
-* **Internal reloads** (resident re-sync, persisted-state install) replace that
-  same retained report and emit a `tool_restore.report` trace event naming the
-  site, the policy and all three classes.
+Open and internal installs retain the report. A non-clean report emits a
+`tool_restore.report` trace event with site, authority, policy and the three
+classes. A clean report emits no such event. The report is a local runtime
+fact, rather than a Session Observation Event or persisted wire shape.
 
-The report is deliberately *not* a Session Observation Event: that enum crosses
-the remote protocol as `RemoteSessionObservationEvent`, and the report is not
-wire state. Nothing about the report reaches `REMOTE_PROTOCOL_VERSION` or any
-persisted encoding.
+Source: `crates/lash-core/src/runtime/tool_restore.rs:172`.
 
 ### Tool-source policy
 
-`ToolSourcePolicy` is set at core assembly (`LashCoreBuilder::tool_source_policy`),
-overridable per open (`SessionBuilder::tool_source_policy`), and carried on the
-runtime host config so runtime-initiated constructions honour it.
+`ToolSourcePolicy::Tolerate` is the default. `Require` refuses an open with
+`SessionError::ToolSourcesUnavailable` when the report has lost members.
+Parked opt-outs and replaced identities do not refuse. The core sets the
+policy, and the session builder can override it for an open.
 
-* **Tolerate** (the default) — the session opens and the report is delivered.
-* **Require** — the open refuses with `SessionError::ToolSourcesUnavailable`
-  when the report has lost members. Parked opt-outs and superseded identities
-  never refuse.
-
-Tolerate is the default because locking a user out of a conversation is worse
-than degrading it: a chat whose MCP server is down is still worth reading and
-often still worth continuing. Unattended and fixed-tool deployments — a queued
-worker, a scheduled agent, a service whose tool set is part of its contract —
-set Require, where running without a tool silently is the worse failure. There
-are two values on purpose: per-tool "required" declarations wait for a host that
-needs them, and Require is not advertised as a complete runnability check.
+Tolerate permits reading and continuing a conversation during tool-source
+outages. A deployment whose tool set is part of its execution contract can
+choose Require. This policy checks tool restoration, not every condition
+needed to run a turn.
 
 #### Only an open may refuse
 
-The policy is an *open* policy. The three installs onto an already-live runtime
-— the host's `restore_tool_state`, a persisted-state install, and the resident
-re-sync — always tolerate, retain the report and return it, on a Require core
-as much as a Tolerate one.
+The installer receives `Open(policy)` or `LiveInstall`. Only the former can
+refuse for missing sources. Reconciliation mutates the registry before policy
+consultation: a refused open drops the runtime under construction, while a
+live install must complete the catalog refresh and retain its report.
 
-That follows from the mutation order rather than from taste. The installer
-commits the reconciled surface before any policy is consulted, so every refusal
-is a refusal *after* the registry changed. At open that is safe and deliberate:
-the runtime being built is dropped with the error and nothing the host can
-reach ever observed it. On a live runtime the same refusal would skip the tool
-catalog refresh, the plugin-state stamp and the report retention, leaving the
-session holding a registry and a catalog that disagree — and, in the resident
-re-sync's case, failing a mid-turn reload because an MCP server went away,
-which is the exact degradation Tolerate-by-default exists to absorb, arrived at
-at a moment nobody chose to open anything. The type says so: the installer's
-authority is either `Open(policy)` or `LiveInstall`, and `LiveInstall` has
-nowhere to put a policy, so a future install site cannot acquire the power to
-refuse by passing one.
+A policy refusal makes no config or state commit, restores no protocol, and
+emits no `SessionRestored`. It does not promise zero side effects: admitted
+load, observer reconciliation and plugin initialization can precede it.
 
-A refusal promises no config or state commit, no protocol restore and no
-`SessionRestored`. The old released-Session-Execution-Lease promise is
-historical under ADR 0104; a following open needs no SQL execution lease.
-It does not promise zero side effects. By the time tool state is installed,
-observer-intent reconcile and admitted load have run, plugins have materialised
-and `initialize_session` has run. A zero-side-effect refusal would need a separate preflight contract.
+Sources: `crates/lash-core/src/runtime/tool_restore.rs:124` and
+`crates/lash-core/src/runtime/lifecycle.rs:239`.
 
-### What an orphaned commit leaves durable
+### Opens that will not run a turn
 
-FIG-3353 asked whether a commit taken while tools are orphaned persists them as
-non-members for good. It does not. An orphan keeps the host's `member` bit,
-effective membership is derived (`member && !orphaned`), and rebind restores it
-against the live manifest. The orphan flag and the catalog generation are the
-only durable trace. Alias replacement is the exception: a superseded identity is
-dropped rather than orphaned and its opt-out does not transfer to the new id.
+`SessionBuilder::enqueue_only()` selects
+`ToolSurfaceOpenMode::PreservePersisted`. The runtime keeps the loaded tool
+snapshot without installing it, rebuilding its catalog, changing its tool
+generation or producing a restore report. Resident re-sync follows the same
+rule. At state-adoption and stamping boundaries, runtime configuration
+reasserts preservation, so commits carry the loaded snapshot forward.
 
-### Opens that will not run a turn (FIG-3353, continued)
+Turn entry refuses this mode before admission with
+`TurnExecutionRequiresReconciledToolSurface`. Running requires reopening in
+default `Reconcile` mode, which restores tools, applies policy and rebuilds
+the catalog. Hosts that need no runtime can use `durable()` directly.
 
-A *reconciling* open is still the wrong tool for a host that only wants to
-commit durable input on a runtime — e.g. a worker that opens a session to
-append pending input on a core that does not carry the session's tool sources.
-`ToolSurfaceOpenMode` states which open it is:
+Sources: `crates/lash/src/session.rs:142`,
+`crates/lash-core/src/runtime/session_api.rs:24`, and
+`crates/lash-core/src/runtime/turn_loop/resident_session.rs:383`.
 
-* **Reconcile** (the default) installs the persisted `ToolState` and rebuilds
-  the catalog exactly as before.
-* **PreservePersisted** declares the open will not run a turn. The persisted
-  snapshot is not installed, the catalog is not rebuilt, no generation bumps,
-  no `ToolRestoreReport` is produced and the lost-tools warning does not fire —
-  for an intentional no-source open the warning is absent, not merely
-  downgraded. The runtime keeps the loaded snapshot on its state rather than
-  restamping it from an unreconciled registry, so any commit the open takes
-  carries the persisted surface forward untouched: no orphans, no generation
-  movement, and the tools are still catalog members on the next reconciling
-  open. The same skip applies to the resident re-sync on such a runtime.
+## Consequences
 
-The declaration is a fence, not merely a claim. Every turn-execution entry —
-direct turns, queued and prepared drives, and the shared logical-turn funnel
-— refuses a `PreservePersisted` open with
-`RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface` before
-admission, because the surface was never reconciled and no `ToolSourcePolicy`
-was enforced: letting a turn run there would both execute against an
-unreconciled registry and bypass `Require`. Reopening in `Reconcile` mode is
-the escalation path; it performs the restore, applies the policy and rebuilds
-the catalog.
+Durable queue access cannot orphan tools or emit runtime restoration events.
+Multiple correctly bound handles can operate beside the serialized drive.
+Acquiring a runtime for a poll would perform reconciliation without an
+execution need. Inferring execution completion from a queue row disappearing
+would confuse claimed, cancelled and completed work; handles and observation
+carry the outcome instead.
 
-Preservation is owned by the runtime's open configuration, not only by the
-resident state. Whole-state replacements — resident reload, append-receipt
-replay, append rollback — rebuild the state wholesale, so the runtime
-reasserts the preservation marker from `tool_surface_open_mode` at each
-adoption and at every stamp boundary; a `PreservePersisted` commit therefore
-carries the loaded snapshot forward even across those replacements.
+## Model usage accounting
 
-The facade exposes it as
-`SessionBuilder::enqueue_only()`; below the facade it rides the runtime host
-config (`RuntimeControlConfig::tool_surface_open_mode`), so every construction
-the open performs sees the same choice. Hosts that need durable input without
-a runtime at all should still prefer `durable()`, which builds nothing.
-
-## Amendment (FIG-4163, 2026-09-30)
-
-The pending SQL-engine cutover and lease-based membership rule are historical; durable operations remain valid beside engine-owned execution, and the removed claim-abandon methods are not current handle operations.
-[The Durable Session API](../../crates/lash/src/durable_session.rs),
-[shared durable operations](../../crates/lash-core/src/runtime/durable_queue.rs),
-and [the Restate session driver](../../crates/lash-restate/src/session_driver.rs)
-define the current split; `durable_acquisition_is_non_creating_and_happens_once_per_handle`
-in [the durable-session tests](../../crates/lash/src/tests/durable_session.rs) pins non-creating acquisition.
+A live session's usage is a durable read (`LashSession::usage()`, async), not
+an in-memory ledger, and it answers the same as `DurableSession::usage()` for
+the same owner ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

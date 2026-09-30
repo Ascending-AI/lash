@@ -100,11 +100,14 @@ if [ "${#failures[@]}" -eq 0 ]; then
             cat "$log"
             if ((list_only)); then
                 grep -Eq ': (test|benchmark)$' "$log" && matched=1
-            else
-                grep -Eq 'running [1-9][0-9]* tests?|test result: .* ([1-9][0-9]* passed|[1-9][0-9]* ignored)' "$log" && matched=1
             fi
         done
-        if ((!matched && !help_only)); then
+        if ((!list_only && !help_only)); then
+            python3 "${junit_xml%/*}/libtest_selection.py" batch "$xml" "$LASH_BATCH_MANIFEST" "${args[@]}" || {
+                echo "FAIL: no tests matched the batch arguments with non-ignored execution" >&2
+                exit 1
+            }
+        elif ((!matched && !help_only)); then
             echo "FAIL: no tests matched the batch arguments" >&2
             exit 1
         fi

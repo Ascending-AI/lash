@@ -157,7 +157,7 @@ def anthropic(
     ]
     index = 0
     if empty_deltas:
-        events.extend([raw(""), payload({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": ""}})])
+        events.append(raw(""))
     if reasoning is not None:
         events.append(payload({"type": "content_block_start", "index": index, "content_block": {"type": "thinking", "thinking": ""}}))
         pieces = [reasoning[:7], reasoning[7:]] if split else [reasoning]
@@ -168,6 +168,8 @@ def anthropic(
         index += 1
     if text is not None:
         events.append(payload({"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}}))
+        if empty_deltas:
+            events.append(payload({"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": ""}}))
         pieces = [text[: max(1, len(text) // 2)], text[max(1, len(text) // 2) :]] if split else [text]
         for piece in pieces:
             events.append(payload({"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": piece}}))

@@ -47,9 +47,9 @@ pub enum ArtifactReferrerKind {
     ProcessRecord,
     SubscriptionRevision,
     Start,
+    StartInput,
     Execution,
     HostPin,
-    DefinitionRevision,
     Session,
     Upload,
 }
@@ -61,15 +61,15 @@ impl ArtifactReferrerKind {
         Self::ProcessRecord,
         Self::SubscriptionRevision,
         Self::Start,
+        Self::StartInput,
         Self::Execution,
         Self::HostPin,
-        Self::DefinitionRevision,
         Self::Session,
         Self::Upload,
     ];
 
     /// `frame_environment`, `process_record`, `subscription_revision`,
-    /// `start`, `execution`, `host_pin`, `definition_revision`, `session`, `upload`.
+    /// `start`, `start_input`, `execution`, `host_pin`, `session`, `upload`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -77,9 +77,9 @@ impl ArtifactReferrerKind {
             Self::ProcessRecord => "process_record",
             Self::SubscriptionRevision => "subscription_revision",
             Self::Start => "start",
+            Self::StartInput => "start_input",
             Self::Execution => "execution",
             Self::HostPin => "host_pin",
-            Self::DefinitionRevision => "definition_revision",
             Self::Session => "session",
             Self::Upload => "upload",
         }
@@ -106,8 +106,8 @@ impl ArtifactReferrerKind {
             self,
             Self::Execution
                 | Self::Start
+                | Self::StartInput
                 | Self::SubscriptionRevision
-                | Self::DefinitionRevision
                 | Self::Upload
         )
     }
@@ -116,7 +116,7 @@ impl ArtifactReferrerKind {
     pub const fn holds_attachments(self) -> bool {
         matches!(
             self,
-            Self::Session | Self::Upload | Self::Execution | Self::ProcessRecord
+            Self::Session | Self::Upload | Self::Execution | Self::StartInput | Self::ProcessRecord
         )
     }
 }
@@ -137,9 +137,13 @@ pub enum ArtifactReferrer {
     ProcessRecord(ProcessId),
     SubscriptionRevision(SubscriptionRevisionId),
     Start(StartKey),
+    /// One starter's input staging, independent of earlier uses of the key.
+    StartInput {
+        start_key: StartKey,
+        starter: EffectJournalIdentity,
+    },
     Execution(EffectJournalIdentity),
     HostPin(HostArtifactPin),
-    DefinitionRevision(DefinitionRevisionId),
     Session(SessionId),
     Upload(UploadReferrerId),
 }
@@ -162,9 +166,9 @@ impl ArtifactReferrer {
             Self::ProcessRecord(_) => ArtifactReferrerKind::ProcessRecord,
             Self::SubscriptionRevision(_) => ArtifactReferrerKind::SubscriptionRevision,
             Self::Start(_) => ArtifactReferrerKind::Start,
+            Self::StartInput { .. } => ArtifactReferrerKind::StartInput,
             Self::Execution(_) => ArtifactReferrerKind::Execution,
             Self::HostPin(_) => ArtifactReferrerKind::HostPin,
-            Self::DefinitionRevision(_) => ArtifactReferrerKind::DefinitionRevision,
             Self::Session(_) => ArtifactReferrerKind::Session,
             Self::Upload(_) => ArtifactReferrerKind::Upload,
         }
@@ -185,9 +189,11 @@ impl ArtifactReferrer {
                 id.revision,
             )),
             Self::Start(key) => key.as_str().to_owned(),
+            Self::StartInput { start_key, starter } => {
+                json_text(&(start_key.as_str(), starter.key()))
+            }
             Self::Execution(journal) => journal.key().to_owned(),
             Self::HostPin(pin) => pin.as_str().to_owned(),
-            Self::DefinitionRevision(id) => json_text(&(id.definition_id.as_str(), id.revision)),
             Self::Session(id) => id.to_string(),
             Self::Upload(id) => json_text(&(id.session_id.as_str(), id.upload_id.as_str())),
         }
@@ -237,6 +243,15 @@ impl ArtifactReferrer {
             ArtifactReferrerKind::Start => Self::Start(
                 StartKey::parse_rendered(id).map_err(|error| malformed(kind, error.to_string()))?,
             ),
+            ArtifactReferrerKind::StartInput => {
+                let (start_key, starter): (String, String) = json_parse(kind, id)?;
+                Self::StartInput {
+                    start_key: StartKey::parse_rendered(&start_key)
+                        .map_err(|error| malformed(kind, error.to_string()))?,
+                    starter: decode_journal_identity(&starter)
+                        .map_err(|detail| malformed(kind, detail))?,
+                }
+            }
             ArtifactReferrerKind::Execution => {
                 Self::Execution(decode_journal_identity(id).map_err(|detail| {
                     ArtifactReferrerError::Malformed {
@@ -264,13 +279,6 @@ impl ArtifactReferrer {
                     session,
                     AttachmentUploadId::try_from(upload)?,
                 ))
-            }
-            ArtifactReferrerKind::DefinitionRevision => {
-                let (definition_id, revision): (String, u64) = json_parse(kind, id)?;
-                Self::DefinitionRevision(
-                    DefinitionRevisionId::new(definition_id, revision)
-                        .map_err(|error| malformed(kind, error.to_string()))?,
-                )
             }
         };
         if referrer.canonical_id() != id {
@@ -383,47 +391,6 @@ impl SubscriptionRevisionId {
     #[must_use]
     pub fn incarnation(&self) -> &str {
         &self.incarnation
-    }
-
-    #[must_use]
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
-}
-
-/// One revision of one named process-definition slot.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DefinitionRevisionId {
-    definition_id: String,
-    revision: u64,
-}
-
-impl DefinitionRevisionId {
-    /// `definition_id` is the registry's primary key
-    /// (`lash.process-definition:<owner namespace>:<name>`). Refuses an empty
-    /// id and revision 0.
-    ///
-    /// # Errors
-    ///
-    /// [`ArtifactReferrerError::Malformed`] for either.
-    pub fn new(definition_id: String, revision: u64) -> Result<Self, ArtifactReferrerError> {
-        let kind = ArtifactReferrerKind::DefinitionRevision;
-        if definition_id.is_empty() {
-            return Err(malformed(kind, "empty definition id"));
-        }
-        if revision == 0 {
-            return Err(malformed(kind, "revision 0"));
-        }
-        reject_nul(kind, &definition_id)?;
-        Ok(Self {
-            definition_id,
-            revision,
-        })
-    }
-
-    #[must_use]
-    pub fn definition_id(&self) -> &str {
-        &self.definition_id
     }
 
     #[must_use]
@@ -663,8 +630,8 @@ impl ReferrerClaim {
     }
 
     /// `Execution` with `AwaitJournal`, `Start` with `AwaitStart`,
-    /// `SubscriptionRevision` with `AwaitSubscriptionRevision`,
-    /// `DefinitionRevision` with `AwaitDefinitionRevision`, `Upload` with
+    /// `StartInput` with `AwaitStart` naming its own starter,
+    /// `SubscriptionRevision` with `AwaitSubscriptionRevision`, `Upload` with
     /// `AwaitUploadExpiry`. Any other pairing,
     /// and every `Ended` plan, is refused.
     ///
@@ -675,28 +642,33 @@ impl ReferrerClaim {
         referrer: ArtifactReferrer,
         guard: ArtifactCleanupPlan,
     ) -> Result<Self, ArtifactReferrerError> {
-        let paired = matches!(
-            (&referrer, &guard),
-            (
-                ArtifactReferrer::FrameEnvironment(_),
-                ArtifactCleanupPlan::AwaitFrame { .. }
-            ) | (
-                ArtifactReferrer::Execution(_),
-                ArtifactCleanupPlan::AwaitJournal
-            ) | (
-                ArtifactReferrer::Start(_),
-                ArtifactCleanupPlan::AwaitStart { .. }
-            ) | (
-                ArtifactReferrer::SubscriptionRevision(_),
-                ArtifactCleanupPlan::AwaitSubscriptionRevision { .. }
-            ) | (
-                ArtifactReferrer::DefinitionRevision(_),
-                ArtifactCleanupPlan::AwaitDefinitionRevision { .. }
-            ) | (
-                ArtifactReferrer::Upload(_),
-                ArtifactCleanupPlan::AwaitUploadExpiry { .. }
+        let paired = if let (
+            ArtifactReferrer::StartInput { starter, .. },
+            ArtifactCleanupPlan::AwaitStart { starter: authority },
+        ) = (&referrer, &guard)
+        {
+            starter == authority
+        } else {
+            matches!(
+                (&referrer, &guard),
+                (
+                    ArtifactReferrer::FrameEnvironment(_),
+                    ArtifactCleanupPlan::AwaitFrame { .. }
+                ) | (
+                    ArtifactReferrer::Execution(_),
+                    ArtifactCleanupPlan::AwaitJournal
+                ) | (
+                    ArtifactReferrer::Start(_),
+                    ArtifactCleanupPlan::AwaitStart { .. }
+                ) | (
+                    ArtifactReferrer::SubscriptionRevision(_),
+                    ArtifactCleanupPlan::AwaitSubscriptionRevision { .. }
+                ) | (
+                    ArtifactReferrer::Upload(_),
+                    ArtifactCleanupPlan::AwaitUploadExpiry { .. }
+                )
             )
-        );
+        };
         if !paired {
             return Err(malformed(
                 referrer.kind(),
@@ -806,6 +778,39 @@ impl ArtifactCleanup {
         serde_json::to_string(self)
     }
 
+    /// The journal whose settlement this record's delivery waits on, if any
+    /// (ADR 0113 §2.5): its gate first, which defers every plan; otherwise
+    /// the journal its guard awaits — an execution referrer's own journal, a
+    /// prepared frame's creator, an absent start's starter, or a subscription
+    /// revision's creator. An `Ended` record without a gate, and the upload and
+    /// session-graph guards, await none. A store keeps its key beside the
+    /// row, so the journal's settlement nudges the row
+    /// (`ArtifactCleanupLedger::nudge_awaiting_journal`).
+    #[must_use]
+    pub fn awaited_journal(&self) -> Option<&EffectJournalIdentity> {
+        if let Some(gate) = &self.gate {
+            return Some(gate);
+        }
+        match (&self.plan, &self.referrer) {
+            (ArtifactCleanupPlan::AwaitJournal, ArtifactReferrer::Execution(journal)) => {
+                Some(journal)
+            }
+            (
+                ArtifactCleanupPlan::AwaitFrame { creator }
+                | ArtifactCleanupPlan::AwaitSubscriptionRevision { creator },
+                _,
+            ) => Some(creator),
+            (ArtifactCleanupPlan::AwaitStart { starter }, _) => Some(starter),
+            (
+                ArtifactCleanupPlan::Ended { .. }
+                | ArtifactCleanupPlan::AwaitJournal
+                | ArtifactCleanupPlan::AwaitUploadExpiry { .. }
+                | ArtifactCleanupPlan::AwaitSessionGraphRetired,
+                _,
+            ) => None,
+        }
+    }
+
     /// Decode a stored `cleanup_json`, and check it names `referrer`.
     ///
     /// # Errors
@@ -851,11 +856,6 @@ pub enum ArtifactCleanupPlan {
         #[serde(with = "journal_identity")]
         creator: EffectJournalIdentity,
     },
-    /// Guard of a definition revision acquired before its CAS commits.
-    AwaitDefinitionRevision {
-        #[serde(with = "journal_identity")]
-        creator: EffectJournalIdentity,
-    },
 }
 
 impl ArtifactCleanupPlan {
@@ -876,7 +876,6 @@ impl ArtifactCleanupPlan {
             Self::AwaitFrame { .. } => "await_frame",
             Self::AwaitStart { .. } => "await_start",
             Self::AwaitSubscriptionRevision { .. } => "await_subscription_revision",
-            Self::AwaitDefinitionRevision { .. } => "await_definition_revision",
         }
     }
 }
@@ -1033,12 +1032,12 @@ mod tests {
                     .expect("revision"),
             ),
             ArtifactReferrer::Start(start_key()),
+            ArtifactReferrer::StartInput {
+                start_key: start_key(),
+                starter: journal(),
+            },
             ArtifactReferrer::Execution(journal()),
             ArtifactReferrer::HostPin(HostArtifactPin::mint()),
-            ArtifactReferrer::DefinitionRevision(
-                DefinitionRevisionId::new("lash.process-definition:ns:name".to_owned(), 2)
-                    .expect("revision"),
-            ),
             ArtifactReferrer::Session(SessionId::from("s-1")),
             ArtifactReferrer::Upload(UploadReferrerId::mint(SessionId::from("s-1"))),
         ]
@@ -1070,6 +1069,39 @@ mod tests {
     }
 
     #[test]
+    fn start_input_claim_is_tied_to_its_start_key_and_starter() {
+        let first = ArtifactReferrer::StartInput {
+            start_key: start_key(),
+            starter: journal(),
+        };
+        let next_starter = ExecutionScope::turn("session", "next-turn")
+            .journal_identity()
+            .expect("next turn's journal");
+        let next = ArtifactReferrer::StartInput {
+            start_key: start_key(),
+            starter: next_starter.clone(),
+        };
+        assert_ne!(first.canonical_id(), next.canonical_id());
+        assert!(first.kind().holds_attachments());
+        assert!(!ArtifactReferrerKind::Start.holds_attachments());
+        ReferrerClaim::guarded(
+            first.clone(),
+            ArtifactCleanupPlan::AwaitStart { starter: journal() },
+        )
+        .expect("the starter guards its own input");
+        assert!(
+            ReferrerClaim::guarded(
+                first,
+                ArtifactCleanupPlan::AwaitStart {
+                    starter: next_starter
+                },
+            )
+            .is_err()
+        );
+        assert!(ReferrerClaim::unguarded(next).is_err());
+    }
+
+    #[test]
     fn canonical_ids_are_the_pinned_texts() {
         let frame = ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
             SessionId::from("s"),
@@ -1080,10 +1112,6 @@ mod tests {
             SubscriptionRevisionId::new("sub".to_owned(), "inc".to_owned(), 7).expect("revision"),
         );
         assert_eq!(revision.canonical_id(), r#"["sub","inc",7]"#);
-        let definition = ArtifactReferrer::DefinitionRevision(
-            DefinitionRevisionId::new("def".to_owned(), 1).expect("revision"),
-        );
-        assert_eq!(definition.canonical_id(), r#"["def",1]"#);
         assert_eq!(
             ArtifactReferrer::Execution(journal()).canonical_id(),
             r#"{"version":2,"kind":"turn","session_id":"session","execution_id":"turn"}"#
@@ -1122,7 +1150,6 @@ mod tests {
             ("frame_environment", r#"["s"]"#),
             ("frame_environment", r#"["","f"]"#),
             ("subscription_revision", r#"["sub","inc",0]"#),
-            ("definition_revision", r#"["",1]"#),
             ("process_record", "not-a-process"),
             ("start", "process-start:x"),
             ("execution", "{}"),
@@ -1237,7 +1264,6 @@ mod tests {
             ArtifactCleanupPlan::AwaitJournal,
             ArtifactCleanupPlan::AwaitStart { starter: journal() },
             ArtifactCleanupPlan::AwaitSubscriptionRevision { creator: journal() },
-            ArtifactCleanupPlan::AwaitDefinitionRevision { creator: journal() },
         ] {
             let cleanup = ArtifactCleanup {
                 referrer: referrers[4].clone(),

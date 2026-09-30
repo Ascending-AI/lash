@@ -28,7 +28,7 @@ impl lash_core::store::RuntimeStoreDecorator for RefuseCommandEnqueue {
 
 #[tokio::test]
 async fn command_enqueue_preserves_typed_session_state_version_refusal() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let inner = recording_unbound_store_on(&backend).await;
     let store: Arc<dyn lash_core::RuntimeStore> = Arc::new(RefuseCommandEnqueue { inner });
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -130,7 +130,7 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
 
 #[tokio::test]
 pub(super) async fn config_settlement_distinguishes_enqueue_rejection_from_durable_completion() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     let original_model = runtime.session_policy().model.clone();
     let outcome = Box::pin(
@@ -289,7 +289,7 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
 
 #[tokio::test]
 pub(super) async fn every_session_config_patch_emits_a_lifecycle_event() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let observed = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let observed_hook = Arc::clone(&observed);
     let plugin = Arc::new(RuntimeTestPluginFactory {

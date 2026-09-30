@@ -270,6 +270,9 @@ impl BrokerFailure {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::WorkerLost { outcome, .. } => outcome.is_retryable(),
+            Self::Unavailable {
+                refusal: CheckoutRefusal::Infrastructure(outcome),
+            } => outcome.is_retryable(),
             Self::Interrupted { .. }
             | Self::Unavailable { .. }
             | Self::Parent { .. }
@@ -352,9 +355,16 @@ impl Broker<'_> {
         };
         let mut held = None::<HeldOperation>;
         loop {
+            let step_start = Start {
+                owner: self.context.owner.clone(),
+                program: start.program.clone(),
+                contexts: start.contexts.clone(),
+                state,
+                limits: start.limits,
+            };
             let checkout = self
                 .slots
-                .checkout(&self.context.owner)
+                .checkout(&self.context.owner, &step_start)
                 .await
                 .map_err(|refusal| BrokerFailure::Unavailable { refusal })?;
             let mut session = Session {
@@ -368,24 +378,23 @@ impl Broker<'_> {
                 journaled_cancel: false,
                 stopping: None,
             };
-            let start = Start {
-                owner: self.context.owner.clone(),
-                program: start.program.clone(),
-                contexts: start.contexts.clone(),
-                state,
-                limits: start.limits,
-            };
             let end = session
-                .drive(start, &mut ledger, &mut held, stop, &mut frames)
+                .drive(step_start, &mut ledger, &mut held, stop, &mut frames)
                 .await;
             let checkout = session.checkout;
             match end {
                 SessionEnd::Ended(end) => {
-                    self.slots.release(checkout).await;
+                    self.slots
+                        .release(checkout)
+                        .await
+                        .map_err(|refusal| BrokerFailure::Unavailable { refusal })?;
                     return Ok(end);
                 }
                 SessionEnd::Lost(failure) => {
-                    self.slots.discard(checkout).await;
+                    self.slots
+                        .discard(checkout)
+                        .await
+                        .map_err(|refusal| BrokerFailure::Unavailable { refusal })?;
                     return Err(failure);
                 }
                 SessionEnd::ParkedForEffect {
@@ -394,7 +403,10 @@ impl Broker<'_> {
                 } => {
                     // The slot goes back before the operation that needs a
                     // worker of its own runs.
-                    self.slots.release(checkout).await;
+                    self.slots
+                        .release(checkout)
+                        .await
+                        .map_err(|refusal| BrokerFailure::Unavailable { refusal })?;
                     let performed = self
                         .effects
                         .perform(&operation)
@@ -470,6 +482,7 @@ struct Session<'b, 'a> {
 /// Why reading the worker's next message stopped short.
 enum ReadStop {
     Lost(InfrastructureOutcome),
+    Parent(ParentFault),
     Interrupted,
     FrameRetired,
 }
@@ -544,8 +557,11 @@ impl Session<'_, '_> {
                 }
                 // Phase reports and worker-reported limits never leave
                 // `next_message`.
-                other @ (WorkerMessage::Ready { .. }
-                | WorkerMessage::ResetDone
+                other @ (WorkerMessage::Observations { .. }
+                | WorkerMessage::Refused { .. }
+                | WorkerMessage::Ready { .. }
+                | WorkerMessage::ResetDone { .. }
+                | WorkerMessage::Prepared { .. }
                 | WorkerMessage::Progress { .. }
                 | WorkerMessage::PayloadTooLarge { .. }
                 | WorkerMessage::LimitExceeded { .. }) => {
@@ -579,6 +595,22 @@ impl Session<'_, '_> {
                 size: request.payload.0.len() as u64,
             }));
         }
+        if request.kind == EffectKind::ProjectionRead {
+            if let Err(error) = broker.codec.check_payload(&request.payload.0) {
+                return Some(self.lost(error.into()));
+            }
+            let response = match broker.effects.projection(&request.payload) {
+                Ok(response) => response,
+                Err(fault) => return Some(SessionEnd::Lost(BrokerFailure::Parent { fault })),
+            };
+            return self
+                .answer(
+                    request.id,
+                    EffectOutcome::Value(response),
+                    Settlement::default(),
+                )
+                .await;
+        }
         if request.kind == EffectKind::CancelCheckpoint {
             let Ok(checkpoint) = rmp_serde::from_slice::<u64>(&request.payload.0) else {
                 return Some(self.violation("a cancel checkpoint names no checkpoint".into()));
@@ -596,12 +628,35 @@ impl Session<'_, '_> {
                 )
                 .await;
         }
-        let resolved = match authority::resolve(
+        if request.kind == EffectKind::ProcessBoundary {
+            if broker.effects.boundary() {
+                return self
+                    .send(ParentMessage::Park)
+                    .await
+                    .err()
+                    .map(|evidence| self.lost(InfrastructureOutcome::WorkerCrashed { evidence }));
+            }
+            return self
+                .answer(request.id, EffectOutcome::Unit, Settlement::default())
+                .await;
+        }
+        if request.kind == EffectKind::ParkDeclined {
+            let reason = match rmp_serde::from_slice::<String>(&request.payload.0) {
+                Ok(reason) => reason,
+                Err(error) => {
+                    return Some(self.violation(format!("invalid park decline: {error}")));
+                }
+            };
+            broker.effects.park_declined(&reason);
+            return self
+                .answer(request.id, EffectOutcome::Unit, Settlement::default())
+                .await;
+        }
+        let resolved = match broker.effects.resolve(
             broker.context,
             ledger.grants(),
             self.frame_epoch,
-            request.kind,
-            &request.payload,
+            &request,
         ) {
             Ok(resolved) => resolved,
             Err(refusal) => {
@@ -627,7 +682,8 @@ impl Session<'_, '_> {
                 .answer(request.id, parked.outcome, Settlement::default())
                 .await;
         }
-        let operation = ledger.admit(broker.context, resolved);
+        let mut operation = ledger.admit(broker.context, resolved);
+        operation.request = Some(request.payload.clone());
         match broker.effects.retain(&operation).await {
             Ok(retained) if retained == operation.fingerprint => {}
             Ok(retained) => {
@@ -650,7 +706,7 @@ impl Session<'_, '_> {
                 // acknowledged, issued the request again: it is performed in
                 // place.
                 ParkAnswer::Declined(id) => self.last_request = Some(id),
-                ParkAnswer::Ended(end) => return Some(end),
+                ParkAnswer::Ended(end) => return Some(*end),
             }
         }
         self.perform(operation, ledger).await
@@ -702,6 +758,7 @@ impl Session<'_, '_> {
                             Err(refusal) => break InfrastructureOutcome::from(refusal),
                         }
                     }
+                    WorkerRead::Failed(outcome) => break outcome,
                     WorkerRead::Ended(evidence) => {
                         break InfrastructureOutcome::WorkerCrashed { evidence };
                     }
@@ -751,20 +808,20 @@ impl Session<'_, '_> {
         frames: &mut watch::Receiver<FrameEpoch>,
     ) -> ParkAnswer {
         if let Err(evidence) = self.send(ParentMessage::Park).await {
-            return ParkAnswer::Ended(
+            return ParkAnswer::Ended(Box::new(
                 self.lost_settling(InfrastructureOutcome::WorkerCrashed { evidence }, operation),
-            );
+            ));
         }
         match self.next_message(stop, frames).await {
             Ok(WorkerMessage::Suspended { state }) => {
                 match state.check(&self.broker.expectation(VmStateKind::Continuation)) {
                     Ok(()) => ParkAnswer::Parked(state),
-                    Err(refusal) => ParkAnswer::Ended(self.lost_settling(
+                    Err(refusal) => ParkAnswer::Ended(Box::new(self.lost_settling(
                         InfrastructureOutcome::ProtocolViolation {
                             reason: format!("the parked state is refused: {refusal}"),
                         },
                         operation,
-                    )),
+                    ))),
                 }
             }
             // The run could not be captured where it stands. Once the
@@ -773,17 +830,26 @@ impl Session<'_, '_> {
             Ok(WorkerMessage::EffectRequest(declined))
                 if declined.kind == EffectKind::ParkDeclined && declined.id > id =>
             {
+                let reason = match rmp_serde::from_slice::<String>(&declined.payload.0) {
+                    Ok(reason) => reason,
+                    Err(error) => {
+                        return ParkAnswer::Ended(Box::new(
+                            self.violation(format!("invalid park decline: {error}")),
+                        ));
+                    }
+                };
+                self.broker.effects.park_declined(&reason);
                 self.last_request = Some(declined.id);
                 if let Some(end) = self
                     .answer(declined.id, EffectOutcome::Unit, Settlement::default())
                     .await
                 {
-                    return ParkAnswer::Ended(match end {
+                    return ParkAnswer::Ended(Box::new(match end {
                         SessionEnd::Lost(BrokerFailure::WorkerLost { outcome, .. }) => {
                             self.lost_settling(outcome, operation)
                         }
                         end => end,
-                    });
+                    }));
                 }
                 match self.next_message(stop, frames).await {
                     Ok(WorkerMessage::EffectRequest(again))
@@ -791,7 +857,7 @@ impl Session<'_, '_> {
                     {
                         ParkAnswer::Declined(again.id)
                     }
-                    Ok(other) => ParkAnswer::Ended(self.lost_settling(
+                    Ok(other) => ParkAnswer::Ended(Box::new(self.lost_settling(
                         InfrastructureOutcome::ProtocolViolation {
                             reason: format!(
                                 "the worker followed a declined park with {}",
@@ -799,17 +865,19 @@ impl Session<'_, '_> {
                             ),
                         },
                         operation,
-                    )),
-                    Err(stop) => ParkAnswer::Ended(self.stopped_settling(stop, operation)),
+                    ))),
+                    Err(stop) => {
+                        ParkAnswer::Ended(Box::new(self.stopped_settling(stop, operation)))
+                    }
                 }
             }
-            Ok(other) => ParkAnswer::Ended(self.lost_settling(
+            Ok(other) => ParkAnswer::Ended(Box::new(self.lost_settling(
                 InfrastructureOutcome::ProtocolViolation {
                     reason: format!("the worker answered a park with {}", name(&other)),
                 },
                 operation,
-            )),
-            Err(stop) => ParkAnswer::Ended(self.stopped_settling(stop, operation)),
+            ))),
+            Err(stop) => ParkAnswer::Ended(Box::new(self.stopped_settling(stop, operation))),
         }
     }
 
@@ -869,6 +937,7 @@ impl Session<'_, '_> {
         outcome: EffectOutcome,
         settled: Settlement,
     ) -> Option<SessionEnd> {
+        self.journaled_cancel |= matches!(outcome, EffectOutcome::Cancelled);
         match self
             .send(ParentMessage::EffectResponse(EffectResponse {
                 id,
@@ -952,6 +1021,22 @@ impl Session<'_, '_> {
                         // transport's supervisor; a phase report is not a
                         // step of the run.
                         WorkerMessage::Progress { .. } => continue,
+                        WorkerMessage::Observations { payload } => {
+                            self.broker
+                                .codec
+                                .check_payload(&payload.0)
+                                .map_err(|error| ReadStop::Lost(error.into()))?;
+                            self.broker
+                                .effects
+                                .observe(&payload)
+                                .map_err(ReadStop::Parent)?;
+                            continue;
+                        }
+                        WorkerMessage::Refused { reason } => {
+                            return Err(ReadStop::Lost(InfrastructureOutcome::ProtocolViolation {
+                                reason,
+                            }));
+                        }
                         WorkerMessage::PayloadTooLarge { limit, size } => {
                             return Err(ReadStop::Lost(InfrastructureOutcome::PayloadTooLarge {
                                 limit,
@@ -994,6 +1079,7 @@ impl Session<'_, '_> {
                 }
             };
             match read {
+                WorkerRead::Failed(outcome) => return Err(ReadStop::Lost(outcome)),
                 WorkerRead::Bytes(bytes) => {
                     if let Err(refusal) = self.reader.push(&bytes) {
                         return Err(ReadStop::Lost(refusal.into()));
@@ -1037,6 +1123,7 @@ impl Session<'_, '_> {
             }
             ReadStop::Interrupted => BrokerFailure::Interrupted { settlement },
             ReadStop::FrameRetired => BrokerFailure::FrameRetired,
+            ReadStop::Parent(fault) => BrokerFailure::Parent { fault },
         })
     }
 
@@ -1055,7 +1142,7 @@ impl Session<'_, '_> {
 enum ParkAnswer {
     Parked(OpaqueVmState),
     Declined(EffectRequestId),
-    Ended(SessionEnd),
+    Ended(Box<SessionEnd>),
 }
 
 async fn sleep_until(deadline: Option<tokio::time::Instant>) {
@@ -1078,11 +1165,14 @@ fn name(message: &WorkerMessage) -> &'static str {
         WorkerMessage::LimitExceeded { .. } => "LimitExceeded",
         WorkerMessage::Ready { .. } => "Ready",
         WorkerMessage::EffectRequest(_) => "EffectRequest",
+        WorkerMessage::Observations { .. } => "Observations",
+        WorkerMessage::Refused { .. } => "Refused",
         WorkerMessage::Suspended { .. } => "Suspended",
         WorkerMessage::Complete { .. } => "Complete",
         WorkerMessage::GuestError { .. } => "GuestError",
         WorkerMessage::Cancelled => "Cancelled",
-        WorkerMessage::ResetDone => "ResetDone",
+        WorkerMessage::ResetDone { .. } => "ResetDone",
+        WorkerMessage::Prepared { .. } => "Prepared",
     }
 }
 

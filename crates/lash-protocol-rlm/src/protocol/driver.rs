@@ -25,7 +25,7 @@ use serde_json::Value;
 #[cfg(feature = "testing")]
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
@@ -49,24 +49,21 @@ use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rl
 
 #[derive(Clone)]
 pub struct RlmDriver {
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 }
 
 impl RlmDriver {
-    /// A driver on TypeScript, because it is the only language a session can be
-    /// served (ADR 0096).
-    ///
-    /// With the dialect selector gone, a default that still named lashlang would be the
-    /// compatibility reader this cutover exists to remove.
-    pub fn new() -> Self {
+    /// A prompt-only driver in the host's selected `dialect` (ADR 0096).
+    pub fn new(dialect: Arc<dyn crate::dialect::Dialect>) -> Self {
         Self {
-            dialect: Arc::new(crate::dialect::TypescriptDialect::prompt_only(
+            dialect: Arc::new(crate::dialect::SessionDialect::prompt_only(
+                dialect,
                 lash_lashlang_runtime::LashlangSurface::default(),
             )),
         }
     }
 
-    pub(crate) fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
+    pub(crate) fn with_dialect(dialect: Arc<SessionDialect>) -> Self {
         Self { dialect }
     }
 
@@ -152,7 +149,7 @@ impl RlmDriver {
         // with it (FIG-1475).
         //
         // Only where a cell is *required*. On a `Natural` turn prose is an
-        // answer, and prose about cells — "`<typescript>` and `</typescript>`
+        // answer, and prose about cells — "`<open>` and `</close>`
         // are the tags you asked about" — opens a line with the tag while
         // being exactly what the user wanted. Correcting a fence there would
         // bury the answer under a lecture and spend the turn's attempts on a
@@ -237,12 +234,6 @@ impl RlmDriver {
             retry_events,
             AttemptProgress::Stalled,
         )
-    }
-}
-
-impl Default for RlmDriver {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -447,7 +438,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             llm_extraction_payload(
                 ctx.turn_id(),
                 &fingerprint,
-                self.dialect.execution_diagnostic_name(),
+                &self.dialect.execution_diagnostic_name(),
                 &termination,
                 cell_counts(
                     self.dialect.language_id(),
@@ -469,12 +460,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         state.reasoning = reasoning;
         state.prose = cell.prose.clone();
 
-        // Emit the raw cell source as a `Message` with kind
-        // `typescript_code` so the CLI can reveal it in the full-expand
-        // view (Alt+O) above the tool activities it produced.
+        // Emit the raw cell source as a `Message` with kind `code` so the
+        // CLI can reveal it in the full-expand view (Alt+O) above the tool
+        // activities it produced.
         actions.push(DriverAction::Emit(SessionStreamEvent::Message {
             text: cell.code.clone(),
-            kind: self.dialect.code_stream_kind(),
+            kind: lash_core::session_model::StreamMessageKind::Code,
         }));
         actions.push(DriverAction::Start(PendingWork::Exec {
             language: self.dialect.language_id().to_string(),
@@ -1504,7 +1495,8 @@ mod tests {
             ..RlmDriverState::default()
         };
 
-        let vocabulary = crate::dialect::DialectPromptVocabulary::default();
+        let vocabulary =
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect);
         let entry = trajectory_entry(vocabulary, &TurnId::from("turn"), 0, &state, None);
         let error = entry.outcome.error().expect("captured public error");
 

@@ -22,9 +22,14 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         )
     }
 
+    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
+        Some(self.driver.host.core.usage_accounting())
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let mut runner = *self;
         match envelope.command {
@@ -61,6 +66,28 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 let host = Arc::clone(&runner.driver.host.core.control.effect_host);
                 let honoured = runner.driver.turn_cancel.is_some();
                 let request = Arc::new((*request).into_request(None, None));
+                // The model call is one call of this effect's usage run,
+                // owned by the turn's session (ADR 0125).
+                let call = usage_run
+                    .as_ref()
+                    .ok_or_else(|| {
+                        RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::UsageRunMissing,
+                            "a turn's model call reached its provider outside any usage run",
+                        )
+                    })?
+                    .call(
+                        crate::RuntimeOwner::Session(runner.driver.session_id.clone()),
+                        "turn",
+                        runner.driver.policy.model.id.clone(),
+                    )
+                    .map_err(|error| {
+                        RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::UsageRunMissing,
+                            error.to_string(),
+                        )
+                    })?;
+                let body_call = call.clone();
                 let invocation = envelope.invocation.into_runtime_invocation();
                 let protocol_iteration = runner.protocol_iteration;
                 let event_tx = runner.event_tx.clone();
@@ -72,10 +99,20 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     stream,
                 } = Box::pin(control.run_step_body(&host, honoured, |stop| async move {
                     driver
-                        .run_llm_call(request, protocol_iteration, invocation, &event_tx, &stop)
+                        .run_llm_call(
+                            request,
+                            protocol_iteration,
+                            invocation,
+                            &event_tx,
+                            &stop,
+                            body_call,
+                        )
                         .await
                 }))
                 .await?;
+                if let Some(call_record) = &call_record {
+                    call.record(call_record);
+                }
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,
@@ -267,7 +304,7 @@ mod tests {
     /// (ADR 0105 §1).
     #[tokio::test]
     async fn a_checkpoint_body_and_the_driver_mint_distinct_observation_ids() {
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::sqlite_recording_backend().await;
         let scoped = backend
             .effect_host()
             .scoped_static(crate::AdmittedScope::turn(
@@ -296,7 +333,7 @@ mod tests {
         let event = || {
             crate::engine::ObservedEvent::Session(crate::SessionStreamEvent::Message {
                 text: "marker".to_string(),
-                kind: crate::StreamMessageKind::TypescriptCode,
+                kind: crate::StreamMessageKind::Code,
             })
         };
         body_cursor.observe(&sink, event());

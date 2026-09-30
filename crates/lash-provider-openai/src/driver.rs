@@ -433,11 +433,32 @@ pub(crate) async fn complete(
         let headers = resp.headers;
         let text = read_http_body_text(
             resp.body,
+            provider.options.response_body_limit(),
             timeouts.request_timeout,
             endpoint.response_body_timeout_error(),
         )
-        .await
-        .unwrap_or_default();
+        .await;
+        let text = match text {
+            Ok(text) => text,
+            Err(error) => {
+                let failure = error
+                    .with_http_status(status)
+                    .with_headers(headers)
+                    .with_request_body(request_body_for_error);
+                if let Some(resume) = responses_resume {
+                    return Err(responses_stream_failure(
+                        provider,
+                        resume.request_key,
+                        resume.state,
+                        Some(resume.starting_after),
+                        true,
+                        http_summary,
+                        failure,
+                    ));
+                }
+                return Err(failure);
+            }
+        };
         let mut failure = run(
             crate::request_work::bytes_need_blocking(text.len()),
             move || {
@@ -651,7 +672,13 @@ async fn complete_buffered_response(
         ..
     } = context;
     let stream_termination = stream_events.is_some().then_some(stream_termination);
-    let text = read_http_body_text(body, timeout, endpoint.response_body_timeout_error()).await?;
+    let text = read_http_body_text(
+        body,
+        provider.options.response_body_limit(),
+        timeout,
+        endpoint.response_body_timeout_error(),
+    )
+    .await?;
     capture.capture_body_text(&text);
     emit_provider_trace(provider_trace.as_ref(), "openai_compatible", &text);
     match endpoint {

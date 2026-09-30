@@ -84,7 +84,7 @@ async fn execute_process_dispatch(
 
 #[tokio::test]
 async fn process_run_context_captures_catalog_and_execution_route_together() {
-    let backend = crate::testing::memory_backend().await;
+    let backend = crate::testing::sqlite_recording_backend().await;
     let a_active = Arc::new(AtomicBool::new(true));
     let b_active = Arc::new(AtomicBool::new(false));
     let spec = crate::PluginSpec::new()

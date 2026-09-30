@@ -169,13 +169,6 @@ pub(super) struct NodeAnchorObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct UsageDeltaObservation {
-    pub(super) source: String,
-    pub(super) model: String,
-    pub(super) usage: TokenUsage,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SessionMetaObservation {
     pub(super) relation: SessionRelation,
 }
@@ -204,7 +197,6 @@ pub(super) struct RawDurableState {
     pub(super) runtime_turn_commits: Vec<RuntimeTurnCommitObservation>,
     pub(super) attachment_referrers: Vec<AttachmentReferrerObservation>,
     pub(super) node_anchors: Vec<NodeAnchorObservation>,
-    pub(super) usage_deltas: Vec<UsageDeltaObservation>,
     pub(super) session_meta: Option<SessionMetaObservation>,
     pub(super) pending_turn_inputs: Vec<PendingTurnInputObservation>,
     pub(super) queued_work: Vec<QueuedWorkObservation>,

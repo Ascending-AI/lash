@@ -4,16 +4,15 @@
 //! One operation — [`RuntimeExecutionContext::incorporate_tool_settlement`] —
 //! applies every semantic channel a settlement carries exactly once per
 //! [`SettlementSource`]: possession is granted, committed checkpoint messages
-//! are enqueued, trigger receipts are restored as evidence, and each usage
-//! delta is charged into the session token ledger under the `(source, model)`
-//! the live path would have used. It never executes a declaration, never
-//! emits a delivery, and never re-runs a projector.
+//! are enqueued and trigger receipts are restored as evidence. It never
+//! executes a declaration, never emits a delivery, never re-runs a projector,
+//! and never charges usage: a child's spend was delivered by its attempts'
+//! usage runs when they were recorded (ADR 0125).
 //!
 //! Idempotence is carried, not hoped for: [`IncorporationLedger`] records the
-//! incorporated sources and the [`UsageDeltaIdentity`]s already charged, and
-//! travels with the execution context wherever `started_process_ids` does, so
-//! a redrive or a segment handover cannot incorporate the same settlement
-//! twice or double-charge a delta that already reached the ledger.
+//! incorporated sources and travels with the execution context wherever
+//! `started_process_ids` does, so a redrive or a segment handover cannot
+//! incorporate the same settlement twice.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -22,9 +21,9 @@ use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
 use super::execution_context::RuntimeExecutionContext;
+use crate::ProcessId;
 use crate::runtime::effect::ToolSettlement;
 use crate::runtime::effect::executor::RuntimeEffectControllerError;
-use crate::{LlmCallId, ProcessId};
 
 /// Which recorded settlement is being incorporated — its once-only identity
 /// (ADR 0099 §6).
@@ -42,41 +41,25 @@ pub enum SettlementSource {
     },
 }
 
-/// The identity of one usage delta across every carrier it can arrive on
-/// (§13): the settlement it rode in on, the attempt ordinal stamped at
-/// capture, and the ADR 0032 `(llm_call_id, provider_attempt)` pair the
-/// provider's own record is named by. A delta already in
-/// [`IncorporationLedger::usage_charged`] is a second attach of a known fact,
-/// charged once.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct UsageDeltaIdentity {
-    pub source: SettlementSource,
-    pub attempt: u32,
-    pub llm_call_id: LlmCallId,
-    pub provider_attempt: u32,
-}
-
-/// What the opener has incorporated so far: the once-only set and the usage
-/// identities already charged. Travels with the execution context across
-/// segment handover beside `started_process_ids`.
+/// What the opener has incorporated so far: the once-only set. Travels with
+/// the execution context across segment handover beside
+/// `started_process_ids`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncorporationLedger {
     pub incorporated: BTreeSet<SettlementSource>,
-    pub usage_charged: BTreeSet<UsageDeltaIdentity>,
 }
 
 impl IncorporationLedger {
     /// Whether nothing has been incorporated.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.incorporated.is_empty() && self.usage_charged.is_empty()
+        self.incorporated.is_empty()
     }
 
     /// Adopt everything `other` incorporated. Incorporation only ever grows a
     /// ledger, so a restored snapshot is merged, never assigned.
     pub fn absorb(&mut self, other: Self) {
         self.incorporated.extend(other.incorporated);
-        self.usage_charged.extend(other.usage_charged);
     }
 }
 
@@ -89,26 +72,10 @@ pub struct Incorporated {
     pub possession: Vec<ProcessId>,
     pub messages: usize,
     pub triggers: usize,
-    pub usage_charged: usize,
-    pub usage_deduplicated: usize,
-}
-
-/// The charge a settlement's usage deltas land in: the opener's session token
-/// ledger, reached through the same capability the live direct-completion
-/// path writes (`usage_capability.record_token_usage`). Not a second ledger —
-/// the same destination, offered as a narrow sink so the execution context
-/// never names the ledger type itself.
-pub trait UsageChargeSink: Send + Sync {
-    fn charge(
-        &self,
-        source: &str,
-        model: &str,
-        usage: &crate::TokenUsage,
-    ) -> Result<(), crate::PluginError>;
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
-    /// ADR 0099 §6/§13: applies a settlement's recorded semantic deltas
+    /// ADR 0099 §6: applies a settlement's recorded semantic deltas
     /// exactly once. Never executes a declaration, never emits a delivery,
     /// never re-runs a projector. A `source` already in the ledger returns an
     /// [`Incorporated`] whose counts are all zero.
@@ -125,53 +92,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                 ..Incorporated::default()
             });
         }
-        // Usage first: it is the only fallible step, and a failure before any
-        // buffer mutation leaves the source unincorporated so a retry replays
-        // the whole incorporation rather than half of it. A delta already
-        // charged is skipped by identity — the additive ledger merge becomes
-        // idempotent by `UsageDeltaIdentity`.
-        let mut usage_charged = 0usize;
-        let mut usage_deduplicated = 0usize;
-        if !settlement.usage.is_empty() {
-            let sink = self
-                .dispatch
-                .direct_completions
-                .usage_charge_sink()
-                .ok_or_else(|| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                        format!(
-                            "settlement {source:?} carries usage but this context has no \
-                                 session-ledger charge sink; a known spend is refused rather than \
-                                 dropped"
-                        ),
-                    )
-                })?;
-            for delta in &settlement.usage {
-                let identity = UsageDeltaIdentity {
-                    source: source.clone(),
-                    attempt: delta.attempt,
-                    llm_call_id: delta.llm_call_id.clone(),
-                    provider_attempt: delta.provider_attempt,
-                };
-                if ledger.usage_charged.contains(&identity) {
-                    usage_deduplicated += 1;
-                    continue;
-                }
-                sink.charge(&delta.source, &delta.model, &delta.usage)
-                    .map_err(|error| {
-                        RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                            format!(
-                                "settlement {source:?} usage delta {identity:?} could not be \
-                                 charged into the session ledger: {error}"
-                            ),
-                        )
-                    })?;
-                ledger.usage_charged.insert(identity);
-                usage_charged += 1;
-            }
-        }
         // Possession is granted from the settlement's own realized
         // `possession` — the identities the child's intent outcomes bound —
         // never re-derived from intent outcomes here (§6).
@@ -186,8 +106,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             possession: settlement.possession.clone(),
             messages: settlement.checkpoint_messages.len(),
             triggers: settlement.triggers.len(),
-            usage_charged,
-            usage_deduplicated,
         })
     }
 

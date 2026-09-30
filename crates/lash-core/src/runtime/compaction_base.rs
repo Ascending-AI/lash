@@ -107,6 +107,7 @@ impl RuntimeEffectLocalRunner for RecordCompactionBaseRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::RecordCompactionBase { .. } = &envelope.command else {
             return Err(RuntimeEffectControllerError::new(

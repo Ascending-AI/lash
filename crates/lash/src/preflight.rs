@@ -160,6 +160,8 @@ pub async fn probe_store(
 /// The accumulated evidence of one walk.
 #[derive(Default)]
 struct Walk {
+    #[cfg(feature = "rlm")]
+    workers: lash_vm_client::service::Service,
     tallies: BTreeMap<DurableFormat, FormatTally>,
     drain: Vec<DrainBlocker>,
     not_scanned: Vec<NotScanned>,
@@ -239,8 +241,7 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         ),
         DurableFormat::AppendRequestIdentity
         | DurableFormat::RecordConfigRequestIdentity
-        | DurableFormat::CreateSessionRequestIdentity
-        | DurableFormat::UsageLedgerRequestIdentity => SurfaceRelation::Unwalkable(
+        | DurableFormat::CreateSessionRequestIdentity => SurfaceRelation::Unwalkable(
             "identity, not a stamp: recomputed and compared when a retried request replays, \
              never read back at rest",
         ),
@@ -361,7 +362,11 @@ impl Walk {
     }
 
     fn item(&mut self, item: &DurableItem) {
-        for extraction in extract(item) {
+        for extraction in extract(
+            item,
+            #[cfg(feature = "rlm")]
+            &self.workers,
+        ) {
             match extraction {
                 Extraction::Found { format, version } => {
                     let expected =

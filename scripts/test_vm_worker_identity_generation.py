@@ -17,6 +17,7 @@ class WorkerIdentityGenerationTests(unittest.TestCase):
              patch.object(generator, "cargo_metadata", return_value={}), \
              patch.object(generator, "generated", return_value=(outputs, {})), \
              patch.object(generator, "reconcile_lane_units", return_value=[]), \
+             patch.object(generator, "reconcile_vm_worker_variants", return_value=[]), \
              patch.object(generator, "check", return_value=0):
             outputs[ROOT / "tools/buck2/target-inventory.json"] = '{"feature_lane_units": []}'
             self.assertEqual(generator.main(), 0)

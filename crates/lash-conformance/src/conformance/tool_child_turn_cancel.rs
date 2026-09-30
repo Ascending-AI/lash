@@ -767,7 +767,7 @@ pub async fn cancel_dispositions_survive_group_child_teardown_and_redrive(
             .expect("read root terminal")
             .expect("cancellation committed root terminal evidence");
         assert!(
-            matches!(root.cause, crate::RootTerminalCause::Committed { stop: Some(TurnStop::Cancelled { evidence: ref recorded }), .. } if recorded == evidence)
+            matches!(root.cause, crate::RootTerminalCause::Committed { outcome: crate::store::RootCommittedOutcome::Stopped(TurnStop::Cancelled { evidence: ref recorded }), .. } if recorded == evidence)
         );
 
         wait_until("the cancel-ignoring tool child is dropped", || {

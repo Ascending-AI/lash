@@ -8,6 +8,7 @@ use lash_core::store::{HistoryAnchor, HistoryBudget};
 use lash_restate_test::{CrashPoint as EngineCut, CrashRule};
 
 use super::{Staged, crash_and_restart, send, session_name};
+use crate::crash_matrix::catalog_audit;
 use crate::crash_matrix::invariants::{CustomCheck, Expected};
 use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 use crate::crash_matrix::{CrashPoint, Seam};
@@ -35,6 +36,7 @@ fn core() -> CoreBuild {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
         lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -96,11 +98,7 @@ fn published(session: lash_core::SessionId) -> CustomCheck {
                 Err(error) => return vec![format!("create exposed no definition ID: {error}")],
             };
             let backend = world.backend();
-            let bytes = match backend
-                .process_definitions()
-                .get_process_definition(&id)
-                .await
-            {
+            let bytes = match backend.definition_store().get_process_definition(&id).await {
                 Ok(Some(bytes)) => bytes,
                 other => return vec![format!("committed definition is missing: {other:?}")],
             };
@@ -155,6 +153,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         notes: vec![format!("create publication cut={point:?}")],
         expected: Expected {
             custom: vec![("definition_create", published(session))],
+            audits: vec![("catalog_names", catalog_audit::no_catalog_name())],
             ..Default::default()
         },
     })

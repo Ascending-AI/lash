@@ -2,10 +2,10 @@ use compact_str::ToCompactString;
 use lashlang::{
     AbilityOp, AbilityOutcome, AssignTarget, Declaration, ExecutionHost, ExecutionHostError,
     ExecutionMode, Expr, FunctionExpr, HostDescriptor, ImageValue, JavaScriptBinaryOp,
-    JavaScriptLogicalOp, JavaScriptUnaryOp, LASH_PROCESS_NAME_KEY, LashlangAbilities,
-    LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue, Program,
-    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Record, State, TypeExpr, TypeField, Value, from_json,
+    JavaScriptLogicalOp, JavaScriptUnaryOp, LashlangAbilities, LashlangHostCatalog,
+    LashlangHostEnvironment, LinkedModule, ListValue, Program, ProjectedBindings,
+    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
+    State, TypeExpr, TypeField, Value, from_json,
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};

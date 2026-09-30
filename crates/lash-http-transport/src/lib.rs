@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod allocation_counter;
 mod error;
 mod http;
 

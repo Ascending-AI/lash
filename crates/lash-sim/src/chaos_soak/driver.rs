@@ -16,7 +16,7 @@ use crate::crash_matrix::cases::process;
 use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 
 /// How long one step may run in wall time before the epoch calls it hung.
-const STEP_WALL_LIMIT: Duration = Duration::from_secs(300);
+const STEP_WALL_LIMIT: Duration = Duration::from_secs(60);
 
 /// How long a held step waits in wall time for its root to reach the model.
 const HELD_WAIT: Duration = Duration::from_secs(20);
@@ -224,6 +224,7 @@ impl LashlangProcesses {
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build(),
+                std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 backend,
             ),
         }
@@ -312,6 +313,10 @@ impl Driver {
             config,
         )
         .await?;
+        // Held model calls keep ctx.run open intentionally. Waiting for them
+        // to settle spends the whole wall-time budget on every recovery tick.
+        // Recovery passes and end-state checks retain their virtual bounds.
+        world.set_quiesce_budget(Duration::from_millis(50));
         let deployment = world
             .double()?
             .server()
@@ -350,18 +355,54 @@ impl Driver {
     /// deployment died there, so kill what is left of it and bring up a
     /// fresh one. `true` when it restarted.
     pub async fn settle_crash(&mut self) -> Result<bool, String> {
-        let fires = self.world.trip().fires();
-        if fires <= self.handled {
-            return Ok(false);
+        let mut restarted = false;
+        loop {
+            let fires = self.world.trip().fires();
+            if fires <= self.handled {
+                return Ok(restarted);
+            }
+            self.handled = fires;
+            self.counts.crashes += 1;
+            self.world.crash_and_restart().await?;
+            self.live_since_wall_ms = wall_ms();
+            // A replay may crash the new deployment during its restart.
+            // Only the crashes that initiated this restart were answered.
+            restarted = true;
         }
-        self.handled = fires;
-        self.counts.crashes += 1;
-        self.world.crash_and_restart().await?;
-        self.live_since_wall_ms = wall_ms();
-        // The restart's own kill fires nothing, but a crash that raced it
-        // counts as answered by it.
-        self.handled = self.handled.max(self.world.trip().fires());
-        Ok(true)
+    }
+
+    /// Keep manual-time retries moving while a host waits for their answer.
+    /// The next plan tick cannot run until this call returns. Advance to a
+    /// retry's actual due time, preserving backoff and the shared store clock.
+    fn advance_retry(&self) -> Result<(), String> {
+        let server = self.world.double()?.server();
+        if let Some(due) = server
+            .timers()
+            .iter()
+            .filter(|timer| timer.kind == "retry")
+            .map(|timer| timer.fire_at_ms)
+            .min()
+        {
+            self.world
+                .engine()
+                .advance(Duration::from_millis(due.saturating_sub(server.now_ms())));
+        }
+        Ok(())
+    }
+
+    async fn host_answer<F, T>(&self, work: F) -> Result<Option<T>, String>
+    where
+        F: std::future::Future<Output = Option<T>>,
+    {
+        let mut work = std::pin::pin!(work);
+        loop {
+            tokio::select! {
+                biased;
+                () = self.world.trip().fired_beyond(self.handled) => return Ok(None),
+                answer = &mut work => return Ok(answer),
+                () = tokio::time::sleep(Duration::from_millis(50)) => self.advance_retry()?,
+            }
+        }
     }
 
     /// Run `task` as host work, and tell whether a crash fired during it.
@@ -370,8 +411,8 @@ impl Driver {
         F: std::future::Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
-        let before = self.world.trip().fires();
-        let answer = self.world.host_op(task).await;
+        let before = self.handled;
+        let answer = self.host_answer(Box::pin(self.world.host_op(task))).await?;
         let crashed = self.world.trip().fires() > before;
         self.settle_crash().await?;
         Ok((answer, crashed))
@@ -380,11 +421,11 @@ impl Driver {
     /// One recovery tick, cut short when the deployment dies inside it.
     pub async fn tick(&mut self) -> Result<(), String> {
         self.settle_crash().await?;
-        let seen = self.world.trip().fires();
-        let ticked = tokio::select! {
-            ticked = self.world.tick() => ticked.map(|_| ()),
-            () = self.world.trip().fired_beyond(seen) => Ok(()),
-        };
+        let seen = self.handled;
+        let ticked = self
+            .host_answer(async { Some(self.world.tick().await.map(|_| ())) })
+            .await?
+            .unwrap_or(Ok(()));
         // A crash that fired between the settle and the tick's look at the
         // deployment took it down: the settle below answers it.
         if ticked.is_err() && self.world.trip().fires() <= seen {
@@ -400,7 +441,10 @@ impl Driver {
         match tokio::time::timeout(STEP_WALL_LIMIT, Box::pin(self.run_step(seed, step))).await {
             Ok(outcome) => outcome,
             Err(_) => Err(format!(
-                "the step ran past {STEP_WALL_LIMIT:?} of wall time: the host or the engine hung; {:?}",
+                "the step ran past {STEP_WALL_LIMIT:?} of wall time: the host or the engine hung; crashes {}/{} handled; timers {:?}; {:?}",
+                self.handled,
+                self.world.trip().fires(),
+                self.world.double()?.server().timers(),
                 crate::crash_matrix::invariants::diagnose(&self.world).await
             )),
         }
@@ -558,9 +602,10 @@ impl Driver {
             }
             Step::Kill => {
                 self.counts.kills += 1;
+                self.handled = self.world.trip().fires();
                 self.world.crash_and_restart().await?;
                 self.live_since_wall_ms = wall_ms();
-                self.handled = self.handled.max(self.world.trip().fires());
+                self.settle_crash().await?;
                 Ok(String::new())
             }
             Step::ArmEngineCut { service, index } => {
@@ -684,12 +729,13 @@ impl Driver {
                 // cancel or the delete that follows answers for it.
                 return Ok(admission);
             }
-            let seen = self.world.trip().fires();
+            let seen = self.handled;
             tokio::select! {
                 () = tokio::time::sleep(Duration::from_millis(10)) => {}
                 () = self.world.trip().fired_beyond(seen) => {}
             }
             self.settle_crash().await?;
+            self.advance_retry()?;
         }
         // The root runs: a child it registers lives until it ends, as a
         // tool call's child process would.
@@ -802,7 +848,9 @@ impl Driver {
         let mut pinned = 0;
         let mut unanswered = 0;
         let admission = loop {
-            let deleted = host::delete_session(&self.world, &id).await;
+            let deleted = self
+                .host_answer(host::delete_session(&self.world, &id))
+                .await?;
             self.settle_crash().await?;
             match deleted {
                 Some(Ok(())) => break Admission::Known,
@@ -857,7 +905,13 @@ impl Driver {
         self.starts += 1;
         let mut started = None;
         for _ in 0..5 {
-            let answer = host::start_process(&self.world, request.clone(), &operation).await;
+            let answer = self
+                .host_answer(host::start_process(
+                    &self.world,
+                    request.clone(),
+                    &operation,
+                ))
+                .await?;
             self.settle_crash().await?;
             match answer {
                 Some(Ok(process_id)) => {
@@ -1166,4 +1220,66 @@ fn invocation_input(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_host_answer_drives_its_manual_time_retry() {
+        let mut driver = Driver::new(0x4402).await.expect("world");
+        let engine = driver.world.double().expect("double").clone();
+        let server = engine.server().clone();
+        let before = server.now_ms();
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            driver.host(async move {
+                engine
+                    .run_crashed_then_redriven(
+                        lash_core::AdmittedScope::runtime_operation("retry-budget"),
+                        Arc::new(|_| Box::pin(async { panic!("first host attempt fails") })),
+                        Arc::new(|_| Box::pin(async {})),
+                    )
+                    .await
+            }),
+        )
+        .await;
+        let timers = server.timers();
+        let advanced = server.now_ms().saturating_sub(before);
+        driver.world.finish().await;
+        assert!(result.is_ok(), "host waits for virtual retry: {timers:?}");
+        assert_eq!(
+            result.expect("bounded answer").expect("host"),
+            (Some(Ok(())), false)
+        );
+        assert!(
+            advanced >= 500,
+            "preserve the retry's backoff: {advanced}ms"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_crash_before_host_admission_is_not_missed() {
+        let mut driver = Driver::new(0x4402).await.expect("world");
+        driver
+            .world
+            .trip()
+            .fire("between the step and host admission");
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            driver.host(std::future::pending::<()>()),
+        )
+        .await;
+        driver.world.finish().await;
+        assert!(
+            result.is_ok(),
+            "an already-fired crash must interrupt host work instead of waiting for another crash"
+        );
+        assert_eq!(
+            result.expect("bounded host call").expect("restart"),
+            (None, true)
+        );
+        assert_eq!(driver.counts.crashes, 1);
+    }
 }

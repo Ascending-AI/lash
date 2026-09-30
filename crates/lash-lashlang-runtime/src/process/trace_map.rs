@@ -5,12 +5,6 @@ use lash_trace::{
     TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
 };
 
-/// The admitted artifact's graph: identity, structure and sites, with no
-/// dialect text (a trace map carries none).
-fn artifact_graph(artifact: &lashlang::ModuleArtifact) -> lashlang::WorkflowGraph {
-    lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText)
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum TraceLanguageExecutionMapError {
     #[error("failed to read Lashlang module artifact: {0}")]
@@ -29,16 +23,17 @@ pub enum TraceLanguageExecutionMapError {
 /// This is independent of trace delivery: a host can call it after attaching
 /// to a resumed process whose initial `ExecutionStarted` event is unavailable.
 pub async fn trace_lashlang_process_map_snapshot(
+    workers: &lash_vm_client::service::Service,
     store: &lashlang::LashlangArtifacts,
     input: &crate::LashlangProcessInput,
 ) -> Result<TraceLanguageExecutionMap, TraceLanguageExecutionMapError> {
-    let artifact = store
-        .get_module_artifact(&input.module_ref)
+    let artifact = workers
+        .inspect_artifact(store, &input.module_ref)
         .await?
         .ok_or_else(|| {
             TraceLanguageExecutionMapError::ArtifactMissing(input.module_ref.to_string())
         })?;
-    trace_lashlang_process_map(&artifact, &input.process_name).ok_or_else(|| {
+    trace_lashlang_process_map(&artifact.graph, &input.process_name).ok_or_else(|| {
         TraceLanguageExecutionMapError::ProcessMissing {
             module_ref: input.module_ref.to_string(),
             process_name: input.process_name.clone(),
@@ -52,16 +47,15 @@ pub async fn trace_lashlang_process_map_snapshot(
 /// resumed segment does not need to repeat `ExecutionStarted` to make its
 /// definition discoverable.
 pub fn trace_lashlang_process_map(
-    artifact: &lashlang::ModuleArtifact,
+    graph: &lashlang::WorkflowGraph,
     process_name: &str,
 ) -> Option<TraceLanguageExecutionMap> {
-    let graph = artifact_graph(artifact);
     let process = graph.process(process_name)?;
     Some(trace_workflow_subgraph(&process.body))
 }
 
-pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecutionMap {
-    trace_workflow_subgraph(&artifact_graph(artifact).main)
+pub fn trace_lashlang_main_map(graph: &lashlang::WorkflowGraph) -> TraceLanguageExecutionMap {
+    trace_workflow_subgraph(&graph.main)
 }
 
 type TraceNodeKey = (String, lash_sansio::ExecutionNodeKind);
@@ -243,8 +237,12 @@ mod tests {
             lashlang::Expr::Block(expressions) => expressions,
             _ => unreachable!(),
         }));
-        let graph = artifact_graph(&linked.artifact);
-        let map = trace_lashlang_main_map(&linked.artifact);
+        let graph =
+            lashlang::workflow_graph_from_artifact(&linked.artifact, &lashlang::NoStatementText);
+        let map = trace_lashlang_main_map(&lashlang::workflow_graph_from_artifact(
+            &linked.artifact,
+            &lashlang::NoStatementText,
+        ));
         assert_map_contract(&map, &graph.main);
     }
 
@@ -254,9 +252,14 @@ mod tests {
             vec![b::process("worker", Vec::new(), body())],
             Vec::new(),
         ));
-        let graph = artifact_graph(&linked.artifact);
+        let graph =
+            lashlang::workflow_graph_from_artifact(&linked.artifact, &lashlang::NoStatementText);
         let process = graph.process("worker").expect("worker graph");
-        let map = trace_lashlang_process_map(&linked.artifact, "worker").expect("worker map");
+        let map = trace_lashlang_process_map(
+            &lashlang::workflow_graph_from_artifact(&linked.artifact, &lashlang::NoStatementText),
+            "worker",
+        )
+        .expect("worker map");
         assert_map_contract(&map, &process.body);
     }
 }

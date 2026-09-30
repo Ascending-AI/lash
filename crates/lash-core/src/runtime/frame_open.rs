@@ -11,8 +11,11 @@
 //!   primitive);
 //! - resets the live interpreter from the new frame's seed through
 //!   [`LashRuntime::restore_protocol_session_after_frame_open`], once the open
-//!   is accepted: after its commit when it commits, at once when it only
-//!   stages.
+//!   is accepted: after its commit when it commits, at once on a storeless
+//!   runtime, which has nothing to commit.
+//!
+//! A store-backed session's host opens are session commands its drive
+//! applies at a turn boundary and commits with their settlement (FIG-4202).
 //!
 //! Initial-frame construction (`ensure_agent_frame_initialized_with_clock`,
 //! `reset_initial_agent_frame_with_clock`) is the bootstrap exception: it
@@ -69,25 +72,30 @@ impl LashRuntime {
         })
     }
 
-    /// Open a new Agent Frame, or replay the current one idempotently.
+    /// Open a new Agent Frame on a storeless runtime, or replay the current
+    /// one idempotently.
     ///
-    /// The frame is staged in resident state and becomes durable with the
-    /// session's next commit; the live interpreter restarts from its seed at
-    /// once, as after every accepted open (FIG-4134, F5).
+    /// A storeless runtime has no durable head: the frame opens in resident
+    /// state and the live interpreter restarts from its seed at once, as
+    /// after every accepted open (FIG-4134, F5). A store-backed session's
+    /// head is owned by its bound turn, so its host opens are
+    /// [`SessionCommand::OpenAgentFrame`](crate::SessionCommand::OpenAgentFrame)
+    /// commands its drive applies and commits at a turn boundary (FIG-4202);
+    /// calling this on one is refused with
+    /// [`RuntimeErrorCode::SessionCommandRequired`].
     ///
     /// Refuses with
     /// [`RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported`] when the
-    /// key names a persisted frame that is not current: making it resident
-    /// would replace session configuration without a commanded config patch.
-    /// Refuses with [`RuntimeErrorCode::ExecutionStateCaptureFailed`], before
-    /// anything is opened, a seed that carries artifacts: only an open that
-    /// commits its own frame (a context-pressure hook, an administrative
-    /// compaction, `continue_as`) can hand them to the new frame, so a staged
-    /// one would lose them.
-    pub async fn open_agent_frame(
+    /// key names a frame of the session that is not current. Refuses with
+    /// [`RuntimeErrorCode::ExecutionStateCaptureFailed`], before anything is
+    /// opened, a seed that carries artifacts: only an open that commits its
+    /// own frame with a carry (a context-pressure hook, an administrative
+    /// compaction, `continue_as`) can hand them to the new frame.
+    pub async fn open_storeless_agent_frame(
         &mut self,
         request: crate::OpenAgentFrameRequest,
     ) -> Result<crate::OpenAgentFrameOutcome, RuntimeError> {
+        self.refuse_store_backed_host_write("open_agent_frame")?;
         let opened = self.stage_agent_frame(request, StagedOpen::Caller).await?;
         if opened.result.opened {
             self.restore_protocol_session_after_frame_open().await?;
@@ -184,9 +192,11 @@ impl LashRuntime {
 /// Who stages an open, and so which checks it needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::runtime) enum StagedOpen {
-    /// A caller naming its own frame key: a key can name a persisted
-    /// historical frame, which is refused, and the open commits nothing of
-    /// its own, so a seed that carries artifacts is refused too.
+    /// A caller naming its own frame key, a storeless runtime's host or a
+    /// host's `OpenAgentFrame` command (FIG-4202): a key can name a persisted
+    /// historical frame, which is refused, and the open carries nothing out
+    /// of the frame it leaves, so a seed that carries artifacts is refused
+    /// too.
     Caller,
     /// An administrative compaction, whose key core derives from the
     /// compaction's scope and the frame current at its recorded base, as a

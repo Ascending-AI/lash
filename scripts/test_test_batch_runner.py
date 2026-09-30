@@ -25,10 +25,12 @@ class BatchRunnerTests(unittest.TestCase):
                 member.write_text(
                     '#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\n'
                     'name=Path(sys.argv[0]).name\n'
-                    'Path(os.environ["TEST_TMPDIR"],name+".args").write_text(json.dumps(sys.argv[1:]))\n'
-                    'count = 0 if "missing" in sys.argv else 1\n'
+                    'record=Path(os.environ["TEST_TMPDIR"],name+".args")\n'
+                    'if not record.exists(): record.write_text(json.dumps(sys.argv[1:]))\n'
+                    'count = 0 if "missing" in sys.argv or "--ignored" in sys.argv else 1\n'
+                    'case=next((a for a in sys.argv[1:] if not a.startswith("-")), name+"::case")\n'
                     'if "--list" in sys.argv:\n'
-                    '    if count: print(name+"::case: test")\n'
+                    '    if count: print(case+": test")\n'
                     '    print(str(count)+" tests, 0 benchmarks")\n'
                     'else:\n'
                     '    print("member-output "+name)\n'
@@ -40,7 +42,8 @@ class BatchRunnerTests(unittest.TestCase):
             manifest.write_text("_main/first\n_main/second\n")
             xml = root / "test.xml"
             result = subprocess.run(
-                ["bash", str(RUNNER), *args], text=True, capture_output=True, timeout=10,
+                ["bash", str(RUNNER), "2", "_main/first", "_main/second", *args],
+                cwd=root, text=True, capture_output=True, timeout=10,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
                          XML_OUTPUT_FILE=str(xml),
@@ -73,6 +76,12 @@ class BatchRunnerTests(unittest.TestCase):
                 result, _ = self.invoke(*args)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("no tests matched", result.stderr)
+
+    def test_ignored_only_selection_requires_an_execution(self):
+        result, observed = self.invoke("--ignored")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(observed, [["--ignored"], ["--ignored"]])
+        self.assertIn("no executable tests matched", result.stderr)
 
     def test_plain_success_stays_compact_and_failure_prints_its_member(self):
         success, observed = self.invoke()
@@ -122,7 +131,9 @@ class BatchRunnerTests(unittest.TestCase):
             manifest = root / "manifest"
             manifest.write_text("".join(f"_main/{name}\n" for name in names))
             result = subprocess.run(
-                ["bash", str(RUNNER)], text=True, capture_output=True, timeout=20,
+                ["bash", str(RUNNER), str(len(names)),
+                 *(f"_main/{name}" for name in names)],
+                cwd=root, text=True, capture_output=True, timeout=20,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
                          LASH_BATCH_JOBS="2", XML_OUTPUT_FILE=str(root / "test.xml")),

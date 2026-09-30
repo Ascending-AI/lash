@@ -48,13 +48,13 @@ pub struct DurableParts {
 }
 
 /// One root's fragment in a capture.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DurableFragment {
     /// The fragment is byte-identical to the one the baseline recorded, so its
     /// previously persisted body still stands.
     Unchanged,
     /// The fragment's canonical bytes.
-    Changed(Vec<u8>),
+    Changed(#[serde(with = "serde_bytes")] Vec<u8>),
 }
 
 /// What a capture wrote, reduced to what the next capture must compare.

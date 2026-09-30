@@ -618,6 +618,22 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
     }
 }
 
+/// Verified executable bytes for immutable artifact publication. Hosts may
+/// publish worker-produced bytes without invoking a semantic artifact decoder.
+pub trait ModuleArtifactBytes: Send + Sync {
+    fn artifact_ref(&self) -> &ModuleRef;
+    fn encoded_artifact(&self) -> Result<Vec<u8>, ArtifactStoreError>;
+}
+impl ModuleArtifactBytes for ModuleArtifact {
+    fn artifact_ref(&self) -> &ModuleRef {
+        self.module_ref()
+    }
+    fn encoded_artifact(&self) -> Result<Vec<u8>, ArtifactStoreError> {
+        self.to_store_bytes()
+            .map_err(|error| ArtifactStoreError::Encode(error.to_string()))
+    }
+}
+
 /// The typed Lashlang view of a store set's module-artifact port.
 ///
 /// The port ([`ModuleArtifactStore`]) keeps a module's verified store bytes
@@ -659,16 +675,14 @@ impl LashlangArtifacts {
 
     /// Publish an immutable module and add the claim's edge to it (ADR 0113
     /// §2.1): refused `ReferrerEnded` when the claim's referrer has a fence.
-    pub async fn publish_module_artifact(
+    pub async fn publish_module_artifact<T: ModuleArtifactBytes + ?Sized>(
         &self,
         claim: &ReferrerClaim,
-        artifact: &ModuleArtifact,
+        artifact: &T,
     ) -> Result<(), ArtifactStoreError> {
-        let bytes = artifact
-            .to_store_bytes()
-            .map_err(|err| ArtifactStoreError::Encode(err.to_string()))?;
+        let bytes = artifact.encoded_artifact()?;
         self.store
-            .publish_module_artifact(claim, artifact.module_ref().as_str(), &bytes)
+            .publish_module_artifact(claim, artifact.artifact_ref().as_str(), &bytes)
             .await
     }
 

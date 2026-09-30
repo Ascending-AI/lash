@@ -31,7 +31,6 @@
 //! root         spawn     process.start           process=process-001 label="child"
 //! process-001  outcome   process.success         value="left"
 //! root         commit    checkpoint.commit       rev=0->1
-//! root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
 //! root                     turn_state            stored logical=412B
 //! root                     tool_state            ref (unchanged)
 //! root         outcome   turn.final_value        value={"joined":["left","right"]}
@@ -418,64 +417,6 @@ pub struct Component {
     body: ComponentBody,
 }
 
-/// Typed usage facts carried by every [`Kind::Commit`] entry.
-///
-/// This is separate from [`Component`]: usage is accounting data, not an
-/// opaque checkpoint body whose byte size says whether it changed. The
-/// renderer requires this value for every commit and always emits it as one
-/// line, so a harness cannot silently omit accounting from its golden.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Usage {
-    entries: usize,
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_input_tokens: i64,
-    cache_write_input_tokens: i64,
-    reasoning_output_tokens: i64,
-}
-
-impl Usage {
-    /// Usage rows and canonical token buckets submitted by one commit.
-    pub const fn new(
-        entries: usize,
-        input_tokens: i64,
-        output_tokens: i64,
-        cache_read_input_tokens: i64,
-        cache_write_input_tokens: i64,
-        reasoning_output_tokens: i64,
-    ) -> Self {
-        Self {
-            entries,
-            input_tokens,
-            output_tokens,
-            cache_read_input_tokens,
-            cache_write_input_tokens,
-            reasoning_output_tokens,
-        }
-    }
-
-    /// A commit seam that submitted no usage rows.
-    pub const fn none() -> Self {
-        Self::new(0, 0, 0, 0, 0, 0)
-    }
-
-    fn rendered_body(&self) -> String {
-        let total = i128::from(self.input_tokens)
-            + i128::from(self.output_tokens)
-            + i128::from(self.cache_read_input_tokens)
-            + i128::from(self.cache_write_input_tokens);
-        format!(
-            "entries={} input={} output={} cache_read={} cache_write={} reasoning={} total={total}",
-            self.entries,
-            self.input_tokens,
-            self.output_tokens,
-            self.cache_read_input_tokens,
-            self.cache_write_input_tokens,
-            self.reasoning_output_tokens,
-        )
-    }
-}
-
 impl Component {
     /// A component whose body reached the store.
     ///
@@ -531,7 +472,6 @@ pub struct Entry {
     kind: Kind,
     event: String,
     attrs: Vec<Attr>,
-    usage: Option<Usage>,
     components: Vec<Component>,
 }
 
@@ -545,7 +485,6 @@ impl Entry {
             kind,
             event: event.into(),
             attrs: Vec::new(),
-            usage: None,
             components: Vec::new(),
         }
     }
@@ -555,27 +494,17 @@ impl Entry {
     /// Harnesses that observe a commit without a revision (the sans-io protocol
     /// harnesses see a `CheckpointKind` request, not a store commit) build the
     /// line with [`Entry::new`] instead and describe what they actually saw.
-    pub fn commit(actor: Actor, revision_before: u64, revision_after: u64, usage: Usage) -> Self {
+    ///
+    /// A commit carries no usage: model usage is owner-scoped accounting
+    /// delivered per call, never a commit component (ADR 0125).
+    pub fn commit(actor: Actor, revision_before: u64, revision_after: u64) -> Self {
         Self::new(Kind::Commit, actor, CHECKPOINT_COMMIT_EVENT)
             .attr(Attr::revision(revision_before, revision_after))
-            .usage(usage)
     }
 
     /// Attach a `key=value` attribute. Attribute order is the order recorded.
     pub fn attr(mut self, attr: Attr) -> Self {
         self.attrs.push(attr);
-        self
-    }
-
-    /// Attach the mandatory typed usage facts for a commit entry.
-    pub fn usage(mut self, usage: Usage) -> Self {
-        debug_assert_eq!(
-            self.kind,
-            Kind::Commit,
-            "usage belongs to a commit line, not to {}",
-            self.kind.as_str()
-        );
-        self.usage = Some(usage);
         self
     }
 
@@ -683,26 +612,6 @@ impl Transcript {
                 line.push_str(&attrs);
             }
             writeln!(output, "{}", line.trim_end()).expect("write transcript line");
-            if entry.kind == Kind::Commit {
-                let usage = entry.usage.as_ref().unwrap_or_else(|| {
-                    panic!(
-                        "commit entry `{}` omitted mandatory typed usage facts",
-                        entry.event
-                    )
-                });
-                writeln!(
-                    output,
-                    "{}",
-                    format!(
-                        "{actor:<ACTOR_WIDTH$}  {blank:<KIND_WIDTH$}  {name:<EVENT_WIDTH$}  {body}",
-                        blank = "",
-                        name = "  usage",
-                        body = usage.rendered_body(),
-                    )
-                    .trim_end()
-                )
-                .expect("write transcript usage line");
-            }
             for component in &entry.components {
                 let indented = format!("  {}", component.name);
                 writeln!(
@@ -1000,8 +909,7 @@ mod tests {
         transcript
             .record(
                 Entry::new(Kind::Commit, session("s"), "checkpoint.request")
-                    .attr(Attr::debug_token("checkpoint", &Sample::AfterWork))
-                    .usage(Usage::none()),
+                    .attr(Attr::debug_token("checkpoint", &Sample::AfterWork)),
             )
             .record(
                 Entry::new(Kind::Tool, session("s"), "tool.result")
@@ -1046,26 +954,19 @@ mod tests {
     fn durable_commit_lines_carry_the_tokens_the_pr_rule_keys_on() {
         let mut transcript = Transcript::new();
         transcript.record(
-            Entry::commit(session("s"), 1, 2, Usage::new(1, 11, 7, 3, 2, 4))
+            Entry::commit(session("s"), 1, 2)
                 .component(Component::stored("turn_state", Some(412)))
                 .component(Component::unchanged_ref("tool_state")),
         );
         let rendered = transcript.render();
         insta::assert_snapshot!(rendered, @r###"
         session-001  commit    checkpoint.commit       rev=1->2
-        session-001              usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
         session-001              turn_state            stored logical=412B
         session-001              tool_state            ref (unchanged)
         "###);
         assert!(rendered.contains("rev=1->2"), "{rendered}");
         assert!(rendered.contains("stored logical=412B"), "{rendered}");
         assert!(rendered.contains("ref (unchanged)"), "{rendered}");
-        assert!(
-            rendered.contains(
-                "usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23"
-            ),
-            "{rendered}"
-        );
         assert!(
             DURABLE_WRITE_EVENTS.contains(&CHECKPOINT_COMMIT_EVENT),
             "the commit event must stay in the durable-marker list"
@@ -1076,7 +977,7 @@ mod tests {
     fn opaque_tool_state_sizes_are_normalized_by_the_renderer() {
         let mut transcript = Transcript::new();
         transcript.record(
-            Entry::commit(session("s"), 0, 1, Usage::none())
+            Entry::commit(session("s"), 0, 1)
                 .component(Component::stored("turn_state", Some(240)))
                 .component(Component::stored("tool_state", Some(6_800)))
                 .component(Component::stored("plugin_state", Some(342)))
@@ -1086,7 +987,6 @@ mod tests {
         let rendered = transcript.render();
         insta::assert_snapshot!(rendered, @r###"
         session-001  commit    checkpoint.commit       rev=0->1
-        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=240B
         session-001              tool_state            stored logical=<opaque>
         session-001              plugin_state          stored logical=342B
@@ -1100,18 +1000,10 @@ mod tests {
             let mut transcript = Transcript::new();
             transcript
                 .record(Entry::new(Kind::Ingress, session("s"), "turn.start"))
-                .record(Entry::commit(session("s"), 0, 1, Usage::none()));
+                .record(Entry::commit(session("s"), 0, 1));
             transcript.render()
         };
         assert_eq!(build(), build());
-    }
-
-    #[test]
-    #[should_panic(expected = "omitted mandatory typed usage facts")]
-    fn a_commit_without_usage_cannot_render() {
-        let mut transcript = Transcript::new();
-        transcript.record(Entry::new(Kind::Commit, session("s"), "checkpoint.request"));
-        transcript.render();
     }
 
     #[test]

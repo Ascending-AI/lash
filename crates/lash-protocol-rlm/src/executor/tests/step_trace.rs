@@ -102,7 +102,7 @@ async fn run_step_with_sink(
         &mut RlmExecutionState::new(),
         ctx,
         ExecRequest { code: code.into() },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         Some(Arc::new(InboxResolver)),
         RlmProjectedBindings::default(),

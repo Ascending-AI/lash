@@ -236,6 +236,13 @@ pub trait ConformanceTurnRunner: Send + Sync {
     /// (FIG-4068). Nothing a later scenario observes may change.
     async fn scenario_finished(&self) {}
 
+    /// Waits until every dispatch and child invocation for these groups completed.
+    /// A seated cancellation is insufficient: a late child callback may
+    /// still be running and attempting to publish its final.
+    async fn await_group_quiescence(&self, _group_keys: &[String]) {
+        panic!("this tier must expose group invocation quiescence for the cancellation law");
+    }
+
     /// The replay keys of every effect the tier journaled for `scope`'s
     /// turn, or `None` when this runner cannot read them. A law finds the
     /// key of a [`JournalCut`] here, from a probe run of the same turn.

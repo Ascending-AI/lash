@@ -1840,6 +1840,14 @@
         }
       ]
     },
+    "WorkflowDiagnosticClassification": {
+      "description": "Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.",
+      "enum": [
+        "definite",
+        "advisory"
+      ],
+      "type": "string"
+    },
     "WorkflowDiagnosticKind": {
       "description": "Closed host-facing vocabulary for linker diagnostics.",
       "enum": [
@@ -2584,6 +2592,9 @@
     },
     "WorkflowTypeDiagnostic": {
       "properties": {
+        "classification": {
+          "$ref": "#/definitions/WorkflowDiagnosticClassification"
+        },
         "kind": {
           "$ref": "#/definitions/WorkflowDiagnosticKind"
         },
@@ -2614,6 +2625,7 @@
         }
       },
       "required": [
+        "classification",
         "kind",
         "message",
         "node_id"

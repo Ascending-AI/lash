@@ -14,8 +14,8 @@ use lash_core_execution::Clock;
 
 use crate::location::{DatabaseLocation, MemoryAnchors, SqliteLocation};
 use crate::{
-    BuiltinBlobProfile, SqliteAttachmentStore, SqliteDatabase, SqliteProcessDefinitionRegistry,
-    SqliteProcessRegistry, SqliteStore, SqliteTriggerStore, StoreOptions,
+    BuiltinBlobProfile, SqliteAttachmentStore, SqliteDatabase, SqliteProcessRegistry, SqliteStore,
+    SqliteTriggerStore, StoreOptions,
 };
 
 /// A file store set has some of its databases, but cannot open until all
@@ -111,7 +111,6 @@ struct StoreParts {
     clock: Arc<dyn Clock>,
     process_registry: Arc<SqliteProcessRegistry>,
     trigger_store: Arc<SqliteTriggerStore>,
-    process_definitions: Arc<SqliteProcessDefinitionRegistry>,
     process_env_store: Arc<SqliteStore>,
     attachment_store: Arc<SqliteAttachmentStore>,
     recovery_leader: Arc<crate::recovery_leader::SqliteRecoveryLeader>,
@@ -172,17 +171,17 @@ impl SqliteStoreSet {
         Self::assemble(location, identity, None, options, clock).await
     }
 
-    /// A fresh named in-memory store set. SQLite caps each memdb at 1 GiB.
+    /// A fresh named SQLite in-memory store set. SQLite caps each memdb at 1 GiB.
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
         Self::memory_with_clock(system_clock()).await
     }
 
-    /// A fresh named in-memory store set on `clock`.
+    /// A fresh named SQLite in-memory store set on `clock`.
     pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options_and_clock(SqliteStoreSetOptions::memory(), clock).await
     }
 
-    /// A fresh named in-memory store set with explicit options and clock.
+    /// A fresh named SQLite in-memory store set with explicit options and clock.
     pub async fn memory_with_options_and_clock(
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
@@ -272,17 +271,15 @@ impl SqliteStoreSet {
         // Each database carries its own copy of `F`, which its writer fence
         // reads (ADR 0115 §1.2); `check_set` above refused a set whose copies
         // disagree.
-        let process_registry = Arc::new(
-            SqliteProcessRegistry::open_at(
-                &registry,
-                Arc::clone(&clock),
-                #[cfg(feature = "testing")]
-                None,
-            )
-            .await?
-            .with_wake_delivery_config(options.wake_delivery)
-            .with_process_id_mint_for_testing(options.process_id_mint.clone()),
-        );
+        let process_registry = SqliteProcessRegistry::open_at(
+            &registry,
+            Arc::clone(&clock),
+            #[cfg(feature = "testing")]
+            None,
+        )
+        .await?
+        .with_wake_delivery_config(options.wake_delivery)
+        .with_process_id_mint_for_testing(options.process_id_mint.clone());
         crate::lifecycle::attach_process_registry(
             &process_env_store.conn,
             registry.target(),
@@ -293,8 +290,13 @@ impl SqliteStoreSet {
         let process_env_store = Arc::new(process_env_store);
         let trigger_store =
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);
-        let process_definitions =
-            Arc::new(SqliteProcessDefinitionRegistry::open_at(&core, Arc::clone(&clock)).await?);
+        // The registry reads a delivery's binding when it registers the
+        // delivery's start (FIG-4369).
+        let process_registry = Arc::new(
+            process_registry
+                .with_attached_trigger_store(&triggers)
+                .await?,
+        );
         let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
         let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
             process_env_store.conn.clone(),
@@ -309,7 +311,6 @@ impl SqliteStoreSet {
                 clock,
                 process_registry,
                 trigger_store,
-                process_definitions,
                 process_env_store,
                 attachment_store,
                 recovery_leader,
@@ -439,11 +440,6 @@ impl SqliteStoreSet {
         Arc::clone(&self.inner.trigger_store)
     }
 
-    /// The named process-definition registry, in the durable-core catalog.
-    pub fn process_definition_registry(&self) -> Arc<SqliteProcessDefinitionRegistry> {
-        Arc::clone(&self.inner.process_definitions)
-    }
-
     /// The durable-core [`SqliteStore`] that serves process execution environments
     /// and Lashlang artifacts. Unbound to any session.
     pub fn process_env_store(&self) -> Arc<SqliteStore> {
@@ -464,6 +460,11 @@ impl SqliteStoreSet {
 }
 
 impl lash_core_execution::StoreSet for SqliteStoreSet {
+    fn usage_accounting(&self) -> Arc<dyn lash_core_execution::UsageAccountingStore> {
+        Arc::clone(&self.inner.process_env_store)
+            as Arc<dyn lash_core_execution::UsageAccountingStore>
+    }
+
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
         &self.inner.binding
     }
@@ -491,13 +492,13 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         SqliteStoreSet::trigger_store(self)
     }
 
-    fn process_definition_registry(
-        &self,
-    ) -> Arc<dyn lash_core_execution::ProcessDefinitionRegistry> {
-        SqliteStoreSet::process_definition_registry(self)
+    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
+        SqliteStoreSet::process_env_store(self)
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
+    fn worker_recovery(
+        &self,
+    ) -> Arc<dyn lash_core_execution::store::worker_recovery::WorkerRecoveryStore> {
         SqliteStoreSet::process_env_store(self)
     }
 
@@ -513,7 +514,7 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
 
     /// Definition descriptors live beside the modules and environments their
     /// manifests name, so one transaction holds a whole closure.
-    fn process_definitions(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
         SqliteStoreSet::process_env_store(self)
     }
 
@@ -670,12 +671,12 @@ mod tests {
             .expect("read the catalog")
     }
 
-    /// A memory stores's databases live exactly as long as the stores
+    /// A SQLite memory store set's databases live exactly as long as the stores
     /// or a handle taken from it: data written through one handle is read
     /// through another after the writer is gone, and the databases disappear
     /// once the last handle drops.
     #[tokio::test]
-    async fn a_memory_stores_lives_until_its_last_handle_drops() {
+    async fn a_sqlite_memory_store_lives_until_its_last_handle_drops() {
         let stores = SqliteStoreSet::memory()
             .await
             .expect("open the memory stores");

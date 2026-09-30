@@ -10,7 +10,9 @@ use lash_vm_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::authority::{Invocation, OperationRequest, decode_value, encode_value};
+use crate::authority::{
+    Invocation, OperationRequest, OperationRequestCodec, decode_value, encode_value,
+};
 use crate::transport::{WorkerRead, WorkerTransport};
 
 use super::pool::PoolShared;
@@ -217,6 +219,9 @@ impl FakeWorker {
 
     fn handle(&mut self, message: ParentMessage) {
         match message {
+            ParentMessage::Prepare { .. } => {
+                self.die(SupervisorEvidence::Exited { code: 1 });
+            }
             ParentMessage::Start(start) => {
                 if self.fault == Some(Fault::DieBeforeStart) {
                     self.die(Self::crash());
@@ -252,6 +257,10 @@ impl FakeWorker {
                     return;
                 }
                 match result.outcome {
+                    EffectOutcome::Cancelled => {
+                        self.emit(WorkerMessage::Cancelled);
+                        return;
+                    }
                     EffectOutcome::Value(value) => self
                         .state
                         .results
@@ -280,7 +289,14 @@ impl FakeWorker {
                 self.pending = None;
                 if self.fault == Some(Fault::DeclinePark) {
                     self.declining = true;
-                    self.request(EffectKind::ParkDeclined, EncodedPayload(Vec::new()));
+                    // The reason, encoded as the worker entry encodes it.
+                    self.request(
+                        EffectKind::ParkDeclined,
+                        EncodedPayload(
+                            rmp_serde::to_vec_named("the fake worker declines its park")
+                                .unwrap_or_default(),
+                        ),
+                    );
                     return;
                 }
                 // The run stands on the step that issued the request, and
@@ -294,7 +310,7 @@ impl FakeWorker {
             ParentMessage::Reset => {
                 self.state = FakeState::default();
                 self.program = None;
-                self.emit(WorkerMessage::ResetDone);
+                self.emit(WorkerMessage::ResetDone { cpu_nanos: 0 });
             }
             ParentMessage::Shutdown => self.die(SupervisorEvidence::Exited { code: 0 }),
         }
@@ -329,15 +345,30 @@ impl FakeWorker {
             }
             match step {
                 Step::Invoke(invocation) => {
-                    return self.request(
-                        EffectKind::ResourceOperation,
-                        OperationRequest::Invoke(invocation).encode(),
-                    );
+                    return self
+                        .request(EffectKind::ResourceOperation, invocation.request().encode());
                 }
                 Step::Aggregate(members) => {
                     return self.request(
                         EffectKind::ResourceOperationBatch,
-                        OperationRequest::Aggregate { members }.encode(),
+                        OperationRequest::ResourceOperationBatch(
+                            lashlang::ResourceOperationBatch {
+                                leaves: members
+                                    .into_iter()
+                                    .map(|member| {
+                                        let OperationRequest::ResourceOperation(op) =
+                                            member.request()
+                                        else {
+                                            unreachable!()
+                                        };
+                                        lashlang::ResourceOperationBatchLeaf::Operation(*op)
+                                    })
+                                    .collect(),
+                                consumer: lashlang::AggregateConsumer::All,
+                                settled_value_after: None,
+                            },
+                        )
+                        .encode(),
                     );
                 }
                 Step::AwaitHandleOf { from } => {
@@ -351,13 +382,18 @@ impl FakeWorker {
                         .to_string();
                     return self.request(
                         EffectKind::Await,
-                        OperationRequest::Await { handle }.encode(),
+                        OperationRequest::Await(lashlang::Value::String(handle.into())).encode(),
                     );
                 }
                 Step::Sleep(millis) => {
                     return self.request(
                         EffectKind::Sleep,
-                        OperationRequest::Sleep { millis }.encode(),
+                        OperationRequest::Sleep(lashlang::Sleep {
+                            value: lashlang::Value::Number(millis as f64),
+                            kind: lashlang::SleepKind::For,
+                            call_site: None,
+                        })
+                        .encode(),
                     );
                 }
                 Step::Checkpoint(checkpoint) => {

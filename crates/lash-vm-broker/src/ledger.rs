@@ -52,6 +52,10 @@ pub enum AdmittedKind {
     Sleep {
         millis: u64,
     },
+    Control {
+        kind: lash_vm_protocol::EffectKind,
+        payload: lash_vm_protocol::EncodedPayload,
+    },
 }
 
 /// A request the parent admitted: its ordinal, the fingerprint of what it
@@ -61,6 +65,7 @@ pub struct AdmittedOperation {
     pub ordinal: u64,
     pub fingerprint: RequestFingerprint,
     pub kind: AdmittedKind,
+    pub request: Option<lash_vm_protocol::EncodedPayload>,
 }
 
 impl AdmittedOperation {
@@ -72,7 +77,7 @@ impl AdmittedOperation {
                 calls.iter().map(|call| call.call_id.clone()).collect()
             }
             AdmittedKind::Await { grant, .. } => vec![grant.call_id.clone()],
-            AdmittedKind::Sleep { .. } => Vec::new(),
+            AdmittedKind::Sleep { .. } | AdmittedKind::Control { .. } => Vec::new(),
         }
     }
 
@@ -135,11 +140,13 @@ impl ParentLedger {
             ),
             ResolvedRequest::Await { handle, grant } => AdmittedKind::Await { handle, grant },
             ResolvedRequest::Sleep { millis } => AdmittedKind::Sleep { millis },
+            ResolvedRequest::Control { kind, payload } => AdmittedKind::Control { kind, payload },
         };
         AdmittedOperation {
             ordinal,
             fingerprint,
             kind,
+            request: None,
         }
     }
 

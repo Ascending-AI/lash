@@ -62,7 +62,6 @@ pub use lash_core::store::{
     CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION, CURRENT_SESSION_STATE_VERSION,
     RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
     SESSION_CHECKPOINT_SCHEMA_VERSION, SESSION_HEAD_META_SCHEMA_VERSION,
-    USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
 };
 pub use lash_core::{
     PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
@@ -129,8 +128,6 @@ pub enum DurableFormat {
     RecordConfigRequestIdentity,
     /// The identity encoding of a create-session semantic-boundary request.
     CreateSessionRequestIdentity,
-    /// The identity encoding of a usage-ledger semantic-boundary request.
-    UsageLedgerRequestIdentity,
     /// The retained tool-child request of a durable effect group.
     ToolChildRequest,
     /// The semantic settlement a tool child journals on its outcome.
@@ -215,7 +212,6 @@ impl DurableFormat {
             DurableFormat::AppendRequestIdentity => "append request identity",
             DurableFormat::RecordConfigRequestIdentity => "record-config request identity",
             DurableFormat::CreateSessionRequestIdentity => "create-session request identity",
-            DurableFormat::UsageLedgerRequestIdentity => "usage-ledger request identity",
             DurableFormat::ToolChildRequest => "tool child request",
             DurableFormat::ToolSettlement => "tool settlement",
             DurableFormat::ToolAttemptCapture => "tool attempt capture",
@@ -259,7 +255,6 @@ impl DurableFormat {
             DurableFormat::AppendRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::RecordConfigRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::CreateSessionRequestIdentity => UpgradePolicy::Coexist,
-            DurableFormat::UsageLedgerRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::ToolChildRequest => UpgradePolicy::Drain,
             DurableFormat::ToolSettlement => UpgradePolicy::Drain,
             DurableFormat::ToolAttemptCapture => UpgradePolicy::Drain,
@@ -433,13 +428,6 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             version: FormatVersion::Counter(CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION),
             owning_crate: "lash-core",
             constant: "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION",
-            probe: FormatProbe::IdentityOnly,
-        },
-        DurableFormatEntry {
-            format: DurableFormat::UsageLedgerRequestIdentity,
-            version: FormatVersion::Counter(USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION),
-            owning_crate: "lash-core",
-            constant: "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION",
             probe: FormatProbe::IdentityOnly,
         },
         DurableFormatEntry {

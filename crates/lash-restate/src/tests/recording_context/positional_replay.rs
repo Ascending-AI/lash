@@ -34,6 +34,18 @@ impl PositionalReplayContext {
 impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<PositionalReplayContext> {}
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
+    fn send_usage_settlement<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        _owner_key: String,
+        _request: crate::usage_accounting::UsageAccountingSettle,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async move { Ok(()) })
+    }
+
     fn attach_process_terminal<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,

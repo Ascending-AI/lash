@@ -5,8 +5,8 @@
 //! head: a derive-then-append caller whose base was merely overtaken keeps its
 //! work, and only a caller whose base has left the active path is refused. Both
 //! halves are load-bearing and both are asserted here, against every backend,
-//! for both public append entry points (the direct
-//! [`LashRuntime`](crate::LashRuntime) method and the plugin-facing
+//! for both public append entry points (a host's append, a session command
+//! the drive applies at a turn boundary (FIG-4202), and the plugin-facing
 //! [`SessionGraphService`](crate::plugin::SessionGraphService)).
 
 use super::*;
@@ -55,6 +55,7 @@ async fn session_graph_append_tolerates_an_advanced_head(
     // The base a derive-then-append caller reads and derives from.
     let observed_base = Box::pin(append_conformance_plugin_node(
         &mut runtime,
+        store.store().as_ref(),
         "observe-base",
         0,
     ))
@@ -67,9 +68,11 @@ async fn session_graph_append_tolerates_an_advanced_head(
         "the scenario needs the head to have moved past the observed base"
     );
 
-    let result = Box::pin(
-        runtime.append_session_nodes(derived_append_request(&observed_base, "derived-append")),
-    )
+    let result = Box::pin(crate::testing::runtime_helpers::apply_host_append(
+        &mut runtime,
+        store.store().as_ref(),
+        derived_append_request(&observed_base, "derived-append"),
+    ))
     .await
     .expect("an ancestor base is a live branch, not a store error");
 
@@ -78,7 +81,7 @@ async fn session_graph_append_tolerates_an_advanced_head(
         result,
         &observed_base,
         &advanced_leaf,
-        "LashRuntime::append_session_nodes",
+        "the host append command",
     )
     .await;
     assert_ne!(appended, advanced_leaf);
@@ -105,6 +108,7 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
     let mut runtime = append_conformance_runtime(store.store(), &request).await;
     let observed_base = Box::pin(append_conformance_plugin_node(
         &mut runtime,
+        store.store().as_ref(),
         "observe-base",
         0,
     ))
@@ -154,10 +158,11 @@ async fn session_graph_append_rejects_an_abandoned_branch(
         append_conformance_runtime(scenario.branch.store(), &scenario.branch_request).await;
     let before = read_conformance_session(&scenario.branch).await;
 
-    let result = Box::pin(runtime.append_session_nodes(derived_append_request(
-        &scenario.abandoned_base,
-        "abandoned-append",
-    )))
+    let result = Box::pin(crate::testing::runtime_helpers::apply_host_append(
+        &mut runtime,
+        scenario.branch.store().as_ref(),
+        derived_append_request(&scenario.abandoned_base, "abandoned-append"),
+    ))
     .await
     .expect("an abandoned branch is a typed outcome, not a store error");
 
@@ -166,7 +171,8 @@ async fn session_graph_append_rejects_an_abandoned_branch(
         result,
         &scenario.abandoned_base,
         before,
-        "LashRuntime::append_session_nodes",
+        SettlementCommits::One,
+        "the host append command",
     )
     .await;
 }
@@ -204,6 +210,7 @@ async fn session_graph_service_append_rejects_an_abandoned_branch(
         result,
         &scenario.abandoned_base,
         before,
+        SettlementCommits::None,
         "SessionGraphService::append_session_nodes",
     )
     .await;
@@ -238,6 +245,7 @@ async fn abandoned_branch_scenario(
     let mut source_runtime = append_conformance_runtime(source.store(), &source_request).await;
     let fork_point = Box::pin(append_conformance_plugin_node(
         &mut source_runtime,
+        source.store().as_ref(),
         "fork-point",
         0,
     ))
@@ -250,6 +258,7 @@ async fn abandoned_branch_scenario(
     // be abandoned.
     let abandoned_base = Box::pin(append_conformance_plugin_node(
         &mut source_runtime,
+        source.store().as_ref(),
         "abandoned-base",
         1,
     ))
@@ -383,11 +392,23 @@ async fn assert_appended_onto_current_leaf(
     appended.to_string()
 }
 
+/// How many head commits a refused append's entry point makes to settle it.
+/// A host append is a session command: its refusal settles in one commit that
+/// completes the command's row and carries the typed outcome, which advances
+/// the head revision and writes nothing else. A plugin's in-turn append
+/// refuses without a commit.
+#[derive(Clone, Copy)]
+enum SettlementCommits {
+    None,
+    One,
+}
+
 async fn assert_stale_branch_changed_nothing(
     store: &crate::store::SessionStore,
     result: crate::AppendSessionNodesOutcome,
     abandoned_base: &str,
     before: crate::store::SessionWindowRead,
+    settlement: SettlementCommits,
     entry_point: &str,
 ) {
     let crate::AppendSessionNodesOutcome::StaleBranch { required_node_id } = result else {
@@ -399,9 +420,14 @@ async fn assert_stale_branch_changed_nothing(
     );
 
     let after = read_conformance_session(store).await;
+    let settlement_commits = match settlement {
+        SettlementCommits::None => 0,
+        SettlementCommits::One => 1,
+    };
     assert_eq!(
-        after.head_revision, before.head_revision,
-        "{entry_point}: a refused append must not move the head revision"
+        after.head_revision,
+        before.head_revision + settlement_commits,
+        "{entry_point}: a refused append moves the head revision only by its settlement"
     );
     assert_eq!(
         after.window.leaf_node_id, before.window.leaf_node_id,
@@ -480,41 +506,6 @@ async fn append_conformance_runtime(
     .expect("append conformance runtime")
 }
 
-/// Prove that a plugin-facing lost-response append retry restores interleaved
-/// usage to the shared ledger and that the next natural commit persists it.
-///
-/// Integrator class (ADR 0051): **conformance-suite embedders**.
-/// `store` is a catalog with the root session `root` admitted.
-pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimeStore>) {
-    Box::pin(
-        lash_core::testing::conformance_support::append_receipt_mixed_usage_envelope_conformance(
-            crate::StoreLawBackend::new().into_backend(),
-            crate::conformance::helpers::session_view(&store, "root"),
-        ),
-    )
-    .await;
-}
-
-/// Cancel an append after a queued-commit backend has accepted its work, then
-/// prove retry plus a later natural commit publishes the staged usage exactly
-/// once. `arm_and_wait` arms the backend seam and resolves only after the
-/// background worker is paused; its result releases that worker.
-pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
-    store: Arc<dyn crate::RuntimeStore>,
-    arm_and_wait: A,
-) where
-    A: FnOnce() -> W,
-    W: std::future::Future<Output = R>,
-    R: FnOnce(),
-{
-    lash_core::testing::conformance_support::append_usage_cancellation_exactly_once_conformance(
-        crate::StoreLawBackend::new().into_backend(),
-        crate::conformance::helpers::session_view(&store, "root"),
-        arm_and_wait,
-    )
-    .await;
-}
-
 /// Rewrite a committed receipt to a genuine pre-upgrade JSON shape and prove
 /// that the public runtime result still returns the original non-empty leaf.
 ///
@@ -539,17 +530,23 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
         "old-format-append-receipt-model",
         crate::SessionRelation::Root,
     );
-    let mut runtime = append_conformance_runtime(&store, &request).await;
-    Box::pin(
-        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
+    let runtime = append_conformance_runtime(&store, &request).await;
+    // The plugin-facing service writes through the store's append receipt:
+    // a host's append is a session command, whose own receipt is its batch.
+    let service = runtime
+        .session_graph_service()
+        .expect("session graph service");
+    Box::pin(service.append_session_nodes(
+        &request.session_id,
+        crate::AppendSessionNodesRequest {
             operation_id: "old-format-append-receipt-seed".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "old-format-append-receipt-seed",
                 serde_json::json!({"seed": true}),
             )],
             requires_ancestor_node_id: None,
-        }),
-    )
+        },
+    ))
     .await
     .expect("seed old-format fixture session");
     let append = crate::AppendSessionNodesRequest {
@@ -560,11 +557,11 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
         )],
         requires_ancestor_node_id: None,
     };
-    let first = Box::pin(runtime.append_session_nodes(append.clone()))
+    let first = Box::pin(service.append_session_nodes(&request.session_id, append.clone()))
         .await
         .expect("first old-format fixture append");
     rewrite_receipt().await;
-    let replay = Box::pin(runtime.append_session_nodes(append))
+    let replay = Box::pin(service.append_session_nodes(&request.session_id, append))
         .await
         .expect("old-format fixture receipt replay");
     let (
@@ -589,26 +586,30 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
     );
 }
 
-/// Append one plugin node through the runtime and return its durable id.
+/// Append one plugin node as a host append the command lane applies, and
+/// return its durable id.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn append_conformance_plugin_node(
     runtime: &mut crate::LashRuntime,
+    store: &dyn crate::RuntimeStore,
     operation_id: &str,
     step: u64,
 ) -> String {
-    let result = Box::pin(
-        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
+    let result = Box::pin(crate::testing::runtime_helpers::apply_host_append(
+        runtime,
+        store,
+        crate::AppendSessionNodesRequest {
             operation_id: operation_id.to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "append-fence-conformance",
                 serde_json::json!({ "step": step }),
             )],
             requires_ancestor_node_id: None,
-        }),
-    )
+        },
+    ))
     .await
     .expect("seed the append conformance graph");
     match result {

@@ -221,11 +221,11 @@ async fn registered_attach(
 
 /// FIG-4025: a committed turn's terminal is published one-way after its
 /// commit, so CloseRootScope can retire the root while that publish is still
-/// in flight. Every wait registered on the terminal — live attaches, and a
-/// capped read whose caller already gave up (send resolution's
-/// `TERMINAL_READ`) — resolves with the real terminal, never `Cancelled`,
-/// and a read after the cap reads it too. A root that ended without a commit
-/// owes no terminal, so retiring it still releases its waiter.
+/// in flight. The wait registered on the terminal, which every attach shares
+/// (FIG-4345), resolves with the real terminal, never `Cancelled`, for the
+/// attaches still listening and after one whose caller stopped listening;
+/// an attach after the publish reads it too. A root that ended without a
+/// commit owes no terminal, so retiring it still releases its waiter.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_publishes() {
     use lash_core::engine::ScopeCloseSink as _;
@@ -278,15 +278,23 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
     };
     let published = serde_json::to_value(&terminal).expect("encode the terminal");
 
-    let mut waiters = Vec::new();
-    for _ in 0..3 {
-        waiters.push(registered_attach(&attach, &key, address.clone()).await);
+    // The first attach registers the terminal's one waiter; later attaches
+    // join it, and one whose caller stops listening leaves it parked.
+    let mut waiters = vec![registered_attach(&attach, &key, address.clone()).await];
+    for _ in 0..2 {
+        let attach = attach.clone();
+        let address = address.clone();
+        waiters.push(tokio::spawn(async move {
+            attach.await_terminal(&address).await
+        }));
     }
-    // Send resolution's capped read registers the same wait, and its caller
-    // stops listening when the cap elapses; its invocation stays parked.
-    registered_attach(&attach, &key, address.clone())
-        .await
-        .abort();
+    let dropped = {
+        let attach = attach.clone();
+        let address = address.clone();
+        tokio::spawn(async move { attach.await_terminal(&address).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    dropped.abort();
 
     // A root lost without a commit, in the same session, owes no terminal.
     let lost_root = TurnId::from("fig4025-lost-root");
@@ -311,7 +319,11 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
             cause: RootTerminalCause::Committed {
                 commit: TurnCommitId::new(root.clone(), 1),
                 turn: final_turn.clone(),
-                stop: None,
+                outcome: lash_core::store::RootCommittedOutcome::Finished(
+                    lash_core::facade_support::TurnFinish::AssistantMessage {
+                        text: String::new(),
+                    },
+                ),
             },
             head_revision: Some(2),
             at_ms: 1,
@@ -360,7 +372,7 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
     let reread = attach
         .await_terminal(&address)
         .await
-        .expect("a read after the cap reads the published terminal");
+        .expect("an attach after the publish reads the published terminal");
     assert_eq!(
         serde_json::to_value(&reread).expect("encode the re-read terminal"),
         published

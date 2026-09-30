@@ -42,7 +42,7 @@ pub(crate) const SPAN_NAMED_NESTED_REPEATED: &str = r#"const worker=async()=>{aw
 
 /// The canonical-span golden whose process literal lifts inline. Its source
 /// is a registered trigger source constructor, so a host admits it.
-pub(crate) const SPAN_LIFTED_INLINE: &str = r#"await triggers.register({source:timer.Schedule({expr:"0 8 * * *"}),target:async(event)=>{await tools.echo({value:"inline"});return event;}});"#;
+pub(crate) const SPAN_LIFTED_INLINE: &str = r#"await triggers.register({source:timer.Schedule({expr:"0 8 * * *"}),target:{definition:async(event)=>{await tools.echo({value:"inline"});return event;}}});"#;
 
 /// FIG-3635's shape: top-level `var` declarations hoisted ahead of the
 /// hoisted function declarations, so the round trip only holds when the

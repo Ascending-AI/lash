@@ -1,7 +1,7 @@
 use super::super::*;
 use crate::plugins::{
-    PluginCommand, PluginOperation, PluginOperationFailure, PluginOperationInvokeError,
-    PluginOperationOutcome, PluginQuery, PluginRuntimeEvent, PluginTask, SessionParam,
+    PluginCommand, PluginOperation, PluginOperationFailure, PluginOperationOutcome, PluginQuery,
+    PluginRuntimeEvent, PluginTask, SessionParam,
 };
 
 use std::time::Duration;
@@ -38,6 +38,8 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
     run_async_test_on_stack_budget("plugin-operations", || async {
         let entered = Arc::new(tokio::sync::Notify::new());
         let task_entered = entered.clone();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let task_release = release.clone();
         let spec = lash_core::facade_support::PluginSpec::new()
             .with_plugin_query_typed::<Query, _, _>(|ctx, args| async move {
                 assert_eq!(ctx.session_id.as_deref(), Some("plugin-accept"));
@@ -48,11 +50,16 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             })
             .with_plugin_task_typed::<Task, _, _>(move |ctx, args| {
                 let entered = task_entered.clone();
+                let release = task_release.clone();
                 async move {
                     if args == "cancel-739" {
                         entered.notify_one();
-                        ctx.cancellation_token.cancelled().await;
-                        return Err(PluginOperationFailure::new("cancelled:cancel-739"));
+                        tokio::select! {
+                            () = ctx.cancellation_token.cancelled() => {
+                                return Err(PluginOperationFailure::new("cancelled:cancel-739"));
+                            }
+                            () = release.notified() => {}
+                        }
                     }
                     Ok(outcome(format!("task:{args}"), "completed"))
                 }
@@ -133,6 +140,9 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             ],
             "both owned events persist in operation order"
         );
+        // A host cancellation withdraws only a command no drive admitted
+        // (FIG-4202). This task is running in the drive, so the cancel does
+        // not reach it: the host's call awaits the drive's settlement.
         let cancel = crate::CancellationToken::new();
         let task_cancel = cancel.clone();
         let running_ops = ops.clone();
@@ -145,16 +155,21 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             .await
             .expect("task entered");
         cancel.cancel();
-        let error = tokio::time::timeout(Duration::from_secs(5), running)
-            .await
-            .expect("cancellation settles")
-            .expect("task does not panic")
-            .expect_err("cancelled task fails");
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
         assert!(
-            matches!(error, EmbedError::Control(PluginOperationInvokeError::Failed(ref message))
-            if message == "cancelled:cancel-739")
+            !running.is_finished(),
+            "a cancel after admission waits for the drive's settlement"
         );
-        assert_eq!(
+        release.notify_one();
+        let receipt = tokio::time::timeout(Duration::from_secs(5), running)
+            .await
+            .expect("the admitted task settles")
+            .expect("task does not panic")
+            .expect("the admitted task completes");
+        assert_eq!(receipt.output, "task:cancel-739");
+        assert_ne!(
             session
                 .admin()
                 .state()
@@ -163,12 +178,12 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
                 .session_graph
                 .leaf_node_id,
             before_cancel.session_graph.leaf_node_id,
-            "cancelled task emits no success event"
+            "the admitted task's event commits with its settlement"
         );
         assert_eq!(
             ops.query::<Query>(probe()).await?,
             "query:cobalt-583",
-            "writer released after cancellation"
+            "writer released after the settlement"
         );
         super::transcript::assert_typed_checkpoint_transcript(&writes.events());
         Ok(())

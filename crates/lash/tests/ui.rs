@@ -139,6 +139,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
 /// feature-boundary graph; the workspace graph exercises the testing facade
 /// separately.
 fn register_store_seam_contracts(t: &trybuild::TestCases) {
+    t.compile_fail("tests/ui/reclamation_witness_cannot_be_assembled.rs");
     if !cfg!(feature = "rlm") || cfg!(feature = "testing") {
         return;
     }

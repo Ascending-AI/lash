@@ -1,14 +1,24 @@
 //! Native bootstrap, entered before the host initializes credentials.
 use crate::PoolError;
-use crate::process::{Bootstrap, inherited_pipe};
+use crate::process::inherited_pipe;
 use crate::worker::Server;
+use lash_vm_client::ipc::Bootstrap;
 use lash_vm_protocol::*;
 
 /// Register as the host binary's first action. Returns false for a normal
 /// host invocation. Worker argv never supplies the build identity: `build`
 /// belongs to the compiled host. The pool always execs with an empty env.
 pub fn worker_entry(build: BuildIdentity) -> Result<bool, PoolError> {
-    worker_entry_inner(build, None)
+    worker_entry_with_frontend(build, &crate::frontend::TypeScriptFrontend)
+}
+
+/// Enter the credential-free worker with the host's compiled source frontend.
+/// Call this before constructing the host runtime or credentials.
+pub fn worker_entry_with_frontend(
+    build: BuildIdentity,
+    frontend: &dyn crate::Frontend,
+) -> Result<bool, PoolError> {
+    worker_entry_inner(build, frontend, None)
 }
 
 #[cfg(feature = "testing")]
@@ -16,7 +26,7 @@ pub fn worker_entry_with_hook(
     build: BuildIdentity,
     hook: &mut dyn FnMut(&ParentMessage),
 ) -> Result<bool, PoolError> {
-    worker_entry_inner(build, Some(hook))
+    worker_entry_inner(build, &crate::frontend::TypeScriptFrontend, Some(hook))
 }
 
 #[expect(
@@ -25,6 +35,7 @@ pub fn worker_entry_with_hook(
 )]
 fn worker_entry_inner(
     build: BuildIdentity,
+    frontend: &dyn crate::Frontend,
     mut hook: Option<&mut dyn FnMut(&ParentMessage)>,
 ) -> Result<bool, PoolError> {
     let args = std::env::args().collect::<Vec<_>>();
@@ -60,7 +71,25 @@ fn worker_entry_inner(
             max_allocation_bytes: bootstrap.allocation,
         },
     );
-    let mut server = Server::new(pipe, codec, bootstrap, build)?;
-    server.run(&mut hook)?;
+    let mut server = Server::new(pipe, codec, bootstrap, build, frontend)?;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(&mut hook)))
+        .unwrap_or_else(|panic| {
+            let reason = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("non-string panic");
+            Err(PoolError::protocol(format!(
+                "native worker panic: {reason}"
+            )))
+        });
+    if let Err(error) = result {
+        if let PoolError::Infrastructure(InfrastructureOutcome::ProtocolViolation { reason }) =
+            &error
+        {
+            server.refuse(reason.clone())?;
+        }
+        return Err(error);
+    }
     Ok(true)
 }

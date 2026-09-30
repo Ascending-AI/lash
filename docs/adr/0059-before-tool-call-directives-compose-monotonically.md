@@ -6,14 +6,10 @@ Accepted.
 
 ## Context
 
-Tool-call hooks are contributed independently by plugins. Lash used to apply
-every emitted terminal directive as an unconditional assignment in both hook
-folds. A later successful short-circuit could therefore replace an earlier
-denial or abort. Before-tool hooks also used to invoke every hook with the
-original arguments, so argument replacement could bypass another plugin's
-inspection. The same bypass exists after execution when an earlier output
-policy approves the original result and a later hook successfully replaces it:
-without reinspection, that policy never sees the value that reaches the turn.
+Tool-call hooks come from independent plugins. An unconditional terminal
+assignment would let a successful replacement erase an earlier denial or abort.
+Argument and result replacements also need inspection by hooks that run before
+the replacer, so the final value is visible to the whole hook chain.
 
 Tool Catalog membership remains the availability boundary. This decision is
 only about composing directives for a call that already reached the hook chain;
@@ -89,8 +85,8 @@ later plugin whose directive caused the conflict, including when the later
 plugin supplies the stronger winner. A plugin's multiple terminals compose by
 the same rules without manufacturing a self-conflict event. If the trace
 service rejects the event, Lash logs that emission failure. Lash also attempts
-a non-blocking plugin runtime event with the same attribution and payload; that
-secondary channel remains best-effort when full or closed.
+a plugin runtime observation with the same attribution and payload; that
+secondary observation is synchronous and follows the observer sink contract.
 
 ## Consequences
 
@@ -136,24 +132,21 @@ secondary channel remains best-effort when full or closed.
   no self-conflict.
 - An `EmitTrace` error contributes a denied terminal without
   stopping the directive fold. Later directives, including side effects, still
-  run. (`CreateSession` contributed the same way until FIG-3375 removed the
-  variant; ambient directives no longer create sessions — an orchestrating
-  tool that needs a related session turn spawns a `SessionTurn` process.)
+  run. Related session work is a pending tool outcome with a `DeclaredStart`
+  naming `ProcessInput::SessionTurn`; the runtime launches it under ADR 0116 §3.
+
 - Tool-hook directives remain transient in-process values. Each hook boundary
   has its own directive enum, so a directive that is illegal at that boundary
   is a compile error and needs no runtime denial, persistence migration, or
   wire migration.
 
-FIG-1399 records the reconsideration scope for replacement semantics once real
-multi-plugin compositions provide evidence for a different policy. That scope
-now covers bounded reinspection at both the before-tool argument seam and the
-after-tool result seam, including after-tool first-emitted replacement
-selection; the shared restrictive terminal ordering remains the safety floor.
-This ADR does not depend on any particular production tool-hook registrant.
+Conditional transformations can compose through bounded reinspection. An
+unbounded fixed-point search would make termination depend on plugin behavior;
+the typed conflict refuses that design. Registration order governs side effects
+and transformations, while the terminal ordering supplies the shared floor.
 
-## Amendment (FIG-3562, 2026-09-29): no orchestrating tool starts sessions
+## Code evidence
 
-The parenthesis above that names an orchestrating tool spawning a
-`SessionTurn` process is historical. [ADR 0116](0116-tools-are-opaque.md) deletes orchestrating tools. A tool
-that needs a related session turn returns Pending with a `DeclaredStart` of a
-`ProcessInput::SessionTurn` ([ADR 0116](0116-tools-are-opaque.md) §3), and the runtime launches it.
+- [Directive types and strength](../../crates/lash-core-execution/src/plugin/tool_catalog.rs#L103).
+- [Bounded reinspection](../../crates/lash-core-execution/src/plugin/session_obj.rs#L481).
+- [Terminal fold and conflict observations](../../crates/lash-core-execution/src/tool_dispatch/directives.rs#L112).

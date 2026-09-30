@@ -65,7 +65,6 @@ pub mod panic_containment {
 }
 pub use lash_core_execution::plugin;
 pub(crate) use lash_core_execution::plugin_stack;
-pub use lash_core_execution::process_registry;
 pub(crate) use lash_core_execution::protocol_build;
 #[cfg(feature = "perf-witness")]
 pub use lash_core_ids::perf_witness;
@@ -283,7 +282,6 @@ pub mod facade_support {
     pub use crate::runtime::ObservedWorkItem;
     pub use crate::runtime::ObservedWorkItemState;
     pub use crate::runtime::OutputState;
-    pub use crate::runtime::ParkedSession;
     pub use crate::runtime::ProcessEngineProcessContext;
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
@@ -353,7 +351,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnLaneAdmissionPolicy;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
-    pub use crate::runtime::UnreportedUsageAttempt;
     pub use crate::runtime::UsageReconciliationReport;
     pub use crate::runtime::UsageReportRow;
     pub use crate::runtime::UsageTotals;
@@ -363,7 +360,6 @@ pub mod facade_support {
     pub use crate::runtime::WeakRuntimeHandle;
     pub use crate::runtime::await_event_identity;
     pub use crate::runtime::current_epoch_ms;
-    pub use crate::runtime::diff_token_ledger;
     pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::process_child_session_id;
@@ -376,6 +372,7 @@ pub mod facade_support {
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::release_bound_trigger_delivery_pins;
     pub use crate::runtime::turn_control_binding_id_for_scope;
+    pub use crate::runtime::{ParkRefused, ParkedSession};
     pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
     pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
@@ -528,8 +525,8 @@ pub mod sansio {
 }
 
 pub use attachments::{
-    AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
-    AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
+    AttachmentGcFence, AttachmentReadPolicy, AttachmentReclamationPolicy, AttachmentRootSet,
+    AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
     EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_core_execution::turn_outcome_from_tool_control;
@@ -553,7 +550,7 @@ pub use lash_sansio::{
     PromptContributionBody, PromptContributionGate, PromptLayer, PromptSectionTitle, PromptSlot,
     PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
     PromptTitleBuiltin, RetainedOutput, SchemaContract, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TYPESCRIPT_TOOL_BINDING_KEY, TextProjectionMetadata,
+    SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata,
     TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome,
     ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
     ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDefinitionBindingExt,
@@ -596,9 +593,8 @@ pub(crate) mod facade_ops {}
 pub use lash_core_execution::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
     ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
-    DefinitionRevisionId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim,
-    ResolvedArtifactCleanup, RuntimeOwner, SubscriptionRevisionId, UploadReferrerId,
-    artifact_referrer_ended, trigger_incarnation,
+    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup, RuntimeOwner,
+    SubscriptionRevisionId, UploadReferrerId, artifact_referrer_ended, trigger_incarnation,
 };
 pub use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, Backend, DurabilityTier, EffectEngine,
@@ -686,10 +682,6 @@ pub use lash_core_execution::runtime::publish_process_execution_env;
 /// artifacts through (ADR 0113 §3.3), for hosts that assemble a registry
 /// outside `RuntimeHostConfig`.
 pub use lash_core_execution::runtime::{ArtifactReferrerPorts, ReferrerAcquisition};
-pub use process_registry::{
-    ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
-    ProcessDefinitionRegistration, ProcessDefinitionRegistry,
-};
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
     AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantStreamHookState,
@@ -702,10 +694,10 @@ pub use runtime::{
     EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
     ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
     GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    InputItem, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, LedgerUsageOutcome,
-    Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason,
-    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
+    InputItem, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, Lifetime,
+    LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
     PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
     PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
@@ -737,17 +729,18 @@ pub use runtime::{
     ProcessRegistrationReceipt, ProcessRegistry, ProcessRegistryAwaiter, ProcessRegistryBinding,
     ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention, ProcessRunOutcome,
     ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService, ProcessSessionDeleteReport,
-    ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions,
-    ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait,
-    ProcessTombstone, ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery,
-    ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring,
-    ProjectionWatermark, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
-    QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
-    QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind, RankedGroupSettlement,
-    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender,
-    RefusedWriteRange, RegistryScopeClose, Resolution, ResolveOutcome, ResolvedProcessDefinition,
-    ResolvedRun, RunDefinition, RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash,
+    ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature,
+    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
+    ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox,
+    ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
+    ProtocolSessionExtension, ProtocolSessionExtensionHandle, QueuedDrainCandidate,
+    QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority,
+    QueuedWorkBatchingConfig, QueuedWorkKind, RankedGroupSettlement, RecordedJournal,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender, RefusedWriteRange,
+    RegistryScopeClose, Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun,
+    RunDefinition, RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash,
     RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
@@ -759,20 +752,19 @@ pub use runtime::{
     SessionCursor, SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionDriver,
     SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
     SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
-    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionUsageTotals,
-    SessionView, SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey,
-    StoreRealization, TokenLedgerEntry, ToolAttemptLaunch, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelGatePair,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
-    TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnCancellationAuthority, TurnContext,
-    TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, UnreportedLedgerAttempt,
-    UsageOutcomeError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView,
+    SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization,
+    ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelRequestRecord, TurnCancelUndeliveredInputPolicy, TurnCancelWait,
+    TurnCancellationAuthority, TurnContext, TurnControlAttachment, TurnControlBinding,
+    TurnControlBindingId, TurnControlBindingIdError, TurnEvent, TurnFailureCause,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
+    TurnLaneAdmissionPolicy, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
     WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
@@ -822,14 +814,13 @@ pub use store::{
     MAX_ATTACHMENT_DELETE_ATTEMPTS, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
     MaintenanceResult, MaintenanceStop, MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION,
     OperationId, QueuedWorkStore, RetentionBound, RetentionReport, RuntimeCommit, RuntimeStore,
-    RuntimeStoreDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    ScanCoverage, SemanticBoundaryOperation, SessionAdmission, SessionBinding,
-    SessionBlobReclaimReport, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
-    SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission, SessionStore,
-    StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight,
-    StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
-    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore,
-    VacuumReport, WriterPin, compare_releases, release_stamp_advances,
+    RuntimeStoreDecorator, RuntimeTurnCommitStamp, ScanCoverage, SemanticBoundaryOperation,
+    SessionAdmission, SessionBinding, SessionBlobReclaimReport, SessionCatalogStore,
+    SessionCommitStore, SessionHistoryStore, SessionLookup, SessionMeta, SessionReferrerState,
+    SessionStateAdmission, SessionStore, StoreBackend, StoreComponentVersion, StoreError,
+    StoreMaintenance, StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase,
+    StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission,
+    TurnInputStore, VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
@@ -854,7 +845,7 @@ pub use tool_provider::{
 pub mod core_internal {
     pub use crate::runtime::{ProcessRuntimeContext, ProcessRuntimePorts, RuntimeSessionServices};
     pub use lash_core_execution::core_internal::{
-        StartKeyDerivation, attach_process_invocation_correlation,
+        RuntimeEffectLocalRunner, StartKeyDerivation, attach_process_invocation_correlation,
         clear_process_invocation_correlation,
     };
 }
@@ -881,3 +872,12 @@ mod tests {
         assert!(err.to_string().contains("kind"), "unexpected error: {err}");
     }
 }
+
+/// Engine-owned usage accounting (ADR 0125): the store's ledger vocabulary
+/// and the kernel's usage run, under one path.
+pub mod usage_accounting {
+    pub use lash_core_execution::usage_accounting::*;
+    pub use lash_core_store::usage_accounting::*;
+}
+pub use lash_core_execution::UsageAccountingStore;
+pub use usage_accounting::*;

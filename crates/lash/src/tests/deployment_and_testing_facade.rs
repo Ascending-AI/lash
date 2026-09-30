@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
         LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
@@ -69,7 +69,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
 #[tokio::test]
 async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
     {
-        let backend: lash_core::Backend = memory_store_backend().await;
+        let backend: lash_core::Backend = sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
         let core = explicit_ephemeral_facets(
             LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
@@ -139,7 +139,6 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         };
         let commit = lash_core::store::RuntimeCommit::persisted_state_with_operation_for_testing(
             &state,
-            &[],
             lash_core::store::OperationId::turn(
                 session_id.clone(),
                 lash_core::TurnId::from("parked-turn"),
@@ -437,7 +436,7 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
 /// hold until they are gone; the mark is what makes it drainable at all.
 #[tokio::test]
 async fn generation_drain_status_counts_the_generations_live_processes() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
     let own = backend.build_generation().clone();
     let core = explicit_ephemeral_facets(
@@ -588,13 +587,17 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         ))
     };
     state.ensure_agent_frame_initialized();
-    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state);
     commit.drive_fence = Some(Box::new(lease.clone()));
     commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
         commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
         turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
         root: root.clone(),
-        stop: None,
+        outcome: lash_core::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     let mut settlement = lash_core::store::IngressSettlement::new(root);
     settlement
@@ -648,7 +651,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
 /// before then would strand them.
 #[tokio::test]
 async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() {
-    let backend = memory_store_backend().await;
+    let backend = sqlite_memory_store_backend().await;
     let factory = backend.session_store_factory();
     let clock = backend.clock();
     let core = explicit_ephemeral_facets(

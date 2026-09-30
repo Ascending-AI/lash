@@ -80,13 +80,16 @@ impl Fixture {
                                 .expect("the engine opened the session's store");
                             lash_core::testing::runtime_helpers::advance_session_head(
                                 store.as_ref(),
-                                &[],
                                 |_| {},
                             )
                             .await;
                             arm(&store);
                         }
-                        Ok(text_response("answered"))
+                        Ok(LlmResponse {
+                            usage: paid_usage(),
+                            provider_usage: Some(serde_json::json!({ "billed": true })),
+                            ..text_response("answered")
+                        })
                     }
                 })
                 .build()
@@ -144,6 +147,85 @@ impl Fixture {
             })
             .collect()
     }
+}
+
+/// What the provider reports for every paid call of this module's turns.
+fn paid_usage() -> lash_core::llm::types::LlmUsage {
+    lash_core::llm::types::LlmUsage {
+        input_tokens: 11,
+        output_tokens: 4,
+        ..lash_core::llm::types::LlmUsage::default()
+    }
+}
+
+/// E9 (FIG-4236, ADR 0125): a root refused `StoreCommitSuperseded` after its
+/// paid call keeps that call's usage. A second core over the same deployment
+/// reads it with no session opened and no turn driven: every paid call is one
+/// settled fact, nothing is open or unknown.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_second_host_reads_refused_root_usage() -> Result<()> {
+    let fixture = Fixture::head_moves_under_the_first_turn().await;
+    let session = fixture.core.session(SESSION).created().await.open().await?;
+    let refused = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        session
+            .send(TurnInput::text(
+                "the head moves under this paid turn's commit",
+            ))
+            .id(TURN)
+            .output(),
+    )
+    .await
+    .expect("the superseded turn settles")
+    .expect_err("the superseded commit refuses the root");
+    let EmbedError::Runtime(refusal) = &refused else {
+        panic!("the refusal is the typed runtime error: {refused:?}");
+    };
+    assert_eq!(
+        refusal.code,
+        lash_core::RuntimeErrorCode::StoreCommitSuperseded
+    );
+    drop(session);
+
+    let second_host = explicit_ephemeral_facets(LashCore::standard_builder(
+        fixture.double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("commit-superseded")
+            .complete(|_request| async {
+                panic!("the second host reads usage without calling a model")
+            })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())
+    .expect("build the second host's core");
+    let owner = lash_core::RuntimeOwner::Session(SessionId::from(SESSION));
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let usage = loop {
+        let usage = second_host.owner_usage(&owner).await?;
+        if usage.completeness.is_settled() || tokio::time::Instant::now() >= deadline {
+            break usage;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    let paid_calls = u64::try_from(fixture.provider_calls.load(Ordering::SeqCst))
+        .expect("a call count fits u64");
+    assert_eq!(paid_calls, 1, "the refused root made one paid call");
+    assert!(usage.completeness.is_complete(), "{:?}", usage.completeness);
+    let [row] = usage.rows.as_slice() else {
+        panic!("one (source, model) row: {usage:?}");
+    };
+    assert_eq!(
+        row.reported_attempts, paid_calls,
+        "each paid call counts once"
+    );
+    assert_eq!(row.usage.input_tokens, 11);
+    assert_eq!(row.usage.output_tokens, 4);
+    Ok(())
 }
 
 /// The law: the superseded commit ends its root with the typed refusal in the

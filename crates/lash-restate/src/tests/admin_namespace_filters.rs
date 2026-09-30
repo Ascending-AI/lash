@@ -76,9 +76,14 @@ async fn every_admin_filter_excludes_foreign_and_dotted_namespaces() {
         .await
         .expect("bind live fixture endpoint");
     let (stop, stopped) = tokio::sync::oneshot::channel();
-    let serving = tokio::spawn(crate::serve_endpoint(listener, builder.build(), async {
-        let _ = stopped.await;
-    }));
+    let serving = tokio::spawn(crate::serve_endpoint(
+        listener,
+        builder.build(),
+        crate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+        async {
+            let _ = stopped.await;
+        },
+    ));
     let registered = reqwest::Client::new()
         .post(format!("{admin_url}/deployments"))
         .json(&serde_json::json!({"uri":endpoint_url,"force":true}))

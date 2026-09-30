@@ -1,91 +1,84 @@
 # Engines emit unified tool-call accounting outside model projection
 
-Lash has more than one execution engine. The standard engine asks the model for
-native tool calls and dispatches them between model completions. The RLM engine
-runs Lashlang, whose executor can dispatch tools internally before it returns an
-`ExecResponse`. These are different control loops, but they are not different
-kinds of tool use. Every completed call is part of the turn's accounting and
-must therefore use the standard `SessionStreamEvent::ToolCall` event shape.
+## Context
 
-The RLM driver emits one accounting event for each tool record returned by a
-successful exec effect. It does so in `handle_exec_result`, after inspecting the
-complete response for terminal tool control and before any terminal or
-nonterminal branch returns. This is deliberately the response-handling seam,
-not the live per-call execution seam. Live execution already emits trace and
-activity start/completion pairs; emitting there again would duplicate those
-channels. More importantly, a durable effect re-drive passes its recorded
-`ExecResponse` through the same response-handling seam, so accounting and
-attachment reachability are reconstructed after a cold restart.
+Standard execution dispatches model-native tool calls. RLM executes TypeScript
+that can dispatch tools inside an exec effect. Both contribute to the same
+turn accounting, while each protocol owns the context it projects to the model.
 
-The engine vocabulary carries three invariants:
+## Decision
 
-1. Every engine emits standard tool-call accounting events.
-2. Every engine's terminal outcome carries its full payload. Accounting bounds
-   never determine or truncate the terminal control decision.
-3. Engine internals reach model context only through that engine's projector.
+Each completed tool record in a successful RLM exec response contributes a
+`SessionStreamEvent::ToolCall`, subject to the accounting bounds below. The
+cell and native drivers emit these events in `handle_exec_result`, after
+inspecting the full response for terminal tool control. Recorded exec responses
+pass through this same handling path on redrive. Live trace and activity events
+remain separate observations of execution.
 
-`SessionStreamEvent::ToolCall` is an accounting and host-observation event. It is not a
-conversation or protocol graph node, and RLM trajectory entries remain free of
-tool-call records. RLM emission consequently fills `AssembledTurn.tool_calls`,
-host and remote turn summaries, and `TurnExecutionMetrics.had_tool_calls` without
-changing the bytes projected back to the model. Exec calls continue to consume
-no model tokens and add nothing to the ADR 0032 LLM-attempt ledger.
+Three rules apply:
 
-Accounting remains bounded without sacrificing attachment reachability. Large
-inline `ToolValue` scalars are replaced in place by an `omitted_bytes` marker,
-recursing through success values and failure or cancellation raw values while
-preserving the surrounding arrays and objects. A fixed per-exec record cap (128)
-keeps the first records and reports the tail as one typed
-`SessionStreamEvent::ToolCallsOmitted` event whose `OmittedToolCalls` summary
-carries the omitted `count`, `failures` and `attachments`. Attachment references
-are small, load-bearing references rather than inline output bytes, so neither
-bound may remove them. Tail attachments are carried by that summary and remain
-visible to the ordinary tool-output attachment scan.
+1. Engines use the shared tool-call accounting vocabulary.
+2. Terminal control uses the full payload before accounting truncation.
+3. Protocol projectors decide which execution information reaches model context.
 
-## Why attachment commit combines owner promotion with explicit adoption
+Tool-call accounting populates assembled turns and host observations. It does
+not itself add conversation nodes or model attempts to the ADR 0032 ledger.
 
-The final turn transaction has two complementary paths:
+Each exec retains at most 128 tool records. Oversized inline string scalars,
+above 64 KiB, become `omitted_bytes` markers recursively inside success and raw
+failure values. Arrays, objects, and attachment references retain their shape.
+The omitted tail contributes one `ToolCallsOmitted` event with its count,
+failures, and attachment references. The final attachment scan includes both
+retained records and that summary.
 
-1. The store promotes every uncommitted manifest row bound to the durable
-   `RuntimeTurnCommitStamp` turn id. This is the replay-safe backbone, including
-   puts whose ids appear only in plain JSON or opaque plugin state. It needs no
-   process-local set and reconstructs nothing from tool accounting.
-2. Attachment references in typed tool outputs and message parts form the
-   explicit adoption set. They preserve cross-turn and carried-in references;
-   update-in-place deliberately no-ops when this session has no intent row.
+## Attachment commit acquires explicit referrers
 
-Owner promotion intentionally commits attachment scratch created by a turn even
-when core cannot inspect the opaque state that retains it. Failed or superseded
-turns are not promoted: their uncommitted rows remain live through recovery and
-become reclaimable only after durable supersession proof plus the retention
-window. Explicit `RuntimeAttachmentStore::delete()` releases the holder's own
-edge, and session deletion ends the session's referrer once retained history
-no longer keeps it alive. Attachment GC reclaims bytes only after the final
-referrer ends.
+The final turn transaction acquires a `Session` referrer on each committed
+attachment id. The set includes stored references from tool outputs, the omitted
+tool-call summary, message parts, and retained outputs. A code cell's recorded
+response supplies retained prints and finish values that the commit cannot read
+from protocol records directly. Acquisition validates the whole set and refuses
+an attachment without upload evidence before installing any edge.
+
+A put in a session runtime bound to an execution acquires an `Execution`
+referrer. A put without that binding acquires an expiring `Upload` referrer.
+Commit does not promote every put: an id kept only in opaque plugin state or
+plain JSON is not part of the committed reference scan. An unreferenced turn
+put loses its execution hold when the journal settles. Reclamation requires
+the absence of both referrer edges and pending writes under
+[ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md).
 
 ## Shared-history retention
 
-The pending-retention description is historical. Shared history and attachment
-roots are retained under ADRs 0028 and 0047: a session deletion or explicit
-attachment delete does not reclaim committed roots while retained graph nodes
-still keep them alive, including another session's shared prefix. The current
-manifest keeps attachment roots conservatively at owner granularity, rather
-than claiming an exact attachment-to-node edge for every reference.
+Session deletion and explicit attachment deletion do not reclaim committed
+attachment roots while retained history keeps their owner alive, including
+another session's shared prefix. Session referrers retain these roots at
+owner granularity under ADRs 0047 and 0124. Artifacts use the same referrer
+vocabulary with their own edges and cleanup obligations under
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 
-[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) governs
-artifact retention through explicit referrer edges and durable cleanup
-obligations. It is landed, not pending. The tool-call accounting and its
-attachment-preservation bounds are unchanged.
+## Alternatives considered
 
-## Amendment (FIG-4125, 2026-09-29)
+Emitting accounting only at the live dispatch path loses reconstruction from a
+recorded exec response. Treating accounting records as model history couples
+host observation to a protocol's prompt. Truncating the terminal payload or
+attachment references to satisfy accounting bounds changes execution or
+retention, so those payloads are inspected or retained separately.
 
-Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
-the promised facade. The shared accounting rule survives for current tool
-execution.
+## Consequences
 
-## Amendment (FIG-4163, 2026-09-30)
+Both RLM channels report tool use through the common turn vocabulary. Bounded
+host observations preserve terminal outcomes and attachment reachability.
+Attachment and artifact edges remain separate store contracts within the shared
+referrer vocabulary.
 
-Shared-history retention is current, and ADR 0113's artifact referrers replace pending artifact-retention language without changing tool-call accounting.
-[SQLite attachment root predicates](../../crates/lash-sqlite-store/src/attachments.rs)
-and [the artifact cleanup executor](../../crates/lash-core/src/runtime/artifact_cleanup.rs)
-enforce the separate attachment and artifact retention mechanisms.
+## Code references
+
+- `crates/lash-protocol-rlm/src/protocol/driver.rs:495-558,888-1028` handles and bounds cell accounting.
+- `crates/lash-protocol-rlm/src/native/driver.rs:368-428,648-788` does the same for native transport.
+- `crates/lash-core/src/runtime/turn_boundary/recorded_assembly.rs:107-121` folds omitted summaries.
+- `crates/lash-core/src/runtime/turn_boundary/materialize.rs:50-88` collects committed attachment ids.
+- `crates/lash-core-store/src/attachments.rs:1665-1690` selects execution and upload referrers for puts.
+- `crates/lash-sqlite-store/src/persistence/session_commit.rs:852-853` acquires session edges at commit.
+- `crates/lash-sqlite-store/src/attachments.rs:80-137,850-860` validates acquisition and preserves retained roots.
+- `crates/lash-core/src/runtime/artifact_cleanup.rs` executes artifact cleanup obligations.

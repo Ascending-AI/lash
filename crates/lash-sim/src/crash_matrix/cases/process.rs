@@ -48,8 +48,7 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
     let request = publish_process(&world, "500ms")
         .await?
         .with_host_start_key(format!("crash-matrix-process-start-{seed}"));
-    let env_spec = request.env_spec.clone();
-    let registration = request.into_registration(None);
+    let registration = request.into_registration();
     let registry = world.backend().process_registry();
     let env_store = world.backend().process_env_store();
     let starter =
@@ -62,12 +61,12 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
             env_store: Some(&env_store),
             engines: None,
             engines_required: false,
+            session_catalog: None,
             executor: "process start crash matrix",
             starter: &starter,
         },
         registration,
         &[],
-        env_spec.as_ref(),
     )
     .await
     .map_err(|error| format!("register before the crash: {error}"))?;
@@ -139,6 +138,7 @@ pub(super) fn rlm_core() -> CoreBuild {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
         lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -166,14 +166,21 @@ pub(crate) async fn publish_process(
         )],
         Vec::new(),
     );
-    let linked = lashlang::LinkedModule::link(
-        program,
-        lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::new(),
-            lashlang::LashlangAbilities::default().with_sleep(),
-        ),
-    )
-    .map_err(|error| format!("link the process: {error:?}"))?;
+    let environment = lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        lashlang::LashlangAbilities::default().with_sleep(),
+    );
+    let linked = match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::LinkAst {
+            source: String::new(),
+            program,
+            environment,
+        })
+        .map_err(|error| format!("link the process: {error}"))?
+    {
+        lash_vm_client::service::Response::Module(module) => module,
+        response => return Err(format!("link the process: {response:?}")),
+    };
     lashlang::LashlangArtifacts::new(world.backend().module_artifacts())
         .publish_module_artifact(
             &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -203,13 +210,21 @@ pub(crate) async fn publish_process(
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
-        lash_core::SessionPolicy {
-            model: model_spec()?,
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-    ))
+    .with_env_ref(
+        lash_core::publish_process_execution_env(
+            world.backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: model_spec()?,
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                },
+            )),
+        )
+        .await
+        .map_err(|error| format!("publish captured environment: {error}"))?,
+    )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types()))
 }
 

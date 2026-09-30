@@ -97,12 +97,12 @@ pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteStoreSet
 
 /// [`sqlite_memory_backend`] behind a recording test effect host.
 #[cfg(test)]
-pub(crate) async fn memory_backend() -> crate::Backend {
+pub(crate) async fn sqlite_recording_backend() -> crate::Backend {
     lash_conformance::recording_backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
 /// A fresh Restate server double under `seed` with `config`: lash-restate's
-/// engine over a SQLite memory store set, the twin of [`memory_backend`] for a
+/// engine over a SQLite memory store set, the twin of [`sqlite_recording_backend`] for a
 /// kernel test whose effects run on an engine. Hold the double to the end of
 /// the test and never build a core over the handle itself (FIG-3723); a turn
 /// runs on `double.open_handler(scope)`'s scoped controller.
@@ -124,10 +124,10 @@ std::thread_local! {
 }
 
 /// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test: the twin of [`memory_backend`] for a test that reaches
+/// rest of the running test: the twin of [`sqlite_recording_backend`] for a test that reaches
 /// only store ports.
 #[cfg(test)]
-pub(crate) async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
+pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = std::sync::Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -137,11 +137,11 @@ pub(crate) async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::Sqli
     stores
 }
 
-/// [`memory_store_set`] as a backend whose effect host is the recording
+/// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
 #[cfg(test)]
-pub(crate) async fn memory_store_backend() -> crate::Backend {
-    lash_conformance::recording_backend_over(memory_store_set().await)
+pub(crate) async fn sqlite_memory_store_backend() -> crate::Backend {
+    lash_conformance::recording_backend_over(sqlite_memory_store_set().await)
 }
 
 /// A [`runtime_helpers::RecordingStore`] over a fresh, unbound store of a

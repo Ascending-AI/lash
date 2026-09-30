@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 mod aggregate;
+mod worker_execution;
 pub use aggregate::{
     BridgeAggregateLeaf, host_lifetime_failure_message, settle_bridge_aggregate, timer_duration_ms,
 };
+pub use worker_execution::WorkerRun;
 mod error;
 pub use error::{
     LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError, ToolBindingError,
@@ -29,8 +31,7 @@ pub use language_trace_host::{LanguageTraceHost, trace_failure};
 mod process_create_tool;
 mod trace_waits;
 pub use process_create_tool::{
-    ProcessCreateTools, ProcessSourceParser, process_create_tool_definition,
-    process_create_tool_provider,
+    ProcessCreateTools, process_create_tool_definition, process_create_tool_provider,
 };
 mod trigger_commands;
 mod trigger_tools;
@@ -55,7 +56,7 @@ pub use lash_trace::{
     TraceNodeWaitResolution,
 };
 pub use lashlang::{
-    CompiledProcessCache, LASH_TYPE_KEY, LashlangAbilities, LashlangArtifacts, LashlangHostCatalog,
+    LASH_TYPE_KEY, LashlangAbilities, LashlangArtifacts, LashlangHostCatalog,
     LashlangHostEnvironment, LashlangLanguageFeatures,
 };
 
@@ -63,7 +64,7 @@ pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
 /// The dialect-agnostic tool binding type, its manifest key, and the one
 /// host-facing setter are defined in `lash-core` beside [`lash_core::ToolManifest`]
 /// and re-exported here so existing runtime-crate paths keep resolving.
-pub use lash_core::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
+pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
 pub const LASHLANG_SURFACE_EXTENSION_ID: &str = "lashlang.surface";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -106,9 +107,10 @@ pub fn lashlang_surface_extension(
     lash_core::plugin::PluginExtensionContribution::new(LASHLANG_SURFACE_EXTENSION_ID, contribution)
 }
 
-/// Lashlang/TypeScript resolution over the dialect-agnostic [`ToolBinding`]
-/// relocated to `lash-core`: validate the authored module path and operation
-/// and produce the executable [`ResolvedToolBinding`] the dialects dispatch on.
+/// Resolution over the dialect-agnostic [`ToolBinding`] relocated to
+/// `lash-core`: validate the authored module path and operation and produce
+/// the typed, front-end-neutral [`ResolvedToolBinding`] the runtime links and
+/// each dialect spells in its own syntax (ADR 0096).
 pub trait ToolBindingResolutionExt {
     fn executable_for(&self, tool_name: &str) -> Result<ResolvedToolBinding, ToolBindingError>;
 
@@ -118,7 +120,7 @@ pub trait ToolBindingResolutionExt {
     where
         Self: Sized,
     {
-        required_tool_typescript_executable(manifest)
+        required_tool_executable(manifest)
     }
 
     fn required_executable_for_remote(
@@ -228,21 +230,21 @@ fn validate_lashlang_identifier(
     Ok(())
 }
 
-pub fn required_tool_typescript_binding(
+pub fn required_tool_binding(
     manifest: &lash_core::ToolManifest,
 ) -> Result<ToolBinding, ToolBindingError> {
     ToolManifestBindingExt::tool_binding(manifest)?.ok_or_else(|| {
         ToolBindingError::MissingBinding {
             tool: manifest.name.clone(),
-            binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
+            binding_key: TOOL_BINDING_KEY,
         }
     })
 }
 
-pub fn required_tool_typescript_executable(
+pub fn required_tool_executable(
     manifest: &lash_core::ToolManifest,
 ) -> Result<ResolvedToolBinding, ToolBindingError> {
-    required_tool_typescript_binding(manifest)?.executable_for(&manifest.name)
+    required_tool_binding(manifest)?.executable_for(&manifest.name)
 }
 
 pub trait ToolManifestBindingExt {
@@ -252,13 +254,13 @@ pub trait ToolManifestBindingExt {
 impl ToolManifestBindingExt for lash_core::ToolManifest {
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
         self.bindings
-            .get(TYPESCRIPT_TOOL_BINDING_KEY)
+            .get(TOOL_BINDING_KEY)
             .cloned()
             .map(serde_json::from_value)
             .transpose()
             .map_err(|source| ToolBindingError::MalformedPayload {
                 tool: self.name.clone(),
-                binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
+                binding_key: TOOL_BINDING_KEY,
                 source,
             })
     }
@@ -276,7 +278,7 @@ impl RemoteToolGrantBindingExt for lash_remote_protocol::RemoteToolGrant {
     )]
     fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
         self.bindings.insert(
-            TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
+            TOOL_BINDING_KEY.to_string(),
             serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON"),
         );
         self
@@ -284,13 +286,13 @@ impl RemoteToolGrantBindingExt for lash_remote_protocol::RemoteToolGrant {
 
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
         self.bindings
-            .get(TYPESCRIPT_TOOL_BINDING_KEY)
+            .get(TOOL_BINDING_KEY)
             .cloned()
             .map(serde_json::from_value)
             .transpose()
             .map_err(|source| ToolBindingError::MalformedPayload {
                 tool: self.name.clone(),
-                binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
+                binding_key: TOOL_BINDING_KEY,
                 source,
             })
     }
@@ -431,7 +433,7 @@ fn filtered_tool_catalog(
     masked_call_paths: &BTreeSet<String>,
 ) -> lash_core::ToolCatalog {
     catalog.filtered(|entry| {
-        let Ok(binding) = required_tool_typescript_executable(&entry.manifest) else {
+        let Ok(binding) = required_tool_executable(&entry.manifest) else {
             // Preserve ordinary validation for malformed unrelated entries.
             return true;
         };
@@ -495,7 +497,7 @@ pub fn lashlang_resources_from_tool_catalog(
     let mut host_catalog = LashlangHostCatalog::new();
     // Every catalog member is callable.
     for entry in catalog.tools.iter() {
-        let binding = required_tool_typescript_executable(&entry.manifest)?;
+        let binding = required_tool_executable(&entry.manifest)?;
         let contract = lashlang_tool_operation_contract(&entry.contract);
         host_catalog.add_module_operation_contract(
             binding.module_path.iter().map(String::as_str),
@@ -753,7 +755,7 @@ impl std::fmt::Display for LashlangProcessAdmissionRefusal {
 impl std::error::Error for LashlangProcessAdmissionRefusal {}
 
 pub fn validate_lashlang_process_admission(
-    artifact: &lashlang::ModuleArtifact,
+    artifact: &lash_vm_client::InspectedArtifact,
     input: &LashlangProcessInput,
     host: LashlangHostEnvironmentCheck<'_>,
 ) -> Result<(), LashlangProcessAdmissionRefusal> {
@@ -878,6 +880,7 @@ pub struct PreparedLashlangProcessStart {
 }
 
 pub async fn prepare_lashlang_process_start(
+    workers: &lash_vm_client::service::Service,
     artifact_store: LashlangArtifacts,
     host_start_key: Option<&str>,
     start: lashlang::ProcessStart,
@@ -885,8 +888,8 @@ pub async fn prepare_lashlang_process_start(
     lifetime: lash_core::LifetimeDecision,
 ) -> Result<PreparedLashlangProcessStart, LashlangRuntimeError> {
     let display_name = Some(start.process_name.clone());
-    let artifact = artifact_store
-        .get_module_artifact(&start.module_ref)
+    let artifact = workers
+        .inspect_artifact(&artifact_store, &start.module_ref)
         .await
         .map_err(|source| LashlangRuntimeError::LoadArtifact { source })?
         .ok_or_else(|| LashlangRuntimeError::MissingArtifact {
@@ -905,7 +908,7 @@ pub async fn prepare_lashlang_process_start(
         &admission_input,
         LashlangHostEnvironmentCheck::OmitHostEnvironment,
     )?;
-    let process = artifact.ir().process(&start.process_name).ok_or_else(|| {
+    let process = artifact.process(&start.process_name).ok_or_else(|| {
         LashlangRuntimeError::ArtifactProcessMismatch {
             module_ref: start.module_ref.to_string(),
             process: start.process_name.clone(),
@@ -919,35 +922,26 @@ pub async fn prepare_lashlang_process_start(
         _ => return Err(LashlangRuntimeError::ProcessArgsNotRecord),
     };
     for name in args.keys() {
-        if !process
-            .params
-            .iter()
-            .any(|param| param.name.as_str() == name)
-        {
+        if !process.params.contains_key(name) {
             return Err(LashlangRuntimeError::InvalidProcessArgument {
                 path: name.clone(),
                 message: "argument is not declared by the target process".to_string(),
             });
         }
     }
-    for param in &process.params {
-        let value = args.get(param.name.as_str()).ok_or_else(|| {
+    for (name, expected) in &process.params {
+        let value = args.get(name.as_str()).ok_or_else(|| {
             LashlangRuntimeError::InvalidProcessArgument {
-                path: param.name.to_string(),
+                path: name.to_string(),
                 message: "required argument is missing".to_string(),
             }
         })?;
-        let expected = artifact.resolve_type(&param.ty);
-        if type_contains_process(&expected) {
-            validate_process_claims(&artifact_store, value, &expected, param.name.to_string())
+        if type_contains_process(expected) {
+            validate_process_claims(workers, &artifact_store, value, expected, name.to_string())
                 .await?;
         }
     }
-    let signal_event_types = artifact
-        .ir()
-        .process(&start.process_name)
-        .map(lashlang_process_signal_event_types)
-        .unwrap_or_default();
+    let signal_event_types = process.signals.clone();
     let process_input = LashlangProcessInput {
         module_ref: start.module_ref,
         process_ref: start.process_ref,
@@ -996,6 +990,7 @@ fn type_contains_process(ty: &lashlang::TypeExpr) -> bool {
 }
 
 fn validate_process_claims<'a>(
+    workers: &'a lash_vm_client::service::Service,
     artifact_store: &'a LashlangArtifacts,
     value: &'a serde_json::Value,
     expected: &'a lashlang::TypeExpr,
@@ -1044,6 +1039,7 @@ fn validate_process_claims<'a>(
                     .ok_or_else(|| invalid("expected list".to_string()))?;
                 for (index, item_value) in items.iter().enumerate() {
                     validate_process_claims(
+                        workers,
                         artifact_store,
                         item_value,
                         item,
@@ -1061,6 +1057,7 @@ fn validate_process_claims<'a>(
                     match object.get(field.name.as_str()) {
                         Some(field_value) => {
                             validate_process_claims(
+                                workers,
                                 artifact_store,
                                 field_value,
                                 &field.ty,
@@ -1082,7 +1079,15 @@ fn validate_process_claims<'a>(
             lashlang::TypeExpr::Union(items) => {
                 let mut errors = Vec::new();
                 for item in items {
-                    match validate_process_claims(artifact_store, value, item, path.clone()).await {
+                    match validate_process_claims(
+                        workers,
+                        artifact_store,
+                        value,
+                        item,
+                        path.clone(),
+                    )
+                    .await
+                    {
                         Ok(()) => return Ok(()),
                         Err(error) => errors.push(error.to_string()),
                     }
@@ -1098,8 +1103,8 @@ fn validate_process_claims<'a>(
                 })?;
                 let identity = lashlang::ProcessDefinitionIdentity::from_process_value(value)
                     .map_err(|error| invalid(error.to_string()))?;
-                let actual_artifact = artifact_store
-                    .get_module_artifact(&identity.module_ref)
+                let actual_artifact = workers
+                    .inspect_artifact(artifact_store, &identity.module_ref)
                     .await
                     .map_err(|error| invalid(format!("failed to load process artifact: {error}")))?
                     .ok_or_else(|| {
@@ -1108,8 +1113,8 @@ fn validate_process_claims<'a>(
                             identity.module_ref
                         ))
                     })?;
-                let actual = identity
-                    .resolve_process_type(actual_artifact.as_ref())
+                let actual = actual_artifact
+                    .process_type(&identity)
                     .map_err(|error| invalid(error.to_string()))?;
                 let expected = lashlang::TypeExpr::Process(lashlang::ProcessType::known(
                     expected_signature.clone(),
@@ -1168,7 +1173,8 @@ fn lashlang_process_identity(input: &LashlangProcessInput) -> lash_core::Process
 #[derive(Clone)]
 pub struct LashlangProcessEngine {
     artifact_store: LashlangArtifacts,
-    process_cache: Arc<Mutex<CompiledProcessCache>>,
+    worker_recovery: Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
+    workers: lash_vm_client::service::Service,
     surface: LashlangSurface,
     execution_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_context: lash_trace::TraceContext,
@@ -1176,15 +1182,30 @@ pub struct LashlangProcessEngine {
 }
 
 impl LashlangProcessEngine {
-    pub fn new(artifact_store: LashlangArtifacts, surface: LashlangSurface) -> Self {
+    pub fn new(
+        artifact_store: LashlangArtifacts,
+        surface: LashlangSurface,
+        worker_recovery: Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
+    ) -> Self {
         Self {
             artifact_store,
-            process_cache: Arc::new(Mutex::new(CompiledProcessCache::new())),
+            workers: lash_vm_client::service::Service::default()
+                .with_recovery_store(worker_recovery.clone()),
+            worker_recovery,
             surface,
             execution_sink: None,
             trace_context: lash_trace::TraceContext::default(),
             execution_bounds: lashlang::ExecutionBounds::unbounded(),
         }
+    }
+
+    pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
+        self.workers = workers.with_recovery_store(self.worker_recovery.clone());
+        self
+    }
+
+    pub fn worker_service(&self) -> &lash_vm_client::service::Service {
+        &self.workers
     }
 
     pub fn with_execution_trace(
@@ -1249,8 +1270,8 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             lashlang::ProcessDefinitionIdentity::from_process_value(reference.definition.as_json())
                 .map_err(|error| unresolvable(error.to_string()))?;
         let artifact = self
-            .artifact_store
-            .get_module_artifact(&identity.module_ref)
+            .workers
+            .inspect_artifact(&self.artifact_store, &identity.module_ref)
             .await
             .map_err(|error| unresolvable(error.to_string()))?
             .ok_or_else(|| {
@@ -1259,8 +1280,8 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
                     identity.module_ref
                 ))
             })?;
-        let process_type = identity
-            .resolve_process_type(&artifact)
+        let process_type = artifact
+            .process_type(&identity)
             .map_err(|error| unresolvable(error.to_string()))?;
         // The engine's own lifecycle events ride with the declaration's signals.
         // A leaf `processes.start` (ADR 0095) reaches the registry only through
@@ -1273,13 +1294,12 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .into_iter()
             .chain(
                 artifact
-                    .ir()
                     .process(
                         artifact
                             .process_name_for_ref(&identity.process_ref)
                             .unwrap_or(""),
                     )
-                    .map(lashlang_process_signal_event_types)
+                    .map(|process| process.signals.clone())
                     .unwrap_or_default(),
             )
             .collect::<Vec<_>>();
@@ -1393,7 +1413,7 @@ pub use catalogue_preview::{
 pub use deferred::{
     DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
     DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError, Resolution,
-    SharedDeferredToolResolver, ToolGrant, link_with_deferred_resolution,
+    SharedDeferredToolResolver, ToolGrant, compile_with_deferred_resolution,
     resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
     resolve_and_fold_deferred,
 };

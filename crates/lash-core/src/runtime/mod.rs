@@ -7,6 +7,9 @@ mod assembly;
 mod builder;
 mod compact_context;
 pub use compact_context::COMPACT_CONTEXT_COMMITTED_PHASE;
+pub use host_commands::{
+    SESSION_COMMAND_APPLYING_PHASE, SESSION_COMMAND_COMMITTED_PHASE, SESSION_COMMAND_STAGED_PHASE,
+};
 mod compaction_base;
 pub use lash_core_execution::runtime::attachment_delivery;
 #[cfg(feature = "testing")]
@@ -34,6 +37,7 @@ mod environment;
 mod error;
 mod frame_definition_carry;
 mod frame_open;
+mod host_commands;
 mod observation_publisher;
 mod turn_settlement;
 use lash_core_execution::runtime::host;
@@ -80,16 +84,7 @@ pub use process_runtime::{ProcessRuntimeContext, ProcessRuntimePorts};
 #[doc(hidden)]
 pub use session_manager::RuntimeSessionServices;
 #[cfg(any(test, feature = "testing"))]
-pub use session_manager::append_receipt_mixed_usage_envelope_conformance;
-#[cfg(any(test, feature = "testing"))]
-pub use session_manager::append_usage_cancellation_exactly_once_conformance;
-#[cfg(any(test, feature = "testing"))]
 pub use session_manager::take_spawned_child_runtimes;
-#[cfg(any(test, feature = "testing"))]
-pub use session_manager::{
-    PendingTokenLedgerEntry, StagedTokenLedger, record_reconciled_usage_shared,
-    record_token_usage_shared, record_unreported_attempts_shared, stage_token_ledger_shared,
-};
 mod session_ops;
 use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
@@ -222,7 +217,7 @@ pub use effect::{
     TurnControlBindingIdError, effect_groups_unsupported, refuse_unhonored_group_membership,
     turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
-pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
+pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
 pub use error::{
@@ -292,29 +287,30 @@ pub use process::{
     ProcessRegistrationProbe, ProcessRegistrationReceipt, ProcessRegistrationRefusal,
     ProcessRegistry, ProcessRegistryBinding, ProcessRegistryCursor, ProcessResumeRefusal,
     ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
-    ProcessSessionDeleteReport, ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration,
-    ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan, ProcessStartReceipt,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalPublication, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
-    ProcessToolIntents, ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan,
-    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
-    ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot,
-    ProjectionWatermark, RegistryScopeClose, ResolvedProcessDefinition,
-    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
-    SegmentHandover, SegmentStartMarker, SessionId, SessionObserverIntentSource, SessionScope,
-    SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization, UnavailableProcessService,
-    WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
+    ProcessSessionDeleteReport, ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding,
+    ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartPlan, ProcessStartReceipt, ProcessStartRequest,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication,
+    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, ProcessToolIntents,
+    ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan, ProcessValueSelector,
+    ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeOutbox,
+    ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProjectionWatermark,
+    RegistryScopeClose, ResolvedProcessDefinition, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant,
+    ScopeId, ScopeRef, ScopeStorageError, SegmentHandover, SegmentStartMarker, SessionId,
+    SessionObserverIntentSource, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
+    StoreRealization, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, admitted_signal_wait,
     allocate_process_event_sequence, apply_process_event_projection,
     apply_process_status_projection, artifact_store_plugin_error, check_retained_start,
     current_epoch_ms, fold_process_record, lifetime, load_process_execution_env,
     materialize_process_event_semantics, mint_process_id, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_child_session_id, process_park_transitions, process_signal_event_type,
-    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
-    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
-    publish_process_execution_env, reconcile_pruned_trigger_deliveries,
+    process_child_session_id, process_park_transitions, process_session_turn_id,
+    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
+    process_wake_delivery, process_wake_input_from_event_payload, process_wake_turn_cause,
+    process_wake_turn_text, publish_process_execution_env, reconcile_pruned_trigger_deliveries,
     reconcile_session_process_observer_intents, release_bound_trigger_delivery_pins,
     require_event_replay, terminal_append_request, terminal_event_type_name, tool_failure_code,
     validate_generic_process_event_append, validate_process_signal_name, watch_process_registry,
@@ -363,19 +359,18 @@ pub use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     AdmissionBoundary, AdmittedQueuedWork, CompactContextOutcome, DeliveryPolicy,
-    PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority,
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig,
-    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
-    QueuedWorkPayload, SessionCommand, SessionCommandPayload, SessionCommandReceipt,
-    TurnLaneAdmissionPolicy, TurnWorkPayload, process_wake_batch_draft,
-    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
+    OpenAgentFrameCommandOutcome, PROCESS_WAKE_MERGE_KEY, PluginOperationCommandOutcome,
+    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkCompletion,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    SessionCommandOutcome, SessionCommandPayload, SessionCommandReceipt, TurnLaneAdmissionPolicy,
+    TurnWorkPayload, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
+    process_wake_source_key,
 };
 use usage::nonzero_usage;
 pub use usage::{
-    LedgerUsageOutcome, ReconciledUsageAttempt, SessionUsageReport, SessionUsageTotals,
-    TokenLedgerEntry, UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageOutcomeError,
-    UsageReconciliationReport, UsageReportRow, UsageTotalRow, UsageTotals, diff_token_ledger,
-    diff_usage_reports, outstanding_unreported_attempts,
+    ReconciledUsageAttempt, SessionUsageReport, UsageReconciliationReport, UsageReportRow,
+    UsageTotals, diff_usage_reports,
 };
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no
@@ -502,11 +497,6 @@ pub struct LashRuntime {
     state: RuntimeSessionState,
     pub runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub runtime_lease_executor_id: String,
-    /// Session-scoped token cost ledger. Shared by ALL
-    /// `RuntimeSessionServices` instances created from this runtime
-    /// (both per-turn and async maintenance). Entries accumulate here
-    /// and are drained into `state.token_ledger` at turn-commit time.
-    pub shared_token_ledger: Arc<std::sync::Mutex<Vec<session_manager::PendingTokenLedgerEntry>>>,
     pub process_sync_needed: Arc<AtomicBool>,
     pub turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// How far this handle's resident session has travelled with the durable
@@ -524,11 +514,6 @@ pub struct LashRuntime {
     /// host on the paths that have no return value to give it (FIG-3367); the
     /// facade reads it as `LashSession::tool_restore_report()`.
     pub tool_restore_report: Option<crate::ToolRestoreReport>,
-    /// Attempts whose usage never arrived after an abort or failure, not yet
-    /// reconciled (FIG-2765). Runtime-resident: persisted holes live in the
-    /// ledger's unreported rows; this is the attribution a later
-    /// [`LashRuntime::reconcile_unreported_usage`] needs.
-    pub unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
     /// Whether the running direct turn replays the journaled initial drive
     /// set (ADR 0069 §6). A superseded one cedes the turn at commit under
     /// any generation: if its rows were reclaimed while the turn was down,

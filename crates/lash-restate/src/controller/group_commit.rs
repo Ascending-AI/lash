@@ -13,6 +13,16 @@
 //! The Restate index does not retain `drain_input`: the durable publication
 //! obligation is the committed-but-unseated child plus the dispatch workflow's
 //! own redrive, so `AlreadyCommitted` reports it `None`.
+//!
+//! The controller keeps, per child, the rank its own commit was answered
+//! (FIG-4308): the child's dispatch handler publishes that rank at the seat
+//! without committing again. The receipt is filled only from a journaled
+//! `Committed` or `AlreadyCommitted` answer this controller received — never
+//! from `Ungrouped` or a cancel — so a replay of the invocation restores it
+//! from the same journaled answer, and a fresh invocation starts without one.
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, PoisonError};
 
 use crate::durable_wait::RestateTurnCancelRaceOutcome;
 use lash_core::facade_support::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
@@ -62,21 +72,19 @@ where
         .await
         .map_err(|error| effect_group_engine_error("EffectGroupIndex/commit_child", error))?;
     Ok(match response {
-        EffectGroupCommitChildResponse::Committed { commit_seq, .. } => Outcome::Committed {
-            group_key,
-            commit_seq,
-        },
-        EffectGroupCommitChildResponse::AlreadyCommitted { commit_seq, .. } => {
+        EffectGroupCommitChildResponse::Committed { rank } => {
+            Outcome::Committed { group_key, rank }
+        }
+        EffectGroupCommitChildResponse::AlreadyCommitted { rank, .. } => {
             Outcome::AlreadyCommitted {
                 group_key,
-                commit_seq,
+                rank,
                 drain_input: None,
             }
         }
-        EffectGroupCommitChildResponse::CancelDecided { rank } => Outcome::CancelDecided {
-            group_key,
-            commit_seq: rank,
-        },
+        EffectGroupCommitChildResponse::CancelDecided { rank } => {
+            Outcome::CancelDecided { group_key, rank }
+        }
         EffectGroupCommitChildResponse::UnknownChild => {
             return Err(group_shape_error(format!(
                 "effect group {group_key} membership names replay key `{}` but its \
@@ -94,20 +102,23 @@ where
     })
 }
 
-/// The §5 barrier on the engine's own wake: the index names the last-committed
-/// unseated sibling. Its drained wake covers every lower sibling by
-/// transitivity, so one wait lifts the barrier without polling the index.
+/// The §5 barrier on the engine's own wake: the index names every committed
+/// sibling ranked below `rank` that has not seated, and the waits on their
+/// drained wakes are issued together, so one round trip covers them all.
+/// The barrier lifts once all lower committed siblings have seated, or
+/// retirement releases the wait — a release, not proof of seating: the
+/// semantic-admission fence still refuses any intent under a retired group.
 pub(super) async fn await_group_child_drain_admission<'ctx, C>(
     context: &C,
     namespace: &crate::RestateNamespace,
     group_key: &str,
-    commit_seq: u64,
+    rank: u64,
 ) -> Result<(), RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx>,
 {
     let (wait_scope, positions) = match context
-        .effect_group_drain_blockers(namespace, group_key.to_string(), commit_seq)
+        .effect_group_drain_blockers(namespace, group_key.to_string(), rank)
         .await
         .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blockers", error))?
     {
@@ -117,24 +128,23 @@ where
             positions,
         } => (wait_scope, positions),
     };
-    for position in positions {
+    let mut waits = Vec::with_capacity(positions.len());
+    for &position in &positions {
         let request = drained_wait_request(&wait_scope, group_key, position)?;
         let replay_key = request.key.key_id.clone();
-        let resolution = match context
-            .await_effect_group_wait(
-                namespace,
-                request,
-                replay_key,
-                None,
-                super::context::ProcessCancelRace::NotRaced,
-            )
-            .await
-            .map_err(|error| {
-                effect_group_engine_error(
-                    "LashDurableWaitWorkflow/await_resolution(DRAINED)",
-                    error,
-                )
-            })? {
+        waits.push(context.await_effect_group_wait(
+            namespace,
+            request,
+            replay_key,
+            None,
+            super::context::ProcessCancelRace::NotRaced,
+        ));
+    }
+    let resolved = join_in_order(waits).await;
+    for (position, resolved) in positions.into_iter().zip(resolved) {
+        let resolution = match resolved.map_err(|error| {
+            effect_group_engine_error("LashDurableWaitWorkflow/await_resolution(DRAINED)", error)
+        })? {
             RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
             RestateTurnCancelRaceOutcome::TurnCancelled
             | RestateTurnCancelRaceOutcome::ProcessCancelled
@@ -148,4 +158,91 @@ where
         drained_wait_lifted(group_key, position, resolution)?;
     }
     Ok(())
+}
+
+/// Drives every future to completion, polling them in their order on each
+/// wake, and returns their outputs in that order.
+///
+/// A journaled wait emits its call when it is first polled, so the first poll
+/// issues every call, in order, before any completes: one round trip covers
+/// them all, and the journal is the same on every replay.
+async fn join_in_order<F: std::future::Future + Unpin>(mut futures: Vec<F>) -> Vec<F::Output> {
+    let mut outputs = futures.iter().map(|_| None).collect::<Vec<_>>();
+    std::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (future, output) in futures.iter_mut().zip(outputs.iter_mut()) {
+            if output.is_some() {
+                continue;
+            }
+            match std::pin::Pin::new(future).poll(cx) {
+                std::task::Poll::Ready(value) => *output = Some(value),
+                std::task::Poll::Pending => pending = true,
+            }
+        }
+        if pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(())
+        }
+    })
+    .await;
+    outputs.into_iter().flatten().collect()
+}
+
+/// The exact child a commit receipt is for: its group, its journal scope and
+/// its replay key.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct GroupCommitReceiptKey {
+    group_key: String,
+    scope_id: String,
+    replay_key: String,
+}
+
+/// The ranks this controller's own commits reserved, by exact child.
+#[derive(Default)]
+pub(super) struct GroupCommitReceipts {
+    ranks: Mutex<BTreeMap<GroupCommitReceiptKey, u64>>,
+}
+
+impl GroupCommitReceipts {
+    /// Keeps the rank a `Committed` or `AlreadyCommitted` answer reserved for
+    /// the child at `scope_id`/`replay_key`; any other answer keeps nothing.
+    pub(super) fn keep(
+        &self,
+        scope_id: String,
+        replay_key: String,
+        outcome: &EffectGroupChildCommitOutcome,
+    ) {
+        let (group_key, rank) = match outcome {
+            EffectGroupChildCommitOutcome::Committed { group_key, rank }
+            | EffectGroupChildCommitOutcome::AlreadyCommitted {
+                group_key, rank, ..
+            } => (group_key.clone(), *rank),
+            EffectGroupChildCommitOutcome::Ungrouped
+            | EffectGroupChildCommitOutcome::CancelDecided { .. } => return,
+        };
+        self.ranks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                GroupCommitReceiptKey {
+                    group_key,
+                    scope_id,
+                    replay_key,
+                },
+                rank,
+            );
+    }
+
+    pub(super) fn rank(&self, group_key: &str, scope_id: &str, replay_key: &str) -> Option<u64> {
+        self.ranks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&GroupCommitReceiptKey {
+                group_key: group_key.to_owned(),
+                scope_id: scope_id.to_owned(),
+                replay_key: replay_key.to_owned(),
+            })
+            .copied()
+    }
 }

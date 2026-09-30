@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::events::{ProcessEventType, default_process_event_types};
-use super::{
-    LifetimeDecision, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance, ProcessRegistration,
-    SessionId,
-};
+use super::{LifetimeDecision, ProcessInput, ProcessProvenance, ProcessRegistration, SessionId};
 
 /// A start request as a leaf tool attempt declares it: everything a process
 /// start needs except its key.
@@ -15,6 +12,7 @@ use super::{
 /// process. The process id is minted by the registrar at realization and read
 /// back off the recorded result (ADR 0107).
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessStartDeclaration {
     pub input: ProcessInput,
     /// The lifetime the declaring attempt chose from its start context,
@@ -22,7 +20,7 @@ pub struct ProcessStartDeclaration {
     /// (FIG-3607 R4b).
     pub lifetime: LifetimeDecision,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_spec: Option<super::ProcessExecutionEnvSpec>,
+    pub env_ref: Option<super::ProcessExecutionEnvRef>,
     pub originator: super::ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<super::DeclaredProcessIdentity>,
@@ -45,7 +43,7 @@ impl ProcessStartDeclaration {
         Self {
             input,
             lifetime: lifetime.into(),
-            env_spec: None,
+            env_ref: None,
             originator,
             identity: None,
             wake_session_id: None,
@@ -64,8 +62,8 @@ impl ProcessStartDeclaration {
         Self::new(ProcessInput::External { metadata }, originator, lifetime)
     }
 
-    pub fn with_env_spec(mut self, env_spec: super::ProcessExecutionEnvSpec) -> Self {
-        self.env_spec = Some(env_spec);
+    pub fn with_env_ref(mut self, env_ref: super::ProcessExecutionEnvRef) -> Self {
+        self.env_ref = Some(env_ref);
         self
     }
 
@@ -112,7 +110,7 @@ impl ProcessStartDeclaration {
             start_key: Some(start_key),
             input: self.input,
             lifetime: self.lifetime,
-            env_spec: self.env_spec,
+            env_ref: self.env_ref,
             originator: self.originator,
             identity: self.identity,
             wake_session_id: self.wake_session_id,
@@ -129,6 +127,7 @@ impl ProcessStartDeclaration {
 /// own start paths, and a host rail refuses one that arrives deserialized
 /// ([`Self::keyed_in`]).
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessStartRequest {
     /// The start's idempotency key; `None` starts a new process every time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -138,7 +137,7 @@ pub struct ProcessStartRequest {
     /// a session the host looked up.
     pub lifetime: LifetimeDecision,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_spec: Option<super::ProcessExecutionEnvSpec>,
+    pub env_ref: Option<super::ProcessExecutionEnvRef>,
     pub originator: super::ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<super::DeclaredProcessIdentity>,
@@ -165,7 +164,7 @@ impl ProcessStartRequest {
             start_key: None,
             input,
             lifetime: lifetime.into(),
-            env_spec: None,
+            env_ref: None,
             originator,
             identity: None,
             wake_session_id: None,
@@ -236,10 +235,10 @@ impl ProcessStartRequest {
         }
     }
 
-    /// Sets the env spec carried by a `ProcessStartRequest` for store and durable-substrate
+    /// Sets the environment digest carried by a `ProcessStartRequest` for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
-    pub fn with_env_spec(mut self, env_spec: super::ProcessExecutionEnvSpec) -> Self {
-        self.env_spec = Some(env_spec);
+    pub fn with_env_ref(mut self, env_ref: super::ProcessExecutionEnvRef) -> Self {
+        self.env_ref = Some(env_ref);
         self
     }
 
@@ -294,7 +293,7 @@ impl ProcessStartRequest {
         ProcessStartDeclaration {
             input: self.input,
             lifetime: self.lifetime,
-            env_spec: self.env_spec,
+            env_ref: self.env_ref,
             originator: self.originator,
             identity: self.identity,
             wake_session_id: self.wake_session_id,
@@ -305,7 +304,7 @@ impl ProcessStartRequest {
 
     /// Extracts the registration outcome for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
-    pub fn into_registration(self, env_ref: Option<ProcessExecutionEnvRef>) -> ProcessRegistration {
+    pub fn into_registration(self) -> ProcessRegistration {
         let mut registration = ProcessRegistration::new(
             self.input,
             ProcessProvenance::new(self.originator),
@@ -313,7 +312,7 @@ impl ProcessStartRequest {
         )
         .with_start_key(self.start_key)
         .with_event_types(self.event_types)
-        .with_execution_env_ref(env_ref)
+        .with_execution_env_ref(self.env_ref)
         .with_wake_session_id(self.wake_session_id);
         if let Some(identity) = self.identity {
             registration = registration.with_declared_identity(identity);

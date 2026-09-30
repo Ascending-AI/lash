@@ -185,7 +185,7 @@ fn test_process_execution_write_authority(
 /// error or an endlessly recoverable infra error.
 #[tokio::test]
 async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
-    let backend = crate::testing::memory_backend().await;
+    let backend = crate::testing::sqlite_recording_backend().await;
     let child_session_id = SessionId::from("snapshot-start-child");
     let process_id = crate::ProcessId::fixture("process:subagent:snapshot-start-child");
     let factory = recording_factory(&backend);
@@ -288,7 +288,9 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         mode: crate::TurnCancelMode::Immediate,
         honoured_after_step: None,
     };
-    let registry = crate::testing::memory_backend().await.process_registry();
+    let registry = crate::testing::sqlite_recording_backend()
+        .await
+        .process_registry();
     let process_id = registry
         .register_process(registration)
         .await

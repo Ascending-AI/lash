@@ -30,7 +30,7 @@
             "object"
           ],
           "probes": {
-            "worker": "object {\"id\":{\"$lash_definition_id\":\"lash.definition:sha256:<hash>\"},\"signature\":{\"encoding\":{\"x-lash\":{\"kind\":\"process\",\"signature\":{\"output\":{\"type\":\"null\"},\"params\":[]}}},\"signature\":\"known\"}}"
+            "worker": "object {\"id\":{\"$lash_definition_id\":\"lash.definition:sha256:<hash>\"},\"signature\":{\"encoding\":{\"x-lash\":{\"kind\":\"process\",\"signature\":{\"output\":{\"type\":\"integer\"},\"params\":[]}}},\"signature\":\"known\"}}"
           }
         },
         "restart": {
@@ -39,7 +39,7 @@
             "object"
           ],
           "probes": {
-            "worker": "object {\"id\":{\"$lash_definition_id\":\"lash.definition:sha256:<hash>\"},\"signature\":{\"encoding\":{\"x-lash\":{\"kind\":\"process\",\"signature\":{\"output\":{\"type\":\"null\"},\"params\":[]}}},\"signature\":\"known\"}}"
+            "worker": "object {\"id\":{\"$lash_definition_id\":\"lash.definition:sha256:<hash>\"},\"signature\":{\"encoding\":{\"x-lash\":{\"kind\":\"process\",\"signature\":{\"output\":{\"type\":\"integer\"},\"params\":[]}}},\"signature\":\"known\"}}"
           }
         }
       }

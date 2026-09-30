@@ -114,9 +114,29 @@ pub struct RecordingEffectHost {
     selected_scopes: Arc<Mutex<Vec<ExecutionScope>>>,
     records: Arc<Mutex<Vec<RecordingEffectHostRecord>>>,
     retirements: Arc<Mutex<Vec<crate::EffectJournalRetirement>>>,
+    /// The ledger this journal-free host drains and retires in directly:
+    /// with no continuation of its own, the store is the delivery.
+    usage_accounting: Option<Arc<dyn crate::UsageAccountingStore>>,
 }
 
 impl RecordingEffectHost {
+    /// The recording host over the backend ledger it drains usage owners in.
+    pub fn over_usage_accounting(usage_accounting: Arc<dyn crate::UsageAccountingStore>) -> Self {
+        Self {
+            usage_accounting: Some(usage_accounting),
+            ..Self::default()
+        }
+    }
+
+    fn usage_ledger(&self) -> Result<&Arc<dyn crate::UsageAccountingStore>, crate::RuntimeError> {
+        self.usage_accounting.as_ref().ok_or_else(|| {
+            crate::RuntimeError::new(
+                crate::RuntimeErrorCode::UsageAdmissionFault,
+                "this recording effect host was built without a usage ledger",
+            )
+        })
+    }
+
     pub fn selected_scopes(&self) -> Vec<ExecutionScope> {
         self.selected_scopes.lock_recover().clone()
     }
@@ -168,8 +188,64 @@ impl crate::AwaitEventResolver for RecordingEffectHost {
     }
 }
 
+/// A fixture host's owner retirement: the ledger's own, stamped now. Fixture
+/// hosts have no settle lane to drain, so retirement is the whole drain.
+pub(crate) async fn retire_usage_owner_now(
+    usage_accounting: &dyn crate::UsageAccountingStore,
+    owner: &crate::RuntimeOwner,
+) -> Result<crate::UsageOwnerRetired, crate::RuntimeError> {
+    usage_accounting
+        .retire_usage_owner(
+            owner,
+            crate::ClockWallTime::timestamp_ms(&crate::facade_support::SystemClock),
+        )
+        .await
+        .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
+}
+
+/// A fixture host's execution retirement, keyed by the scope's journal key.
+pub(crate) async fn retire_usage_execution_now(
+    usage_accounting: &dyn crate::UsageAccountingStore,
+    owner: &crate::RuntimeOwner,
+    scope: &ExecutionScope,
+) -> Result<u64, crate::RuntimeError> {
+    let scope_key = scope
+        .journal_identity()
+        .map_err(|error| {
+            crate::RuntimeError::new(
+                crate::RuntimeErrorCode::MissingExecutionScopeId,
+                error.to_string(),
+            )
+        })?
+        .key()
+        .to_string();
+    usage_accounting
+        .retire_usage_execution(
+            owner,
+            &scope_key,
+            crate::ClockWallTime::timestamp_ms(&crate::facade_support::SystemClock),
+        )
+        .await
+        .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
+}
+
 #[async_trait::async_trait]
 impl EffectHost for RecordingEffectHost {
+    async fn drain_usage_accounting(
+        &self,
+        owner: &crate::RuntimeOwner,
+    ) -> Result<crate::UsageOwnerRetired, crate::RuntimeError> {
+        retire_usage_owner_now(self.usage_ledger()?.as_ref(), owner).await
+    }
+
+    async fn retire_usage_execution(
+        &self,
+        owner: &crate::RuntimeOwner,
+        scope: &ExecutionScope,
+    ) -> Result<u64, crate::RuntimeError> {
+        retire_usage_execution_now(self.usage_ledger()?.as_ref(), owner, scope).await
+    }
+
     async fn journal_replay(
         &self,
         _journal: &crate::EffectJournalIdentity,
@@ -290,9 +366,8 @@ where
 /// context before an AwaitEvent can be awaited.
 ///
 /// The witness establishes the active-wait law's registration boundary the
-/// way the host can prove it: [`effect_host_journaled_wait_registration_witness`]
-/// for a store journal, the scheduler for the in-process host, and an engine
-/// marker for a durable engine, where starting an ingress task does not
+/// way the host can prove it: a server-double wait-registration witness or
+/// a live Restate handler marker, where starting an ingress task does not
 /// itself prove that the remote wait registration committed. The witness must
 /// establish that registration through the implementation's real await path
 /// before asserting the shared retirement behavior.
@@ -424,10 +499,10 @@ pub async fn effect_controller_segmentation_vector(
         async fn await_group_child_drain_admission(
             &self,
             group_key: &str,
-            commit_seq: u64,
+            rank: u64,
         ) -> Result<(), lash_core::RuntimeEffectControllerError> {
             self.inner
-                .await_group_child_drain_admission(group_key, commit_seq)
+                .await_group_child_drain_admission(group_key, rank)
                 .await
         }
     }
@@ -1327,9 +1402,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
 /// scope. That is the one memory-versus-durable differential in quiescence
 /// (ADR 0049), and a law over the dropped case would assert two answers.
 ///
-/// This is the in-process host's witness: its waiter parks in memory on its
-/// first poll, with no I/O to wait for. A host that journals the wait uses
-/// [`effect_host_journaled_wait_registration_witness`].
+/// This helper holds a live waiter for a recording fixture. A Restate
+/// fixture supplies its wait-registration witness through
+/// `effect_host_await_events_with_active_wait_witness`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

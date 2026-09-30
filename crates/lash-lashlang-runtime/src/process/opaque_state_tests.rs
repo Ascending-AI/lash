@@ -5,7 +5,6 @@
 use super::{
     LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentState, ReplayOrdinalsState,
     decode_lashlang_segment_state, segment_continuation_expectation, segment_continuation_owner,
-    worker_side,
 };
 
 /// Answers whether `T` implements `DeserializeOwned`, at compile time: the
@@ -127,10 +126,25 @@ async fn parent_state_decode_never_compiles_regexp() {
         "the parent's structural check passes bytes the VM would refuse"
     );
 
-    let refusal = worker_side::open_continuation(&decoded.vm)
+    let refusal = worker_continuation_info(&decoded.vm)
         .expect_err("the worker's semantic decode validates the RegExp");
     assert!(
         refusal.to_string().contains("RegExp"),
         "the refusal is the RegExp validation: {refusal}"
     );
+}
+
+fn worker_continuation_info(state: &lash_vm_protocol::OpaqueVmState) -> Result<usize, String> {
+    match lash_vm_client::service::Service::default()
+        .request(lash_vm_client::service::Request::ContinuationInfo {
+            bytes: state.bytes().to_vec(),
+        })
+        .map_err(|e| e.to_string())?
+    {
+        lash_vm_client::service::Response::ContinuationInfo { iterator_count } => {
+            Ok(iterator_count)
+        }
+        lash_vm_client::service::Response::Refused { message, .. } => Err(message),
+        other => Err(format!("unexpected continuation response: {other:?}")),
+    }
 }

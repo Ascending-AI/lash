@@ -33,6 +33,7 @@ pub struct WakeDeliveryDriveReport {
     pub discarded_expired: usize,
     pub discarded_target_gone: usize,
     pub discarded_sequence_rewound: usize,
+    pub discarded_source_unreadable: usize,
     pub floor_absorbed: usize,
     pub retryable_failures: usize,
 }
@@ -226,204 +227,261 @@ impl WakeDeliveryDriver {
         let mut report = WakeDeliveryDriveReport::default();
         for delivery in registry.claim_pending_wake_deliveries(limit).await? {
             report.inspected += 1;
-            let claim_token = delivery.claim_token()?;
-            registry.get_process(&delivery.wake.process_id).await?;
-            if clock.timestamp_ms() >= delivery.expires_at_ms {
-                Self::settle(
-                    registry.as_ref(),
-                    &delivery,
-                    claim_token,
-                    clock.as_ref(),
-                    WakeDeliverySettlement::Discard(WakeDiscardReason::Expired),
-                    None,
-                    work_cadence,
-                    &mut report,
-                )
-                .await?;
-                continue;
-            }
-
-            let target_session_id = delivery.wake.target_session_id.clone();
-            let lookup = match session_store_factory
-                .lookup_session(&target_session_id)
-                .await
+            if let Err(error) = Self::deliver_claimed(
+                registry.as_ref(),
+                session_store_factory.as_ref(),
+                queued_work.as_ref(),
+                clock.as_ref(),
+                &delivery,
+                delivery_policy,
+                work_cadence,
+                &mut report,
+            )
+            .await
             {
-                Ok(lookup) => lookup,
-                Err(error) => {
-                    tracing::warn!(
-                        delivery_id = %delivery.delivery_id,
-                        target_session_id = %target_session_id,
-                        error = %error,
-                        "process wake target lookup failed; delivery remains pending"
-                    );
-                    Self::settle(
-                        registry.as_ref(),
-                        &delivery,
-                        claim_token,
-                        clock.as_ref(),
-                        WakeDeliverySettlement::Retry,
-                        None,
-                        work_cadence,
-                        &mut report,
-                    )
-                    .await?;
-                    continue;
-                }
-            };
-            match lookup {
-                crate::store::SessionLookup::Live(_) => {}
-                crate::store::SessionLookup::Deleted => {
-                    Self::settle(
-                        registry.as_ref(),
-                        &delivery,
-                        claim_token,
-                        clock.as_ref(),
-                        WakeDeliverySettlement::Discard(WakeDiscardReason::TargetGone),
-                        None,
-                        work_cadence,
-                        &mut report,
-                    )
-                    .await?;
-                    continue;
-                }
-                crate::store::SessionLookup::Absent => {
-                    tracing::debug!(
-                        delivery_id = %delivery.delivery_id,
-                        target_session_id = %target_session_id,
-                        "process wake target has never existed; delivery remains pending"
-                    );
-                    Self::settle(
-                        registry.as_ref(),
-                        &delivery,
-                        claim_token,
-                        clock.as_ref(),
-                        WakeDeliverySettlement::Retry,
-                        None,
-                        work_cadence,
-                        &mut report,
-                    )
-                    .await?;
-                    continue;
-                }
-            }
-            let store = &session_store_factory;
-
-            match store
-                .enqueue_queued_work_with_outcome(process_wake_batch_draft_with_delivery_policy(
-                    delivery.wake.clone(),
-                    delivery_policy,
-                ))
-                .await
-            {
-                Ok(enqueue_outcome) => {
-                    let enqueued = enqueue_outcome.batch();
-                    // The batch's admission armed its ingress obligation
-                    // (ADR 0109 §3); ask for its drive now, strictly after the
-                    // commit, under the first attempt's request, which the
-                    // relay's own first ask shares: the engine dedupes the
-                    // two. The drive's claim of the batch settles the
-                    // obligation; an ask that does not reach the engine is
-                    // the relay's to retry.
-                    if let Err(refusal) = queued_work
-                        .request_drive(
-                            &target_session_id,
-                            crate::engine::ingress_drive_request(
-                                enqueued.batch_id.as_str(),
-                                crate::engine::FIRST_INGRESS_ATTEMPT,
-                            ),
-                        )
-                        .await
-                    {
-                        tracing::debug!(
-                            delivery_id = %delivery.delivery_id,
-                            target_session_id = %target_session_id,
-                            batch_id = %enqueued.batch_id,
-                            %refusal,
-                            "process wake's drive ask was not accepted; the ingress relay retries it"
-                        );
-                    }
-                    if enqueue_outcome.process_wake_was_absorbed() {
-                        tracing::info!(
-                            delivery_id = %delivery.delivery_id,
-                            target_session_id = %target_session_id,
-                            batch_id = %enqueued.batch_id,
-                            source_key = ?enqueued.source_key,
-                            outcome = "floor_absorbed",
-                            "process wake delivery absorbed by receiver idempotency"
-                        );
-                        report.floor_absorbed += 1;
-                    } else {
-                        tracing::info!(
-                            delivery_id = %delivery.delivery_id,
-                            target_session_id = %target_session_id,
-                            batch_id = %enqueued.batch_id,
-                            source_key = ?enqueued.source_key,
-                            delivery_policy = enqueued.delivery_policy.as_str(),
-                            work_kind = enqueued.kind.as_str(),
-                            authority = ?enqueued.authority,
-                            merge_key = ?enqueued.merge_key,
-                            outcome = "enqueued",
-                            "process wake enqueued"
-                        );
-                    }
-                    Self::settle(
-                        registry.as_ref(),
-                        &delivery,
-                        claim_token,
-                        clock.as_ref(),
-                        WakeDeliverySettlement::Enqueued,
-                        None,
-                        work_cadence,
-                        &mut report,
-                    )
-                    .await?;
-                }
-                Err(StoreError::ProcessWakeSequenceRewound {
-                    session_id,
-                    process_id,
-                    sequence,
-                    allocation_floor,
-                }) => {
-                    let rewind_log = SequenceRewindDiscardLog {
-                        session_id: &session_id,
-                        process_id: &process_id,
-                        sequence,
-                        allocation_floor,
-                    };
-                    Self::settle(
-                        registry.as_ref(),
-                        &delivery,
-                        claim_token,
-                        clock.as_ref(),
-                        WakeDeliverySettlement::Discard(WakeDiscardReason::SequenceRewound),
-                        Some(rewind_log),
-                        work_cadence,
-                        &mut report,
-                    )
-                    .await?;
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        delivery_id = %delivery.delivery_id,
-                        target_session_id = %target_session_id,
-                        error = %error,
-                        "process wake enqueue failed; delivery remains pending"
-                    );
-                    Self::settle(
-                        registry.as_ref(),
-                        &delivery,
-                        claim_token,
-                        clock.as_ref(),
-                        WakeDeliverySettlement::Retry,
-                        None,
-                        work_cadence,
-                        &mut report,
-                    )
-                    .await?;
-                }
+                tracing::warn!(
+                    delivery_id = %delivery.delivery_id,
+                    error = %error,
+                    "process wake attempt failed; continuing the claimed page"
+                );
+                report.retryable_failures += 1;
             }
         }
         Ok(report)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn deliver_claimed(
+        registry: &dyn ProcessRegistry,
+        session_store_factory: &dyn DeploymentStore,
+        queued_work: &dyn SessionWorkEngine,
+        clock: &dyn Clock,
+        delivery: &crate::WakeDelivery,
+        delivery_policy: crate::DeliveryPolicy,
+        work_cadence: &WorkCadencePolicy,
+        report: &mut WakeDeliveryDriveReport,
+    ) -> Result<(), PluginError> {
+        let claim_token = delivery.claim_token()?;
+        if clock.timestamp_ms() >= delivery.expires_at_ms {
+            Self::settle(
+                registry,
+                delivery,
+                claim_token,
+                clock,
+                WakeDeliverySettlement::Discard(WakeDiscardReason::Expired),
+                None,
+                work_cadence,
+                report,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if let Err(error) = registry.get_process(&delivery.wake.process_id).await {
+            let settlement = if error.is_terminal() {
+                WakeDeliverySettlement::Discard(WakeDiscardReason::SourceUnreadable)
+            } else {
+                WakeDeliverySettlement::Retry
+            };
+            tracing::warn!(
+                delivery_id = %delivery.delivery_id,
+                process_id = %delivery.wake.process_id,
+                error = %error,
+                terminal = error.is_terminal(),
+                "process wake source read failed"
+            );
+            return Self::settle(
+                registry,
+                delivery,
+                claim_token,
+                clock,
+                settlement,
+                None,
+                work_cadence,
+                report,
+            )
+            .await;
+        }
+
+        let target_session_id = delivery.wake.target_session_id.clone();
+        let lookup = match session_store_factory
+            .lookup_session(&target_session_id)
+            .await
+        {
+            Ok(lookup) => lookup,
+            Err(error) => {
+                tracing::warn!(
+                    delivery_id = %delivery.delivery_id,
+                    target_session_id = %target_session_id,
+                    error = %error,
+                    "process wake target lookup failed; delivery remains pending"
+                );
+                Self::settle(
+                    registry,
+                    delivery,
+                    claim_token,
+                    clock,
+                    WakeDeliverySettlement::Retry,
+                    None,
+                    work_cadence,
+                    report,
+                )
+                .await?;
+                return Ok(());
+            }
+        };
+        match lookup {
+            crate::store::SessionLookup::Live(_) => {}
+            crate::store::SessionLookup::Deleted => {
+                Self::settle(
+                    registry,
+                    delivery,
+                    claim_token,
+                    clock,
+                    WakeDeliverySettlement::Discard(WakeDiscardReason::TargetGone),
+                    None,
+                    work_cadence,
+                    report,
+                )
+                .await?;
+                return Ok(());
+            }
+            crate::store::SessionLookup::Absent => {
+                tracing::debug!(
+                    delivery_id = %delivery.delivery_id,
+                    target_session_id = %target_session_id,
+                    "process wake target has never existed; delivery remains pending"
+                );
+                Self::settle(
+                    registry,
+                    delivery,
+                    claim_token,
+                    clock,
+                    WakeDeliverySettlement::Retry,
+                    None,
+                    work_cadence,
+                    report,
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+
+        match session_store_factory
+            .enqueue_queued_work_with_outcome(process_wake_batch_draft_with_delivery_policy(
+                delivery.wake.clone(),
+                delivery_policy,
+            ))
+            .await
+        {
+            Ok(enqueue_outcome) => {
+                let enqueued = enqueue_outcome.batch();
+                // The batch's admission armed its ingress obligation
+                // (ADR 0109 §3); ask for its drive now, strictly after the
+                // commit, under the first attempt's request, which the
+                // relay's own first ask shares: the engine dedupes the
+                // two. The drive's claim of the batch settles the
+                // obligation; an ask that does not reach the engine is
+                // the relay's to retry.
+                if let Err(refusal) = queued_work
+                    .request_drive(
+                        &target_session_id,
+                        crate::engine::ingress_drive_request(
+                            enqueued.batch_id.as_str(),
+                            crate::engine::FIRST_INGRESS_ATTEMPT,
+                        ),
+                    )
+                    .await
+                {
+                    tracing::debug!(
+                        delivery_id = %delivery.delivery_id,
+                        target_session_id = %target_session_id,
+                        batch_id = %enqueued.batch_id,
+                        %refusal,
+                        "process wake's drive ask was not accepted; the ingress relay retries it"
+                    );
+                }
+                if enqueue_outcome.process_wake_was_absorbed() {
+                    tracing::info!(
+                        delivery_id = %delivery.delivery_id,
+                        target_session_id = %target_session_id,
+                        batch_id = %enqueued.batch_id,
+                        source_key = ?enqueued.source_key,
+                        outcome = "floor_absorbed",
+                        "process wake delivery absorbed by receiver idempotency"
+                    );
+                    report.floor_absorbed += 1;
+                } else {
+                    tracing::info!(
+                        delivery_id = %delivery.delivery_id,
+                        target_session_id = %target_session_id,
+                        batch_id = %enqueued.batch_id,
+                        source_key = ?enqueued.source_key,
+                        delivery_policy = enqueued.delivery_policy.as_str(),
+                        work_kind = enqueued.kind.as_str(),
+                        authority = ?enqueued.authority,
+                        merge_key = ?enqueued.merge_key,
+                        outcome = "enqueued",
+                        "process wake enqueued"
+                    );
+                }
+                Self::settle(
+                    registry,
+                    delivery,
+                    claim_token,
+                    clock,
+                    WakeDeliverySettlement::Enqueued,
+                    None,
+                    work_cadence,
+                    report,
+                )
+                .await?;
+            }
+            Err(StoreError::ProcessWakeSequenceRewound {
+                session_id,
+                process_id,
+                sequence,
+                allocation_floor,
+            }) => {
+                let rewind_log = SequenceRewindDiscardLog {
+                    session_id: &session_id,
+                    process_id: &process_id,
+                    sequence,
+                    allocation_floor,
+                };
+                Self::settle(
+                    registry,
+                    delivery,
+                    claim_token,
+                    clock,
+                    WakeDeliverySettlement::Discard(WakeDiscardReason::SequenceRewound),
+                    Some(rewind_log),
+                    work_cadence,
+                    report,
+                )
+                .await?;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    delivery_id = %delivery.delivery_id,
+                    target_session_id = %target_session_id,
+                    error = %error,
+                    "process wake enqueue failed; delivery remains pending"
+                );
+                Self::settle(
+                    registry,
+                    delivery,
+                    claim_token,
+                    clock,
+                    WakeDeliverySettlement::Retry,
+                    None,
+                    work_cadence,
+                    report,
+                )
+                .await?;
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -525,6 +583,7 @@ impl WakeDeliveryDriver {
             WakeDiscardReason::Expired => report.discarded_expired += 1,
             WakeDiscardReason::TargetGone => report.discarded_target_gone += 1,
             WakeDiscardReason::SequenceRewound => report.discarded_sequence_rewound += 1,
+            WakeDiscardReason::SourceUnreadable => report.discarded_source_unreadable += 1,
             WakeDiscardReason::Retargeted => {
                 unreachable!("the wake delivery driver does not produce retargeted discards")
             }
@@ -544,7 +603,8 @@ impl WakeDeliveryDriver {
                 delivery.claim_token()?,
                 clock
                     .timestamp_ms()
-                    .saturating_add(retry_delay_ms(delivery.attempts, work_cadence)),
+                    .saturating_add(retry_delay_ms(delivery.attempts, work_cadence))
+                    .min(delivery.expires_at_ms),
             )
             .await
         {
@@ -586,6 +646,7 @@ impl WakeDeliveryDriver {
                 + report.discarded_expired
                 + report.discarded_target_gone
                 + report.discarded_sequence_rewound
+                + report.discarded_source_unreadable
                 > 0;
             let delay = if made_progress
                 && report.retryable_failures == 0

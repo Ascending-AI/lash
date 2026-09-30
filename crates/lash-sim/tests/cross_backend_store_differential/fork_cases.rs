@@ -65,7 +65,6 @@ pub(super) fn foreign_lineage_case() -> GeneratedCase {
                     turn_id: "foreign-lineage-fork",
                 }),
                 checkpoint: CheckpointSpec::Empty,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::PinLeaf,
@@ -90,7 +89,6 @@ pub(super) fn rewind_case() -> GeneratedCase {
                     turn_id: "rewind-fork",
                 }),
                 checkpoint: CheckpointSpec::Empty,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::PinLeaf,
@@ -116,7 +114,6 @@ impl BackendRunner {
             .await
             .map_err(|failure| StoreError::Backend(failure.to_string()))?;
         assert_eq!(report.removed_receipt_count, 1);
-        assert_eq!(report.removed_usage_delta_count, 1);
         assert_eq!(report.removed_attachment_root_count, 0);
         assert_eq!(
             self.factory()
@@ -297,7 +294,6 @@ pub(super) fn pin_fork_unpin() -> GeneratedCase {
                     turn_id: "forkable-leaf",
                 }),
                 checkpoint: CheckpointSpec::Empty,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::PinLeaf,
@@ -388,7 +384,7 @@ pub(super) async fn selected_observer_intents(
         state.session_id = source_id.clone();
         state.ensure_agent_frame_initialized();
         source
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
             .await
             .expect("commit fork point");
         let node_id = state

@@ -12,12 +12,12 @@ use crate::support::{
     ProviderHandle, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
     RuntimeSessionState, SessionAdmin, SessionCreationHead, SessionCursor, SessionError,
     SessionObservation, SessionObservationSubscription, SessionPolicy, SessionReadView,
-    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, SessionUsageReport,
-    ToolManifest, ToolState, TurnInput, build_plugin_host, refuse_foreign_backend_factories,
+    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, ToolManifest, ToolState,
+    TurnInput, build_plugin_host, refuse_foreign_backend_factories,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::runtime::{UnreportedUsageAttempt, UsageReconciliationReport};
+use lash_core::runtime::UsageReconciliationReport;
 use lash_core::{LiveReplayStoreError, SessionObservationEvent, facade_support::LiveReplayGap};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
@@ -219,6 +219,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.env.core.control.effect_host),
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.provider_resolver),
+            self.core.backend.usage_accounting(),
         )
     }
 
@@ -308,6 +309,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.live_replay_store),
             catalog,
             Arc::clone(&self.core.env.core.providers.provider_resolver),
+            self.core.backend.usage_accounting(),
         ))
     }
 
@@ -685,6 +687,71 @@ pub struct LashSession {
     pub(crate) parent_session_id: Option<SessionId>,
 }
 
+/// A [`LashSession::park`] or [`LashSession::close`] that did not complete
+/// (FIG-4202). It loses nothing: when the refusal left the session intact,
+/// it hands the session back with its runtime and its pending usage, and the
+/// host keeps using it or parks it again.
+pub struct SessionParkRefused {
+    session: Option<Box<LashSession>>,
+    error: Box<EmbedError>,
+}
+
+impl SessionParkRefused {
+    /// Why the park did not complete.
+    pub fn error(&self) -> &EmbedError {
+        &self.error
+    }
+
+    /// The drive that owns the session head, when the refusal is a busy one:
+    /// the park's flush met a bound turn, an owed follow-on or an open
+    /// session command. The same park lands once that owner's boundary
+    /// passes.
+    pub fn busy_owner(&self) -> Option<&lash_core::store::SessionHeadOwner> {
+        match self.error.as_ref() {
+            EmbedError::Session(SessionError::Store {
+                source: lash_core::StoreError::SessionHeadOwned { owner, .. },
+                ..
+            }) => Some(owner),
+            _ => None,
+        }
+    }
+
+    /// The session, handed back intact, when the refusal left it so: a busy
+    /// or failed flush. `None` when another handle still shares the runtime
+    /// ([`EmbedError::SessionStillInUse`] leaves that handle in place).
+    pub fn into_session(self) -> Option<LashSession> {
+        self.session.map(|session| *session)
+    }
+}
+
+impl std::fmt::Debug for SessionParkRefused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SessionParkRefused")
+            .field("session_returned", &self.session.is_some())
+            .field("error", &self.error)
+            .finish()
+    }
+}
+
+impl std::fmt::Display for SessionParkRefused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "the session did not park: {}", self.error)
+    }
+}
+
+impl std::error::Error for SessionParkRefused {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
+}
+
+impl From<SessionParkRefused> for EmbedError {
+    fn from(refused: SessionParkRefused) -> Self {
+        *refused.error
+    }
+}
+
 /// Lightweight, consuming handle returned by [`LashSession::park`].
 ///
 /// Parking flushes a session's dirty state to its store and drops the live
@@ -746,59 +813,107 @@ impl LashSession {
     /// Durably close this session, then release its in-memory runtime.
     ///
     /// `close` is the honest teardown verb: a persistent session flushes its
-    /// dirty state (via a fresh-lease commit) so the store reflects the final
-    /// transcript, its in-memory plugin session is unregistered, and the live
-    /// runtime is dropped.
+    /// dirty state so the store reflects the final transcript, its in-memory
+    /// plugin session is unregistered, and the live runtime is dropped.
     ///
-    /// This consumes the session and requires exclusive ownership: any cloned
-    /// [`LashSession`] handle or in-flight turn keeps a live reference to the
-    /// same runtime, so `close` returns [`EmbedError::SessionStillInUse`] until
-    /// those are dropped or finished. Cancel a running send first with
+    /// It requires exclusive ownership: any cloned [`LashSession`] handle or
+    /// in-flight turn keeps a live reference to the same runtime, so `close`
+    /// refuses with [`EmbedError::SessionStillInUse`] until those are
+    /// dropped or finished. Cancel a running send first with
     /// [`SendHandle::cancel`](crate::SendHandle::cancel) if needed.
+    ///
+    /// A close whose flush does not land is recoverable and loses nothing
+    /// (FIG-4202): the refusal hands the session back with its runtime and
+    /// its pending usage, and [`SessionParkRefused::busy_owner`] names the
+    /// drive that owns the session head when that is why. Close it again once
+    /// that owner's boundary passes.
     ///
     /// To keep a handle for later resumption instead of discarding the session,
     /// use [`park`](Self::park).
-    pub async fn close(self) -> Result<()> {
-        let runtime = self.into_owned_runtime().await?;
-        runtime.unregister_plugin_session()?;
-        // Reuse the core parking primitive to flush + release the lease,
-        // discarding the returned handle: close does not resume.
-        Box::pin(runtime.park()).await?;
-        Ok(())
+    pub async fn close(self) -> std::result::Result<(), SessionParkRefused> {
+        // Close does not resume: the parked handle is discarded.
+        Box::pin(self.park()).await.map(drop)
     }
 
     /// Quiesce this session for later resumption, returning a lightweight
     /// [`ParkedSession`] handle.
     ///
-    /// Parking flushes dirty state to the store (a fresh-lease commit), drops
-    /// the live runtime and its plugin session, and hands back a cheap handle
-    /// the host can cache and later rebuild with
-    /// [`LashCore::resume`](crate::LashCore::resume). This is the
-    /// quiesce/handoff lever for webserver embedders that hold many idle
-    /// sessions: it bounds resident memory per session without deleting durable
-    /// state.
+    /// Parking flushes dirty state to the store, drops the live runtime and
+    /// its plugin session, and hands back a cheap handle the host can cache
+    /// and later rebuild with [`LashCore::resume`](crate::LashCore::resume).
+    /// This is the quiesce/handoff lever for webserver embedders that hold
+    /// many idle sessions: it bounds resident memory per session without
+    /// deleting durable state.
     ///
     /// Contract:
-    /// - **Exclusive ownership required.** `park` consumes the session and drops
-    ///   the in-memory runtime, so it needs the sole live reference. A cloned
-    ///   [`LashSession`] or an in-flight turn holds another reference and makes
-    ///   `park` return [`EmbedError::SessionStillInUse`]. Because an executing
-    ///   turn holds such a reference, parking is effectively an *idle-session*
-    ///   operation: finish or cancel ([`SendHandle::cancel`](crate::SendHandle::cancel))
-    ///   first. The store commit itself does not observe an active turn; the
-    ///   exclusive-ownership guard is what makes mid-turn parking an explicit
-    ///   error rather than a silent partial flush.
-    pub async fn park(self) -> Result<ParkedSession> {
+    /// - **Exclusive ownership required.** A cloned [`LashSession`] or an
+    ///   in-flight turn holds another reference to the runtime, and `park`
+    ///   refuses with [`EmbedError::SessionStillInUse`] before it writes
+    ///   anything. Parking is therefore an *idle-session* operation: finish
+    ///   or cancel ([`SendHandle::cancel`](crate::SendHandle::cancel)) first.
+    /// - **Busy is recoverable (FIG-4202).** The session's bound turn owns its
+    ///   head. A dirty park while a drive owns it (a turn running on another
+    ///   runtime, an owed follow-on, a session command not yet applied)
+    ///   writes nothing and hands the session back, with its runtime and its
+    ///   pending usage, in [`SessionParkRefused`]. Park it again once that
+    ///   owner's boundary passes. A clean park writes nothing and is never
+    ///   busy.
+    pub async fn park(self) -> std::result::Result<ParkedSession, SessionParkRefused> {
+        let was_resident = self.binding.release_resident(&self.runtime).await;
+        let refuse = |session: Self, error: EmbedError| {
+            if was_resident {
+                session.binding.register_resident(&session.runtime);
+            }
+            Err(SessionParkRefused {
+                session: Some(Box::new(session)),
+                error: Box::new(error),
+            })
+        };
+        if !self.is_sole_handle() {
+            return refuse(self, EmbedError::SessionStillInUse);
+        }
+        let flushed = {
+            let writer = self.runtime.writer();
+            let mut runtime = writer.lock().await;
+            let flushed = Box::pin(runtime.flush_for_park()).await;
+            self.runtime.publish_from(&runtime);
+            flushed
+        };
+        if let Err(error) = flushed {
+            return refuse(self, error.into());
+        }
         let binding = Arc::clone(&self.binding);
-        let runtime = self.into_owned_runtime().await?;
-        // We now own the runtime exclusively; release the in-memory plugin
-        // session registration before flushing and dropping it.
-        runtime.unregister_plugin_session()?;
-        let parked = Box::pin(runtime.park()).await?;
-        Ok(ParkedSession {
-            inner: parked,
-            binding,
-        })
+        let runtime = match self.into_owned_runtime(was_resident).await {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                return Err(SessionParkRefused {
+                    session: None,
+                    error: Box::new(error),
+                });
+            }
+        };
+        // The flush landed and this handle owns the runtime alone: release
+        // its in-memory plugin session and drop it.
+        let parked = runtime
+            .unregister_plugin_session()
+            .map_err(EmbedError::from)
+            .and_then(|()| runtime.parked_handle().map_err(EmbedError::from));
+        match parked {
+            Ok(inner) => Ok(ParkedSession { inner, binding }),
+            Err(error) => Err(SessionParkRefused {
+                session: None,
+                error: Box::new(error),
+            }),
+        }
+    }
+
+    /// Whether this handle is the runtime's only live reference: no cloned
+    /// session and no in-flight turn shares it.
+    fn is_sole_handle(&self) -> bool {
+        // `writer()` clones the shared `Arc<Mutex<LashRuntime>>`, so the
+        // handle's own reference and this clone are the only two when no
+        // other handle exists.
+        Arc::strong_count(&self.runtime.writer()) == 2
     }
 
     /// Consume the session and take sole ownership of the underlying runtime.
@@ -810,11 +925,13 @@ impl LashSession {
     /// The core's session driver runs drives on an open session's runtime, so
     /// the session is first withdrawn from the drives and a drive already
     /// running on it is let stop; a failed take lends it to them again.
-    async fn into_owned_runtime(self) -> Result<LashRuntime> {
+    ///
+    /// `was_resident` says whether the session was lent to the drives
+    /// before the take, so a failed take lends it to them again.
+    async fn into_owned_runtime(self, was_resident: bool) -> Result<LashRuntime> {
         let LashSession {
             runtime, binding, ..
         } = self;
-        let was_resident = binding.release_resident(&runtime).await;
         let weak = runtime.downgrade();
         // `writer()` clones the shared `Arc<Mutex<LashRuntime>>`; dropping the
         // handle then leaves this clone as the sole strong reference iff no
@@ -946,7 +1063,7 @@ impl LashSession {
 
     /// Refresh the session graph from any background process that signalled it
     /// changed. This is the honest name for the former
-    /// `processes().await_all()` misnomer (ADR 0019 grill): a session-graph
+    /// `processes().await_all()` misnomer (ADR 0014 grill): a session-graph
     /// resync, not a terminal wait on background work — wait on a process with
     /// [`SessionProcessAdmin::await_output`]. It lives on the session surface
     /// because it refreshes the session graph, not the global process registry.
@@ -985,6 +1102,7 @@ impl LashSession {
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
             self.binding.provider_resolver(),
+            self.binding.usage_accounting(),
         )
     }
 
@@ -1010,32 +1128,31 @@ impl LashSession {
         self.runtime.observe().read_view.clone()
     }
 
-    pub fn usage_report(&self) -> SessionUsageReport {
-        self.runtime.observe().usage_report.clone()
-    }
-
-    /// Attempts of finished turns whose provider usage never arrived after a
-    /// protocol abort or a failure, not yet reconciled. Each is already
-    /// counted in [`usage_report`](Self::usage_report) as an unreported row;
-    /// [`reconcile_unreported_usage`](Self::reconcile_unreported_usage) fills
-    /// them.
-    pub async fn unreported_usage_attempts(&self) -> Vec<UnreportedUsageAttempt> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        runtime.unreported_usage_attempts().to_vec()
+    /// The session's model usage, read from the deployment's usage ledger
+    /// (ADR 0125): every call made for this session, by this runtime or any
+    /// other. `completeness.is_settled()` says whether every run has been
+    /// delivered; a host that reads after a turn and wants the turn's calls
+    /// counted waits for it.
+    pub async fn usage(&self) -> Result<lash_core::OwnerUsage> {
+        self.binding
+            .usage_accounting()
+            .load_owner_usage(&lash_core::RuntimeOwner::Session(SessionId::from(
+                self.runtime.observe().session_id(),
+            )))
+            .await
+            .map_err(Into::into)
     }
 
     /// Ask the session's provider for the usage of every unreported attempt
-    /// and append one correction row per recovered generation. Host-invoked
-    /// (a billing sweep, an idle hook), never on the turn's hot path; each
-    /// lookup is bounded by the provider. Attempts the provider cannot resolve
-    /// stay registered and return as `unresolved`.
+    /// the ledger holds for this session, and append one correction per
+    /// recovered generation. Host-invoked (a billing sweep, an idle hook),
+    /// never on the turn's hot path; each lookup is bounded by the provider.
+    /// Attempts the provider cannot resolve stay outstanding and return as
+    /// `unresolved`.
     pub async fn reconcile_unreported_usage(&self) -> Result<UsageReconciliationReport> {
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let report = runtime.reconcile_unreported_usage().await?;
-        self.runtime.publish_resident_from(&runtime);
-        Ok(report)
+        Ok(runtime.reconcile_unreported_usage().await?)
     }
 
     pub async fn set_turn_phase_probe(
@@ -1150,10 +1267,6 @@ impl ObservableSession {
 
     pub fn read_view(&self) -> SessionReadView {
         self.snapshot().read_view.clone()
-    }
-
-    pub fn usage_report(&self) -> SessionUsageReport {
-        self.snapshot().usage_report.clone()
     }
 
     pub fn tool_state(&self) -> Option<ToolState> {

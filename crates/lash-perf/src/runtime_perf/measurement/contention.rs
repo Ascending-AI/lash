@@ -215,7 +215,7 @@ mod contention_tests {
     #[tokio::test]
     async fn gate_bypass_second_completer_hits_receipt_conflict_then_rebuilds_after_backoff() {
         let session_id = "commit-admission-bypass";
-        let factory = memory_stores()
+        let factory = sqlite_memory_stores()
             .await
             .expect("open a SQLite memory store set")
             .session_store_factory();
@@ -241,14 +241,12 @@ mod contention_tests {
         );
         let first_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
             &first_state,
-            &[],
             shared_operation.clone(),
         );
         // Mutation probe: this second completer deliberately builds its stale
         // intent without entering the process-local admission FIFO.
         let bypass_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
             &bypass_state,
-            &[],
             shared_operation,
         );
         lash_core::facade_support::run_head_advancing_commit_attempt(
@@ -294,7 +292,6 @@ mod contention_tests {
                 fresh.policy.provider_id = "gate-bypass-completer".to_string();
                 let retry_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
                     &fresh,
-                    &[],
                     lash_core::OperationId::new(
                         lash_core::ExecutionScope::runtime_operation(
                             "commit-admission-bypass-retry",
@@ -462,7 +459,7 @@ pub(crate) async fn run_once_writer_contention(
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
-    let cumulative_usage = runtime.usage_report();
+    let cumulative_usage = runtime.settled_usage_report().await?;
 
     for session in peer_sessions {
         session.close().await?;
@@ -649,7 +646,7 @@ pub(crate) async fn run_once_async_process_settlement(
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
     let state = runtime.export_state().await;
-    let cumulative_usage = runtime.usage_report();
+    let cumulative_usage = runtime.settled_usage_report().await?;
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
@@ -791,7 +788,7 @@ async fn settle_durable_contention_root(
                     .ok_or_else(|| {
                         anyhow::anyhow!("durable contention session state disappeared")
                     })?;
-                let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+                let mut commit = RuntimeCommit::persisted_state_for_test(&state);
                 commit.drive_fence = Some(Box::new(fence.clone()));
                 let commit = super::queued_work::finishing_perf_root(commit, root, admission);
                 match store.commit_runtime_state(commit).await {
@@ -1041,7 +1038,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             ))
         };
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
             .await?;
     }
     for index in 0..target_completions {

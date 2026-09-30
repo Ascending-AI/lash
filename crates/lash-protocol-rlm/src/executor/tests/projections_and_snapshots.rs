@@ -41,7 +41,7 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
             .expect("patch diary");
 
         let projected = projected_history(vec![FlowValue::String("hello".into())]);
-        let compiled = lashlang::testing::harness::try_compile_program(&finish_record(&[
+        let compiled = worker_compile_program(&finish_record(&[
             ("history_len", b::builtin("len", vec![b::var("history")])),
             ("diary_len", b::builtin("len", vec![b::var("diary")])),
         ]))
@@ -54,15 +54,7 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
         };
         assert_eq!(record["history_len"], FlowValue::Number(1.0));
         assert_eq!(record["diary_len"], FlowValue::Number(1.0));
-        assert!(
-            state
-                .vm
-                .state()
-                .snapshot()
-                .globals()
-                .get("history")
-                .is_none()
-        );
+        assert!(state.vm.state().globals().get("history").is_none());
     });
 }
 
@@ -72,7 +64,7 @@ pub(super) fn projected_history_defaults_to_empty_list_when_missing() {
         let mut state = RlmExecutionState::new();
 
         let projected = projected_history(Vec::new());
-        let compiled = lashlang::testing::harness::try_compile_program(&finish_record(&[(
+        let compiled = worker_compile_program(&finish_record(&[(
             "history_len",
             b::builtin("len", vec![b::var("history")]),
         )]))
@@ -104,20 +96,12 @@ pub(super) fn set_default_initializes_once_and_does_not_mutate_projected_globals
         )
         .expect("apply defaults");
     assert_eq!(
-        state.vm.state().snapshot().globals().get("diary"),
+        state.vm.state().globals().get("diary"),
         Some(&FlowValue::List(
             vec![FlowValue::String("initial".into())].into()
         ))
     );
-    assert!(
-        state
-            .vm
-            .state()
-            .snapshot()
-            .globals()
-            .get("current_query")
-            .is_none()
-    );
+    assert!(state.vm.state().globals().get("current_query").is_none());
 
     state
         .patch_globals(
@@ -131,7 +115,7 @@ pub(super) fn set_default_initializes_once_and_does_not_mutate_projected_globals
         )
         .expect("reapply defaults");
     assert_eq!(
-        state.vm.state().snapshot().globals().get("diary"),
+        state.vm.state().globals().get("diary"),
         Some(&FlowValue::List(
             vec![FlowValue::String("initial".into())].into()
         ))
@@ -143,8 +127,7 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = lashlang::testing::harness::try_compile_program(&seed_nested_one())
-            .expect("compile setup");
+        let setup = worker_compile_program(&seed_nested_one()).expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
             .expect("execute setup");
@@ -160,10 +143,8 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
             )
             .expect("patch heap-backed state");
 
-        let finish = lashlang::testing::harness::try_compile_program(&b::program(vec![b::finish(
-            b::var("diary"),
-        )]))
-        .expect("compile finish");
+        let finish = worker_compile_program(&b::program(vec![b::finish(b::var("diary"))]))
+            .expect("compile finish");
         assert_eq!(
             execute_with_projected(&finish, state.vm.state_mut(), &projected)
                 .await
@@ -176,9 +157,9 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
         let bytes = state
             .vm
             .state()
-            .snapshot()
-            .to_canonical_bytes()
-            .expect("encode patched state");
+            .bytes()
+            .expect("canonical worker state")
+            .to_vec();
         let snapshot = lashlang::VmInstance::pristine()
             .open_snapshot(&bytes)
             .expect("decode patched state");
@@ -199,17 +180,16 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = lashlang::testing::harness::try_compile_program(&seed_nested_one())
-            .expect("compile setup");
+        let setup = worker_compile_program(&seed_nested_one()).expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
             .expect("execute setup");
         let before = state
             .vm
             .state()
-            .snapshot()
-            .to_canonical_bytes()
-            .expect("encode pre-patch state");
+            .bytes()
+            .expect("canonical worker state")
+            .to_vec();
         let dirty_before = state.execution_state_dirty();
 
         // A deterministically ordered patch whose first key is acceptable
@@ -234,12 +214,7 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
             "no key from a rejected patch may be committed"
         );
         assert_eq!(
-            state
-                .vm
-                .state()
-                .snapshot()
-                .to_canonical_bytes()
-                .expect("encode post-patch state"),
+            state.vm.state().bytes().expect("canonical worker state"),
             before,
             "a rejected patch must leave the state byte-identical"
         );
@@ -256,7 +231,7 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = lashlang::testing::harness::try_compile_program(&b::program(vec![b::assign(
+        let setup = worker_compile_program(&b::program(vec![b::assign(
             "seed",
             b::list(vec![b::num(1.0)]),
         )]))
@@ -267,9 +242,9 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
         let before = state
             .vm
             .state()
-            .snapshot()
-            .to_canonical_bytes()
-            .expect("encode pre-patch state");
+            .bytes()
+            .expect("canonical worker state")
+            .to_vec();
 
         let protected = BTreeSet::from(["docs".to_string()]);
         state
@@ -285,12 +260,7 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
             .expect_err("a protected name must reject the whole patch");
 
         assert_eq!(
-            state
-                .vm
-                .state()
-                .snapshot()
-                .to_canonical_bytes()
-                .expect("encode post-patch state"),
+            state.vm.state().bytes().expect("canonical worker state"),
             before
         );
     });
@@ -301,7 +271,7 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
     block_on(async {
         // history = [{ role: "user" }]
         // kept = [{ nested: [2] }]
-        let setup = lashlang::testing::harness::try_compile_program(&b::program(vec![
+        let setup = worker_compile_program(&b::program(vec![
             b::assign(
                 "history",
                 b::list(vec![b::record(vec![("role", b::string("user"))])]),
@@ -347,7 +317,7 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
         );
         crate::projection::prune_reserved_projected_bindings(&mut state);
 
-        let finish = lashlang::testing::harness::try_compile_program(&finish_record(&[
+        let finish = worker_compile_program(&finish_record(&[
             ("doc", b::var("doc")),
             ("kept", b::var("kept")),
         ]))
@@ -447,7 +417,7 @@ pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_ser
             ExecRequest {
                 code: "console.log(healthy);\nconsole.log(dead);\nfinish(ordinary);".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::new()
@@ -526,7 +496,7 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
             ProjectedValue::scalar("current_query", FlowValue::String("host".into())),
         );
 
-        let compiled = lashlang::testing::harness::try_compile_program(&finish_record(&[
+        let compiled = worker_compile_program(&finish_record(&[
             ("chars", b::builtin("len", vec![b::var("current_query")])),
             ("value", b::var("current_query")),
         ]))
@@ -539,26 +509,17 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
         };
         assert_eq!(record["chars"], FlowValue::Number(4.0));
         assert_eq!(record["value"], FlowValue::String("host".into()));
-        assert!(
-            state
-                .vm
-                .state()
-                .snapshot()
-                .globals()
-                .get("current_query")
-                .is_none()
-        );
+        assert!(state.vm.state().globals().get("current_query").is_none());
 
-        let compiled =
-            lashlang::testing::harness::try_compile_program(&b::program(vec![b::assign(
-                "current_query",
-                b::string("local"),
-            )]))
-            .expect("compile write");
+        let compiled = worker_compile_program(&b::program(vec![b::assign(
+            "current_query",
+            b::string("local"),
+        )]))
+        .expect("compile write");
         let env = ExecutionEnvironment::new(&NoopHost)
             .traced()
             .with_projected_bindings(projected.clone());
-        let error = lashlang::execute(&compiled, state.vm.state_mut(), &env)
+        let error = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
             .await
             .expect_err("projected write should fail");
         let failure = env
@@ -610,7 +571,7 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
         .expect("restore runtime");
     let restored = restored_execution.vm.state().clone();
     assert!(matches!(
-        restored.snapshot().globals().get("m"),
+        restored.globals().get("m"),
         Some(FlowValue::Projected(_))
     ));
 }
@@ -746,8 +707,8 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
             .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
             .expect("cold reopen final capture");
         assert_eq!(
-            reopened.vm.state().snapshot().globals().get("large"),
-            state.vm.state().snapshot().globals().get("large"),
+            reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large"),
             "cold reopen must include the assignment made after the progress capture"
         );
 
@@ -761,8 +722,8 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
             .restore_execution_state(&retry_hydrated, lash_core::FleetFormat::current())
             .expect("cold reopen retry capture");
         assert_eq!(
-            retry_reopened.vm.state().snapshot().globals().get("large"),
-            state.vm.state().snapshot().globals().get("large"),
+            retry_reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large"),
             "aborting a superseded capture must retain the post-progress assignment"
         );
     });
@@ -840,8 +801,8 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
             .expect("cold reopen final A capture");
         assert_eq!(
-            reopened.vm.state().snapshot().globals().get("large"),
-            state.vm.state().snapshot().globals().get("large")
+            reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large")
         );
 
         state.abort_execution_state_capture();
@@ -859,8 +820,8 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             .restore_execution_state(&retry_hydration, lash_core::FleetFormat::current())
             .expect("cold reopen retry A capture");
         assert_eq!(
-            retry_reopened.vm.state().snapshot().globals().get("large"),
-            state.vm.state().snapshot().globals().get("large")
+            retry_reopened.vm.state().globals().get("large"),
+            state.vm.state().globals().get("large")
         );
     });
 }
@@ -880,9 +841,8 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
         let full_state_bytes = state
             .vm
             .state()
-            .snapshot()
-            .to_canonical_bytes()
-            .expect("pre-arc flat snapshot baseline")
+            .bytes()
+            .expect("canonical worker state")
             .len();
         let _initial = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
@@ -959,9 +919,8 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
         let full_state_bytes = state
             .vm
             .state()
-            .snapshot()
-            .to_canonical_bytes()
-            .expect("accumulated canonical state")
+            .bytes()
+            .expect("canonical worker state")
             .len();
         assert_eq!(full_state_bytes, 1_104_953);
         let _initial = state
@@ -1092,7 +1051,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             ExecRequest {
                 code: "let scratch_note = \"after execution\";".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
@@ -1112,7 +1071,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             &mut cache,
             &globals,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );
@@ -1153,7 +1112,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             &mut state,
             ctx,
             ExecRequest { code },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
@@ -1173,7 +1132,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             &mut cache,
             &globals,
             &[],
-            crate::dialect::DialectPromptVocabulary::default(),
+            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )

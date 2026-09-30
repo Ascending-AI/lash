@@ -12,9 +12,11 @@
 //!   reopened from its bytes on a fresh instance, match the same program run
 //!   straight through.
 //! * [`effect_park_matches_straight_through_for_every_corpus_program`]
-//!   (FIG-4159): a run of either mode parked on every operation it awaits,
-//!   reopened from its bytes on a fresh instance and answered there with the
-//!   outcome its host held, matches the same program run straight through:
+//!   (FIG-4159, FIG-4275): a run of either mode parked on every operation it
+//!   awaits (resource operations and their batches, process awaits, sleeps
+//!   and signal waits), reopened from its bytes on a fresh instance and
+//!   answered there with the outcome its host held, matches the same program
+//!   run straight through:
 //!   the same requests, the same cancel checkpoints, the same end and state.
 
 use std::future::Future;
@@ -273,6 +275,8 @@ fn stepped_within(
             .iter()
             .filter(|entry| {
                 entry.starts_with("effect ResourceOperation(")
+                    || entry.starts_with("effect ResourceOperationBatch(")
+                    || entry.starts_with("effect Await(")
                     || entry.starts_with("effect Sleep")
                     || entry.starts_with("effect WaitSignal")
             })
@@ -464,6 +468,7 @@ fn effect_park_matches_straight_through_for_every_corpus_program() {
     let corpus = corpus();
     let mut failures = Vec::new();
     let mut parked_programs = 0_usize;
+    let mut batch_parked_programs = 0_usize;
     for program in &corpus {
         for mode in [ExecutionMode::Foreground, ExecutionMode::Process] {
             let straight = straight_through(&program.program, &program.globals, mode);
@@ -482,6 +487,14 @@ fn effect_park_matches_straight_through_for_every_corpus_program() {
                     .any(|entry| entry.starts_with("effect ResourceOperation("))
             {
                 parked_programs += 1;
+            }
+            if mode == ExecutionMode::Foreground
+                && parked
+                    .transcript
+                    .iter()
+                    .any(|entry| entry.starts_with("effect ResourceOperationBatch("))
+            {
+                batch_parked_programs += 1;
             }
             if parked != straight {
                 failures.push(format!(
@@ -503,6 +516,12 @@ fn effect_park_matches_straight_through_for_every_corpus_program() {
     assert!(
         parked_programs >= 7,
         "too few corpus programs parked on a resource operation: {parked_programs}"
+    );
+    // The corpus's aggregate awaits: every program that issues a
+    // resource-operation batch parked on it (FIG-4275).
+    assert!(
+        batch_parked_programs >= 4,
+        "too few corpus programs parked on a resource-operation batch: {batch_parked_programs}"
     );
 }
 

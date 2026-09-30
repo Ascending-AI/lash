@@ -105,7 +105,7 @@ pub(super) async fn trigger_tool_context<'run>(
     // Realization publishes into the store the referrer ports acquire from.
     let router = lash_core::testing::test_trigger_router(
         trigger_store,
-        crate::testing::memory_process_registry().await,
+        crate::testing::sqlite_memory_process_registry().await,
     )
     .with_process_artifacts(
         Arc::clone(&ports.process_env_store),
@@ -124,12 +124,18 @@ pub(super) async fn trigger_tool_context<'run>(
                         lashlang::LashlangLanguageFeatures::default(),
                         timer_trigger_resources(),
                     ),
+                    crate::testing::sqlite_recording_backend()
+                        .await
+                        .worker_recovery(),
                 ),
             )),
     );
     let builder = lash_core::testing::TestExecutionContextBuilder::new(ports)
         .provider(Arc::new(
-            lash_lashlang_runtime::register_trigger_tool_provider(artifact_store.clone()),
+            lash_lashlang_runtime::register_trigger_tool_provider(
+                lash_vm_client::service::Service::default(),
+                artifact_store.clone(),
+            ),
         ))
         .tool_catalog(lash_core::ToolCatalog::from_tool_definitions(vec![
             lash_lashlang_runtime::register_trigger_tool_definition(),
@@ -158,12 +164,12 @@ async fn execute_with_deferred_trigger(
         ))
         .await
         .expect("open the cell's handler");
-    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+    let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
     let response = execute_code_with_trigger_test_render(
         &mut state,
         trigger_tool_context(
             crate::testing::double_ports(&double, &handler),
-            crate::testing::memory_trigger_store().await,
+            crate::testing::sqlite_memory_trigger_store().await,
             &artifact_store,
             Some(lash_core::testing::exec_code_invocation(
                 "session",
@@ -319,7 +325,7 @@ fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
         let code = r#"
             const wrong = async (value: number) => true;
             await triggers.register({
-              source: calendar.Changed({}), target: wrong,
+              source: calendar.Changed({}), target: { definition: wrong },
               inputs: (event) => ({ value: event })
             });
             finish(true);
@@ -369,12 +375,12 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             ))
             .await
             .expect("open the cell's handler");
-        let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+        let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
         let response = execute_code_with_trigger_test_render(
             &mut state,
             trigger_tool_context(
                 crate::testing::double_ports(&double, &handler),
-                crate::testing::memory_trigger_store().await,
+                crate::testing::sqlite_memory_trigger_store().await,
                 &artifact_store,
                 Some(lash_core::testing::exec_code_invocation(
                     "session",
@@ -565,10 +571,10 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+    let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
     let ctx = trigger_tool_context(
         crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
-        crate::testing::memory_trigger_store().await,
+        crate::testing::sqlite_memory_trigger_store().await,
         &artifact_store,
         None,
     )
@@ -745,7 +751,7 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
 #[test]
 pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store() {
     block_on(async {
-        let store = crate::testing::memory_trigger_store().await;
+        let store = crate::testing::sqlite_memory_trigger_store().await;
         let capture = TriggerEffectCapture::default();
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -753,7 +759,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
-        let artifact_store = crate::testing::memory_artifact_store().await;
+        let artifact_store = crate::testing::sqlite_memory_artifact_store().await;
         let ctx = trigger_tool_context(
             crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
             store.clone(),
@@ -939,8 +945,8 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
 #[test]
 pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregister() {
     block_on(async {
-        let trigger_store = crate::testing::memory_trigger_store().await;
-        let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+        let trigger_store = crate::testing::sqlite_memory_trigger_store().await;
+        let artifact_store = crate::testing::fresh_sqlite_memory_artifact_store().await;
         let surface = LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
@@ -1095,7 +1101,7 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             ExecRequest {
                 code: "finish(42);".to_string(),
             },
-            crate::testing::fresh_memory_artifact_store().await,
+            crate::testing::fresh_sqlite_memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
@@ -1307,7 +1313,7 @@ async fn execute_trigger_process_with_originator(
     expect_success: bool,
 ) -> TriggerProcessResult {
     let artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::fresh_memory_artifact_store().await;
+        crate::testing::fresh_sqlite_memory_artifact_store().await;
     let table = crate::testing::DoubleProcesses::new(0x7219_0001).await;
     let handler = table
         .open_handler(crate::testing::default_cell_scope())
@@ -1346,6 +1352,7 @@ async fn execute_trigger_process_with_originator(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 engine_surface,
+                table.backend().worker_recovery(),
             ),
         ),
     );
@@ -2024,7 +2031,7 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
 
     block_on(async {
         let capture = TriggerEffectCapture::default();
-        let store = crate::testing::fresh_memory_artifact_store().await;
+        let store = crate::testing::fresh_sqlite_memory_artifact_store().await;
         let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
             TRIGGER_INPUTS_ARROW_SOURCE,
             capture.clone(),
@@ -2115,7 +2122,7 @@ fn repin_trigger_inputs_retired_record_form() {
 
     block_on(async {
         let capture = TriggerEffectCapture::default();
-        let store = crate::testing::fresh_memory_artifact_store().await;
+        let store = crate::testing::fresh_sqlite_memory_artifact_store().await;
         let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
             TRIGGER_INPUTS_ARROW_SOURCE,
             capture.clone(),
@@ -2177,7 +2184,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
         &mut state,
         trigger_tool_context(
             crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
-            crate::testing::memory_trigger_store().await,
+            crate::testing::sqlite_memory_trigger_store().await,
             &store,
             None,
         )

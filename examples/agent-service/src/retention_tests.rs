@@ -113,7 +113,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         "the unreachable store blob must be gone"
     );
     assert!(matches!(
-        attachment_store.get(&orphan_attachment.id).await,
+        attachment_store.get(&orphan_attachment.id, lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes).await,
         Err(lash::persistence::AttachmentStoreError::NotFound(id))
             if id == orphan_attachment.id
     ));
@@ -194,7 +194,13 @@ async fn scheduled_retention_refuses_a_witnessed_empty_attachment_root_set() {
         "the scheduled pass must report the refusal loudly: {report:?}"
     );
     assert!(
-        attachment_store.get(&orphan.id).await.is_ok(),
+        attachment_store
+            .get(
+                &orphan.id,
+                lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes
+            )
+            .await
+            .is_ok(),
         "refusal must preserve the attachment"
     );
 }

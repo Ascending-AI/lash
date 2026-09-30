@@ -17,7 +17,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
         .process_work()
         .watched()
         .add_event_sink(Arc::new(sink.clone()));
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {
@@ -50,9 +50,6 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let payload = serde_json::json!({ "ok": true, "answer": 42 });
     core.processes()
         .signal(
-            &process_id,
-            "ready",
-            "e2e-signal-1",
             signal_request(&process_id, "ready", "e2e-signal-1", payload.clone()),
             runtime_operation_scope(&core, "e2e-signal").await,
         )

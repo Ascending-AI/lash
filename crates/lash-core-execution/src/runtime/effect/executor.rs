@@ -24,7 +24,9 @@ mod tool_attempt;
 mod trigger;
 mod turn_cancel_wait;
 mod turn_control_authority;
+mod usage;
 pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
+pub use usage::DirectUsage;
 
 pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
@@ -171,6 +173,10 @@ pub struct ProcessLocalExecution {
     pub process_starts: Option<Arc<crate::runtime::process_start::ProcessStartRelay>>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub process_engines: Option<crate::ProcessEngineRegistry>,
+    /// The session catalog a root start's host session-lookup grant is
+    /// checked against inside the start's recorded admission. `None` refuses
+    /// every host-granted start: nothing can prove its session live.
+    pub session_catalog: Option<Arc<dyn crate::store::RuntimeStore>>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     /// The attachment referrers a delivered terminal is acquired through
@@ -180,24 +186,22 @@ pub struct ProcessLocalExecution {
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
-/// Local execution target for the journaled process-definition CAS write
-/// (FIG-3470): unlike [`ProcessLocalExecution`], which serves the process
-/// service, this target binds only the definition registry the
-/// `RegisterDefinition` command writes through.
-pub enum ProcessDefinitionLocalExecution {
-    Registry {
-        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
-    },
-    Artifacts {
-        engines: crate::ProcessEngineRegistry,
-        claim: crate::ReferrerClaim,
-    },
+/// Local execution target for the journaled immutable-definition commands:
+/// unlike [`ProcessLocalExecution`], which serves the process service, this
+/// target binds only the engine registry and the parent's admitted claim that
+/// `PublishDefinition` and `GetDefinition` acquire their artifact closures
+/// under (ADR 0113 §3.6).
+pub struct ProcessDefinitionLocalExecution {
+    pub(crate) engines: crate::ProcessEngineRegistry,
+    pub(crate) claim: crate::ReferrerClaim,
 }
 
 pub(super) struct LocalDirectEffectRunner {
     provider: ProviderHandle,
     charge_safety: crate::ChargeSafetyPolicy,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
+    /// Who the call spends for, under which source label (ADR 0125).
+    usage: DirectUsage,
 }
 
 /// Runs one tool attempt against a live execution context: the recorded body
@@ -216,6 +220,9 @@ struct LocalPreparedToolAttemptEffectRunner<'run> {
 
 struct RemoteEffectRunner {
     requests: mpsc::UnboundedSender<RemoteLocalExecutionRequest>,
+    /// The forwarded runner's binding, so the proxying controller begins the
+    /// body's run where it records it.
+    usage: Option<crate::UsageAccountingBinding>,
 }
 
 #[async_trait::async_trait]
@@ -238,9 +245,24 @@ pub trait RuntimeEffectLocalRunner: Send {
         None
     }
 
+    /// Where this runner's spending bodies account their provider calls
+    /// (ADR 0125). A runner whose body may dispatch a provider call answers
+    /// the ledger it admits and settles through; the executor begins the
+    /// body's [`UsageRun`](crate::UsageRun) with it and hands the run to
+    /// [`execute`](Self::execute). `None` is the honest answer for a runner
+    /// that never dispatches.
+    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
+        None
+    }
+
+    /// Run the body. `usage_run` is the body's run when the envelope is a
+    /// spending effect and this runner offered
+    /// [`usage_accounting`](Self::usage_accounting); every provider call the
+    /// body dispatches takes a call from it.
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
 }
 
@@ -271,7 +293,7 @@ enum LocalTarget {
         clock: Arc<dyn crate::Clock>,
     },
     Process(ProcessLocalExecution),
-    ProcessDefinitions(ProcessDefinitionLocalExecution),
+    Definition(ProcessDefinitionLocalExecution),
     Trigger(TriggerLocalExecution),
     TurnAcceptance(Arc<dyn crate::TurnInputStore>),
     /// The recorded presentation boundary's local work (ADR 0099 §6,
@@ -295,6 +317,7 @@ impl ExecutionEnvLoadExecution {
         self,
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let claim = crate::session::execution_claim_of(envelope.invocation.execution_scope())?;
         let RuntimeEffectCommand::LoadExecutionEnv { env } = envelope.command else {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -304,10 +327,18 @@ impl ExecutionEnvLoadExecution {
                 ),
             ));
         };
+        self.store
+            .acquire_process_execution_env(&claim, &env)
+            .await
+            .map_err(|error| {
+                unresolved_execution_env(
+                    &self.subject,
+                    &env,
+                    crate::runtime::ProcessExecutionEnvLoadError::Store(error.into()),
+                )
+            })?;
         match crate::runtime::load_process_execution_env(self.store.as_ref(), &env).await {
-            Ok(spec) => Ok(RuntimeEffectOutcome::LoadExecutionEnv {
-                spec: Box::new(spec),
-            }),
+            Ok(_) => Ok(RuntimeEffectOutcome::LoadExecutionEnv { env }),
             Err(error) => Err(unresolved_execution_env(&self.subject, &env, error)),
         }
     }
@@ -324,7 +355,7 @@ impl ExecutionEnvLoadExecution {
 /// settles by its own cause, and a live fault is marked retryable, so an
 /// engine runs the step again instead of recording it (FIG-3683) and a redrive
 /// under a healthy store loads the environment.
-fn unresolved_execution_env(
+pub(crate) fn unresolved_execution_env(
     subject: &str,
     env: &crate::ProcessExecutionEnvRef,
     error: crate::runtime::ProcessExecutionEnvLoadError,
@@ -632,6 +663,22 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Binds the session catalog a root start's host session-lookup grant is
+    /// checked against inside the start's recorded admission, so a replay
+    /// after the session was deleted answers the recorded start instead of
+    /// refusing it (ADR 0105 §1).
+    pub fn with_process_session_catalog(
+        mut self,
+        catalog: Arc<dyn crate::store::RuntimeStore>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution.session_catalog = Some(catalog);
+        }
+        self
+    }
+
     /// Binds process engines that own start-time artifact lifecycle hooks.
     pub fn with_process_engines(mut self, engines: crate::ProcessEngineRegistry) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
@@ -668,6 +715,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     process_starts: None,
                     process_env_store: None,
                     process_engines: None,
+                    session_catalog: None,
                     turn_cancellation: None,
                     effect_controller: None,
                     attachments: None,
@@ -721,28 +769,17 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    /// Binds the process-definition registry for the journaled
-    /// `RegisterDefinition` write (FIG-3470). This is the only command this
-    /// executor serves; every other process command still requires
-    /// [`Self::processes`].
-    pub fn process_definitions(registry: Arc<dyn crate::ProcessDefinitionRegistry>) -> Self {
-        Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(
-                ProcessDefinitionLocalExecution::Registry { registry },
-            )),
-            replay_trace: None,
-            served_only: None,
-        }
-    }
-
-    /// Bind immutable definition mechanics under the parent's admitted claim.
+    /// Binds the definition executor for the journaled `PublishDefinition` /
+    /// `GetDefinition` commands: the engine registry the commands resolve
+    /// against and the parent's admitted claim their artifact closures pin.
+    /// Every other process command still requires [`Self::processes`].
     pub fn definition_artifacts(
         engines: crate::ProcessEngineRegistry,
         claim: crate::ReferrerClaim,
     ) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(
-                ProcessDefinitionLocalExecution::Artifacts { engines, claim },
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(
+                ProcessDefinitionLocalExecution { engines, claim },
             )),
             replay_trace: None,
             served_only: None,
@@ -791,8 +828,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
 
     /// Binds the store a recorded
     /// [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv) step reads
-    /// on its first execution; replay serves the recorded spec. `subject`
-    /// names whose environment it is in a refusal.
+    /// validates and holds on its first execution; replay resolves the
+    /// recorded digest. `subject` names whose environment it is in a refusal.
     pub fn execution_env_load(
         store: Arc<dyn crate::ProcessExecutionEnvStore>,
         subject: impl Into<String>,
@@ -864,6 +901,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         provider: ProviderHandle,
         charge_safety: crate::ChargeSafetyPolicy,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
+        usage: DirectUsage,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
         Self {
@@ -872,6 +910,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     provider,
                     charge_safety,
                     attachment_store,
+                    usage,
                 },
             ))),
             replay_trace,
@@ -1002,28 +1041,24 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Executes execute work for effect-host implementors while executing or replaying a runtime
-    /// effect.
-    pub async fn execute(
+    async fn run_body(
         self,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        // An engine that reaches a served-only effect's live execution
-        // without asking still dispatches nothing (FIG-3719).
-        if let Some(refusal) = self.served_only_refusal() {
-            return Err(refusal);
-        }
         match self.state {
-            RuntimeEffectLocalExecutorState::Runner(runner) => runner.execute(envelope).await,
+            RuntimeEffectLocalExecutorState::Runner(runner) => {
+                runner.execute(envelope, usage_run).await
+            }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
                 if !runner.uses_task_boundary(&envelope.command) {
-                    return runner.execute(envelope).await;
+                    return runner.execute(envelope, usage_run).await;
                 }
                 let panic_call = match &envelope.command {
                     RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.clone()),
                     _ => None,
                 };
-                let task = crate::task::spawn(runner.execute(envelope));
+                let task = crate::task::spawn(runner.execute(envelope, usage_run));
                 let mut abort = AbortEffectTaskOnDrop::new(task.abort_handle());
                 let result = match task.await {
                     Ok(result) => result,
@@ -1063,7 +1098,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     ),
                 ))
             }
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(_)) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(_)) => {
                 Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                     format!(
@@ -1140,18 +1175,18 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Extracts the process-definition registry for the journaled
-    /// `RegisterDefinition` write (FIG-3470).
-    pub fn into_process_definitions(
+    /// Extracts the definition executor for the journaled `PublishDefinition`
+    /// / `GetDefinition` commands.
+    pub fn into_definition_execution(
         self,
     ) -> Result<ProcessDefinitionLocalExecution, RuntimeEffectControllerError> {
         match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::ProcessDefinitions(execution)) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(execution)) => {
                 Ok(execution)
             }
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "no process-definition registry is available for the register-definition command",
+                "no definition executor is available for the publish/get-definition command",
             )),
         }
     }
@@ -1165,6 +1200,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             mpsc::UnboundedReceiver<RemoteLocalExecutionRequest>,
         )>,
     ) {
+        let usage = self.usage_accounting();
         let RuntimeEffectLocalExecutor {
             state,
             replay_trace,
@@ -1176,7 +1212,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 (
                     RuntimeEffectLocalExecutor {
                         state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner { requests }),
+                            Box::new(RemoteEffectRunner { requests, usage }),
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
@@ -1196,7 +1232,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 (
                     RuntimeEffectLocalExecutor {
                         state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner { requests }),
+                            Box::new(RemoteEffectRunner { requests, usage }),
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
@@ -1227,7 +1263,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     async fn execute_forwarded(
         self,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        // The proxy that forwarded this body already asked the served-only
+        // question and began the body's run.
+        if let Some(refusal) = self.served_only_refusal() {
+            return Err(refusal);
+        }
         let RuntimeEffectEnvelope {
             invocation,
             command,
@@ -1242,11 +1284,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 self.execute_trigger(invocation, *command).await
             }
             command => {
-                self.execute(RuntimeEffectEnvelope {
-                    invocation,
-                    command,
-                    group,
-                })
+                self.run_body(
+                    RuntimeEffectEnvelope {
+                        invocation,
+                        command,
+                        group,
+                    },
+                    usage_run,
+                )
                 .await
             }
         }
@@ -1284,12 +1329,15 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             RuntimeEffectLocalExecutorState::Runner(runner)
             | RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
                 runner
-                    .execute(RuntimeEffectEnvelope::new(
-                        invocation,
-                        RuntimeEffectCommand::Trigger {
-                            command: Box::new(command),
-                        },
-                    ))
+                    .execute(
+                        RuntimeEffectEnvelope::new(
+                            invocation,
+                            RuntimeEffectCommand::Trigger {
+                                command: Box::new(command),
+                            },
+                        ),
+                        None,
+                    )
                     .await
             }
             _ => Err(RuntimeEffectControllerError::new(
@@ -1364,6 +1412,7 @@ impl RuntimeEffectLocalRunner for TestingRuntimeEffectLocalRunner<'_> {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         (self.run)(envelope).await
     }
@@ -1375,9 +1424,14 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
         matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
     }
 
+    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
+        self.context.usage_accounting()
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::ToolAttempt {
@@ -1395,6 +1449,7 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
                     envelope.invocation.into_runtime_invocation(),
                     child_execution_trace_hook,
                     self.completion_key,
+                    usage_run,
                 ))
                 .await?;
                 Ok(tool_attempt_outcome(outcome))
@@ -1425,22 +1480,23 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
         matches!(command, RuntimeEffectCommand::Direct { .. })
     }
 
+    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
+        Some(self.usage.accounting.clone())
+    }
+
     async fn execute(
         mut self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::Direct { request, .. } => {
-                let (result, call_record) = self
-                    .run_direct_llm_request((*request).into_request(
-                        crate::session_model::transport_stream_events(&self.provider, None),
-                        None,
-                    ))
-                    .await;
-                Ok(RuntimeEffectOutcome::Direct {
-                    result: Box::new(result),
-                    call_record,
-                })
+                let request = (*request).into_request(
+                    crate::session_model::transport_stream_events(&self.provider, None),
+                    None,
+                );
+                self.run_direct_in_usage_run(request, usage_run.as_ref())
+                    .await
             }
             RuntimeEffectCommand::Sleep { spec } => {
                 let duration_ms = sleep_duration(spec, crate::SystemClock.timestamp_ms());
@@ -1465,13 +1521,22 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for RemoteEffectRunner {
+    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
+        self.usage.clone()
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let (response, response_rx) = oneshot::channel();
         self.requests
-            .send(RemoteLocalExecutionRequest { envelope, response })
+            .send(RemoteLocalExecutionRequest {
+                envelope,
+                usage_run,
+                response,
+            })
             .map_err(|_| {
                 RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
@@ -1488,7 +1553,11 @@ impl RuntimeEffectLocalRunner for RemoteEffectRunner {
 }
 
 impl LocalDirectEffectRunner {
-    async fn run_direct_llm_request(&mut self, request: CoreLlmRequest) -> RuntimeDirectLlmOutcome {
+    async fn run_direct_llm_request(
+        &mut self,
+        request: CoreLlmRequest,
+        call: &crate::UsageCall,
+    ) -> RuntimeDirectLlmOutcome {
         let request = match crate::attachments::resolve_llm_request_attachments(
             request,
             self.attachment_store.as_ref(),
@@ -1516,7 +1585,7 @@ impl LocalDirectEffectRunner {
         };
         match self
             .provider
-            .complete_with_charge_safety(request, self.charge_safety.clone())
+            .complete_with_charge_safety(request, self.charge_safety.clone(), call)
             .await
         {
             Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
@@ -1597,6 +1666,7 @@ mod task_boundary_tests {
         async fn execute(
             self: Box<Self>,
             _envelope: RuntimeEffectEnvelope,
+            _usage_run: Option<crate::UsageRun>,
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
             let _ = self.observed.send(tokio::task::id());
             Ok(RuntimeEffectOutcome::Sleep)

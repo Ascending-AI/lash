@@ -6,9 +6,11 @@
 //! execution context, one in the await-effect suffix, and one in a runbook
 //! worker binary *outside* the workspace crates. A change to the format in core
 //! left the other seven minting a different durable dedupe key: double
-//! realization of one recorded intent, and not a compile error. Every site now
-//! calls `lash_core::runtime::process_signal_wait_key` (or its `await` sibling),
-//! and this test fails if the literal comes back.
+//! realization of one recorded intent, and not a compile error. Since FIG-4299
+//! a signal is admitted as a typed `ProcessSignal` whose identity derives the
+//! append key from `lash_core::runtime::process_signal_wait_key` — callers can
+//! no longer name a replay key at all — and the wait side still calls the
+//! constructor directly. This test fails if the literal comes back.
 //!
 //! The scan also caught four sites the ticket's inventory predates — conformance
 //! fixtures that interpolate the process id around a hard-coded signal name —
@@ -203,7 +205,10 @@ fn the_gate_rejects_a_reintroduced_literal() {
 }
 
 /// The scan must actually reach the runbook binary that motivated the ticket;
-/// an empty or crates-only walk would pass vacuously.
+/// an empty or crates-only walk would pass vacuously. Since FIG-4299 the worker
+/// cannot name the key: it delivers a typed `ProcessSignal`, and the identity's
+/// append key comes from the one constructor, so the proof is that the worker
+/// takes that path — and that the identity still delegates to the constructor.
 #[test]
 fn the_scan_reaches_the_runbook_worker_outside_the_workspace_crates() {
     let worker = workspace_root().join("runbooks/restate-postgres-workers/src/bin/worker.rs");
@@ -213,7 +218,41 @@ fn the_scan_reaches_the_runbook_worker_outside_the_workspace_crates() {
     );
     let source = std::fs::read_to_string(&worker).expect("read the runbook worker");
     assert!(
-        source.contains("process_signal_wait_key"),
-        "the runbook worker must build its replay key from the core constructor"
+        source.contains("ProcessSignalIdentity::new") && source.contains("ProcessSignal::new"),
+        "the runbook worker must deliver its signal as a typed ProcessSignal: \
+         the identity derives the replay key, so there is no caller-spelled key"
+    );
+    assert!(
+        source.contains(".signal("),
+        "the runbook worker must submit the signal through the typed signal API"
+    );
+    for bypass in [
+        "process_signal_wait_key",
+        "ProcessEventAppendRequest",
+        "with_replay_key",
+    ] {
+        assert!(
+            !source.contains(bypass),
+            "the runbook worker assembles its own signal append ({bypass}); \
+             a typed ProcessSignal must derive the replay key from its identity"
+        );
+    }
+
+    // The typed path only proves coverage if the identity's key still comes
+    // from the single constructor: pin that delegation in the exempt file.
+    let events = workspace_root().join(EXEMPT_FILES[0]);
+    let events = std::fs::read_to_string(&events).expect("read the signal event constructors");
+    assert!(
+        events.contains("fn process_signal_wait_key"),
+        "the exempt file must still hold the single replay-key constructor"
+    );
+    assert!(
+        events.contains("process_signal_wait_key(&self.process_id"),
+        "ProcessSignalIdentity::append_key must derive the key from the single \
+         constructor, not re-spell it"
+    );
+    assert!(
+        events.contains(".with_replay_key(self.identity.append_key())"),
+        "a signal's append must carry the replay key its identity derives"
     );
 }

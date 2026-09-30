@@ -38,7 +38,7 @@ impl RlmFrameLawProtocol {
                         1_000_000,
                     ))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build(),
+                    .build(), std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 backend,
             )
             // The laws' sessions start no process from a cell.

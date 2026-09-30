@@ -1,8 +1,9 @@
 //! The session drive's laws on the in-process server double: the drive
 //! admission laws (FIG-3600, ADR 0105), the root start marker (L-S8) and the
 //! queued, frame-switch and frame-open redrives (FIG-3748,
-//! FIG-3788, FIG-4110). Each runs through
-//! the endpoint's real handlers with the Restate server simulated in process.
+//! FIG-3788, FIG-4110) and the bound-trigger duplicate (FIG-4297). Each runs
+//! through the endpoint's real handlers with the Restate server simulated in
+//! process.
 
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 
@@ -137,6 +138,48 @@ mod frame_open_under_replay {
         let stores = harness.law_stores();
         let prefix: &'static str = Box::leak(
             format!("restate-frame-open-replay-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        (harness, prefix, effect_host, stores, turn_runner)
+    });
+}
+
+// FIG-4297: a duplicate of a bound trigger delivery's occurrence, emitted by a
+// fresh invocation after the bound process was pruned, returns that process
+// and starts nothing, and the original emission's replay still answers it.
+// Every emission runs in a probe handler and the delivery's process in the
+// endpoint's `LashProcessWorkflow`.
+lash_conformance::bound_trigger_duplicate_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let effect_host = harness.endpoint_host();
+    let turn_runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-bound-trigger-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, effect_host, stores, turn_runner)
+});
+
+// FIG-4297's law where every await suspends and every resumption replays the
+// handler's journal from its start: each emission's admission and start are
+// served from its journal on every resumption.
+mod bound_trigger_duplicate_under_replay {
+    use super::{HarnessServer, LiveConformanceHarness};
+
+    lash_conformance::bound_trigger_duplicate_tests!({
+        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+            unreachable!("in_process names the server double");
+        };
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+                seed,
+                always_replay: true,
+            })
+            .await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str = Box::leak(
+            format!("restate-bound-trigger-replay-{}", harness.run_nonce()).into_boxed_str(),
         );
         (harness, prefix, effect_host, stores, turn_runner)
     });

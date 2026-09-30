@@ -11,7 +11,7 @@
 //!
 //! A live fault is the engine's to retry (FIG-3897): the Restate engine
 //! reruns the root under its own attempt, so the host-side redrive-by-turn-id
-//! laws the store-journal host had are the engine's retry laws in
+//! laws the store-journal host had, retired in 476264fbea, are the engine's retry laws in
 //! `lash-restate`.
 
 use super::*;

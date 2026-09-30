@@ -5,6 +5,7 @@ load(":platforms.bzl", "pool_properties")
 def _bundle_impl(ctx):
     directory = ctx.actions.copied_dir("helpers", {
         "junit_xml.py": ctx.attrs.junit,
+        "libtest_selection.py": ctx.attrs.libtest_selection,
         "postgres_slot_runner.sh": ctx.attrs.postgres,
         "test_batch_runner.sh": ctx.attrs.batch,
         "test_batch_launcher.sh": ctx.attrs.batch_launcher,
@@ -28,6 +29,7 @@ test_helper_bundle = rule(
         "batch": attrs.source(),
         "batch_launcher": attrs.source(),
         "junit": attrs.source(),
+        "libtest_selection": attrs.source(),
         "launcher": attrs.source(),
         "postgres": attrs.source(),
         "shard": attrs.source(),

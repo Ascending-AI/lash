@@ -5,7 +5,10 @@
 //! workers read. Under a fault campaign (FIG-4169) the fault controller's
 //! ledger places each fault on the same database clock, and every fault must
 //! have hit operations in flight that then reached their durable terminals.
+//! Under the rolling-upgrade campaign (FIG-3805) the same ledger places each
+//! upgrade step, and every session must keep answering through the roll.
 
+use super::fault_verify::{CampaignKind, campaign_kind};
 use super::{
     CancelOutcome, DeleteReport, InputOutcome, LoadContext, LoadRequest, LoadResponse,
     ReportedStatus, TurnReport,
@@ -56,6 +59,19 @@ pub const FAULT_CLASSES: [&str; 4] = [
     "worker-kill",
     "restate-restart",
     "rolling-deploy",
+];
+
+/// The classes a run under the rolling-upgrade campaign (FIG-3805 phase B)
+/// must also witness: the campaign, each ADR 0106 §6 step it runs, and
+/// every session answering after every step.
+pub const UPGRADE_CLASSES: [&str; 7] = [
+    "upgrade-campaign",
+    "half-roll",
+    "rollback",
+    "roll",
+    "finalize",
+    "fence",
+    "sessions-through-roll",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -349,10 +365,15 @@ fn mentions(value: &Value, needle: &str) -> bool {
 pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Result<Verdict> {
     let generator = load.generator(run)?;
     let evidence = Evidence::index(snapshot);
-    let campaign = !snapshot.faults.is_empty();
+    let campaign = campaign_kind(snapshot);
+    let campaign_classes: &[&'static str] = match campaign {
+        None => &[],
+        Some(CampaignKind::Faults) => &FAULT_CLASSES,
+        Some(CampaignKind::RollingUpgrade) => &UPGRADE_CLASSES,
+    };
     let mut classes: BTreeMap<&'static str, Tally> = CLASSES
         .iter()
-        .chain(FAULT_CLASSES.iter().filter(|_| campaign))
+        .chain(campaign_classes)
         .map(|class| (*class, Tally::default()))
         .collect();
     let mut note = |class: &'static str, result: Result<(), String>| {
@@ -543,8 +564,12 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
         );
     }
 
-    if campaign {
-        super::fault_verify::verify_faults(snapshot, &mut note);
+    match campaign {
+        None => {}
+        Some(CampaignKind::Faults) => super::fault_verify::verify_faults(snapshot, &mut note),
+        Some(CampaignKind::RollingUpgrade) => {
+            super::upgrade_verify::verify_upgrade(snapshot, &mut note);
+        }
     }
 
     super::behavior_verify::verify(load, run, snapshot, &mut classes)?;

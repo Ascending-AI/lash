@@ -23,7 +23,6 @@
 
 pub mod abandoned_consumer_holds;
 pub mod change_clock;
-pub mod definitions;
 pub mod events;
 pub mod observers;
 pub mod parent_end_plans;

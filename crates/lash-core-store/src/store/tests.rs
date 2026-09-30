@@ -94,7 +94,7 @@ fn intent_fixture() -> RuntimeCommit {
             },
         }],
     };
-    RuntimeCommit::persisted_state_with_graph_commit_and_operation(&state, graph, &[], operation)
+    RuntimeCommit::persisted_state_with_graph_commit_and_operation(&state, graph, operation)
         .expect("build intent fixture")
 }
 
@@ -230,7 +230,7 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
         .expect("derive expected first node id");
 
     let (commit, persisted_node_ids) =
-        RuntimeCommit::persisted_state_with_operation(&mut state, &[], operation)
+        RuntimeCommit::persisted_state_with_operation(&mut state, operation)
             .expect("build first append");
     let leaf_node_id = commit.graph.leaf_node_id().cloned();
     let GraphAppend::Extend { nodes } = &commit.graph else {
@@ -261,7 +261,6 @@ fn commit_frame_derivation_reads_resident_parent_for_temporary_append_nodes() {
     let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
         &state,
         graph,
-        &[],
         OperationId::turn(&state.session_id, "turn-1", "final"),
     )
     .expect("derive frame from resident parent");
@@ -291,13 +290,9 @@ fn commit_frame_derivation_reads_resident_parent_for_derived_append_nodes() {
             .is_none()
     );
 
-    let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        &state,
-        graph,
-        &[],
-        operation,
-    )
-    .expect("derive frame from resident parent");
+    let commit =
+        RuntimeCommit::persisted_state_with_graph_commit_and_operation(&state, graph, operation)
+            .expect("derive frame from resident parent");
 
     assert_eq!(commit.current_frame_node_id, Some(current_frame_node_id));
 }
@@ -327,7 +322,6 @@ fn commit_frame_derivation_uses_last_frame_boundary_inside_append() {
     let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
         &state,
         state.pending_graph_commit(),
-        &[],
         OperationId::turn(&state.session_id, "turn-1", "final"),
     )
     .expect("derive appended frame boundary");
@@ -415,9 +409,10 @@ fn intent_hash_golden_vector() {
     // revision are pinned in intent bytes.
     // FIG-3542: the frame-handoff batch list left the intent; a pending
     // follow-on enters it only when the commit leaves one on the head.
+    // FIG-4236: the usage deltas left the intent (ADR 0125).
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "0c81c92fdf706e18e6bb9c19b96d81197433f80444165b80eb9d541b112cb854"
+        "e8cefaf87d75fb5de0c1e2014a9582ce2156c2d1a39aeea8ecfee4e811a77cb5"
     );
 }
 
@@ -426,7 +421,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "0c81c92fdf706e18e6bb9c19b96d81197433f80444165b80eb9d541b112cb854",
+        "e8cefaf87d75fb5de0c1e2014a9582ce2156c2d1a39aeea8ecfee4e811a77cb5",
         "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
@@ -460,7 +455,7 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "0c81c92fdf706e18e6bb9c19b96d81197433f80444165b80eb9d541b112cb854"
+        "e8cefaf87d75fb5de0c1e2014a9582ce2156c2d1a39aeea8ecfee4e811a77cb5"
     );
 
     let mut with_evidence = baseline;

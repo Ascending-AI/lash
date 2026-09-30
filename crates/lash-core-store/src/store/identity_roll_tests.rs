@@ -27,7 +27,6 @@ fn record_config_request(encoded_under: FleetFormat) -> RuntimeCommit {
     }));
     let mut commit = RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         OperationId::new(
             crate::ExecutionScope::runtime_operation(
                 "session:rolled:boundary:protocol-materialization",

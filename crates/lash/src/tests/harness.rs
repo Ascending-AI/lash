@@ -218,7 +218,7 @@ where
     dead_code,
     reason = "a PREP-F twin the S5c batches move their fixtures onto"
 )]
-pub(crate) async fn memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
+pub(crate) async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
     Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -232,8 +232,8 @@ pub(crate) async fn memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet>
     dead_code,
     reason = "a PREP-F twin the S5c batches move their fixtures onto"
 )]
-pub(crate) async fn memory_store_backend() -> lash_core::Backend {
-    let stores = memory_store_set().await;
+pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
+    let stores = sqlite_memory_store_set().await;
     lash_conformance::recording_backend_over(stores)
 }
 

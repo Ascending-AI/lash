@@ -1114,7 +1114,11 @@ mod tests {
                     cause: lash::persistence::RootTerminalCause::Committed {
                         commit: lash::persistence::TurnCommitId::new(root.clone(), 0),
                         turn: root.clone(),
-                        stop: None,
+                        outcome: lash::persistence::RootCommittedOutcome::Finished(
+                            lash::TurnFinish::AssistantMessage {
+                                text: String::new(),
+                            },
+                        ),
                     },
                     head_revision: None,
                     at_ms: 1,
@@ -1204,7 +1208,7 @@ mod tests {
         let root = lash_core::TurnId::from("latency-probe-root");
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("open the in-memory store set");
+            .expect("open the SQLite in-memory store set");
         let factory = stores.session_store_factory();
         factory
             .admit_session(&lash_core::SessionStoreCreateRequest {

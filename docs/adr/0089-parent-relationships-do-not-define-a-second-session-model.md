@@ -2,98 +2,61 @@
 
 ## Status
 
-Accepted. Ratified on FIG-2872. Completed on FIG-3378: the second running
-model described in the Context no longer exists in code.
-
-Amended 2026-09-29 (FIG-4112): the parent relation is creation-only. A facade
-related session is created with `create(SessionCreation { parent: Some(p), .. })`
-and then opened like any session; the relation is recorded with the catalog
-row and no open can state or change it. A create naming an existing id is
-refused with `SessionAlreadyExists`, whatever parent it names, so the recorded
-relation is never rewritten.
+Accepted.
 
 ## Context
 
-Lash has described sessions created from another session as children, managed
-sessions, and subagent sessions. Those names leaked into construction and
-lifecycle: an opened facade session could create a runtime through the managed
-session registry without passing through the facade's canonical store
-admission, and a facade administration operation could replace the runtime
-inside an existing session handle with one of those managed runtimes. The
-result admitted two execution models. In one, the facade bound an exact session
-identity, store, and lifecycle owner. In the other, parentage selected different
-storage and identity rules.
-
-A subagent needs inherited context, restricted tools, usage attribution, and a
-parent relationship. None of those facts changes what a session is or what must
-be true before it executes.
+A related session needs a parent relationship, inherited context, tool access,
+and usage attribution. Those facts describe its inputs; they do not define a
+different storage identity or lifecycle.
 
 ## Decision
 
-Every executing facade session is an ordinary session. It passes through the
-same canonical admission boundary and receives one immutable Session Binding
-as defined by
-[ADR 0088](0088-facade-sessions-bind-storage-and-lifecycle-owners.md), whether
-it is opened by a host, forked, created from another session, or created to run
-a subagent. Session relation, subagent context, tool access, policy, initial
-state, and usage attribution are request data applied at that boundary. They
-do not select another storage, control, lifecycle, or identity model.
+Every executing facade session passes through canonical store admission and
+owns one immutable Session Binding, as defined by
+[ADR 0088](0088-facade-sessions-bind-storage-and-lifecycle-owners.md).
+Root sessions, related sessions, forks, and subagent sessions use this boundary.
 
-Creating a related session therefore must select and admit its exact store
-before publishing an executable handle. A parent relationship may influence
-catalog selection and host policy, but it cannot reuse the parent's exact
-store handle or exempt the new session from admission. If the selected catalog
-cannot provide a store, creation fails before the session becomes executable.
-The resulting handle owns the new session's binding; an existing handle never
-changes its session id or binding to point at the result.
+The facade records parentage only at creation.
+`create(SessionCreation { parent: Some(parent), .. })` writes the relation
+with the catalog row and initial config head, then returns a Durable Session.
+Creation constructs no runtime. An existing id is refused with
+`SessionAlreadyExists`, even when the request repeats its parent and config;
+a deleted id is refused with `SessionDeleted`. Opening resolves an existing
+session, reads its recorded state and parent relation, and constructs its bound
+runtime. An open cannot state or change parentage.
 
-The second running model is gone. The managed-session registry, managed-turn
-machinery, and managed lifecycle were deleted; every executing session is an
-ordinary session driven through the shared session/turn path. Session creation
-is named session initialisation: it materializes and commits the session from
-the create request — relation, policy, tool access, subagent context, initial
-state, observer intents, and plugin configuration — and it may reopen an
-already-committed durable session when a process run is redelivered. It may
-not bypass store admission, reuse the parent's exact store handle, publish a
-storeless executable handle, keep a registry or cache of live runtimes for the
-sessions it creates, or swap a different runtime identity underneath an opened
-facade handle. A runtime minted to run a process child turn is owned by that
-process run and dropped when the run ends; the durable session row is the
-continuity a redelivery reopens.
+Each related session has its own exact session store binding and usage ledger.
+Parentage cannot exempt it from admission or substitute the parent's binding.
+A handle keeps its session identity and binding for its lifetime.
 
-ADR 0011 remains orthogonal. A runtime instantiated solely to execute an
-already-admitted Runtime Process is reconstructed from that process's captured
-Execution Environment and is identified by its process Execution Scope. It is
-not a host-addressable facade session merely because lower-level code reuses
-runtime machinery. A `ProcessInput::SessionTurn` that creates and executes a
-real session is covered by this decision and receives no process-only
-exemption.
+The process-origin initialisation path materializes an ordinary session from
+`SessionCreateRequest`, carrying relation, policy, tool access, subagent
+context, initial nodes, observer intents, and plugin configuration. The runtime
+that executes a `ProcessInput::SessionTurn` is local to that process run. A
+redelivery reopens its durable session row; no live child-runtime registry
+supplies continuity.
 
-This decision supersedes ADR 0088's wording that gave managed children a
-separate storage-selection rule. Catalog choice may use the parent relation as
-input, but canonical admission and binding are shared by every facade session.
+Initialisation and catalog `fork_session` are separate operations. A fork
+materializes durable lineage and retained-frame content under its own failure
+contract; it does not consume a live parent's plugin-init capture.
+[ADR 0011](0011-self-contained-processes.md) governs reconstruction of a Runtime
+Process from its captured Execution Environment. Creating and executing a real
+child session still requires ordinary admission.
+
+Evidence: `crates/lash/src/session.rs:52`, `:164`, `:247`, `:402`, and
+`crates/lash-core/src/runtime/session_manager/session_init.rs:1`, `:52`, `:85`.
+
+## Alternatives considered
+
+A separate child runtime registry would make parentage select another storage
+and lifecycle model. Durable session rows already provide continuity.
+Rebinding an existing handle would change its identity beneath callers; moving
+foreground work requires a different handle.
 
 ## Consequences
 
-- Subagents differ through relationship and configuration metadata, not
-  lifecycle machinery.
-- A related-session creation route cannot publish a storeless executable
-  runtime when facade admission requires a store.
-- Session handles keep one identity and one Session Binding for their entire
-  lifetime; moving foreground work to another session requires another handle.
-- Tests and examples must exercise related sessions through the same admission,
-  control, resume, and failure contracts as root sessions.
-- The facade child-administration surface (`SessionAdmin::children`,
-  `ChildSessionAdmin`) is removed (FIG-3373): a host-run related session is an
-  ordinary session created with a `parent` in its `SessionCreation` and then
-  opened (FIG-4112), its spend records on its own ledger, and rolling related
-  sessions together is host policy.
-- Session initialisation stays distinct from catalog `fork_at` (FIG-3377):
-  `fork_at` materializes durable fork lineage and retained-frame content under
-  its own failure semantics and carries no live-parent plugin-init payload.
-- A process-spawned child runtime is run-scoped (FIG-3424): owned by the
-  process run, dropped when the run ends in success, failure, or cancellation,
-  and reopenable afterwards only through the ordinary open path against the
-  durable session row.
-- Process reconstruction remains governed by ADR 0011 only where no
-  host-addressable facade session is being created.
+- Subagents differ through relationship and configuration data.
+- Admission, control, resume, and failure contracts apply to related sessions.
+- Rolling related sessions' usage together is host policy.
+- Process-run residency ends with the run; durable session identity survives it.

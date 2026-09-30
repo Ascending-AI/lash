@@ -26,14 +26,12 @@ impl CommitBudgetLimit {
 /// Bytes cover the complete logical persisted payload carried by a
 /// [`RuntimeCommit`]: session configuration, graph delta, hydrated checkpoint,
 /// attachment-manifest ids, queued-work batches, the selected Agent Frame,
-/// usage deltas, and the durable turn result. Nodes bound all rows the commit
+/// and the durable turn result. Nodes bound all rows the commit
 /// writes: graph nodes plus attachment-intent adoption rows. Hosts must choose
 /// bounded or unbounded behavior for both dimensions; this type deliberately
-/// has no `Default`. The reference curve in ADR 0058 recommends a 1 MiB
-/// logical-byte limit because its p95 physical commit interval stays below the
-/// named 60 ms target on both reference backends; 512 rows remains the separate
-/// starting-point node bound. Hosts should remeasure and tune both limits for
-/// their own backend envelope.
+/// has no `Default`. ADR 0058 documents 1 MiB and 512 recorded rows as
+/// starting points. Hosts measure their own byte and row curves, including
+/// the joint configured point, and tune both limits for their backend envelope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommitBudget {
@@ -72,7 +70,6 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub attachment_referrer_bytes: usize,
     pub follow_on_bytes: usize,
     pub agent_frame_bytes: usize,
-    pub usage_delta_bytes: usize,
     pub turn_result_bytes: usize,
     pub total_bytes: usize,
 }
@@ -206,7 +203,6 @@ impl RuntimeCommit {
                 attachment_referrer_bytes = measurement.attachment_referrer_bytes,
                 follow_on_bytes = measurement.follow_on_bytes,
                 agent_frame_bytes = measurement.agent_frame_bytes,
-                usage_delta_bytes = measurement.usage_delta_bytes,
                 turn_result_bytes = measurement.turn_result_bytes,
                 actual = measurement.total_bytes,
                 limit = max_bytes,
@@ -220,7 +216,6 @@ impl RuntimeCommit {
                 attachment_referrer_bytes: measurement.attachment_referrer_bytes,
                 follow_on_bytes: measurement.follow_on_bytes,
                 agent_frame_bytes: measurement.agent_frame_bytes,
-                usage_delta_bytes: measurement.usage_delta_bytes,
                 turn_result_bytes: measurement.turn_result_bytes,
                 total_bytes: measurement.total_bytes,
                 max_bytes,
@@ -239,7 +234,6 @@ impl RuntimeCommit {
             attachment_referrer_bytes = measurement.attachment_referrer_bytes,
             follow_on_bytes = measurement.follow_on_bytes,
             agent_frame_bytes = measurement.agent_frame_bytes,
-            usage_delta_bytes = measurement.usage_delta_bytes,
             turn_result_bytes = measurement.turn_result_bytes,
             actual = measurement.total_bytes,
             limit = max_bytes,
@@ -296,12 +290,6 @@ impl RuntimeCommit {
             .map(|frame_node_id| measure_json(serde_json::to_vec(frame_node_id)))
             .transpose()?
             .unwrap_or_default();
-        let usage_delta_bytes = self.usage_deltas.iter().try_fold(
-            0usize,
-            |total, delta| -> Result<usize, StoreError> {
-                Ok(total.saturating_add(measure_json(serde_json::to_vec(delta))?))
-            },
-        )?;
         let turn_result_bytes = measure_json(serde_json::to_vec(&self.turn_commit))?;
         let total_bytes = session_config_bytes
             .saturating_add(graph_delta_bytes)
@@ -309,7 +297,6 @@ impl RuntimeCommit {
             .saturating_add(attachment_referrer_bytes)
             .saturating_add(follow_on_bytes)
             .saturating_add(agent_frame_bytes)
-            .saturating_add(usage_delta_bytes)
             .saturating_add(turn_result_bytes);
         let graph_rows = self.graph.nodes().len();
         let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
@@ -324,7 +311,6 @@ impl RuntimeCommit {
             attachment_referrer_bytes,
             follow_on_bytes,
             agent_frame_bytes,
-            usage_delta_bytes,
             turn_result_bytes,
             total_bytes,
         })
@@ -356,7 +342,7 @@ mod tests {
             },
         };
         let budget = CommitBudget::bounded(1024 * 1024, 2);
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit.graph = crate::GraphAppend::Extend {
             nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
@@ -384,7 +370,7 @@ mod tests {
             ))
         };
         let budget = CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::bounded(2));
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit.adopted_intent_rows = 3;
 
         let error = commit
@@ -414,7 +400,7 @@ mod tests {
             ))
         };
         let budget = CommitBudget::bounded(128, 512);
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         let node = crate::SessionNodeRecord {
             node_id: "budget-node".into(),
             parent_node_id: None,
@@ -470,7 +456,6 @@ mod tests {
                 attachment_referrer_bytes,
                 follow_on_bytes,
                 agent_frame_bytes,
-                usage_delta_bytes,
                 turn_result_bytes,
                 total_bytes,
                 max_bytes,
@@ -480,7 +465,6 @@ mod tests {
                 && attachment_referrer_bytes == expected_attachment_bytes
                 && follow_on_bytes == 0
                 && agent_frame_bytes == 0
-                && usage_delta_bytes == 0
                 && turn_result_bytes > 0
                 && total_bytes
                     == expected_session_config_bytes
@@ -506,7 +490,7 @@ mod tests {
                 crate::TurnBudget::Unbounded,
             ))
         };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.commit_budget = CommitBudget::bounded(512, 512);
 
         assert!(matches!(
@@ -533,7 +517,7 @@ mod tests {
             CommitBudgetLimit::bounded(BYTE_LIMIT),
             CommitBudgetLimit::Unbounded,
         );
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit
             .validate_budget()
             .expect("the commit without a pending follow-on must fit");
@@ -546,6 +530,7 @@ mod tests {
             resolved_run: None,
             chain_depth: 1,
             attempts: 0,
+            max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         });
 
         assert!(matches!(
@@ -570,7 +555,7 @@ mod tests {
             CommitBudgetLimit::bounded(BYTE_LIMIT),
             CommitBudgetLimit::Unbounded,
         );
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit
             .validate_budget()
             .expect("the commit without an agent frame must fit");
@@ -579,43 +564,6 @@ mod tests {
             crate::FrameNodeId::new("f".repeat(BYTE_LIMIT * 2))
                 .expect("test frame identity is non-empty"),
         );
-
-        assert!(matches!(
-            commit.validate_budget(),
-            Err(StoreError::CommitByteBudgetExceeded {
-                max_bytes: BYTE_LIMIT,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn usage_delta_bytes_can_exceed_the_commit_budget_alone() {
-        const BYTE_LIMIT: usize = 2_048;
-        let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("budget-usage-delta"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        };
-        let budget = CommitBudget::new(
-            CommitBudgetLimit::bounded(BYTE_LIMIT),
-            CommitBudgetLimit::Unbounded,
-        );
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
-        commit
-            .validate_budget()
-            .expect("the commit without a usage delta must fit");
-
-        let usage = crate::TokenLedgerEntry {
-            source: "u".repeat(BYTE_LIMIT * 2),
-            model: "budget-model".to_string(),
-            usage: crate::TokenUsage::default(),
-            usage_disposition: Default::default(),
-        };
-        commit.usage_deltas =
-            crate::store::RuntimeUsageDelta::for_operation(&commit.turn_commit.operation, &[usage])
-                .expect("identify the oversized usage delta");
 
         assert!(matches!(
             commit.validate_budget(),
@@ -639,7 +587,7 @@ mod tests {
             CommitBudgetLimit::bounded(BYTE_LIMIT),
             CommitBudgetLimit::Unbounded,
         );
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit
             .validate_budget()
             .expect("the commit with its ordinary turn result must fit");
@@ -668,22 +616,11 @@ mod tests {
             ))
         };
         state.ensure_agent_frame_initialized();
-        let usage = crate::TokenLedgerEntry {
-            source: "all-families".to_string(),
-            model: "budget-model".to_string(),
-            usage: crate::TokenUsage {
-                input_tokens: 1,
-                output_tokens: 2,
-                ..crate::TokenUsage::default()
-            },
-            usage_disposition: Default::default(),
-        };
         let budget = CommitBudget::new(
             CommitBudgetLimit::bounded(BYTE_LIMIT),
             CommitBudgetLimit::Unbounded,
         );
-        let mut commit =
-            RuntimeCommit::persisted_state_for_test_with_budget(&state, &[usage], budget);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit.committed_attachment_ids = vec![
             crate::AttachmentId::parse("all-families-attachment").expect("valid attachment id"),
         ];
@@ -695,6 +632,7 @@ mod tests {
             resolved_run: None,
             chain_depth: 1,
             attempts: 0,
+            max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         });
 
         commit
@@ -709,7 +647,6 @@ mod tests {
         assert!(measurement.attachment_referrer_bytes > 0);
         assert!(measurement.follow_on_bytes > 0);
         assert!(measurement.agent_frame_bytes > 0);
-        assert!(measurement.usage_delta_bytes > 0);
         assert!(measurement.turn_result_bytes > 0);
         assert!(measurement.total_bytes < BYTE_LIMIT);
     }

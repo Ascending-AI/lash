@@ -750,7 +750,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
                 store.as_ref(),
                 &authority,
                 &lease,
-                RuntimeCommit::persisted_state_for_test(&state, &[])
+                RuntimeCommit::persisted_state_for_test(&state)
                     .deferring_interrupted_turn_inputs(turn_id, None),
             )
             .await
@@ -898,7 +898,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
                 &authority,
                 &lease,
                 settling_commit_for_test(
-                    RuntimeCommit::persisted_state_for_test(&state, &[]),
+                    RuntimeCommit::persisted_state_for_test(&state),
                     &lease,
                     {
                         let mut settlement = IngressSettlement::new(admission_turn_id.clone());
@@ -1305,7 +1305,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
                 store.as_ref(),
                 &authority,
                 &lease,
-                RuntimeCommit::persisted_state_for_test(&state, &[])
+                RuntimeCommit::persisted_state_for_test(&state)
                     .deferring_interrupted_turn_inputs(ended_turn, None),
             )
             .await

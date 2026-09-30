@@ -537,9 +537,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
         ))
     };
     let receipt = store
-        .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
+        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit re-encodes under writable epoch");
     assert_ne!(receipt.schema_version, 7);

@@ -16,7 +16,7 @@ use super::*;
 #[tokio::test]
 pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomness() {
     let artifact_store: lashlang::LashlangArtifacts =
-        crate::testing::fresh_memory_artifact_store().await;
+        crate::testing::fresh_sqlite_memory_artifact_store().await;
     let table = crate::testing::DoubleProcesses::new(0x3079_0001).await;
     let handler = table
         .open_handler(crate::testing::default_cell_scope())
@@ -46,6 +46,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
                 process_engine_surface(surface.clone()),
+                table.backend().worker_recovery(),
             ),
         ),
     );

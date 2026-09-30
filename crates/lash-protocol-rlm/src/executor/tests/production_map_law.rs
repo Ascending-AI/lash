@@ -129,7 +129,7 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
         ExecRequest {
             code: source.to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface {
             language_features: lashlang::LashlangLanguageFeatures::default()
                 .with_label_annotations(),
@@ -319,7 +319,7 @@ fn production_rlm_map_is_the_compiled_inventory_for_every_loop_kind() {
             panic!("one execution_started event, got {}", maps.len());
         };
         let artifact = stored_artifact(
-            &crate::testing::memory_artifact_store().await,
+            &crate::testing::sqlite_memory_artifact_store().await,
             &started.identity.module_ref,
         )
         .await;
@@ -392,6 +392,10 @@ finish("started");
 
 #[tokio::test]
 async fn production_process_map_is_the_compiled_inventory_after_a_store_round_trip() {
+    process_map_fixture(lash_vm_client::service::Service::default()).await;
+}
+
+async fn process_map_fixture(workers: lash_vm_client::service::Service) {
     let dir = tempfile::tempdir().expect("store directory");
     let path = dir.path().join("artifacts");
     // The cell publishes through one store; the engine reads through another
@@ -430,11 +434,16 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
     let traced_engine = || {
         // The process controls reach the engine through the worker's tool
         // catalog, so its surface carries no copy of them.
-        lash_lashlang_runtime::LashlangProcessEngine::new(engine_store.clone(), surface.clone())
-            .with_execution_trace(
-                Some(sink.clone() as Arc<dyn TraceSink>),
-                TraceContext::default(),
-            )
+        lash_lashlang_runtime::LashlangProcessEngine::new(
+            engine_store.clone(),
+            surface.clone(),
+            table.backend().worker_recovery(),
+        )
+        .with_worker_service(workers.clone())
+        .with_execution_trace(
+            Some(sink.clone() as Arc<dyn TraceSink>),
+            TraceContext::default(),
+        )
     };
     let module_store = Arc::clone(engine_store.store());
     let worker_backend =
@@ -490,7 +499,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             session_policy,
         ),
     );
-    let mut state = RlmExecutionState::for_engine("typescript");
+    let mut state = RlmExecutionState::for_engine_with_workers("typescript", workers.clone());
     let response = execute_code_with_test_render(
         &mut state,
         ctx,
@@ -606,5 +615,63 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
                 node.observation
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn every_model_code_path_runs_in_a_worker() {
+    use lash_vm_client::service::{Request, Response, WorkerPath};
+    let workers = lash_vm_client::service::Service::default().with_worker_receipts();
+    let id = lash_core::ProcessDefinitionId::from_sha256_digest([41; 32]);
+    let mut remote = lash_vm_client::RemoteState::pristine(workers.clone());
+    remote
+        .insert_global(
+            "definition",
+            lashlang::from_json(serde_json::json!({"$lash_definition_id": id.to_string()})),
+        )
+        .expect("worker installs the candidate root");
+    assert_eq!(
+        remote.referenced_definition_ids(),
+        BTreeSet::from([id.clone()])
+    );
+    let capture = remote
+        .capture(&Default::default(), lash_core::FleetFormat::current())
+        .expect("worker captures candidate roots");
+    assert_eq!(capture.definition_ids, BTreeSet::from([id]));
+    let definition = workers
+        .request(Request::CreateDefinition {
+            source: "const answer = async (): Promise<number> => { return 42; };".into(),
+            environment: lashlang::LashlangHostEnvironment::new(
+                lashlang::LashlangHostCatalog::new(),
+                lashlang::LashlangAbilities::all(),
+            ),
+        })
+        .expect("definition compiler runs in a worker");
+    assert!(matches!(definition, Response::Definition(_)));
+    process_map_fixture(workers.clone()).await;
+    let receipts = workers.worker_receipts();
+    assert!(
+        receipts
+            .iter()
+            .all(|receipt| receipt.pid != std::process::id()),
+        "every actual checkout belongs to a child: {receipts:?}"
+    );
+    let paths = receipts
+        .iter()
+        .map(|receipt| receipt.path)
+        .collect::<BTreeSet<_>>();
+    for path in [
+        WorkerPath::References,
+        WorkerPath::Compile,
+        WorkerPath::CreateDefinition,
+        WorkerPath::Artifact,
+        WorkerPath::State,
+        WorkerPath::Cell,
+        WorkerPath::Process,
+    ] {
+        assert!(
+            paths.contains(&path),
+            "production path {path:?} has no worker process receipt: {receipts:?}"
+        );
     }
 }

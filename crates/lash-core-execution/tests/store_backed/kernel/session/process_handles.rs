@@ -73,7 +73,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_backend().await;
+        let backend = crate::support::sqlite_memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -142,7 +142,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host,
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -293,7 +292,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_set().await;
+        let backend = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -334,7 +333,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -431,7 +429,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_set().await;
+        let backend = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -447,7 +445,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -578,7 +575,7 @@ mod tests {
             .build_session(PluginSessionRequest::creation("root", Default::default()))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_store_set().await;
+        let backend = crate::support::sqlite_memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -611,7 +608,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: ScopedEffectController::shared(
                 Arc::new(crate::testing::UnavailableEffectController),
@@ -979,7 +975,6 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
-            process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             // The completion presents through the journaled boundary, so the
             // context runs on the open handler's lent controller.

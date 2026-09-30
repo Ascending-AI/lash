@@ -1,242 +1,85 @@
-# Session state migrates totally at admission
-
-## Status
-
-Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
-passages are historical under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
-The non-SQL decision and host-policy rules here survive.
-
-Accepted. Ratified on FIG-874; this ADR defines the store-owned quadrant of
-that compatibility doctrine.
-
-Amended 2026-09-23 (FIG-3540), **not yet implemented**; the row merge is not
-adopted (ADR 0101's FIG-3540 close-out keeps both row classes): under [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) the projection's
-Pending Turn Input and Queued Work rows become the session's Session Ingress
-rows, and the head gains the pending follow-on and `config_revision`. That
-cutover advances `session_state_version` from 2 to 3 with no converter step and
-an oldest supported version of 3, so an older session is refused at admission,
-not migrated.
-
-Amended 2026-09-24 (FIG-3669), **not yet implemented**:
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
-makes Restate the only effect engine and the SQL stores storage only. This ADR
-specifies SQL-engine behaviour: admission under the SQL session-execution lease;
-total migration at admission stays. Those passages stay as written until the PR
-that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session lease)
-rewrites them.
+# Session state admits one compatible continuation generation
 
 ## Context
 
-Lash has exact format counters for individual mutable records: the checkpoint
-manifest and component encoding, the session head, process-wake delivery, and
-protocol-turn options. Those counters let a reader identify one record's
-codec, but they do not say whether every record needed to continue one session
-has moved together. A store can therefore pass its DDL gate and still contain
-a head, checkpoint, pending input, and queued command that no single runtime
-generation can safely interpret as one recovery unit.
-
-[ADR 0045](0045-services-are-stateless-substrates-own-continuation.md) makes
-the store's committed continuation sufficient for recovery. That property
-requires a compatibility boundary over the complete mutable continuation, not
-independent best-effort reads. The session-execution lease already supplies the
-single-writer lane and monotonic fencing generation needed to move that
-boundary without racing recovery.
+Individual record codecs identify envelopes, but recovery also needs a version
+for the session's mutable continuation as a unit. The marker must be readable
+before an incompatible head or checkpoint is decoded.
 
 ## Decision
 
-Each session has one monotonic `session_state_version`. It versions the
-**bounded mutable continuation projection** owned by the Lash session store:
+Each session carries an independently readable `session_state_version` beside
+its durable binding metadata. New sessions receive the version selected by the
+store's recorded fleet format. The marker guards the mutable session recovery
+unit: head and config, current checkpoint and Lash-owned components, pending
+inputs, and queued work. It is separate from physical DDL and individual record
+codec versions.
 
-- session head and persisted session configuration;
-- the current checkpoint manifest and Lash-owned checkpoint-component bodies;
-- Pending Turn Input rows, including their claim and terminal state; and
-- Queued Work rows for that session, including session commands, process-wake
-  payloads, claim state, and interrupted-composition evidence.
+### Admission is the compatibility seam
 
-The version is an independently readable scalar beside the session's durable
-binding metadata, not a field hidden inside any mutable payload it guards. A
-new session is stamped with the binary's current version when its binding is
-created. Installing the scalar in a backend's physical schema follows that
-backend's existing DDL rules; it is not a session-state migration.
+Drive admission reads the marker before admitting work. Recovery checks it
+before guarded payload decoding. A version outside the fleet read window
+returns `SessionStateVersionUnsupported` or `SessionStateVersionNewerThanRuntime`
+without attempting to interpret the payload.
 
-The projection is bounded by ownership, not by row count. “Total” means that
-every reachable in-scope value for the session is either converted by the
-declared chain or causes the whole admission to fail. No row may be skipped,
-reset, dropped, decoded with a guessed default outside an explicit mapping, or
-left at an old in-scope representation after success. An unknown source
-version or source codec refuses without mutation.
-
-### Admission is the only migration seam
-
-Migration is a prefix of execution admission, never store construction. Before
-recovery or any new turn, the runtime:
-
-1. acquires the session-execution lease and retains its full authority;
-2. reads `session_state_version` before decoding any in-scope mutable payload;
-3. refuses a version newer than the binary, or an older version for which the
-   registry has no complete chain;
-4. for an older supported version, runs the complete ordered converter chain
-   and advances the version in one backend transaction; and
-5. only after that transaction commits, hydrates recovery state or begins the
-   new turn while still holding the execution lane.
-
-The migration transaction locks the version row before enumerating the
-projection and revalidates the presented lease token and fencing generation
-inside the transaction. All converted rows and the final version advance are
-one atomic commit. A crash before commit leaves the complete source generation;
-an ambiguous result is resolved by rereading the scalar and rerunning the same
-deterministic chain. A superseded or expired fence vetoes the transaction.
-
-This gate is stricter than the existing CAS-only fallback for a busy execution
-lane. A path that has not completed admission under an acquired lease may not
-recover or start a turn lane-lessly. The session-head CAS remains commit
-authority, but it cannot make interpreting a projection concurrently with its
-migration safe.
-
-Every ordinary reader or writer of an in-scope payload checks the scalar first.
-A current-version reader then applies the record's own codec check; a current-
-version writer serializes on the version row so it is ordered before or after a
-migration transaction. An old-version result directs the caller through
-admission migration, and a newer-version result refuses. Only the private,
-lease-fenced migration path may read old in-scope payloads. This makes a
-concurrent enqueue fall wholly on one side of migration: it is either included
-as source state or written in the target format after the advance.
+`admit_session_state` validates a sealed `DriveFence` inside a backend
+transaction before reading the marker. Its result carries the session id,
+version, and drive epoch. This admission checks compatibility; it does not
+execute a per-session converter chain or advance the marker.
 
 ### Record counters remain codec discriminators
 
-The checkpoint-manifest, checkpoint-component encoding, session-head,
-process-wake, and protocol-turn-options counters remain. Their current values
-are not restated here: `scripts/versioned-surfaces.toml` is the registry of
-every durable format version, the format manifest (`lash::formats`) reports
-the values a build writes, and `scripts/check_format_registry.py` holds the two
-in agreement. Each counter is an exact-generation fence: a reader refuses a
-record stamped with any other value, older or newer. The counters identify the
-local envelope or body codec used by a converter and continue to detect corrupt
-or impossible mixtures. `session_state_version` instead says
-that the complete mutable recovery unit has passed one semantic compatibility
-boundary. Neither number can replace the other.
+Head, checkpoint, component, wake, and protocol counters remain independent.
+The owning readers apply their format guards within the recorded fleet window.
+A compatible session marker does not authorize ignoring a record's own guard.
+`scripts/versioned-surfaces.toml` and `lash::formats` identify the formats the
+binary supports.
 
-At the current session version, every exact in-scope record counter must be one
-the current reader accepts. Older counters are reachable only through the raw
-migration decoder selected by a declared converter step. A current session
-marker paired with an old exact record counter is corruption, not permission to
-run a partial migration.
+### Conversion and source-shape enforcement
 
-The FIG-1895 head change is the worked example. Under this decision it still
-bumps `SESSION_HEAD_META_SCHEMA_VERSION` from 3 to 4. It also advances
-`session_state_version` and registers a total step whose head mapping decodes
-v3, writes v4, and materializes the newly durable `generation` field with the
-declared legacy meaning (`GenerationOptions::default()`). The same step audits
-queued session commands and declares unchanged old command payloads
-tolerate-old where their existing representation already has identical
-meaning. The session version does not absorb the head counter. The immutable
-node-body generation is a separate exact-generation fence
-(`SESSION_NODE_BODY_SCHEMA_VERSION`) and is owed a bump only by an actual
-node-body shape change, not merely because a head-only type shares its source
-file.
-
-### Converter registry and source-shape enforcement
-
-Core owns one ordered registry of adjacent steps. Each step declares:
-
-- exact `from` and `to` session versions;
-- stable identifiers for every in-scope source projection it maps;
-- the accepted source and emitted target record codecs for those projections;
-- the deterministic converter for each mapped projection; and
-- any explicit `tolerate_old` declaration, with its compatibility fixture and
-  reason, for a representation whose old bytes retain exactly the same meaning.
-
-Steps are contiguous and unique. Admission composes them from the stored
-version to the binary's version inside one transaction; it never searches for
-an opportunistic direct converter. Conversion receives no clock, randomness,
-network, host configuration, or resident state. It derives the target solely
-from the complete stored source projection. A `tolerate_old` declaration is
-not a waiver for an exact codec mismatch: it is valid only where the owning
-reader explicitly accepts the old representation and tests its unchanged
-meaning.
+Durable format conversion belongs to the fleet finalize contract in
+[ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) and the
+registered lifts and migration guarantees of
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). Admission
+does not invent a converter for unsupported state or reset its contents.
+The production session marker is generation 3; the synthetic-next tier uses
+generation 4 to prove adjacent-format support. Neither admits snapshot-era
+session generations by guessing defaults.
 
 ### Executable state remains pinned
 
-Totality ends at the store-owned projection. A parked Lashlang segment, VM
-continuation, RLM snapshot, or executable artifact is not converted by session
-admission. Its instruction pointer and heap have meaning only under the exact
-code and artifact identity that created them, so the executable episode stays
-exact-pinned and drains under that deployment as required by
-[ADR 0043](0043-hosts-register-immutable-deployments.md). The session's mutable
-store data may migrate successfully while such an episode remains parked. If
-the pinned code is unavailable, resuming that episode refuses; it does not roll
-back the session migration or reinterpret the executable state.
-
-An eternal subscription is store-owned data and migrates with its session. It
-is not treated as one eternal execution. Each occurrence starts one finite
-executable episode, and that episode pins and drains independently. New
-occurrences use current code; already-started occurrences finish on their
-pinned code or use the separately decided fork-forward remedy. There is no
-fifth strategy that pins an entire session, lazily upgrades an instruction
-pointer, or exempts an occurrence from drain.
+The marker does not translate a parked VM instruction pointer, heap, compiled
+artifact, or engine invocation into another executable deployment. Executable
+identity and drain rules remain separate under ADR 0043. Wire negotiation and
+physical-store admission also retain their own contracts.
 
 ## Enforcement gates
 
-A source generation is supported only while all of these gates remain green:
+The session-state admission law places malformed payload behind an unsupported
+marker and asserts that marker refusal wins over decoding. It also proves
+that a stale drive fence fails before the marker check. These laws run against
+SQLite file, SQLite memory, and PostgreSQL. Upgrade proofs use the synthetic-next
+tier; host laws cover the Restate server double, live Restate, and lash-sim's
+in-process effect host where applicable.
 
-1. **Frozen generation corpus.** One non-regenerating fixture corpus per
-   supported source generation covers both SQL backends and every reachable
-   mutable variant: head present and absent, config values, checkpoint roots
-   and each Lash-owned component, pending and terminal inputs, both queued-work
-   classes, commands and wakes, unclaimed and claimed rows, interrupted claims,
-   and each reachable staged or terminal work phase. Adding a variant expands
-   every still-supported generation's corpus or explicitly makes that source
-   generation unsupported.
-2. **Interruption, idempotence, and backend determinism law.** For each source
-   generation and backend, inject interruption at every migration write
-   boundary, reopen, reacquire the lane, and rerun. The result must equal an
-   uninterrupted migration. SQLite and PostgreSQL must produce the same
-   backend-neutral semantic projection and the same format-owned payload bytes.
-   Before the atomic commit the source remains intact; after it, rerun is a
-   no-op with the identical result.
-3. **Refuse-newer law.** On each backend, pre-acquire a valid lease, capture the
-   complete database state, stamp an otherwise valid session at
-   `current + 1`, and place malformed mutable payload behind that marker. The
-   admission attempt must return the typed newer-session refusal rather than a
-   payload decode error, and a post-attempt comparison must prove that no row
-   changed.
+## Alternatives considered
 
-## Hard fences
-
-This decision does not create a universal storage version:
-
-- Store DDL retains its creation/open-time transactional migration or exact
-  refusal policy. Session converters never alter physical schema.
-- Immutable graph-node bodies are fenced at one exact generation: a body
-  stamped with any other `SESSION_NODE_BODY_SCHEMA_VERSION`, older or newer, is
-  refused. Admission never rewrites them.
-- Engine journals carry their own exact format counters (the tool-effect,
-  Restate journal, and durable-wait surfaces in the registry) and are refused,
-  not reinterpreted, under any other value. The Lash session store never
-  rewrites them.
-- VM, RLM, and artifact executable state remains exact-pin plus drain.
-- Wire compatibility remains negotiation and refusal, never storage migration.
+Checking only individual records can admit an incoherent recovery unit. Moving
+the marker inside the guarded payload prevents refusal before decode. Lazy
+reset or opportunistic conversion at an ordinary read makes recovery depend
+on which row is visited first. Explicit fleet conversion and an early marker
+gate avoid those ambiguities.
 
 ## Consequences
 
-- Successful admission leaves one wholly current mutable continuation; later
-  recovery has no lazy migration branches.
-- Migration failure preserves the complete source generation and prevents both
-  recovery and new work for that session.
-- An older binary refuses a session advanced by a newer binary before decoding
-  or writing its mutable state. There is no downgrade path.
-- Sessions migrate independently. One session's refusal or conversion does not
-  block unrelated sessions in the same physical store beyond normal backend
-  transaction contention.
-- Backend implementations own transaction and locking mechanics, while core
-  owns the converter chain, projection membership, deterministic semantics, and
-  conformance laws.
+An incompatible session cannot begin recovery or new work. A compatible marker
+and compatible record codecs are both required. Store transactions own fence
+validation, while fleet conversion owns supported format transitions.
 
-## Amendment (FIG-4125, 2026-09-29)
+## Code references
 
-Item 18: The history rule has
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) as its 1.0
-floor: 1.0 must read the 1.1 migration shape during a roll. Lease-era status
-text is retired under
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+- `crates/lash-core-store/src/store/state_version.rs:4-61` defines marker admission and the fleet window.
+- `crates/lash-core/src/runtime/drive/admission.rs:108-113` gates drive admission.
+- `crates/lash-sqlite-store/src/persistence/session_commit.rs:166-199` validates the drive fence.
+- `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:220-239` implements the same transaction.
+- `crates/lash-conformance/src/conformance/session_store_factory/state_version.rs:16-139` pins refusal ordering.

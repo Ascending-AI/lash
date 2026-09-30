@@ -242,6 +242,19 @@ class ChartTests(unittest.TestCase):
                        if entry['name'] == 'WORKER_GENERATION'}
         self.assertEqual(generations, {'initial', 'next'})
 
+    def test_a_rollback_generation_returns_n_without_its_migrate(self):
+        documents = self.documents('rollback-generations.yaml')
+        workers = [item for item in documents if item['kind'] == 'Deployment' and '-worker-' in item['metadata']['name']]
+        self.assertEqual(len(workers), 6)
+        for worker in workers:
+            expected_tag = 'new' if worker['metadata']['name'].endswith('-next') else 'old'
+            self.assertTrue(worker['spec']['template']['spec']['containers'][0]['image'].endswith(':' + expected_tag))
+        services = {item['metadata']['name'] for item in documents if item['kind'] == 'Service'}
+        self.assertTrue({'lash-loadtest-workers-initial', 'lash-loadtest-workers-next',
+                         'lash-loadtest-workers-rollback'} <= services)
+        # N's operator never migrates over the store N+1 expanded.
+        self.assertFalse(any(item['kind'] == 'Job' and '-migrate-' in item['metadata']['name'] for item in documents))
+
     def test_fault_targets_restart_in_place_after_a_hold(self):
         documents = self.documents('values-local.yaml.rendered.yaml')
         self.assertFalse(any(item['kind'] == 'Job' and '-migrate-' in item['metadata']['name'] for item in documents))

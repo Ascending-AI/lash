@@ -587,7 +587,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 // The deferral's completion gate is settled through the
                 // effect host that owns the turn-control promises; the phase
                 // measures the store's complete-and-defer commit.
-                let mut completing = RuntimeCommit::persisted_state_for_test(&commit_state, &[])
+                let mut completing = RuntimeCommit::persisted_state_for_test(&commit_state)
                     .deferring_interrupted_turn_inputs(turn_id.clone(), None);
                 let mut settlement = lash_core::store::IngressSettlement::new(turn_id.clone());
                 settlement
@@ -702,8 +702,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 let (_, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.complete_next_turn_inputs",
                     async {
-                        let mut commit =
-                            RuntimeCommit::persisted_state_for_test(&commit_state, &[]);
+                        let mut commit = RuntimeCommit::persisted_state_for_test(&commit_state);
                         commit.drive_fence = Some(Box::new(fence.clone()));
                         let result = store
                             .commit_runtime_state(finishing_perf_root(
@@ -801,7 +800,7 @@ fn queued_work_stress_commit(
     RuntimeCommit {
         graph: GraphAppend::PreserveHead,
         drive_fence: Some(Box::new(fence.clone())),
-        ..RuntimeCommit::persisted_state_for_test(state, &[])
+        ..RuntimeCommit::persisted_state_for_test(state)
     }
 }
 
@@ -840,7 +839,11 @@ pub(super) fn finishing_perf_root(
         commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
         turn: lash_core::store::PhysicalTurn::derive_turn_id(root, 0),
         root: root.clone(),
-        stop: None,
+        outcome: lash_core::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     commit
 }

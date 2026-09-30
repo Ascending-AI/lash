@@ -2,7 +2,7 @@
 //!
 //! [`Processes`] (reached via [`LashCore::processes`](crate::LashCore::processes),
 //! re-exported as [`lash::process::Processes`](crate::process::Processes)) is THE
-//! host-level process surface (ADR 0019 grill): start, observe, signal, cancel,
+//! host-level process surface (ADR 0014 grill): start, observe, signal, cancel,
 //! transfer, prune, and abandon-request every process, with the two distinct
 //! scope filters — `observed_by` (what a session may address) and `originated_by`
 //! (what a session created). The session-scoped
@@ -360,6 +360,7 @@ impl Processes {
                     .with_process_env_store(Arc::clone(
                         &self.core.env.core.durability.process_env_store,
                     ))
+                    .with_process_session_catalog(Arc::clone(&self.core.store_factory) as _)
                     .with_process_engines(self.core.host_process_engines.clone()),
             )
             .await?;
@@ -414,20 +415,18 @@ impl Processes {
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessStartReceipt> {
-        // A root start's session grant is the host's lookup: the session must
-        // exist now, whether the grant came from `session_scope` or from a
-        // remote start's `until_session` data (FIG-3607 R3).
-        if let lash_core::LifetimeDecision::Until {
-            scope: lash_core::ScopeId::Session(session_id),
-            grant: lash_core::ScopeGrant::HostSessionLookup,
-        } = &request.lifetime
-        {
-            self.require_live_session(session_id).await?;
-        }
-        // Publication belongs inside the replayable process effect. Publishing here
-        // would revisit the permanently retired staging owner before the executor can
-        // discover the already-transferred process edge on an exact replay.
-        let env_spec = request.env_spec.clone();
+        // A root start's session grant is the host's lookup, whether it came
+        // from `session_scope` or from a remote start's `until_session` data
+        // (FIG-3607 R3). The start's recorded admission checks the session is
+        // live, so a replay after the session was deleted answers the start
+        // its first run made (ADR 0105 §1).
+        let host_session = match &request.lifetime {
+            lash_core::LifetimeDecision::Until {
+                scope: lash_core::ScopeId::Session(session_id),
+                grant: lash_core::ScopeGrant::HostSessionLookup,
+            } => Some(session_id.clone()),
+            _ => None,
+        };
         let observers = request.observers.clone();
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
@@ -435,23 +434,47 @@ impl Processes {
         let registration = request
             .keyed_in(&scoped_effect_controller)
             .map_err(EmbedError::Plugin)?
-            .into_registration(None);
+            .into_registration();
+        if let Some(env_ref) = registration.env_ref.as_ref() {
+            let claim = lash_core::ReferrerClaim::guarded(
+                lash_core::ArtifactReferrer::Execution(
+                    scoped_effect_controller
+                        .execution_scope()
+                        .journal_identity()
+                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+                ),
+                lash_core::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            self.core
+                .env
+                .core
+                .durability
+                .process_env_store
+                .acquire_process_execution_env(&claim, env_ref)
+                .await
+                .map_err(lash_core::PluginError::from)?;
+        }
         let start_key = registration.start_key.clone();
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,
-            env_spec,
             execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
         };
         let outcome = self
             .execute_command(command, scoped_effect_controller.clone())
             .await
-            .map_err(|error| {
-                EmbedError::Plugin(host_start_refusal(
+            .map_err(|error| match host_session {
+                Some(session_id)
+                    if error.code == lash_core::RuntimeErrorCode::HostSessionNotLive =>
+                {
+                    EmbedError::UnknownSession { session_id }
+                }
+                _ => EmbedError::Plugin(host_start_refusal(
                     start_key.as_ref(),
                     error.code.clone(),
                     error.to_string(),
-                ))
+                )),
             })?;
         let lash_core::ProcessEffectOutcome::Start {
             record,
@@ -493,7 +516,7 @@ impl Processes {
     }
 
     /// List processes a session originated — the **provenance** filter (ADR
-    /// 0019). This is the lineage lens (what a session created), distinct from
+    /// 0011). This is the lineage lens (what a session created), distinct from
     /// [`list_observed_by`](Self::list_observed_by): a process a session started
     /// then transferred away still matches here, and one merely observed by it
     /// does not.
@@ -598,18 +621,13 @@ impl Processes {
         process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
-        let process_id = self
-            .core
-            .process_registry()
-            .require_process_id(process_id)
-            .await?;
         #[expect(
             clippy::expect_used,
             reason = "an execution scope is a struct of opaque string identities, whose \
                       serialization has no failing case"
         )]
         let command = lash_core::ProcessCommand::Cancel {
-            process_id,
+            process_id: process_id.clone(),
             origin: lash_core::CancelOrigin::OperatorRequested,
             requester: serde_json::to_string(scoped_effect_controller.execution_scope()).expect(
                 "an execution scope is a struct of opaque string identities, whose \
@@ -628,26 +646,18 @@ impl Processes {
         Ok(lash_core::ProcessCancelReceipt::from_record(*record)?)
     }
 
-    /// Delivers a signal to the identified process.
+    /// Delivers one signal to the process its identity names.
+    ///
+    /// The signal's identity is its append key (FIG-4299): delivering the
+    /// same signal again, from a retry, a redrive or another host, is served
+    /// the event its first delivery admitted, and the same identity under a
+    /// changed payload is refused as a durable-identity conflict.
     pub async fn signal(
         &self,
-        process_id: &ProcessId,
-        signal_name: impl Into<String>,
-        signal_id: impl Into<String>,
-        request: lash_core::ProcessEventAppendRequest,
+        signal: lash_core::ProcessSignal,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
-        let process_id = self
-            .core
-            .process_registry()
-            .require_process_id(process_id)
-            .await?;
-        let command = lash_core::ProcessCommand::Signal {
-            process_id,
-            signal_name: signal_name.into(),
-            signal_id: signal_id.into(),
-            request,
-        };
+        let command = lash_core::ProcessCommand::Signal { signal };
         let outcome = self
             .run_command(command, scoped_effect_controller.clone())
             .await?;
@@ -783,6 +793,30 @@ impl Processes {
             .await?;
         for process_id in prunable {
             let process_scope = lash_core::ExecutionScope::process(process_id.clone());
+            // Usage accounting drains before the journal goes (ADR 0125): the
+            // process's settlements are delivered and its owner retired, so
+            // nothing admitted after this spends under a pruned process. A
+            // process runtime spends under its own owner only.
+            let owner = lash_core::RuntimeOwner::Process(process_id.clone());
+            if let Err(err) = self
+                .core
+                .env
+                .core
+                .control
+                .effect_host
+                .drain_usage_accounting(&owner)
+                .await
+            {
+                tracing::warn!(
+                    failure_stage = "drain_process_usage_accounting",
+                    cutoff_epoch_ms,
+                    process_id = %process_id,
+                    %owner,
+                    error = %err,
+                    "process retention failed"
+                );
+                return Err(err.into());
+            }
             // This is the cancellation-admission serialization point. The
             // factory checks every persisted closure and writes the scope
             // tombstone under the same backend fence later authorization

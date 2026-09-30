@@ -619,6 +619,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let plan = instruction_heap_plan(instruction, self.chunk)?;
         match plan.stack {
             StackExport::Top(window) => {
+                // An await issued again after its run parked mid-aggregate
+                // also reads the results it had settled, which ride above its
+                // operand (FIG-4275).
+                let window = match &self.resume_point {
+                    super::VmResumePoint::ReissueOperation {
+                        operation: super::VmSuspendedOperation::Await { settled },
+                        ..
+                    } if *settled > 0 => window + 1,
+                    _ => window,
+                };
                 let start = self.stack.len().saturating_sub(window);
                 for index in start..self.stack.len() {
                     let exported = if matches!(

@@ -399,6 +399,7 @@ fn law_core_over(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -519,7 +520,7 @@ async fn blob_present(fixture: &Fixture, id: &AttachmentId) -> bool {
         .double
         .lash_backend()
         .attachment_store()
-        .get(id)
+        .get(id, 32 * 1024 * 1024)
         .await
         .is_ok()
 }

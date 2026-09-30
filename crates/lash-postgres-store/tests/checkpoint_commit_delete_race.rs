@@ -74,7 +74,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         )
     };
     victim_state.ensure_agent_frame_initialized();
-    let mut victim_commit = RuntimeCommit::persisted_state_for_test(&victim_state, &[]);
+    let mut victim_commit = RuntimeCommit::persisted_state_for_test(&victim_state);
     victim_commit.checkpoint.components.insert(
         "law/commit-delete-shared".to_string(),
         HydratedCheckpointComponent::changed(b"commit-delete-shared".to_vec()),
@@ -98,7 +98,7 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         )
     };
     target_state.ensure_agent_frame_initialized();
-    let mut target_commit = RuntimeCommit::persisted_state_for_test(&target_state, &[]);
+    let mut target_commit = RuntimeCommit::persisted_state_for_test(&target_state);
     target_commit.checkpoint.components.insert(
         "law/commit-delete-shared".to_string(),
         match branch {

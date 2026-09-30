@@ -21,27 +21,30 @@ if [ "$definition_count" != "1" ]; then
   exit 1
 fi
 
-if ! grep -qE 'lash_lashlang_runtime::trace_lashlang_main_map\(artifact\)' \
+if ! grep -qE 'lash_lashlang_runtime::trace_lashlang_main_map\(&artifact\.graph\)' \
   crates/lash-protocol-rlm/src/executor/mod.rs; then
   echo "workflow graph model check failed: RLM no longer delegates its trace skeleton" >&2
   exit 1
 fi
 
-if ! grep -q 'lashlang::workflow_graph_from_artifact' \
-  crates/lash-lashlang-runtime/src/process/trace_map.rs; then
-  echo "workflow graph model check failed: trace skeleton no longer projects the admitted artifact's WorkflowGraph" >&2
+if ! grep -qE 'graph:[[:space:]]*lashlang::workflow_graph_from_artifact\(artifact,[[:space:]]*&lashlang::NoStatementText\)' \
+  crates/lash-vm-worker/src/service.rs; then
+  echo "workflow graph model check failed: worker no longer projects the admitted artifact's WorkflowGraph" >&2
   exit 1
 fi
 
 # FIG-3571 (ADR 0100 R8): the IR crate and the process runtime stay
 # language-neutral. Each workspace crate declares its role in
 # `[package.metadata.lash] role`: a `language-neutral` crate may not reach a
-# `front-end` crate through its dependency graph (dev-dependencies included),
+# `front-end` crate through its production feature graph (dev-dependencies included),
 # and a front end depends on it, never the reverse. The one recorded
 # exemption is a dev-dependency edge, listed below with its reason.
 python3 - <<'PY'
+import json
+import subprocess
 import sys
 import tomllib
+from functools import cache
 from pathlib import Path
 
 # (language-neutral package, front-end package) -> why the dev-dependency is
@@ -55,6 +58,13 @@ DEV_DEPENDENCY_EXEMPTIONS = {
 
 root = Path(".")
 workspace = tomllib.loads((root / "Cargo.toml").read_text())
+metadata = json.loads(subprocess.check_output(
+    ["cargo", "metadata", "--no-deps", "--format-version", "1"], text=True
+))
+feature_tables = {
+    Path(package["manifest_path"]).parent.resolve(): package["features"]
+    for package in metadata["packages"]
+}
 alias_to_path = {}
 for alias, spec in workspace.get("workspace", {}).get("dependencies", {}).items():
     if isinstance(spec, dict) and "path" in spec:
@@ -81,10 +91,41 @@ if not front_ends or not neutral:
     sys.exit(1)
 
 
+@cache
+def production_optional_dependencies(path):
+    features = feature_tables[(root / path).resolve()]
+    # Cargo includes implicit dependency features here. A default or another
+    # public feature may reach testing, so exclude only testing as a root.
+    pending = [name for name in features if name != "testing"]
+    visited, activated = set(), set()
+    while pending:
+        feature = pending.pop()
+        if feature in visited:
+            continue
+        visited.add(feature)
+        for entry in features.get(feature, []):
+            if entry.startswith("dep:"):
+                activated.add(entry.removeprefix("dep:"))
+            elif "/" in entry:
+                dependency, _ = entry.split("/", 1)
+                # Weak dependency features do not activate an optional edge.
+                if not dependency.endswith("?"):
+                    activated.add(dependency)
+            else:
+                pending.append(entry)
+    return activated
+
+
 def edges(path, tables):
     data = manifest(path)
     for table in tables:
         for alias, spec in data.get(table, {}).items():
+            if (
+                isinstance(spec, dict)
+                and spec.get("optional")
+                and alias not in production_optional_dependencies(path)
+            ):
+                continue
             if isinstance(spec, dict) and spec.get("workspace"):
                 target = alias_to_path.get(alias)
             elif isinstance(spec, dict) and "path" in spec:

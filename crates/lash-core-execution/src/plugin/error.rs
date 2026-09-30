@@ -13,7 +13,7 @@ use crate::SessionId;
 /// It is spelled as a [`RuntimeError`](crate::RuntimeError) carrying
 /// [`RuntimeErrorCode::DurableIdentityConflict`](crate::RuntimeErrorCode::DurableIdentityConflict)
 /// rather than a new `PluginError` variant, because `PluginError` is journaled
-/// through `ProcessEffectOutcome::CancelRefused`: a new code string is data an
+/// inside recorded process admissions: a new code string is data an
 /// existing variant already carries, while a new variant would be a shape an
 /// older build could not read.
 pub fn durable_identity_conflict(message: impl Into<String>) -> PluginError {
@@ -65,6 +65,29 @@ pub enum PluginError {
     /// refusal names the key and nothing of the process it is bound to.
     #[error("process start key `{start_key}` is bound to another start")]
     StartKeyConflict { start_key: crate::StartKey },
+    /// A trigger delivery's start found no retained process under its key,
+    /// and the delivery already bound to `process_id` (ADR 0107 §5,
+    /// FIG-4369). The bound process was pruned, so its key finds nothing; the
+    /// registrar read the binding in the transaction that checked the key and
+    /// registered nothing.
+    #[error(
+        "trigger delivery `{occurrence_id}`/`{subscription_id}` is already bound to process `{process_id}`"
+    )]
+    TriggerDeliveryBound {
+        occurrence_id: String,
+        subscription_id: String,
+        process_id: ProcessId,
+    },
+    /// A trigger delivery's start found no retained process under its key,
+    /// and no delivery row: retention removed the delivery once its bound
+    /// process was pruned (FIG-4369). The registrar registered nothing.
+    #[error(
+        "trigger delivery `{occurrence_id}`/`{subscription_id}` is no longer reserved: its process was pruned and the delivery retired"
+    )]
+    TriggerDeliveryRetired {
+        occurrence_id: String,
+        subscription_id: String,
+    },
     /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String },
@@ -120,6 +143,9 @@ pub enum PluginError {
     },
     #[error("plugin session error: {0}")]
     Session(String),
+    /// An atomic plugin-state refusal, retained across journal transport.
+    #[error("plugin state: {0}")]
+    State(#[source] super::PluginStateError),
     /// A store compatibility refusal, preserved through plugin-facing ports.
     #[error(transparent)]
     StoreRefusal(#[from] crate::store::StoreRefusal),
@@ -185,15 +211,6 @@ pub enum PluginError {
         record_kind: String,
         /// Backend diagnostic describing the malformed field or payload.
         message: String,
-    },
-    /// A store response confirmed usage identities outside the set staged by
-    /// this operation. Applying it would discard unrelated usage.
-    #[error(
-        "store confirmed {confirmed_count} usage identities, but only {staged_count} were staged"
-    )]
-    UnstagedUsageConfirmation {
-        confirmed_count: usize,
-        staged_count: usize,
     },
     /// A backend-owned authoritative clock produced a value before the Unix
     /// epoch, outside the runtime clock contract.
@@ -368,6 +385,9 @@ impl PluginError {
             | Self::InvalidTriggerTarget { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
+            | Self::State(_)
+            | Self::TriggerDeliveryBound { .. }
+            | Self::TriggerDeliveryRetired { .. }
             | Self::InvalidToolDiscovery { .. }
             | Self::InvalidBatchMaximum { .. }
             | Self::ResidentToolContractUnavailable { .. }
@@ -385,7 +405,6 @@ impl PluginError {
             | Self::AppendOperationIdentityConflict { .. }
             | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
             | Self::StoredDataCorrupt { .. }
-            | Self::UnstagedUsageConfirmation { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::ProcessNotVisible { .. }
             | Self::NotASessionRuntime { .. }
@@ -437,6 +456,7 @@ impl PluginError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::StoreRefusal(_) => true,
+            Self::State(error) => error.is_terminal(),
             Self::Runtime(error) => error.is_terminal(),
             Self::RuntimeEffectController(error) => error.is_terminal(),
             Self::BeforeToolCallReplacementConflict { .. }
@@ -446,7 +466,6 @@ impl PluginError {
             | Self::AppendOperationIdentityConflict { .. }
             | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
             | Self::StoredDataCorrupt { .. }
-            | Self::UnstagedUsageConfirmation { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessChangeCursorPruned { .. }
@@ -460,6 +479,8 @@ impl PluginError {
             | Self::InvalidTriggerTarget { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
+            | Self::TriggerDeliveryBound { .. }
+            | Self::TriggerDeliveryRetired { .. }
             | Self::SessionAlreadyExists { .. }
             | Self::ProcessCancelConflict { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }

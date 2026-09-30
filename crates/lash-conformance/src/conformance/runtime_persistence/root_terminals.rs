@@ -38,13 +38,9 @@ fn turn_commit(
     graph
         .derive_node_ids(&state.session_id, &operation)
         .expect("derive commit node ids");
-    let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
-    )
-    .expect("build the commit");
+    let mut commit =
+        RuntimeCommit::persisted_state_with_graph_commit_and_operation(state, graph, operation)
+            .expect("build the commit");
     commit.root_terminal = root_terminal.map(Box::new);
     commit.drive_fence = drive_fence.map(Box::new);
     commit
@@ -59,7 +55,14 @@ fn ends(root: &str, ordinal: u32, stop: Option<crate::TurnStop>) -> RootTerminal
         commit: TurnCommitId::new(root.clone(), ordinal),
         root,
         turn,
-        stop,
+        outcome: match stop {
+            None => lash_core::store::RootCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: String::new(),
+                },
+            ),
+            Some(stop) => lash_core::store::RootCommittedOutcome::Stopped(stop),
+        },
     }
 }
 

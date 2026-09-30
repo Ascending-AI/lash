@@ -4,76 +4,20 @@
 
 accepted
 
-Amended 2026-09-24 (#846): the native substrate became first-class and the
-seam names below follow the code. `ProcessWorkDriver` is now
-`ProcessWorkSubstrate`, whose `await_process_terminal` is the only sanctioned
-wait and returns `ProcessTerminalWait::{Terminal, Reattach}`; there is no
-polling fallback and no optional attach. `ProcessAwaiter` is now
-`NativeProcessAwaiter`, the native substrate's waiter, and `ProcessAttach` is
-gone: the Restate substrate implements `await_process_terminal` itself. The
-decision (waits live above storage) is unchanged.
-
-Amended 2026-09-27 (FIG-3860,
-[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)):
-the in-process process work is deleted. Restate's process work is the only
-`ProcessWorkSubstrate` that runs processes; a backend that runs none wires
-`NoProcessWork`. `NativeProcessAwaiter` is now `ProcessRegistryAwaiter`, the
-engine-neutral registry waiter. The decision (waits live above storage) is
-unchanged.
-
 ## Decision
 
-`ProcessRegistry` is a state interface, not a coordination primitive. Registry
-implementations record process rows, observer edges, leases, wake bookkeeping,
-and event logs through point reads and writes; they do not expose
-`await_process`, `wait_event_after`, store-local `Notify` loops, or
-backend-specific polling contracts.
+`ProcessRegistry` stores process state, observer relationships, wake bookkeeping and events. It exposes point reads and mutations rather than backend-specific wait methods. Coordination belongs to `ProcessWorkSubstrate::await_process_terminal`, returning `ProcessTerminalWait::{Terminal, Reattach}`.
 
-Process waits live above storage:
+`ProcessRegistryAwaiter` reads `get_process` and `event_page`. A watched registry's `ProcessChangeHub` supplies local notifications; backoff handles remote mutations. Default polling starts at 25 milliseconds, doubles, and caps at one second. `NoProcessWork` uses this awaiter for a backend that executes no processes. Restate executes processes and owns its terminal wait through ingress to `LashProcessWorkflow/{process_id}/await_terminal`.
 
-- `ProcessWorkSubstrate` is the process execution and coordination seam.
-  Process commands route every terminal wait through its
-  `await_process_terminal`.
-- `ProcessRegistryAwaiter` is the engine-neutral registry waiter: it performs
-  point reads (`get_process`, `event_page`) and uses a `ProcessChangeHub` when
-  the registry is wrapped in-process, with bounded exponential backoff when
-  another process may be mutating the store. `NoProcessWork`, the port of a
-  backend that runs no processes, answers terminal waits through it.
-- An external execution backend owns a terminal await by implementing
-  `await_process_terminal`. The Restate substrate uses synchronous ingress to
-  `LashProcessWorkflow/{process_id}/await_terminal`, so the durable workflow
-  promise is the long-hold mechanism instead of a database wait loop.
+## Terminal-wait failures
 
-## Why
+Transient ingress errors return `Reattach` without writing a process outcome. Connection refusal or reset, response-read EOF, truncated JSON, timeout, HTTP 408/429 and ingress-generated 5xx failures are transient. Reattachment observes the same durable process. Definitive targets, typed refusals, local encoding errors and complete malformed responses remain errors. An invocation-sourced failure stays definitive even when its HTTP status is 5xx. Cancel watches and bounded sends use the same classifier; retries retain workflow identity, payload and any send idempotency key.
 
-The old registry wait methods made every persistence adapter implement both
-state and coordination. In-memory, SQLite, Postgres, tests, and downstream
-registries each had to carry their own notify/poll loops, lost-wakeup defenses,
-and polling cadence. That duplicated the most failure-prone part of process
-waiting while hiding it behind a trait whose real job is durable state.
+`CallerDeparted` refuses an unresolved wait before contacting ingress. A retained terminal outcome is returned from durable state. Engine errors do not fall back silently to database polling.
 
-The runtime already has the right boundary: `ProcessWorkSubstrate` knows whether
-process execution is inline, worker-owned, or externally attached. Storage does
-not know whether a wait should be a cheap in-process watch, a bounded polling
-loop, or a durable workflow promise. Moving waits to the driver seam keeps
-stores simple, lets engine-backed deployments use their engine's suspension
-economics, and gives store-only deployments one shared implementation.
+## Why and consequences
 
-## Consequences
+Per-backend wait loops duplicate lost-wakeup handling and force stores to know the deployment's execution economics. They are rejected. The work driver chooses durable engine suspension or shared point-read coordination. Watched decorators can add local notifications without changing storage traits, and sinks under ADR 0017 remain optional freshness rather than terminal authority.
 
-- Store adapters implement no process wait loops and keep no wait notification
-  fields. A watched registry decorator publishes in-process change ticks without
-  changing the registry trait.
-- Native waits are still correct without a hub: the awaiter repeatedly performs
-  narrow point reads with a 25ms floor, doubling backoff, and a 1s cap. With a
-  hub, local mutations wake waiters promptly without database polling.
-- External substrates are authoritative for terminal waits through
-  `await_process_terminal`. An attach error is surfaced instead of silently falling back to local
-  polling, because the external backend owns the durable promise.
-- Restate's in-workflow await path remains the durable handler primitive; the
-  new ingress attach is the host-side consumer for waiting on an already
-  scheduled `LashProcessWorkflow`.
-- New registry implementations should not reintroduce wait methods. Implement
-  state mutations, wrap with `watch_process_registry` when local wakeups are
-  useful, and expose backend-specific long holds through a
-  `ProcessWorkSubstrate` implementation.
+[Shared awaiter](../../crates/lash-core-execution/src/runtime/work/awaiter.rs), [cadence](../../crates/lash-core-execution/src/runtime/work/cadence.rs), [Restate process ingress](../../crates/lash-restate/src/process/mod.rs) and [HTTP failure classification](../../crates/lash-restate/src/ingress.rs) implement the decision.

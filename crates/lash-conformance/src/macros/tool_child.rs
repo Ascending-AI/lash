@@ -154,6 +154,7 @@ macro_rules! drive_admission_tests {
     (cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
     (no_row_stays_bound_after_a_roots_verb_close_or_lost_end, "root-verb-unbinds"),
     (a_refused_root_ends_once_and_its_next_input_admits_a_new_root, "refused-root-end"),
+    (a_root_with_no_engine_run_ends_only_once_it_started, "lost-root-no-run"),
     (an_obsolete_executor_never_ends_its_successors_root, "obsolete-executor"),
     (inconsistent_divergence_still_parks_on_a_lower_revision, "inconsistent-lower-revision"),
     (inconsistent_divergence_still_parks_on_another_leaf, "inconsistent-other-leaf"),
@@ -480,7 +481,7 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-deferred-commit-point"
             ),
             (
-                group_accounting_conserves_each_incorporated_rank,
+                group_incorporation_replays_exactly_the_recorded_ranks,
                 "tool-child-group-prefix-incorporation"
             ),
             (

@@ -103,6 +103,7 @@ fn remote_process_event_semantics_reject_contradictory_status_and_outcome() {
             outcome: settled_cancelled(),
         }),
         wake: None,
+        signal_wait: None,
     };
     assert!(
         mismatched
@@ -118,6 +119,7 @@ fn remote_process_event_semantics_reject_contradictory_status_and_outcome() {
             outcome: settled_success(),
         }),
         wake: None,
+        signal_wait: None,
     };
     assert!(
         nonterminal
@@ -136,6 +138,7 @@ fn remote_process_event_semantics_reject_contradictory_status_and_outcome() {
             },
         }),
         wake: None,
+        signal_wait: None,
     };
     assert!(
         no_longer_retained
@@ -179,6 +182,7 @@ fn terminal_event(status: RemoteProcessStatus, outcome: RemoteProcessAwaitOutput
     RemoteProcessEventSemantics {
         terminal: Some(RemoteProcessTerminalSemantics { status, outcome }),
         wake: None,
+        signal_wait: None,
     }
     .validate("RemoteProcessEventSemantics")
     .expect("matching terminal status and outcome must be accepted");

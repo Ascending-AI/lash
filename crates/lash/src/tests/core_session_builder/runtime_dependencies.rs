@@ -72,8 +72,8 @@ fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &s
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()> {
-    let artifacts = memory_store_backend().await;
-    let core_backend = memory_store_backend().await;
+    let artifacts = sqlite_memory_store_backend().await;
+    let core_backend = sqlite_memory_store_backend().await;
     // Precondition: two memory store sets are two substrates.
     assert_ne!(
         artifacts.binding_identity(),
@@ -481,7 +481,6 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     source
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await
         .expect("commit orphaned source frame");
@@ -594,7 +593,6 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await
         .expect("commit fork observer source");
@@ -1014,7 +1012,6 @@ async fn duplicate_only_fork_intents_are_canonical(
     source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await?;
     let fork_node_id = source_state
@@ -1074,7 +1071,7 @@ async fn duplicate_only_fork_intents_are_canonical(
 }
 
 #[tokio::test]
-async fn duplicate_only_fork_intents_are_canonical_in_memory() -> Result<()> {
+async fn duplicate_only_fork_intents_are_canonical_on_sqlite_memory() -> Result<()> {
     duplicate_only_fork_intents_are_canonical("memory", double_backend().await).await
 }
 
@@ -1426,7 +1423,6 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
-            &[],
         ))
         .await
         .expect("commit fork source");
@@ -1462,6 +1458,33 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     assert_eq!(
         branch_state.policy.model.id, "fork-source-model",
         "the branch still records the model that produced the history it continues"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn attachment_read_policy_survives_facade_builder_reconfiguration() -> Result<()> {
+    let policy = lash_core::AttachmentReadPolicy {
+        max_blob_bytes: 37,
+        max_request_bytes: 4096,
+    };
+    let core = explicit_ephemeral_facets(peer_coherence_builder().await)
+        .attachment_read_policy(policy)
+        .max_attachment_bytes(Some(19))
+        .attachment_upload_expiry(std::time::Duration::from_secs(13))
+        .build(crate::testing::runtime_lease_owner())?;
+    assert_eq!(
+        core.env.core.durability.attachment_store.read_policy(),
+        policy
+    );
+    let replacement = core
+        .env
+        .core
+        .clone()
+        .with_backend(core.env.core.backend().clone());
+    assert_eq!(
+        replacement.durability.attachment_store.read_policy(),
+        policy
     );
     Ok(())
 }

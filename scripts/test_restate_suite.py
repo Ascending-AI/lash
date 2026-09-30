@@ -33,7 +33,15 @@ FAKE_LIBTEST = textwrap.dedent(
     import os, sys, time
     with open(os.environ["FAKE_ARGV_LOG"], "a") as log:
         log.write(" ".join(sys.argv[1:]) + "\\n")
-    names = ["tests::passes", "tests::fails", "tests::hangs", "tests::panics_in_background"]
+    names = [
+        "tests::passes",
+        "tests::fails",
+        "tests::hangs",
+        "tests::panics_in_background",
+        "tests::progresses_past_its_bound",
+        "tests::progresses_then_hangs",
+        "tests::chatters_without_progress",
+    ]
     if "--list" in sys.argv:
         chosen = sys.argv[1]
         for name in names:
@@ -44,6 +52,20 @@ FAKE_LIBTEST = textwrap.dedent(
     if name not in names:
         print("test result: ok. 0 passed; 0 failed; 4 filtered out")
         sys.exit(0)
+    marker = "[restate-suite progress] "
+    if name.endswith("progresses_past_its_bound"):
+        # Twelve steps a quarter second apart: three seconds of work, every
+        # step well inside a one-second bound.
+        for step in range(12):
+            time.sleep(0.25)
+            print(f"{marker}step {step}", flush=True)
+    if name.endswith("progresses_then_hangs"):
+        print(f"{marker}step 0", flush=True)
+        time.sleep(60)
+    if name.endswith("chatters_without_progress"):
+        for _ in range(240):
+            print("retrying: connection refused", flush=True)
+            time.sleep(0.25)
     if name.endswith("hangs"):
         time.sleep(60)
     if name.endswith("fails"):
@@ -237,7 +259,10 @@ class RunnerTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.directory.name)
         self.fake = FakeBinary(self.root)
-        self.patch_env = mock.patch.dict(os.environ, {"FAKE_ARGV_LOG": str(self.fake.argv_log)})
+        self.patch_env = mock.patch.dict(os.environ, {
+            "FAKE_ARGV_LOG": str(self.fake.argv_log),
+            "LASH_VM_WORKER": str(self.fake.path),
+        })
         self.patch_env.start()
 
     def tearDown(self) -> None:
@@ -267,6 +292,17 @@ class RunnerTests(unittest.TestCase):
 
     def test_a_hung_law_is_killed_at_its_bound(self) -> None:
         self.assertEqual("timeout", self.run_one("tests::hangs", timeout=1))
+
+    def test_a_law_that_keeps_progressing_outlasts_its_bound(self) -> None:
+        # The bound is time without progress: three seconds of steps, each
+        # well inside a one-second bound, is not a hang (FIG-4309).
+        self.assertEqual("ok", self.run_one("tests::progresses_past_its_bound", timeout=1))
+
+    def test_a_law_that_stops_progressing_is_killed_at_its_bound(self) -> None:
+        self.assertEqual("timeout", self.run_one("tests::progresses_then_hangs", timeout=1))
+
+    def test_output_that_is_not_a_progress_marker_does_not_restart_the_bound(self) -> None:
+        self.assertEqual("timeout", self.run_one("tests::chatters_without_progress", timeout=1))
 
     def test_the_panic_gate_fails_a_green_law_with_a_panic_in_its_output(self) -> None:
         self.assertEqual("ok", self.run_one("tests::panics_in_background"))

@@ -59,6 +59,12 @@ pub(crate) const READ_ONLY_PRAGMAS: &str = "PRAGMA cache_size = -500;";
 /// nothing to say about it; the durable-core open path issues this text.
 pub(crate) const ATTACH_PROCESS_REGISTRY: &str = "ATTACH DATABASE ?1 AS process_registry";
 
+/// Attach a store set's trigger store to its process registry's connection
+/// under the qualifier `Schema::TriggerStore.qualifier()` names, so a
+/// delivery's start reads the delivery's binding in its registration
+/// transaction (FIG-4369).
+pub(crate) const ATTACH_TRIGGER_STORE: &str = "ATTACH DATABASE ?1 AS trigger_store";
+
 /// The catalog read, not a read of the table itself: a registry mid-creation
 /// has the file and the version counter but not yet the rows, and asking the
 /// catalog distinguishes "not provisioned yet" from "provisioned and empty".

@@ -36,9 +36,9 @@ use crate::{
     EffectGroupAdoptRequest, EffectGroupCleanupFacts, EffectGroupDispatchRequest,
     EffectGroupMembership, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupProbeAdoptResponse,
-    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
-    EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
-    EffectGroupRecordSettlementResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
+    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordSettlementRequest,
+    EffectGroupRecordSettlementResponse, EffectGroupRegisterDispatchRequest,
+    EffectGroupRegisterDispatchResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
     EffectGroupShape, EffectGroupWaitResolution, RestateDurableWaitAddress,
     RestateDurableWaitAwaitRequest, RestateDurableWaitRegistration, RestateEffectHost,
     RestateIngressClient,
@@ -575,6 +575,19 @@ impl LiveConformanceHarness {
         Self::start_with(target, Arc::new(ConformanceExecutors::default()), |_| {}).await
     }
 
+    /// The tool-child laws' endpoint for a law that brings its own store set:
+    /// the accounting continuation settles into the ledger the law's runtime
+    /// admits its runs into (ADR 0125), not the endpoint's own store set.
+    pub(super) async fn start_for_tool_children_settling_into(
+        target: HarnessServer,
+        accounting: Arc<dyn lash_core::UsageAccountingStore>,
+    ) -> Self {
+        Self::start_with(target, Arc::new(ConformanceExecutors::default()), |host| {
+            host.bind_usage_accounting(accounting);
+        })
+        .await
+    }
+
     /// The endpoint binds every lash service through the one binder a
     /// deployment uses, beside the suite's probes.
     async fn start_with(
@@ -641,6 +654,10 @@ impl LiveConformanceHarness {
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("open the endpoint's SQLite memory store set");
+        // The endpoint's accounting continuation settles into the store set
+        // a law's runtime admits its runs into, as `RestateEngine::new`
+        // binds a deployment's (ADR 0125).
+        host.bind_usage_accounting(lash_core::StoreSet::usage_accounting(&stores));
         let process_registry = stores.process_registry();
         let process_runner = Arc::new(LawProcessRunner::default());
         let session_driver = crate::RestateSessionDriverSlot::new();
@@ -682,9 +699,14 @@ impl LiveConformanceHarness {
                     .expect("bind Restate effect-group endpoint");
                 let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
                 let server = tokio::spawn(async move {
-                    crate::serve_endpoint(listener, endpoint, async {
-                        let _ = shutdown_rx.await;
-                    })
+                    crate::serve_endpoint(
+                        listener,
+                        endpoint,
+                        crate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+                        async {
+                            let _ = shutdown_rx.await;
+                        },
+                    )
                     .await;
                 });
                 wait_for_endpoint(bind_addr).await;
@@ -726,6 +748,12 @@ impl LiveConformanceHarness {
         }
     }
 
+    /// The harness's admin face: an operator's kill and the retention
+    /// sweep's purge.
+    pub(super) fn harness_admin(&self) -> &HarnessAdmin {
+        &self.admin
+    }
+
     /// A client of [`Self::admin_connection`].
     pub(super) fn admin_client(&self) -> crate::RestateAdminClient {
         crate::RestateAdminClient::new(self.admin_connection())
@@ -738,6 +766,8 @@ impl LiveConformanceHarness {
             lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
             crate::RestateNamespace::default(),
             Arc::new(crate::session_control::RestateSessionControl {
+                lost_processes: Default::default(),
+                lost_roots: Default::default(),
                 admin: self.admin_client(),
                 ingress: crate::RestateIngressClient::new(self.connection.clone()),
                 namespace: crate::RestateNamespace::default(),
@@ -1086,30 +1116,18 @@ impl LiveConformanceHarness {
             .expect("a stand-in invocation is accepted")
             .as_str()
             .to_owned();
-        let recorded: EffectGroupRecordDispatchResponse = ingress
+        let registered: EffectGroupRegisterDispatchResponse = ingress
             .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
-                "record_dispatch",
-                &EffectGroupRecordDispatchRequest {
-                    dispatched: [(0, child_invocation.clone())].into_iter().collect(),
-                },
-            )
-            .await
-            .expect("the dispatch records the child");
-        assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
-        let registered: crate::EffectGroupRegisterResponse = ingress
-            .call_lash_object(
-                "EffectGroupIndex",
-                &group_key,
-                "register_children",
-                &crate::EffectGroupRegisterRequest {
+                "register_dispatch",
+                &EffectGroupRegisterDispatchRequest {
                     addresses: [(0, child_invocation)].into_iter().collect(),
                 },
             )
             .await
             .expect("the dispatch registers the child");
-        assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
+        assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
         assert_eq!(
             self.host
                 .peek_await_event(&wait_key)
@@ -1242,26 +1260,12 @@ impl LiveConformanceHarness {
         tokio::time::timeout(Duration::from_secs(10), parked_on_admission.notified())
             .await
             .expect("the child parks on its admission before the dispatch records it");
-        let recorded: EffectGroupRecordDispatchResponse = ingress
+        let registered: EffectGroupRegisterDispatchResponse = ingress
             .call_lash_object(
                 "EffectGroupIndex",
                 &group_key,
-                "record_dispatch",
-                &EffectGroupRecordDispatchRequest {
-                    dispatched: [(0, child_invocation.as_str().to_owned())]
-                        .into_iter()
-                        .collect(),
-                },
-            )
-            .await
-            .expect("the dispatch records the admitting child");
-        assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
-        let registered: crate::EffectGroupRegisterResponse = ingress
-            .call_lash_object(
-                "EffectGroupIndex",
-                &group_key,
-                "register_children",
-                &crate::EffectGroupRegisterRequest {
+                "register_dispatch",
+                &EffectGroupRegisterDispatchRequest {
                     addresses: [(0, child_invocation.as_str().to_owned())]
                         .into_iter()
                         .collect(),
@@ -1269,7 +1273,7 @@ impl LiveConformanceHarness {
             )
             .await
             .expect("the dispatch registers the admitting child");
-        assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
+        assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
         let closed: crate::EffectGroupCloseResponse = ingress
             .call_lash_object(
                 "EffectGroupIndex",
@@ -1318,16 +1322,20 @@ impl LiveConformanceHarness {
         RestateIngressClient::new(self.connection.clone())
     }
 
+    /// The rank counter's exhaustion is a terminal refusal at the §4 point,
+    /// where a rank is reserved (FIG-4308): the commit is refused, nothing is
+    /// reserved, and the index stays readable.
     pub(super) async fn rank_allocator_exhaustion(&self) {
         use crate::effect_group::{
-            EffectGroupChildCommitState, EffectGroupLifecycle, EffectGroupStateLiveRecord,
-            EffectGroupStateRecord,
+            EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, EffectGroupLifecycle,
+            EffectGroupStateLiveRecord, EffectGroupStateRecord,
         };
         use std::collections::BTreeMap;
         let key = witness_key("rank-exhaustion");
         let child = witness_child(&key, 0);
         let shape = witness_shape(&key, std::slice::from_ref(&child));
         let membership = witness_membership(std::slice::from_ref(&child));
+        let replay_key = shape.replay_keys[0].clone();
         let record = EffectGroupStateRecord {
             shape_digest: shape.digest(&membership).expect("shape digest"),
             dispatch_route: "EffectGroupDispatch".to_string(),
@@ -1336,11 +1344,7 @@ impl LiveConformanceHarness {
                 live: EffectGroupStateLiveRecord {
                     shape,
                     next_rank: u64::MAX,
-                    next_commit_seq: 2,
-                    commit_states: BTreeMap::from([(
-                        0,
-                        EffectGroupChildCommitState::Committed { commit_seq: 1 },
-                    )]),
+                    commit_states: BTreeMap::new(),
                     settlements: BTreeMap::new(),
                     settled_positions: BTreeMap::new(),
                 },
@@ -1351,17 +1355,16 @@ impl LiveConformanceHarness {
         for _ in 0..2 {
             let result = self
                 .ingress()
-                .call_lash_object::<_, EffectGroupRecordSettlementResponse>(
+                .call_lash_object::<_, EffectGroupCommitChildResponse>(
                     "EffectGroupIndex",
                     &key,
-                    "record_settlement",
-                    &EffectGroupRecordSettlementRequest {
-                        position: 0,
-                        terminal: EffectGroupSettlementTerminal::Cancelled,
+                    "commit_child",
+                    &EffectGroupCommitChildRequest {
+                        replay_key: replay_key.clone(),
                     },
                 )
                 .await;
-            let error = result.expect_err("rank exhaustion is terminal, never a wrapped seat");
+            let error = result.expect_err("rank exhaustion is terminal, never a wrapped rank");
             assert!(
                 error.to_string().contains("exhausted settlement ranks"),
                 "{error}"
@@ -1379,7 +1382,7 @@ impl LiveConformanceHarness {
                     },
                 )
                 .await
-                .expect("the refused allocation leaves the index readable");
+                .expect("the refused reservation leaves the index readable");
             assert!(
                 matches!(read, EffectGroupReadRankResponse::NotSettled),
                 "{read:?}"
@@ -2110,20 +2113,20 @@ async fn run_design_witnesses(
     tokio::time::timeout(Duration::from_secs(10), first_admit.notified())
         .await
         .expect("child reaches NotYetRecorded before dispatcher redrive");
-    let recorded: EffectGroupRecordDispatchResponse = ingress
+    let registered: EffectGroupRegisterDispatchResponse = ingress
         .call_lash_object(
             "EffectGroupIndex",
             &admission_group,
-            "record_dispatch",
-            &EffectGroupRecordDispatchRequest {
-                dispatched: [(0, child_invocation.as_str().to_owned())]
+            "register_dispatch",
+            &EffectGroupRegisterDispatchRequest {
+                addresses: [(0, child_invocation.as_str().to_owned())]
                     .into_iter()
                     .collect(),
             },
         )
         .await
-        .expect("dispatcher redrive records mapping");
-    assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
+        .expect("dispatcher redrive registers the mapping");
+    assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
     assert_eq!(
         await_group_wait(
             &ingress,
@@ -2131,7 +2134,7 @@ async fn run_design_witnesses(
         )
         .await,
         EffectGroupWaitResolution::Admit,
-        "record-before-register retains the ADMIT notification"
+        "the registration retains the ADMIT notification"
     );
     assert_eq!(
         await_group_wait(
@@ -2259,7 +2262,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             dispatch_route: "EffectGroupDispatch".to_owned()
         }
     );
-    let mut commit_seqs = Vec::new();
+    let mut ranks = Vec::new();
     for child in &children {
         let committed: EffectGroupCommitChildResponse = ingress
             .call_lash_object(
@@ -2272,19 +2275,17 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             )
             .await
             .expect("drained-wake witness child commits");
-        let EffectGroupCommitChildResponse::Committed { commit_seq, .. } = committed else {
+        let EffectGroupCommitChildResponse::Committed { rank } = committed else {
             panic!("drained-wake witness child commits fresh, got {committed:?}");
         };
-        commit_seqs.push(commit_seq);
+        ranks.push(rank);
     }
     let blockers: EffectGroupDrainBlockersResponse = ingress
         .call_lash_object(
             "EffectGroupIndex",
             &group_key,
             "drain_blockers",
-            &EffectGroupDrainBlockersRequest {
-                commit_seq: commit_seqs[1],
-            },
+            &EffectGroupDrainBlockersRequest { rank: ranks[1] },
         )
         .await
         .expect("drained-wake witness reads the barrier");
@@ -2352,7 +2353,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
                     "EffectGroupIndex",
                     &stale_group,
                     "drain_blockers",
-                    &EffectGroupDrainBlockersRequest { commit_seq: 1 },
+                    &EffectGroupDrainBlockersRequest { rank: 1 },
                 )
                 .await;
             match probed {
@@ -2411,9 +2412,14 @@ async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &se
                 .await
                 .expect("modify the effect-group index state");
             let status = response.status;
-            let bytes = lash_http_transport::read_http_body_bytes(response.body, None, "state")
-                .await
-                .unwrap_or_default();
+            let bytes = lash_http_transport::read_http_body_bytes(
+                response.body,
+                16 * 1024 * 1024,
+                None,
+                "state",
+            )
+            .await
+            .unwrap_or_default();
             (status, String::from_utf8_lossy(&bytes).into_owned())
         }
     };
@@ -2507,7 +2513,7 @@ fn assert_admission_enumerated(cleanup: &EffectGroupCleanupFacts, invocation_id:
 }
 
 /// Every invocation the server holds open, by id, with its target.
-async fn open_invocations(admin: &HarnessAdmin) -> HashMap<String, String> {
+pub(super) async fn open_invocations(admin: &HarnessAdmin) -> HashMap<String, String> {
     match admin {
         HarnessAdmin::Live { admin_url } => {
             #[derive(serde::Deserialize)]

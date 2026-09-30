@@ -365,10 +365,6 @@ pub struct ProcessStartOptions {
     /// options — not the request — so in-session callers cannot forge
     /// provenance through the session surface.
     pub spawn_provenance: Option<ProcessSpawnProvenance>,
-    /// Request-carried environment bytes handed to the replayable start
-    /// command. Kept in options so the service contract does not prepublish a
-    /// staging edge ahead of its journal.
-    pub env_spec: Option<ProcessExecutionEnvSpec>,
 }
 
 /// Provenance a process-run context hands to its children: the chain's
@@ -407,11 +403,6 @@ impl ProcessStartOptions {
     /// implementors while persisting and coordinating durable process execution.
     pub fn with_spawn_provenance(mut self, spawn_provenance: ProcessSpawnProvenance) -> Self {
         self.spawn_provenance = Some(spawn_provenance);
-        self
-    }
-
-    pub fn with_env_spec(mut self, env_spec: Option<ProcessExecutionEnvSpec>) -> Self {
-        self.env_spec = env_spec;
         self
     }
 
@@ -1051,8 +1042,9 @@ pub struct ProcessIdentity {
     /// The definition reference this row pins, for the engine starts that have
     /// one. It is the whole reference, not a bare blob: the engine kind that
     /// owns the definition, the definition value, and the signature claimed for
-    /// it when the row was created.
-    #[serde(skip)]
+    /// it when the row was created. These admission facts persist independently
+    /// of the immutable definition id, including in historical trigger receipts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<ProcessDefinitionRef>,
     /// The immutable definition a start by id admitted this row from
     /// (ADR 0113 §3.6): the row's `ProcessRecord` holds its descriptor and

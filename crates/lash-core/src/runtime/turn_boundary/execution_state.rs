@@ -110,7 +110,7 @@ pub(super) async fn frame_switch_execution_state_update(
 ///
 /// The store ends every frame the commit leaves: the committed head's frame
 /// and each frame whose open this same commit appends (`appended` names the
-/// commit's nodes), except the successor (ADR 0113 §3.1, Lane G amendment).
+/// commit's nodes), except the successor (ADR 0113 §3.1).
 /// A switch names the frame its turn was admitted on and carries its seed's
 /// modules out of it when that frame is one the commit leaves: the frame the
 /// head holds, or a frame opened in resident state since the last commit,

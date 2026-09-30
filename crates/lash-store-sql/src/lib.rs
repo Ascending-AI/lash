@@ -83,6 +83,9 @@ pub mod session_ingress;
 pub mod session_roots;
 pub mod trigger;
 pub mod turn_ingress;
+pub mod worker_recovery;
+
+pub mod usage;
 
 pub use render::{
     Dialect, Placeholder, RenderError, SchemaTables, TableLayout, Vocabulary, VocabularyTerm,
@@ -94,6 +97,9 @@ pub use render::{
 /// The renderer refuses a statement that names a table outside this list, so
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
+    usage::usage_facts::TABLE,
+    usage::usage_runs::TABLE,
+    usage::usage_owner_retirements::TABLE,
     artifact::blobs::TABLE,
     artifact::cleanup_obligations::TABLE,
     artifact::lashlang_artifacts::TABLE,
@@ -109,7 +115,6 @@ pub const TABLES: &[&str] = &[
     draining_generations::TABLE,
     process::abandoned_consumer_holds::TABLE,
     process::change_clock::TABLE,
-    process::definitions::TABLE,
     process::events::TABLE,
     process::observers::TABLE,
     process::parent_end_plans::TABLE,
@@ -122,6 +127,7 @@ pub const TABLES: &[&str] = &[
     process::wake_deliveries::TABLE,
     process::wake_redelivery_fences::TABLE,
     recovery_leader::TABLE,
+    worker_recovery::TABLE,
     trigger::deliveries::TABLE,
     trigger::mutation_receipts::TABLE,
     trigger::occurrences::TABLE,
@@ -151,8 +157,6 @@ pub const TABLES: &[&str] = &[
     session::release_stamp::TABLE,
     session::sessions::TABLE,
     session::turn_commits::TABLE,
-    session::usage_deltas::TABLE,
-    session::usage_delta_holes::TABLE,
     session_roots::control_intents::TABLE,
     session_roots::root_inputs::TABLE,
     session_roots::roots::TABLE,
@@ -167,6 +171,11 @@ pub const TABLES: &[&str] = &[
 #[must_use]
 pub fn all_statements() -> Vec<Statement> {
     let mut statements = Vec::new();
+    statements.extend_from_slice(usage::usage_facts::UsageFactsStatements::NEUTRAL);
+    statements.extend_from_slice(usage::usage_runs::UsageRunsStatements::NEUTRAL);
+    statements.extend_from_slice(
+        usage::usage_owner_retirements::UsageOwnerRetirementsStatements::NEUTRAL,
+    );
     statements.extend_from_slice(artifact::blobs::BlobStatements::NEUTRAL);
     statements.extend_from_slice(artifact::referrer_edges::ReferrerEdgeStatements::NEUTRAL);
     statements.extend_from_slice(artifact::referrer_fences::ReferrerFenceStatements::NEUTRAL);
@@ -185,7 +194,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
     statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
     statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);
-    statements.extend_from_slice(process::definitions::DefinitionStatements::NEUTRAL);
     statements.extend_from_slice(process::events::EventStatements::NEUTRAL);
     statements.extend_from_slice(process::park_events::ProcessParkEventStatements::NEUTRAL);
     statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);
@@ -201,8 +209,6 @@ pub fn all_statements() -> Vec<Statement> {
     );
     statements.extend_from_slice(session::node_anchors::NodeAnchorStatements::NEUTRAL);
     statements.extend_from_slice(session::turn_commits::TurnCommitStatements::NEUTRAL);
-    statements.extend_from_slice(session::usage_deltas::UsageDeltaStatements::NEUTRAL);
-    statements.extend_from_slice(session::usage_delta_holes::UsageDeltaHoleStatements::NEUTRAL);
     statements.extend_from_slice(session_ingress::SessionIngressStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::roots::SessionRootStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::root_inputs::RootInputVerbStatements::NEUTRAL);

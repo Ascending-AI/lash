@@ -1227,7 +1227,6 @@ struct RuntimeCommitIntent<'a> {
     current_frame_node_id: Option<&'a str>,
     graph: GraphCommitIntent<'a>,
     checkpoint: CheckpointIntent<'a>,
-    usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     #[serde(skip_serializing_if = "failure_evidence_is_empty")]
     failure_evidence: &'a [crate::TurnFailureEvidence],
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1280,7 +1279,6 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
             current_frame_node_id: commit.current_frame_node_id.as_deref(),
             graph,
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
-            usage_deltas: &commit.usage_deltas,
             failure_evidence: &commit.failure_evidence,
             outcome: commit.outcome.as_ref(),
             completed_queue_batches: commit

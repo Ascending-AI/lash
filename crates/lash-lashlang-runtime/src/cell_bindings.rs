@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::required_tool_typescript_executable;
+use crate::required_tool_executable;
 
 /// The journal suffix under an exec effect's replay key.
 const CELL_TOOL_BINDINGS_SUFFIX: &str = "cell-tool-bindings";
@@ -150,7 +150,7 @@ impl CellToolBindings {
 }
 
 fn binding_path(manifest: &lash_core::ToolManifest) -> Option<String> {
-    let binding = required_tool_typescript_executable(manifest).ok()?;
+    let binding = required_tool_executable(manifest).ok()?;
     Some(format!(
         "{}.{}",
         binding.module_path.join("."),

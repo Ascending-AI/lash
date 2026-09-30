@@ -24,13 +24,13 @@ fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
                 render.renderer_id = id.to_string();
                 context = context.with_recorded_render(render);
             }
-            let response = crate::executor::execute_code_with_channel_and_bounds(
+            let response = crate::testing::execute_code_with_channel_and_bounds(
                 &mut RlmExecutionState::for_engine("typescript"),
                 context,
                 ExecRequest {
                     code: "print('value');".to_string(),
                 },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -92,13 +92,13 @@ fn bounded_test_entry_uses_the_recorded_params_and_supplied_renderer() {
             params: serde_json::to_value(params).expect("render params"),
         });
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let response = crate::executor::execute_code_with_channel_and_bounds(
+        let response = crate::testing::execute_code_with_channel_and_bounds(
             &mut RlmExecutionState::for_engine("typescript"),
             context,
             ExecRequest {
                 code: "print('abcdefgh');".into(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -156,13 +156,13 @@ fn journaled_prints_replay_without_calling_the_renderer() {
                         params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
                             .expect("render params"),
                     });
-                    let response = crate::executor::execute_code_with_channel_and_bounds(
+                    let response = crate::testing::execute_code_with_channel_and_bounds(
                         &mut RlmExecutionState::for_engine("typescript"),
                         context,
                         ExecRequest {
                             code: "print('journaled');".into(),
                         },
-                        crate::testing::memory_artifact_store().await,
+                        crate::testing::sqlite_memory_artifact_store().await,
                         LashlangSurface::default(),
                         None,
                         RlmProjectedBindings::default(),
@@ -299,7 +299,7 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
                 "#
                 .to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -367,7 +367,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                         "failure-session", "failure-turn", 0, 0, "failure-exec", "exec:failure",
                     )),
                 ExecRequest { code: code.into() },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
@@ -474,7 +474,7 @@ async fn execute_typescript_test_cell(
         ExecRequest {
             code: code.to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
@@ -711,7 +711,7 @@ fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
             ExecRequest {
                 code: "finish(await echo.say({ text: 'structured' }));".to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -774,7 +774,7 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
                 "#
                 .to_string(),
             },
-            crate::testing::memory_artifact_store().await,
+            crate::testing::sqlite_memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -975,7 +975,7 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
                 &mut RlmExecutionState::for_engine("typescript"),
                 context,
                 ExecRequest { code },
-                crate::testing::memory_artifact_store().await,
+                crate::testing::sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),

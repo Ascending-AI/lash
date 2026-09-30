@@ -473,11 +473,13 @@ jobs:
           python3 scripts/test_buck2_action_sizes.py
           python3 scripts/test_vm_worker_identity_generation.py
           python3 scripts/test_loadtest_measurements.py
-          bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_manifest.py
+          bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_upgrade.py && python3 scripts/test_loadtest_manifest.py
           python3 scripts/test_buck2_event_digest.py
           python3 scripts/test_buck2_diagnostics.py
           python3 scripts/test_resolve_buck2_target.py
           python3 scripts/check_feature_coverage.py check
+          python3 scripts/check_retired_terms.py
+          python3 scripts/test_check_retired_terms.py
           python3 scripts/check_outcome_suffixes.py
           python3 scripts/test_check_outcome_suffixes.py
           python3 scripts/check_adr_current.py
@@ -490,10 +492,13 @@ jobs:
           python3 scripts/test_dev_test.py
           python3 scripts/test_test_batch_runner.py
           python3 scripts/test_test_xml.py
+          python3 scripts/test_filtered_store_gates.py
           python3 scripts/test_launcher_test_sandbox.py
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_restate_suite.py
           python3 scripts/test_check_facade_only_examples.py
+          python3 scripts/test_check_workflow_graph_model.py
+          python3 scripts/test_check_dialect_boundary.py && python3 scripts/test_check_vm_parent_paths.py
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_writer_stamps.py
@@ -504,6 +509,7 @@ jobs:
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_package_workspace.py
+          python3 scripts/test_package_vm_worker.py
           python3 scripts/test_release_artifacts.py
           python3 scripts/test_production_file_size.py
           python3 scripts/test_confidence_gate_ci_contract.py
@@ -2183,7 +2189,14 @@ jobs:
           LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
           AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
-        run: just ${{ matrix.recipe }}
+        run: |
+          set -euo pipefail
+          # The crash-window attachment laws require PostgreSQL in both legs.
+          if [ "${{ matrix.name }}" = "server-double" ]; then
+            bash scripts/ci/with-service.sh pg16 -- just ${{ matrix.recipe }}
+          else
+            just ${{ matrix.recipe }}
+          fi
 
       - name: Remove client credentials
         if: always() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.buck2
@@ -2730,6 +2743,9 @@ jobs:
 
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
+
+      - name: Check the code-mode dialect boundary
+        run: python3 scripts/check-dialect-boundary.py
 
       - name: Check operator guide command coverage
         run: python3 scripts/check_operator_guide_commands.py

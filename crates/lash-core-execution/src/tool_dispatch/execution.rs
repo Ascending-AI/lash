@@ -194,11 +194,11 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     attempt: u32,
     max_attempts: u32,
     tool_context: ToolContext<'run>,
-) -> crate::ToolAttemptLaunch {
+) -> Result<crate::ToolAttemptLaunch, crate::RuntimeEffectControllerError> {
     let args = prepared.args.clone();
     let ids = ToolCallIds::of(&prepared);
     let Some(authority) = AttemptAuthority::resolve(context, &prepared.tool_id, grant) else {
-        return attempt_done(
+        return Ok(attempt_done(
             normalized_outcome(
                 context,
                 &ids,
@@ -211,11 +211,13 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                 ),
             )
             .await,
-        );
+        ));
     };
     let tool_name = authority.manifest().name.clone();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
-        return attempt_done(normalized_outcome(context, &ids, tool_name, args, failure).await);
+        return Ok(attempt_done(
+            normalized_outcome(context, &ids, tool_name, args, failure).await,
+        ));
     }
 
     let tool_context = authority.apply_execution_binding(
@@ -244,7 +246,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                 match completion_context.take_completion_key() {
                     Some(key) => key,
                     None => {
-                        return attempt_done(normalized_outcome(
+                        return Ok(attempt_done(normalized_outcome(
                         context,
                         &ids,
                         tool_name,
@@ -253,21 +255,26 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                             ToolFailureClass::Internal,
                             "pending_tool_missing_completion_key",
                             "tool returned Pending without first obtaining a completion key",
-                        )).await);
+                        )).await));
                     }
                 };
             let pending = match announce_pending_park(&completion_context, pending).await {
                 Ok(pending) => pending,
                 Err(failure) => {
-                    return attempt_done(
+                    return Ok(attempt_done(
                         normalized_outcome(context, &ids, tool_name, args, failure).await,
-                    );
+                    ));
                 }
             };
-            return crate::ToolAttemptLaunch::Pending {
-                key: Box::new(key),
-                pending,
-            };
+            return hold_declared_execution_environments(
+                context,
+                crate::ToolAttemptLaunch::Pending {
+                    key: Box::new(key),
+                    pending,
+                },
+                &completion_context.execution_env_spec,
+            )
+            .await;
         }
     };
 
@@ -283,7 +290,76 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
 
     let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;
     outcome.intents = intents;
-    attempt_done(outcome)
+    hold_declared_execution_environments(
+        context,
+        attempt_done(outcome),
+        &completion_context.execution_env_spec,
+    )
+    .await
+}
+
+async fn hold_declared_execution_environments(
+    context: &ToolDispatchContext<'_>,
+    launch: crate::ToolAttemptLaunch,
+    captured_spec: &crate::ProcessExecutionEnvSpec,
+) -> Result<crate::ToolAttemptLaunch, crate::RuntimeEffectControllerError> {
+    let mut env_refs: Vec<_> = match &launch {
+        crate::ToolAttemptLaunch::Done { intents, .. }
+            if super::intent_executor::admit_batch(&context.owner.runtime_owner(), intents)
+                .is_none() =>
+        {
+            intents
+                .intents
+                .iter()
+                .filter(|intent| match intent {
+                    crate::ToolIntent::RegisterTrigger(registration) => {
+                        super::intent_executor::validate_trigger_registration_authority(
+                            context,
+                            registration,
+                        )
+                        .is_none()
+                    }
+                    _ => true,
+                })
+                .filter_map(crate::ToolIntent::execution_env_ref)
+                .cloned()
+                .collect()
+        }
+        crate::ToolAttemptLaunch::Done { .. } => Vec::new(),
+        crate::ToolAttemptLaunch::Pending { pending, .. } => match &pending.resolved_by {
+            Some(crate::PendingResolver::DeclaredStart(start)) => {
+                start.start().declaration.env_ref.iter().cloned().collect()
+            }
+            _ => Default::default(),
+        },
+    };
+    env_refs.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
+    env_refs.dedup();
+    if !env_refs.is_empty() {
+        let ports = context.process_engines.artifact_ports().ok_or_else(|| {
+            crate::PluginError::Session(
+                "an environment declaration requires the runtime's artifact stores".to_string(),
+            )
+        })?;
+        let claim =
+            crate::session::execution_claim_of(context.effect_controller.execution_scope())?;
+        let captured_ref = captured_spec
+            .stable_ref()
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        for env_ref in env_refs {
+            if env_ref == captured_ref {
+                crate::publish_process_execution_env(ports.env().as_ref(), &claim, captured_spec)
+                    .await?;
+            } else {
+                ports
+                    .env()
+                    .acquire_process_execution_env(&claim, &env_ref)
+                    .await
+                    .map_err(crate::PluginError::from)?;
+            }
+        }
+    }
+    Ok(launch)
 }
 
 /// Executes one atomic tool attempt and reports everything it produced.
@@ -313,7 +389,7 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
             tool_context,
         ),
     )
-    .await;
+    .await?;
     let launch = match launch {
         crate::ToolAttemptLaunch::Done {
             mut record,
@@ -329,11 +405,6 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     let capture = crate::runtime::ToolAttemptCapture {
         version: crate::runtime::TOOL_ATTEMPT_CAPTURE_VERSION,
         messages: context.checkpoint_messages.drain(),
-        usage: context
-            .direct_completions
-            .usage_ledger()
-            .map(|ledger| ledger.take())
-            .unwrap_or_default(),
     };
     Ok(crate::ToolAttemptEffectOutcome {
         launch,

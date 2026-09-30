@@ -12,6 +12,9 @@ mod embed_plugins;
 mod facade_inventory;
 #[path = "integration/integrator_facade.rs"]
 mod integrator_facade;
+#[cfg(feature = "mcp")]
+#[path = "integration/mcp_catalog.rs"]
+mod mcp_catalog;
 #[path = "integration/one_home.rs"]
 mod one_home;
 #[path = "integration/stores_evidence.rs"]
@@ -43,3 +46,7 @@ async fn created_session(
     }
     core.session(session_id)
 }
+
+#[cfg(feature = "restate")]
+#[path = "integration/public_process_command_replay.rs"]
+mod public_process_command_replay;

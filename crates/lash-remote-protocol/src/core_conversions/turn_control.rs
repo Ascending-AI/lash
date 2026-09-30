@@ -22,10 +22,24 @@ impl From<RemoteTurnCancelUndeliveredInputPolicy>
     }
 }
 
-// The remote wire shape predates `TurnCancelMode` and is a versioned
-// surface: a remote request always compiles to an immediate stop and remote
-// evidence drops the mode and the honoured step. Carrying the mode over the
-// wire is a follow-up that bumps `REMOTE_PROTOCOL_VERSION`.
+impl From<lash_core::facade_support::TurnCancelMode> for RemoteTurnCancelMode {
+    fn from(value: lash_core::facade_support::TurnCancelMode) -> Self {
+        match value {
+            lash_core::facade_support::TurnCancelMode::Immediate => Self::Immediate,
+            lash_core::facade_support::TurnCancelMode::AfterStep => Self::AfterStep,
+        }
+    }
+}
+
+impl From<RemoteTurnCancelMode> for lash_core::facade_support::TurnCancelMode {
+    fn from(value: RemoteTurnCancelMode) -> Self {
+        match value {
+            RemoteTurnCancelMode::Immediate => Self::Immediate,
+            RemoteTurnCancelMode::AfterStep => Self::AfterStep,
+        }
+    }
+}
+
 impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCancellationEvidence {
     fn from(value: lash_core::facade_support::TurnCancellationEvidence) -> Self {
         let lash_core::facade_support::TurnCancellationEvidence {
@@ -33,21 +47,16 @@ impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCan
             origin,
             reason,
             undelivered,
-            mode: _,
-            honoured_after_step: _,
+            mode,
+            honoured_after_step,
         } = value;
         Self {
             request_id,
             origin,
             reason,
-            undelivered: match undelivered {
-                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer => {
-                    RemoteTurnCancelUndeliveredInputPolicy::Defer
-                }
-                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop => {
-                    RemoteTurnCancelUndeliveredInputPolicy::Drop
-                }
-            },
+            undelivered: undelivered.into(),
+            mode: mode.into(),
+            honoured_after_step,
         }
     }
 }
@@ -59,21 +68,16 @@ impl From<RemoteTurnCancellationEvidence> for lash_core::facade_support::TurnCan
             origin,
             reason,
             undelivered,
+            mode,
+            honoured_after_step,
         } = value;
         Self {
             request_id,
             origin,
             reason,
-            undelivered: match undelivered {
-                RemoteTurnCancelUndeliveredInputPolicy::Defer => {
-                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer
-                }
-                RemoteTurnCancelUndeliveredInputPolicy::Drop => {
-                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop
-                }
-            },
-            mode: lash_core::facade_support::TurnCancelMode::Immediate,
-            honoured_after_step: None,
+            undelivered: undelivered.into(),
+            mode: mode.into(),
+            honoured_after_step,
         }
     }
 }
@@ -90,21 +94,15 @@ impl RemoteTurnCancelRequest {
             origin,
             reason,
             undelivered,
+            mode,
         } = self;
         Ok(lash_core::facade_support::TurnCancelRequest {
             address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
             request_id,
             origin,
             reason,
-            undelivered: match undelivered {
-                RemoteTurnCancelUndeliveredInputPolicy::Defer => {
-                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer
-                }
-                RemoteTurnCancelUndeliveredInputPolicy::Drop => {
-                    lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop
-                }
-            },
-            mode: lash_core::facade_support::TurnCancelMode::Immediate,
+            undelivered: undelivered.into(),
+            mode: mode.into(),
         })
     }
 }
@@ -117,7 +115,7 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             origin,
             reason,
             undelivered,
-            mode: _,
+            mode,
         } = value;
         Self {
             session_id: address.session_id,
@@ -125,14 +123,8 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             request_id,
             origin,
             reason,
-            undelivered: match undelivered {
-                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer => {
-                    RemoteTurnCancelUndeliveredInputPolicy::Defer
-                }
-                lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop => {
-                    RemoteTurnCancelUndeliveredInputPolicy::Drop
-                }
-            },
+            undelivered: undelivered.into(),
+            mode: mode.into(),
         }
     }
 }
@@ -150,11 +142,8 @@ impl From<lash_core::facade_support::TurnCancelOutcome> for RemoteTurnCancelOutc
                     cancellation: cancellation.into(),
                 }
             }
-            // A remote request is always immediate; when it escalates a local
-            // after-step request it took effect, which the pre-mode wire can
-            // only say as `Requested`.
             lash_core::facade_support::TurnCancelOutcome::Escalated(cancellation) => {
-                Self::Requested {
+                Self::Escalated {
                     cancellation: cancellation.into(),
                 }
             }
@@ -183,6 +172,9 @@ impl From<RemoteTurnCancelOutcome> for lash_core::facade_support::TurnCancelOutc
             }
             RemoteTurnCancelOutcome::AlreadyRequested { cancellation } => {
                 Self::AlreadyRequested(cancellation.into())
+            }
+            RemoteTurnCancelOutcome::Escalated { cancellation } => {
+                Self::Escalated(cancellation.into())
             }
             RemoteTurnCancelOutcome::PolicyConflict {
                 requested,

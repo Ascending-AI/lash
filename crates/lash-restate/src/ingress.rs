@@ -15,10 +15,10 @@ use lash_http_transport::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 
+mod config;
 mod lash_calls;
 
-const DEFAULT_CONTROL_TIMEOUT_MS: u64 = 30_000;
-const DEFAULT_ATTACH_CEILING_MS: u64 = 6 * 60 * 60 * 1_000;
+pub use config::RestateConnectionConfig;
 
 /// Stable logical identity of one durable Restate authority.
 ///
@@ -57,71 +57,6 @@ impl RestateAuthorityId {
 
     pub fn binding_id(&self) -> &str {
         &self.0
-    }
-}
-
-const fn default_control_timeout_ms() -> u64 {
-    DEFAULT_CONTROL_TIMEOUT_MS
-}
-
-const fn default_attach_ceiling_ms() -> u64 {
-    DEFAULT_ATTACH_CEILING_MS
-}
-
-/// Deadline classes for HTTP operations issued through a [`RestateConnection`].
-///
-/// Control operations should fail quickly so callers can retry or report a
-/// degraded substrate. Attach operations can legitimately remain parked for a
-/// durable workflow's lifetime, so they receive a separate generous ceiling.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RestateConnectionConfig {
-    /// Submit, cancel, status, query, and patch deadline. Default 30 seconds.
-    #[serde(
-        default = "default_control_timeout_ms",
-        deserialize_with = "deserialize_control_timeout_ms"
-    )]
-    pub control_timeout_ms: u64,
-    /// Await/attach request ceiling. Default 6 hours.
-    #[serde(
-        default = "default_attach_ceiling_ms",
-        deserialize_with = "deserialize_attach_ceiling_ms"
-    )]
-    pub attach_ceiling_ms: u64,
-}
-
-fn deserialize_control_timeout_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
-    if value == 0 {
-        return Err(serde::de::Error::custom(
-            "control_timeout_ms must be greater than zero",
-        ));
-    }
-    Ok(value)
-}
-
-fn deserialize_attach_ceiling_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
-    if value == 0 {
-        return Err(serde::de::Error::custom(
-            "attach_ceiling_ms must be greater than zero",
-        ));
-    }
-    Ok(value)
-}
-
-impl Default for RestateConnectionConfig {
-    fn default() -> Self {
-        Self {
-            control_timeout_ms: default_control_timeout_ms(),
-            attach_ceiling_ms: default_attach_ceiling_ms(),
-        }
     }
 }
 
@@ -213,6 +148,14 @@ impl RestateHttpError {
     pub fn classification(&self) -> RestateHttpErrorClass {
         use RestateHttpErrorClass::{Terminal, Transient};
         match self {
+            Self::Request { source, .. }
+                if matches!(
+                    source.context.as_ref(),
+                    lash_http_transport::HttpFailureContext::ResponseBodyTooLarge { .. }
+                ) =>
+            {
+                Terminal
+            }
             Self::Request { source, .. } => match source.retry_verdict {
                 lash_http_transport::TransportRetryVerdict::Forbidden => Terminal,
                 lash_http_transport::TransportRetryVerdict::RetryableThrottle { .. }
@@ -1672,6 +1615,7 @@ async fn status_error(
     );
     match read_http_body_bytes(
         response.response.body,
+        response.body_limit,
         Some(response.body_timeout),
         &timeout_message,
     )
@@ -1723,6 +1667,7 @@ async fn send_request(
         response,
         deadline,
         body_timeout,
+        body_limit: connection.config.response_body_bytes,
     })
 }
 
@@ -1741,6 +1686,7 @@ async fn decode_response<T: DeserializeOwned>(
     );
     let body = read_http_body_bytes(
         response.response.body,
+        response.body_limit,
         Some(response.body_timeout),
         &timeout_message,
     )
@@ -1804,6 +1750,7 @@ struct RestateHttpResponse {
     response: HttpResponse,
     deadline: RestateRequestDeadline,
     body_timeout: Duration,
+    body_limit: usize,
 }
 
 impl RestateHttpResponse {

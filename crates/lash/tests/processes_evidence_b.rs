@@ -137,22 +137,10 @@ fn processes_area_witnesses_b() {
     variant_witness(|value: &lash::runtime::ProcessCommand| {
         matches!(value, lash::runtime::ProcessCommand::Signal { .. })
     });
-    // W0373: lash::runtime::ProcessCommand::Signal::request [field]
+    // W0373: lash::runtime::ProcessCommand::Signal::signal [field]
     field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Signal { request, .. } = value {
-            let _ = request;
-        }
-    });
-    // W0374: lash::runtime::ProcessCommand::Signal::signal_id [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Signal { signal_id, .. } = value {
-            let _ = signal_id;
-        }
-    });
-    // W0375: lash::runtime::ProcessCommand::Signal::signal_name [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Signal { signal_name, .. } = value {
-            let _ = signal_name;
+        if let lash::runtime::ProcessCommand::Signal { signal } = value {
+            let _ = signal;
         }
     });
     // W0376: lash::runtime::ProcessCommand::Start::execution_context [field]
@@ -408,16 +396,16 @@ fn processes_area_witnesses_b() {
     fn meth_0453<T: lash::plugins::ProcessEngine>(_: &T) {
         let _ = T::run;
     }
-    // W0455: lash_core::ProcessEngineContributionContext [struct]
-    type_witness::<lash_core::ProcessEngineContributionContext>();
-    // W0456: lash_core::ProcessEngineContributionContext::extensions [function]
-    let _ = lash_core::ProcessEngineContributionContext::extensions;
-    // W0457: lash_core::ProcessEngineContributionContext::new [function]
-    let _ = lash_core::ProcessEngineContributionContext::new;
-    // W0458: lash_core::ProcessEngineContributionContext::process_lifecycle_available [function]
-    let _ = lash_core::ProcessEngineContributionContext::process_lifecycle_available;
-    // W0459: lash_core::ProcessEngineContributionContext::trace_context [function]
-    let _ = lash_core::ProcessEngineContributionContext::trace_context;
+    // W0455: lash::plugins::ProcessEngineContributionContext [struct]
+    type_witness::<lash::plugins::ProcessEngineContributionContext>();
+    // W0456: lash::plugins::ProcessEngineContributionContext::extensions [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::extensions;
+    // W0457: lash::plugins::ProcessEngineContributionContext::new [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::new;
+    // W0458: lash::plugins::ProcessEngineContributionContext::process_lifecycle_available [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::process_lifecycle_available;
+    // W0459: lash::plugins::ProcessEngineContributionContext::trace_context [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::trace_context;
     // W0460: lash::plugins::ProcessEngineRunContext [struct]
     type_witness::<lash::plugins::ProcessEngineRunContext>();
     // W0461: lash::plugins::ProcessEngineRunContext::cancellation_token [function]
@@ -1011,12 +999,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessRunOutcome::is_terminal;
     // W0687: lash::plugins::ProcessRunOutcome::terminal_output [function]
     let _ = lash::plugins::ProcessRunOutcome::terminal_output;
-    // W0690: lash::runtime::ProcessCommand::Start::env_spec [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Start { env_spec, .. } = value {
-            let _ = env_spec;
-        }
-    });
     // W0691: lash::runtime::RuntimeEffectLocalExecutor::with_process_env_store [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_env_store;
     // W0692: lash::durability::ProcessLocalExecution::process_env_store [field]

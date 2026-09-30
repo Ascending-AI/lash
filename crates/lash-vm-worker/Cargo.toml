@@ -20,7 +20,7 @@ path = "src/main.rs"
 test = false
 
 [features]
-testing = []
+testing = ["lash-vm-client/testing"]
 
 [[bin]]
 name = "lash-vm-worker-fixture"
@@ -37,12 +37,15 @@ workspace = true
 ignored = ["sha2", "toml"]
 
 [dependencies]
+blake3 = { workspace = true }
+lash-vm-client = { workspace = true }
+lash-core-execution = { workspace = true }
 lash-vm-protocol = { workspace = true }
 lashlang = { workspace = true }
 lash-typescript = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+rmp-serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

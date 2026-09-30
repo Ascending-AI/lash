@@ -180,7 +180,9 @@ pub(super) struct LogicalTurnCommitEffects {
 ///
 /// A frame switch owes the switched frame one follow-on turn, the next
 /// physical turn of the same logical run; its chain depth counts this switch,
-/// continuing the depth the turn itself was owed with. Every other outcome
+/// continuing the depth the turn itself was owed with, and its recovery bound
+/// is the one the chain froze, or `max_recoveries`, the host's bound, when
+/// this switch starts the chain. Every other outcome
 /// leaves nothing: a turn commits only while the head owes nothing or owes
 /// this very turn, and this commit is that follow-on's terminal record.
 pub(super) fn follow_on_after_turn(
@@ -188,6 +190,7 @@ pub(super) fn follow_on_after_turn(
     outcome: &TurnOutcome,
     turn_id: &TurnId,
     root: &TurnId,
+    max_recoveries: u32,
 ) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
     let TurnOutcome::AgentFrameSwitch {
         frame_key, task, ..
@@ -195,12 +198,12 @@ pub(super) fn follow_on_after_turn(
     else {
         return Ok(None);
     };
-    let chain_depth = state
+    let owed = state
         .pending_follow_on
         .as_ref()
-        .filter(|owed| owed.is_turn(turn_id))
-        .map_or(0, |owed| owed.chain_depth)
-        .saturating_add(1);
+        .filter(|owed| owed.is_turn(turn_id));
+    let chain_depth = owed.map_or(0, |owed| owed.chain_depth).saturating_add(1);
+    let max_recoveries = owed.map_or(max_recoveries, |owed| owed.max_recoveries);
     let physical_ordinal = crate::store::PhysicalTurn::physical_ordinal_of(root, turn_id)
         .ok_or_else(|| {
             RuntimeError::new(
@@ -215,6 +218,7 @@ pub(super) fn follow_on_after_turn(
         task.clone(),
         Some(state.effective_protocol_turn_options().clone()),
         chain_depth,
+        max_recoveries,
         state.authority.resolved_run.as_deref().cloned(),
     )
     .map(Some)
@@ -373,7 +377,6 @@ impl LashRuntime {
         let (mut commit, persisted_node_ids) =
             match crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
-                &[],
                 operation,
                 self.host.core.durability.commit_budget,
                 fleet_format,

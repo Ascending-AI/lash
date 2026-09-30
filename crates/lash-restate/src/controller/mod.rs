@@ -299,10 +299,25 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     namespace: crate::RestateNamespace,
     /// The ranks this controller's run reads served (FIG-4088).
     read_ahead: group_read::GroupReadAhead,
+    /// The ranks this controller's own §4 commits reserved (FIG-4308).
+    commit_receipts: group_commit::GroupCommitReceipts,
     _ctx: PhantomData<&'ctx ()>,
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
+    /// The rank this controller's own §4 commit of the child at
+    /// `scope_id`/`replay_key` in `group_key` reserved, if one of its commits
+    /// was answered `Committed` or `AlreadyCommitted` (FIG-4308). It is a
+    /// receipt for that commit, never proof that the child's drain finished.
+    pub(crate) fn group_child_commit_receipt(
+        &self,
+        group_key: &str,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Option<u64> {
+        self.commit_receipts.rank(group_key, scope_id, replay_key)
+    }
+
     pub fn new(context: C, authority_id: RestateAuthorityId) -> Self {
         Self::with_options(
             context,
@@ -325,6 +340,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             folded_sentinel: None,
             namespace: crate::RestateNamespace::default(),
             read_ahead: group_read::GroupReadAhead::default(),
+            commit_receipts: group_commit::GroupCommitReceipts::default(),
             _ctx: PhantomData,
         }
     }
@@ -649,6 +665,37 @@ where
     ) -> Result<lash_core::JournalReplay, RuntimeError> {
         Ok(lash_core::JournalReplay::MayReplay)
     }
+
+    /// The deployment host drains an owner through ingress; a handler-scoped
+    /// controller would put the drain in its own journal, where a replay
+    /// could order it before settles its caller has not sent yet.
+    async fn drain_usage_accounting(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+    ) -> Result<lash_core::UsageOwnerRetired, RuntimeError> {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::EngineEffectController,
+            format!(
+                "a handler-scoped Restate controller does not drain usage owner {owner}; the \
+                 deployment effect host does"
+            ),
+        ))
+    }
+
+    /// See [`drain_usage_accounting`](Self::drain_usage_accounting).
+    async fn retire_usage_execution(
+        &self,
+        owner: &lash_core::RuntimeOwner,
+        _scope: &ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::EngineEffectController,
+            format!(
+                "a handler-scoped Restate controller does not retire usage executions of {owner}; \
+                 the deployment effect host does"
+            ),
+        ))
+    }
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
@@ -966,19 +1013,23 @@ where
         lash_core::facade_support::EffectGroupChildCommitOutcome,
         RuntimeEffectControllerError,
     > {
-        group_commit::commit_group_child_final(&self.context, &self.namespace, commit).await
+        let (scope_id, replay_key) = (commit.scope_id.clone(), commit.replay_key.clone());
+        let outcome =
+            group_commit::commit_group_child_final(&self.context, &self.namespace, commit).await?;
+        self.commit_receipts.keep(scope_id, replay_key, &outcome);
+        Ok(outcome)
     }
 
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         group_commit::await_group_child_drain_admission(
             &self.context,
             &self.namespace,
             group_key,
-            commit_seq,
+            rank,
         )
         .await
     }
@@ -1503,10 +1554,12 @@ fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWa
     }
 }
 
+/// Run a journaled effect's body, beginning a spending body's usage run: the
+/// answer carries what the controller journals beside the outcome.
 async fn execute_restate_journaled_effect(
     envelope: RuntimeEffectEnvelope,
     local_executor: RuntimeEffectLocalExecutor<'_>,
-) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+) -> lash_core::RecordedEffectExecution {
     let RuntimeEffectEnvelope {
         invocation,
         command,
@@ -1514,12 +1567,20 @@ async fn execute_restate_journaled_effect(
     } = envelope;
     match command {
         RuntimeEffectCommand::Trigger { command } => {
-            refuse_unhonored_group_membership(group.as_deref(), "restate trigger")?;
-            local_executor.execute_trigger(invocation, *command).await
+            let outcome =
+                match refuse_unhonored_group_membership(group.as_deref(), "restate trigger") {
+                    Ok(()) => local_executor.execute_trigger(invocation, *command).await,
+                    Err(refusal) => Err(refusal),
+                };
+            lash_core::RecordedEffectExecution {
+                outcome,
+                usage: None,
+                admission_fault: None,
+            }
         }
         command => {
             local_executor
-                .execute(RuntimeEffectEnvelope {
+                .execute_recording_usage(RuntimeEffectEnvelope {
                     invocation,
                     command,
                     group,
@@ -1532,36 +1593,6 @@ async fn execute_restate_journaled_effect(
 mod process_command;
 pub use process_command::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION;
 use process_command::execute_restate_process_command;
-async fn signal_ordinal_for_event(
-    registry: &dyn ProcessRegistry,
-    process_id: &lash_core::ProcessId,
-    signal_name: &str,
-    event_type: &str,
-    sequence: u64,
-) -> Result<u64, PluginError> {
-    if let Some(lash_core::WaitState {
-        kind:
-            lash_core::WaitKind::Signal {
-                name,
-                event_type: waiting_type,
-                ordinal,
-                ..
-            },
-        ..
-    }) = registry
-        .get_process(process_id)
-        .await?
-        .and_then(|record| record.wait)
-        && name == signal_name
-        && waiting_type == event_type
-    {
-        return Ok(ordinal);
-    }
-    // Count at the store without fetching the full event log.
-    registry
-        .count_events_through(process_id, event_type, sequence)
-        .await
-}
 
 mod process_scheduling;
 use process_scheduling::schedule_restate_process;

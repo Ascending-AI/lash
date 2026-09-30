@@ -176,6 +176,8 @@ features = [
   "lash-internal-typescript/testing:off",
   "lash-internal-vm-broker/testing:on",
   "lash-internal-vm-broker/testing:off",
+  "lash-internal-vm-client/testing:on",
+  "lash-internal-vm-client/testing:off",
   "lash-internal-vm-worker/testing:on",
   "lash-internal-vm-worker/testing:off",
 ]
@@ -188,7 +190,10 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-typescript", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--bins", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
 ]
 
@@ -436,6 +441,7 @@ features = [
 commands = [
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-remote-protocol", "--test", "decode_limits", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],

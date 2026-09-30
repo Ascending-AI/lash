@@ -67,10 +67,6 @@ const TURN_BUDGET: Duration = Duration::from_secs(90);
 /// second.
 const PATIENCE: Duration = Duration::from_secs(60);
 
-/// How long a settled call's outcome is given to become durable before a law
-/// crashes the turn around it.
-const SETTLEMENT_GRACE: Duration = Duration::from_millis(500);
-
 /// The probe that answers at once, or holds, or fails its first attempt.
 const PROBE: &str = "identity_probe";
 
@@ -456,6 +452,7 @@ pub(crate) fn text(text: &str) -> crate::LlmResponse {
 #[derive(Clone)]
 pub(crate) struct World {
     tier: ToolCallIdentityTier,
+    recorded: Arc<super::recorded_batch::RecordedBatch>,
     pub(crate) session_id: SessionId,
     pub(crate) witness: Arc<Witness>,
     pub(crate) model_calls: Arc<AtomicUsize>,
@@ -510,6 +507,7 @@ impl World {
     pub(crate) fn new(tier: &ToolCallIdentityTier, law: &str) -> Self {
         Self {
             tier: tier.clone(),
+            recorded: Arc::default(),
             session_id: SessionId::from(format!("{}-{law}", tier.prefix)),
             witness: Arc::new(Witness::default()),
             model_calls: Arc::new(AtomicUsize::new(0)),
@@ -650,6 +648,8 @@ impl World {
         scope: crate::ScopedEffectController<'_>,
         phase_probe: Option<Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>>,
     ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
+        let scope = crate::testing::LayeredEffectHost::layer_scoped(scope, self.recorded.layer())
+            .expect("observe identity law groups");
         let mut runtime = self.runtime(phase_probe).await;
         let mut input = crate::TurnInput::text(turn.input.clone());
         input.trace_turn_id = Some(turn.turn_id.clone());

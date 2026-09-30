@@ -310,21 +310,24 @@ fn trigger_compatibility_accepts_matching_event_mapping() {
         resources(),
     );
     let definition = definition_for(&artifact, "tick");
+    let normalized = ProcessDefinitionIdentity::from_process_value(&definition.to_process_value())
+        .expect("canonical definition references");
+    for definition in [definition, normalized] {
+        let compatibility = check_trigger_compatibility(TriggerCompatibilityRequest {
+            artifact: &artifact,
+            definition: &definition,
+            source_type: "cron.Schedule",
+            inputs: &event_input_template(),
+        })
+        .expect("trigger should be compatible");
 
-    let compatibility = check_trigger_compatibility(TriggerCompatibilityRequest {
-        artifact: &artifact,
-        definition: &definition,
-        source_type: "cron.Schedule",
-        inputs: &event_input_template(),
-    })
-    .expect("trigger should be compatible");
-
-    assert_eq!(compatibility.definition, definition);
-    assert_eq!(compatibility.event_type.name(), "cron.Tick");
-    assert_eq!(
-        format_type_expr(&compatibility.resolved_event_type),
-        "{ fired_at: str }"
-    );
+        assert_eq!(compatibility.definition, definition);
+        assert_eq!(compatibility.event_type.name(), "cron.Tick");
+        assert_eq!(
+            format_type_expr(&compatibility.resolved_event_type),
+            "{ fired_at: str }"
+        );
+    }
 }
 
 #[test]

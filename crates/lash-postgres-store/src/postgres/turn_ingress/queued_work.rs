@@ -32,14 +32,21 @@ lash_store_sql::statements! {
              FROM queued_work_batches
              WHERE session_id = ?1 AND batch_id = ?2 LIMIT 1 FOR UPDATE";
 
-        /// Batch `?2` of session `?1`, if it is open, locked for the caller's
-        /// transaction.
+        /// Batch `?2` of session `?1`, if it is open and not yet read by the
+        /// command lane, locked for the caller's transaction.
+        ///
+        /// The command lane takes no binding: a drive that reads a command
+        /// run delivers each row's obligation in its fenced read, and that
+        /// read is the command's admission (FIG-4202). A delivered open
+        /// command is being applied, so a withdrawal no longer reaches it.
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
                AND admitted_root IS NULL
+               AND NOT (work_kind = 'control'
+                   AND obligation_state IS NOT DISTINCT FROM 'delivered')
              FOR UPDATE";
 
         /// Withdraw batch `?1`.

@@ -30,7 +30,7 @@ lash_conformance::process_start_staging_tests!({
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
         lash_core_execution::StoreSet::module_artifacts(&*backend),
         backend.process_env_store(),
-        lash_core_execution::StoreSet::process_definitions(&*backend),
+        lash_core_execution::StoreSet::definition_store(&*backend),
         lash_core_execution::StoreSet::attachment_referrers(&*backend),
         lash_core_execution::StoreSet::artifact_cleanup(&*backend),
         Arc::new(lash_core_execution::facade_support::SystemClock),
@@ -44,7 +44,7 @@ lash_conformance::process_definition_tests!({
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
         lash_core_execution::StoreSet::module_artifacts(&*backend),
         backend.process_env_store(),
-        lash_core_execution::StoreSet::process_definitions(&*backend),
+        lash_core_execution::StoreSet::definition_store(&*backend),
         lash_core_execution::StoreSet::attachment_referrers(&*backend),
         lash_core_execution::StoreSet::artifact_cleanup(&*backend),
         Arc::new(lash_core_execution::facade_support::SystemClock),

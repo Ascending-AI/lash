@@ -476,6 +476,10 @@ export type UpdateOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'remai
 export type WorkflowTerminalKind = 'finish' | 'fail';
 export type WorkflowNodeNameSource = 'label' | 'derived';
 /**
+ * Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.
+ */
+export type WorkflowDiagnosticClassification = 'definite' | 'advisory';
+/**
  * Closed host-facing vocabulary for linker diagnostics.
  */
 export type WorkflowDiagnosticKind =
@@ -716,6 +720,7 @@ export interface WorkflowTypedVariable {
   [k: string]: unknown;
 }
 export interface WorkflowTypeDiagnostic {
+  classification: WorkflowDiagnosticClassification;
   kind: WorkflowDiagnosticKind;
   message: string;
   node_id: string;

@@ -641,9 +641,12 @@ impl<'de> Deserialize<'de> for Value {
     }
 }
 
+type ProjectedValueResolver = dyn Fn(&ProjectedValue) -> Option<ProjectedValue> + Send + Sync;
+
 #[derive(Clone, Default)]
 pub struct ProjectedBindings {
     bindings: FxHashMap<Symbol, ProjectedValue>,
+    resolver: Option<Arc<ProjectedValueResolver>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -711,13 +714,16 @@ impl ProjectedBindings {
             .map(|symbol| symbol.as_str().to_string())
     }
 
-    /// The first binding backed by a host descriptor rather than an owned
-    /// value: a host object, which cannot cross to a worker.
-    pub(crate) fn host_backed_name(&self) -> Option<String> {
-        self.bindings
-            .iter()
-            .find(|(_, value)| matches!(value.kind, ProjectedKind::Custom(_)))
-            .map(|(symbol, _)| symbol.as_str().to_string())
+    /// Rebinds worker-owned projection references after a parked continuation
+    /// is restored. The resolver lives in the owned execution configuration.
+    pub fn with_resolver(mut self, resolver: Arc<ProjectedValueResolver>) -> Self {
+        self.resolver = Some(resolver);
+        self
+    }
+
+    pub(crate) fn resolve(&self, projected: &ProjectedValue) -> Option<ProjectedValue> {
+        self.get(projected.name())
+            .or_else(|| self.resolver.as_ref()?.as_ref()(projected))
     }
 }
 
@@ -734,31 +740,32 @@ enum ProjectedKind {
     Custom(Arc<dyn ProjectedHostDescriptor>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ProjectedReadRequest {
     Len,
     Empty,
     Truthy,
     Field(Arc<str>),
-    Index(Value),
-    Contains(Value),
+    Index(#[serde(with = "super::effect_value")] Value),
+    Contains(#[serde(with = "super::effect_value")] Value),
     Find {
+        #[serde(with = "super::effect_value")]
         needle: Value,
         start: usize,
     },
-    GrepText(Value),
+    GrepText(#[serde(with = "super::effect_value")] Value),
     Keys,
     Values,
-    StartsWith(Value),
-    EndsWith(Value),
-    Split(Value),
-    Join(Value),
+    StartsWith(#[serde(with = "super::effect_value")] Value),
+    EndsWith(#[serde(with = "super::effect_value")] Value),
+    Split(#[serde(with = "super::effect_value")] Value),
+    Join(#[serde(with = "super::effect_value")] Value),
     Trim,
     Slice {
         start: Option<isize>,
         end: Option<isize>,
     },
-    Push(Value),
+    Push(#[serde(with = "super::effect_value")] Value),
     ToNumber,
     JsonParse,
     SliceBound,
@@ -806,9 +813,9 @@ impl ProjectedReadRequest {
 /// FIG-2863 — a single `Missing` used to mean both, and each consumer picked
 /// its own widening for it, so an unanswerable `Contains` read as `false` and an
 /// unanswerable `Field` read as `null`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ProjectedReadResponse {
-    Value(Value),
+    Value(#[serde(with = "super::effect_value")] Value),
     Text(String),
     Bool(bool),
     Len(usize),
@@ -992,10 +999,18 @@ impl ProjectedValue {
         }
     }
 
-    pub(crate) fn scalar_value(&self) -> Option<&Value> {
+    pub fn scalar_value(&self) -> Option<&Value> {
         match &self.kind {
             ProjectedKind::Scalar(value) => Some(value),
             ProjectedKind::Custom(_) => None,
+        }
+    }
+
+    /// Pure access to the admitted host descriptor, without materializing it.
+    pub fn host_descriptor(&self) -> Option<&dyn ProjectedHostDescriptor> {
+        match &self.kind {
+            ProjectedKind::Custom(value) => Some(value.as_ref()),
+            ProjectedKind::Scalar(_) => None,
         }
     }
 

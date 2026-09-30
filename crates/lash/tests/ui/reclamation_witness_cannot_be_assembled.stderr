@@ -1,0 +1,5 @@
+error[E0451]: field `roots` of struct `CompleteAttachmentRoots` is private
+ --> tests/ui/reclamation_witness_cannot_be_assembled.rs:4:39
+  |
+4 |     let _ = CompleteAttachmentRoots { roots: Default::default() };
+  |                                       ^^^^^ private field

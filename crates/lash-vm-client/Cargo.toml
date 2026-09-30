@@ -1,0 +1,48 @@
+[package]
+name = "lash-internal-vm-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Parent-owned bounded worker pool and opaque-state client."
+
+[lib]
+name = "lash_vm_client"
+doctest = false
+
+[features]
+testing = []
+
+[lints]
+workspace = true
+
+# build.rs imports ../lash-vm-worker/build/fingerprint.rs by #[path].
+# That module uses sha2 and toml, which cargo-shear cannot follow.
+[package.metadata.cargo-shear]
+ignored = ["sha2", "toml"]
+
+[package.metadata.lash]
+role = "language-neutral"
+
+[dependencies]
+lash-core-execution = { workspace = true }
+lash-vm-broker = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+lash-vm-protocol = { workspace = true }
+lashlang = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+rmp-serde = { workspace = true }
+serde_json = { workspace = true }
+serde_bytes = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+libc = { workspace = true }
+
+[build-dependencies]
+sha2 = { workspace = true }
+toml = "1.1.2"

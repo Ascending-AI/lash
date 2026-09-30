@@ -176,18 +176,23 @@ pub(super) async fn retire_restate_scope_via_ingress(
     }
 }
 
-/// The idempotency key every watch of one turn's cancellation gate attaches
-/// under (FIG-3672 P9), or `None` for any other wait. Each model call watches
-/// the gate for its own lifetime and drops its call when it ends; attaching
-/// keeps the server-side waiter to one per gate however many calls the turn
-/// makes.
-pub(super) fn turn_cancel_watch_attachment(key: &AwaitEventKey) -> Option<String> {
-    matches!(
-        key.wait,
-        lash_core::AwaitEventWaitIdentity::TurnCancelGate
-            | lash_core::AwaitEventWaitIdentity::TurnCancelEscalation
-    )
-    .then(|| format!("lash-turn-cancel-watch:{}", key.key_id))
+/// How an ingress await reaches its wait's server-side waiter.
+pub(super) enum IngressAwait<'a> {
+    /// A recorded effect's await, under the effect's replay key.
+    Effect(&'a str),
+    /// An observer family's attach (FIG-4345): a peek, then one waiter per
+    /// wait shared by every attach of the family.
+    Observer(WaitObserver),
+    /// Any other await: a waiter of its own.
+    Plain,
+}
+
+impl IngressAwait<'_> {
+    /// How a caller outside any effect awaits `key`: as its observer family,
+    /// when its wait identity names one.
+    pub(super) fn of_key(key: &AwaitEventKey) -> Self {
+        WaitObserver::of_key(key).map_or(Self::Plain, Self::Observer)
+    }
 }
 
 pub(super) async fn await_restate_await_event_via_ingress(
@@ -195,23 +200,30 @@ pub(super) async fn await_restate_await_event_via_ingress(
     key: &AwaitEventKey,
     cancel: tokio_util::sync::CancellationToken,
     deadline: Option<std::time::Instant>,
-    effect_replay_key: Option<&str>,
+    attach: IngressAwait<'_>,
 ) -> Result<Resolution, RuntimeError> {
     let request =
         restate_durable_wait_request(key, deadline, &lash_core::facade_support::SystemClock);
     let workflow_key = RestateDurableWaitAddress::for_key(&request.key).workflow_key;
+    let durable_wait_workflow = ingress.service(crate::LashService::DurableWaitWorkflow);
     tokio::select! {
         result = async {
-            match effect_replay_key {
-                Some(replay_key) => ingress.ingress.call_lash_workflow_idempotent::<_, Resolution>(
-                    &ingress.service(crate::LashService::DurableWaitWorkflow),
+            match attach {
+                IngressAwait::Effect(replay_key) => ingress.ingress.call_lash_workflow_idempotent::<_, Resolution>(
+                    &durable_wait_workflow,
                     &workflow_key,
                     "await_resolution",
                     &request,
                     replay_key,
                 ).await,
-                None => ingress.ingress.call_lash_workflow::<_, Resolution>(
-                    &ingress.service(crate::LashService::DurableWaitWorkflow),
+                IngressAwait::Observer(observer) => observe_durable_wait(
+                    &ingress.ingress,
+                    &durable_wait_workflow,
+                    observer,
+                    &request,
+                ).await,
+                IngressAwait::Plain => ingress.ingress.call_lash_workflow::<_, Resolution>(
+                    &durable_wait_workflow,
                     &workflow_key,
                     "await_resolution",
                     &request,

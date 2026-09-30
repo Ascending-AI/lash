@@ -32,7 +32,7 @@ pub(crate) type Rebind<'a> = dyn FnMut(&ProjectedValue) -> Option<ProjectedValue
 fn by_name(
     bindings: &ProjectedBindings,
 ) -> impl FnMut(&ProjectedValue) -> Option<ProjectedValue> + '_ {
-    |projected| bindings.get(projected.name())
+    |projected| bindings.resolve(projected)
 }
 
 /// Rebinds every unavailable placeholder in `value`, answering whether any was.

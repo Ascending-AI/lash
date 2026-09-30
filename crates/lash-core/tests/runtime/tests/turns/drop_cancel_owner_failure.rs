@@ -225,6 +225,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
                 session: SessionId::from(SESSION_ID),
                 root: TurnId::from(TURN_ID),
             },
+            lash_core::engine::RootRunLoss::FailedRun,
             0,
         )
         .await

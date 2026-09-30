@@ -16,7 +16,7 @@ use crate::store::{
 use crate::{
     AgentFrameAssignment, AgentFrameReason, ForkSessionRequest, FrameKey, FrameNodeId, NodeId,
     OperationId, ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SessionId, SessionPolicy,
-    SessionRelation, StoreError, TokenLedgerEntry, TokenUsage, TurnBudget,
+    SessionRelation, StoreError, TurnBudget,
 };
 
 fn budget(nodes: u32, bytes: u64) -> HistoryBudget {
@@ -43,21 +43,12 @@ async fn admit(store: &dyn ConformanceDeployment, session_id: &SessionId) {
 }
 
 async fn commit(store: &dyn ConformanceDeployment, state: &mut RuntimeSessionState) {
-    commit_entries(store, state, &[]).await;
-}
-
-async fn commit_entries(
-    store: &dyn ConformanceDeployment,
-    state: &mut RuntimeSessionState,
-    entries: &[TokenLedgerEntry],
-) {
-    commit_with_evidence(store, state, entries, Vec::new()).await;
+    commit_with_evidence(store, state, Vec::new()).await;
 }
 
 async fn commit_with_evidence(
     store: &dyn ConformanceDeployment,
     state: &mut RuntimeSessionState,
-    entries: &[TokenLedgerEntry],
     failure_evidence: Vec<crate::TurnFailureEvidence>,
 ) {
     let operation = OperationId::turn(
@@ -65,9 +56,8 @@ async fn commit_with_evidence(
         format!("history-{}", state.head_revision),
         "commit",
     );
-    let (mut commit, new_ids) =
-        RuntimeCommit::persisted_state_with_operation(state, entries, operation)
-            .expect("prepare history commit");
+    let (mut commit, new_ids) = RuntimeCommit::persisted_state_with_operation(state, operation)
+        .expect("prepare history commit");
     commit.failure_evidence = failure_evidence;
     let receipt = store
         .commit_runtime_state(commit)
@@ -143,39 +133,10 @@ async fn seed_window_fixture(
         commit(store, &mut state).await;
         remaining -= count;
     }
-    let reported = (0..500)
-        .map(|_| {
-            TokenLedgerEntry::reported(
-                "turn",
-                "history-model",
-                TokenUsage {
-                    input_tokens: 1,
-                    ..TokenUsage::default()
-                },
-            )
-        })
-        .collect::<Vec<_>>();
-    for entries in reported.chunks(100) {
-        commit_entries(store, &mut state, entries).await;
-    }
-    let hole = TokenLedgerEntry {
-        source: "turn".to_string(),
-        model: "history-model".to_string(),
-        usage: TokenUsage::default(),
-        usage_disposition: crate::LedgerUsageOutcome::unreported((0..3).map(|ordinal| {
-            crate::UnreportedLedgerAttempt {
-                call_id: format!("history-call-{ordinal}"),
-                attempt_ordinal: 0,
-                generation_id: Some(format!("history-generation-{ordinal}")),
-            }
-        })),
-    };
-    commit_entries(store, &mut state, &[hole]).await;
     for ordinal in 0..50 {
         commit_with_evidence(
             store,
             &mut state,
-            &[],
             vec![crate::TurnFailureEvidence {
                 partial_output: Some(crate::TurnFailurePartialOutput::Complete {
                     text: format!("failed generation {ordinal}"),
@@ -212,23 +173,11 @@ pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeploymen
         assert_eq!(read.current_frame_node_id, Some(current_frame));
         assert_eq!(read.window.nodes.len(), 12);
         assert_eq!(after.graph_node_bodies - before.graph_node_bodies, 12);
-        assert_eq!(after.usage_rows - before.usage_rows, 0);
-        assert_eq!(after.usage_holes - before.usage_holes, 3);
         assert_eq!(after.turn_receipt_bodies - before.turn_receipt_bodies, 0);
         assert_eq!(
             read.window.anchor().expect("anchored window").generation,
             72 + extra_earlier_nodes as u64
         );
-        assert_eq!(read.usage.outstanding.len(), 3);
-        assert_eq!(read.usage.rows.len(), 1);
-        assert_eq!(read.usage.rows[0].usage.input_tokens, 500);
-
-        let ledger = store
-            .load_usage_ledger_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
-            .await
-            .expect("first usage ledger page");
-        assert_eq!(ledger.rows.len(), 7);
-        assert!(ledger.next.is_some());
         let failures = store
             .load_failure_evidence_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
             .await
@@ -763,9 +712,9 @@ pub async fn inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(
 }
 
 /// ADR 0057 and ADR 0112 §5: a history read selects its rows and confirms
-/// them in one snapshot. While a writer commits one node and one usage token
-/// per commit, every concurrent window read agrees with itself: its head
-/// revision, leaf generation and usage totals all describe the same commit,
+/// them in one snapshot. While a writer commits one node per commit, every
+/// concurrent window read agrees with itself: its head revision and leaf
+/// generation describe the same commit,
 /// and every paged read is one edge path from its pinned leaf to the root.
 pub async fn history_selection_and_confirmation_share_one_snapshot(
     store: Arc<dyn ConformanceDeployment>,
@@ -785,19 +734,7 @@ pub async fn history_selection_and_confirmation_share_one_snapshot(
         tokio::spawn(async move {
             for _ in 0..COMMITS {
                 append_nodes(&mut state, 1);
-                commit_entries(
-                    store.as_ref(),
-                    &mut state,
-                    &[TokenLedgerEntry::reported(
-                        "turn",
-                        "snapshot-model",
-                        TokenUsage {
-                            input_tokens: 1,
-                            ..TokenUsage::default()
-                        },
-                    )],
-                )
-                .await;
+                commit(store.as_ref(), &mut state).await;
             }
         })
     };
@@ -810,17 +747,6 @@ pub async fn history_selection_and_confirmation_share_one_snapshot(
                 loop {
                     let read = window(store.as_ref(), &session_id).await;
                     let commits = read.head_revision - base_revision;
-                    let tokens = read
-                        .usage
-                        .rows
-                        .iter()
-                        .map(|row| u64::try_from(row.usage.input_tokens).expect("tokens"))
-                        .sum::<u64>();
-                    assert_eq!(
-                        tokens, commits,
-                        "usage totals and head revision {} come from different snapshots",
-                        read.head_revision
-                    );
                     let leaf = read.window.nodes.last().expect("a committed window");
                     assert_eq!(read.window.leaf_node_id.as_ref(), Some(&leaf.node_id));
                     assert_eq!(
@@ -868,7 +794,7 @@ pub async fn history_selection_and_confirmation_share_one_snapshot(
 
 /// ADR 0057: generation is a checked increment, and the check sits inside
 /// the commit. A commit whose second node would overflow the stored
-/// generation writes nothing: no node, no head move, no usage row, and no
+/// generation writes nothing: no node, no head move, and no
 /// receipt, so the identical commit is fresh once the parent is sound.
 pub async fn graph_generation_overflow_rolls_back_every_write(
     store: Arc<dyn ConformanceDeployment>,
@@ -884,10 +810,6 @@ pub async fn graph_generation_overflow_rolls_back_every_write(
         .await
         .expect("head before the overflow")
         .expect("committed head");
-    let before_usage = store
-        .load_usage_totals(&state.session_id)
-        .await
-        .expect("usage before the overflow");
     store
         .corrupt_graph_row_for_testing(
             &leaf,
@@ -898,19 +820,8 @@ pub async fn graph_generation_overflow_rolls_back_every_write(
 
     append_nodes(&mut state, 2);
     let operation = OperationId::turn(&state.session_id, "history-overflow", "commit");
-    let (commit, _) = RuntimeCommit::persisted_state_with_operation(
-        &mut state,
-        &[TokenLedgerEntry::reported(
-            "turn",
-            "overflow-model",
-            TokenUsage {
-                input_tokens: 1,
-                ..TokenUsage::default()
-            },
-        )],
-        operation,
-    )
-    .expect("prepare the overflowing commit");
+    let (commit, _) = RuntimeCommit::persisted_state_with_operation(&mut state, operation)
+        .expect("prepare the overflowing commit");
     let appended = commit
         .graph
         .nodes()
@@ -934,13 +845,6 @@ pub async fn graph_generation_overflow_rolls_back_every_write(
     assert_eq!(after_meta.head_revision, before_meta.head_revision);
     assert_eq!(after_meta.leaf_node_id, before_meta.leaf_node_id);
     assert_eq!(after_meta.checkpoint_ref, before_meta.checkpoint_ref);
-    assert_eq!(
-        store
-            .load_usage_totals(&state.session_id)
-            .await
-            .expect("usage after the overflow"),
-        before_usage
-    );
     for node_id in &appended {
         assert_not_readable(
             one_node(store.as_ref(), &state.session_id, node_id).await,
@@ -976,7 +880,7 @@ pub async fn a_later_frame_open_cannot_rescue_earlier_root_nodes(
     open_frame(&mut state, "history-late-frame");
     append_nodes(&mut state, 1);
     let operation = OperationId::turn(&state.session_id, "history-late-frame", "commit");
-    let (commit, _) = RuntimeCommit::persisted_state_with_operation(&mut state, &[], operation)
+    let (commit, _) = RuntimeCommit::persisted_state_with_operation(&mut state, operation)
         .expect("prepare the root append");
     let appended = commit
         .graph

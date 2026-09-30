@@ -35,6 +35,19 @@ pub trait ArtifactCleanupLedger: ObligationLedger {
     /// shortens a guard's wait and never decides anything.
     async fn nudge(&self, referrer: &ArtifactReferrer, now_ms: u64) -> Result<bool, StoreError>;
 
+    /// Make every `due` row whose delivery awaits `journal`
+    /// ([`ArtifactCleanup::awaited_journal`]) due now, and answer how many
+    /// were. The engine calls this once `journal` can no longer replay, so a
+    /// cleanup a relay pass deferred at its maximum backoff while the
+    /// journal could still replay is delivered on the next pass instead.
+    /// Like [`nudge`](Self::nudge) it only shortens a wait and never decides
+    /// anything.
+    async fn nudge_awaiting_journal(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+        now_ms: u64,
+    ) -> Result<u64, StoreError>;
+
     /// The cleanup record obligation `id` carries, or `None` if no row
     /// carries it.
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError>;

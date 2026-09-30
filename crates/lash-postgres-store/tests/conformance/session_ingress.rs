@@ -7,7 +7,7 @@ use lash_core_execution::SessionCatalogStore as _;
 use super::{reset, storage};
 
 lash_conformance::session_ingress_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database_fixture, storage)) = storage().await else {
         eprintln!("skipping Postgres session-ingress conformance: database is not configured");
         return;
     };
@@ -19,7 +19,7 @@ lash_conformance::session_ingress_tests!({
         .expect("admit the Postgres session-ingress session");
     let ingress = Arc::clone(&runtime);
     (
-        database_lock,
+        database_fixture,
         lash_conformance::SessionIngressHandles { runtime, ingress },
     )
 });

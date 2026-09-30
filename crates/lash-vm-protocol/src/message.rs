@@ -96,6 +96,15 @@ impl MessageFence {
         }
     }
 
+    pub fn next_header_copy(&self) -> MessageHeader {
+        MessageHeader {
+            lease: self.lease,
+            owner_epoch: self.owner_epoch,
+            frame_epoch: self.frame_epoch,
+            sequence: self.next,
+        }
+    }
+
     /// The header this side's next outgoing message carries, advancing the
     /// sequence.
     pub fn next_header(&mut self) -> MessageHeader {
@@ -163,10 +172,18 @@ pub enum ProgramSource {
     /// A stored module artifact and the entry to compile from it.
     Artifact {
         module_ref: String,
-        entry: String,
+        entry: ProgramEntry,
         #[serde(with = "serde_bytes")]
         artifact: Vec<u8>,
     },
+}
+
+/// The module entry is explicit: a process named `main` is still a process.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProgramEntry {
+    Main,
+    Process { component: String, position: u32 },
 }
 
 /// One explicit description of the context the program runs in: a tool
@@ -218,6 +235,7 @@ pub struct EffectRequestId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectKind {
+    ProjectionRead,
     ResourceOperation,
     ResourceOperationBatch,
     Await,
@@ -240,14 +258,20 @@ pub enum EffectKind {
 
 impl EffectKind {
     /// Whether the parent may answer a request of this kind with
-    /// [`ParentMessage::Park`] instead of a response (FIG-4159): a resource
-    /// operation, a sleep or a signal wait, which a continuation can issue
-    /// again, and a process boundary. It mirrors the VM's `VmRequest::parkable`
-    /// and grants nothing.
+    /// [`ParentMessage::Park`] instead of a response (FIG-4159, FIG-4275): a
+    /// resource operation, a resource-operation batch, a process await, a
+    /// sleep or a signal wait, which a continuation can issue again, and a
+    /// process boundary. It mirrors the VM's `VmRequest::parkable` and grants
+    /// nothing.
     pub fn parkable(self) -> bool {
         matches!(
             self,
-            Self::ResourceOperation | Self::Sleep | Self::WaitSignal | Self::ProcessBoundary
+            Self::ResourceOperation
+                | Self::ResourceOperationBatch
+                | Self::Await
+                | Self::Sleep
+                | Self::WaitSignal
+                | Self::ProcessBoundary
         )
     }
 }
@@ -264,6 +288,8 @@ pub struct EffectRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectOutcome {
+    /// The effect journal observed cancellation; no later guest effect may start.
+    Cancelled,
     Value(EncodedPayload),
     Unit,
     /// The parent handed a signal wait to a successor segment.
@@ -287,6 +313,11 @@ pub struct EffectResponse {
 #[serde(rename_all = "snake_case")]
 pub enum ParentMessage {
     Start(Box<Start>),
+    /// Pure compiler or state work. The payload has no parent authority.
+    Prepare {
+        owner: VmOwner,
+        request: EncodedPayload,
+    },
     #[serde(rename = "effect_result")]
     EffectResponse(EffectResponse),
     /// Cooperative cancellation. It never decides the durable winner: that is
@@ -311,6 +342,10 @@ pub enum ParentMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerMessage {
+    /// The worker refused a malformed request or could not encode its result.
+    Refused {
+        reason: String,
+    },
     /// A bounded phase, with cumulative process CPU usage. It does not grant
     /// extra time when repeated: the parent owns the absolute phase deadline.
     Progress {
@@ -330,6 +365,10 @@ pub enum WorkerMessage {
         build: BuildIdentity,
     },
     EffectRequest(EffectRequest),
+    /// Ordered execution observations, with no authority.
+    Observations {
+        payload: EncodedPayload,
+    },
     /// The run parked, at a boundary or on the request its parent asked it
     /// to park on; the state resumes it.
     Suspended {
@@ -348,7 +387,13 @@ pub enum WorkerMessage {
         error: EncodedPayload,
     },
     Cancelled,
-    ResetDone,
+    ResetDone {
+        cpu_nanos: u64,
+    },
+    /// A complete response to pure worker work.
+    Prepared {
+        response: EncodedPayload,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

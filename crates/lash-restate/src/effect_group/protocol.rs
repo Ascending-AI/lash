@@ -114,7 +114,6 @@ mod tests {
                         opener: lash_core::AdmittedScope::turn("session", "turn"),
                     },
                     next_rank: 0,
-                    next_commit_seq: 0,
                     commit_states: BTreeMap::new(),
                     settlements: BTreeMap::new(),
                     settled_positions: BTreeMap::new(),

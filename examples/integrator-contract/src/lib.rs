@@ -326,6 +326,19 @@ impl EffectHost for Integrator {
     fn turn_control_binding_id(&self) -> String {
         unreachable!("external signature witness")
     }
+    async fn drain_usage_accounting(
+        &self,
+        _owner: &RuntimeOwner,
+    ) -> Result<lash::usage::UsageOwnerRetired, RuntimeError> {
+        unreachable!("external signature witness")
+    }
+    async fn retire_usage_execution(
+        &self,
+        _owner: &RuntimeOwner,
+        _scope: &lash::runtime::ExecutionScope,
+    ) -> Result<u64, RuntimeError> {
+        unreachable!("external signature witness")
+    }
     async fn retire_closed_root_waits(
         &self,
         _session_id: &SessionId,
@@ -497,7 +510,7 @@ impl RuntimeEffectController for Integrator {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         unreachable!("external signature witness")
     }
@@ -599,7 +612,11 @@ impl AttachmentStore for Integrator {
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         unreachable!("external signature witness")
     }
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         unreachable!("external signature witness")
     }
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {

@@ -1,21 +1,23 @@
-//! Single source of truth for the RLM paired executable-cell grammar.
+//! Single source of truth for the RLM paired executable-cell grammar. It is
+//! written here with `<open>` and `</close>` for the session dialect's cell
+//! tags.
 //!
 //! Two shapes are executable cells, and nothing else is.
 //!
 //! The *block* shape: visible assistant prose, then a line whose trimmed
-//! content is exactly `<typescript>`, then TypeScript source, then a later line
-//! whose trimmed content is exactly `</typescript>`.
+//! content is exactly `<open>`, then source, then a later line
+//! whose trimmed content is exactly `</close>`.
 //!
 //! The *inline* shape: one **complete** line — terminated, or ended by the
-//! response itself — whose trimmed content starts with `<typescript>` and ends
-//! with `</typescript>`, with the source between them. A model that answers a
+//! response itself — whose trimmed content starts with `<open>` and ends
+//! with `</close>`, with the source between them. A model that answers a
 //! one-statement turn on one line has written something the grammar can read
 //! unambiguously — refusing it cost a judged frontier row twelve billed calls
 //! for a semantically fine reply (FIG-1475) — so it is read rather than
 //! refused.
 //!
 //! The line must be complete because a streamed prefix of a longer line looks
-//! exactly like a finished inline cell: `<typescript>print 1</typescript> ok` is
+//! exactly like a finished inline cell: `<open>print 1</close> ok` is
 //! prose, and reading it as a cell the instant the closing tag arrives would
 //! let the provider's chunk boundaries decide what executed. Streaming passes
 //! `allow_eof: false` until the response ends, mirroring the block shape's own
@@ -25,14 +27,14 @@
 //!
 //! * The close is **greedy** — the cell ends at the *last* closing tag on the
 //!   line, since that tag is what makes the line an inline cell at all. So
-//!   `<typescript>print "</typescript>"</typescript>` reads the string correctly,
+//!   `<open>print "</close>"</close>` reads the string correctly,
 //!   while two inline cells written on one line concatenate into a single
 //!   program rather than one cell plus prose. Both halves still run, in order,
 //!   which is what the reply asked for; a non-greedy close would instead
 //!   truncate the string case, and truncating source is the worse failure.
 //! * A line that *begins* with the open tag and *ends* with the closing tag is
-//!   a cell even if a human would read it as a sentence — `<typescript> is like
-//!   </typescript>` executes. Prose that merely names the tags mid-sentence, or
+//!   a cell even if a human would read it as a sentence — `<open> is like
+//!   </close>` executes. Prose that merely names the tags mid-sentence, or
 //!   trails anything after the closing tag, stays prose.
 //!
 //! Markdown code blocks, inline tag mentions, and retired `%%typescript` markers
@@ -148,7 +150,7 @@ pub(crate) fn possible_start_tag_suffix_len(text: &str, tags: CellTags) -> usize
 }
 
 /// Locate a start tag only after its line has completed. Streaming uses
-/// this to avoid suppressing an incomplete line like `<typescript> here`
+/// this to avoid suppressing an incomplete line like `<open> here`
 /// before the model has emitted the rest of the line.
 pub(crate) fn complete_start_tag_span(text: &str, tags: CellTags) -> Option<StartTagSpan> {
     let mut pos = 0;

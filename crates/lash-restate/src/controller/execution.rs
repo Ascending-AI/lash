@@ -199,7 +199,11 @@ pub(crate) fn restate_effect_execution(
         // redeploy, and only a definition's refusal of its context is
         // recorded (FIG-3838). So is a command root's read of its command
         // lane: only the run it read, or its fence's refusal, is recorded
-        // (FIG-4201).
+        // (FIG-4201). So is a trigger delivery's admission: the binding a
+        // start refused as bound is read again, and only an admission or the
+        // delivery's absence is recorded (FIG-4369). So is a follow-on
+        // recovery root's decision: only its answer, or its session's
+        // retirement, is recorded (FIG-4361).
         // Presentation likewise retries when the recorded renderer is absent;
         // an unavailable deployment must not turn that fault into history.
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
@@ -207,7 +211,9 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::AdmitRoot { .. }
         | RuntimeEffectCommand::InspectAdmittedHead { .. }
+        | RuntimeEffectCommand::RecoverFollowOn { .. }
         | RuntimeEffectCommand::ReadSessionCommandRun { .. }
+        | RuntimeEffectCommand::AdmitTriggerDelivery { .. }
         | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::CloseRootScope { .. }
         | RuntimeEffectCommand::BeginSessionClose { .. }

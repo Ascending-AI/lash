@@ -68,7 +68,7 @@ async fn run_in(
         ExecRequest {
             code: code.to_string(),
         },
-        crate::testing::memory_artifact_store().await,
+        crate::testing::sqlite_memory_artifact_store().await,
         LashlangSurface::default(),
         Some(Arc::new(BindingDeferredResolver {
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -111,7 +111,8 @@ async fn process_context<'h>(
     double: &lash_restate_test::RestateTestBackend,
     handler: &'h lash_restate_test::OpenHandler,
 ) -> lash_core::RuntimeExecutionContext<'h> {
-    let artifact_store: lashlang::LashlangArtifacts = crate::testing::memory_artifact_store().await;
+    let artifact_store: lashlang::LashlangArtifacts =
+        crate::testing::sqlite_memory_artifact_store().await;
     let backend = double.lash_backend();
     let process_env_store = backend.process_env_store();
     let effect_host = backend.effect_host();

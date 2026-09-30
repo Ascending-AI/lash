@@ -575,10 +575,10 @@ pub enum SessionStreamEvent {
 /// display-only messages Lash and its protocols put on the stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StreamMessageKind {
-    /// Source of a TypeScript cell about to execute, shown above the tool
-    /// activity it produces.
-    #[serde(rename = "typescript_code")]
-    TypescriptCode,
+    /// Source of a code-mode program about to execute, in the session's
+    /// dialect, shown above the tool activity it produces.
+    #[serde(rename = "code")]
+    Code,
     /// A recorded tool child's stream outgrew its recording budget and its
     /// later events were dropped.
     #[serde(rename = "child_stream_truncated")]
@@ -589,7 +589,7 @@ impl StreamMessageKind {
     /// The wire spelling serde writes for this kind.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::TypescriptCode => "typescript_code",
+            Self::Code => "code",
             Self::ChildStreamTruncated => "child_stream_truncated",
         }
     }
@@ -619,7 +619,7 @@ impl TurnOutcome {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnFinish {
     AssistantMessage {

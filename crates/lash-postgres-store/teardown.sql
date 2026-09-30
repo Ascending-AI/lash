@@ -36,9 +36,11 @@ DROP TABLE IF EXISTS lash_graph_nodes CASCADE;
 
 DROP TABLE IF EXISTS lash_fork_lineage CASCADE;
 
-DROP TABLE IF EXISTS lash_usage_deltas CASCADE;
+DROP TABLE IF EXISTS lash_usage_facts CASCADE;
 
-DROP TABLE IF EXISTS lash_usage_delta_holes CASCADE;
+DROP TABLE IF EXISTS lash_usage_runs CASCADE;
+
+DROP TABLE IF EXISTS lash_usage_owner_retirements CASCADE;
 
 DROP TABLE IF EXISTS lash_session_meta CASCADE;
 
@@ -118,8 +120,6 @@ DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_subscriptions CASCADE;
 
-DROP TABLE IF EXISTS lash_process_definitions CASCADE;
-
 DROP TABLE IF EXISTS lash_trigger_occurrences CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_deliveries CASCADE;
@@ -137,3 +137,5 @@ DROP TABLE IF EXISTS lash_artifact_cleanup_obligations CASCADE;
 DROP TABLE IF EXISTS lash_release_stamp CASCADE;
 
 DROP TABLE IF EXISTS lash_catalog_identity CASCADE;
+
+DROP TABLE IF EXISTS lash_worker_recovery CASCADE;

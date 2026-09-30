@@ -243,9 +243,7 @@ async fn pg_fence_encodes_again_when_f_moves() {
         ))
     };
     let receipt = store
-        .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
-        )
+        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("the commit re-encodes under the moved epoch and lands");
     assert_eq!(

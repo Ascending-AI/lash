@@ -593,7 +593,7 @@ def check_buck2_optimized_config(failures: list[str]) -> None:
         or set(third_optimized) != BUCK2_OPTIMIZED_FLAGS
     ):
         failures.append(
-            "tools/buck2 Rust macros: optimized Rust flags do not match Bazel opt"
+            "tools/buck2 Rust macros: optimized Rust flags do not match the repository profile"
         )
 
     profile_text = profile.read_text(encoding="utf-8")
@@ -702,7 +702,7 @@ def check_monty_optimized_config(failures: list[str]) -> None:
     if commands != [expected]:
         failures.append(
             "scripts/profile_monty_comparison.sh: Monty must run through the "
-            "Bazel-opt-equivalent Buck2 optimized configuration"
+            "Buck2 optimized configuration"
         )
 
 

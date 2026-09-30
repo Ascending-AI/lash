@@ -2,93 +2,62 @@
 
 Status: Accepted
 
-Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) keeps the authoritative signature rule
-and moves where it is read. A `Process` value carries its signature as a
-claim; the engine `resolve` for the pinned definition reference returns the
-authority, and every intent that would create a durable row checks the claim
-against it before the row exists. Process values reach tool contracts through
-the `x-lash` keyword rather than the hand-written catalogue.
-
-Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
-retired Lashlang source. `Process<(…), …>` below is the IR type's canonical
-rendering rather than a source form, and the Lashlang-source refusals are
-moot. `trigger.event` is refused in TypeScript (`TriggerEventRemoved`), so the
-trigger-registration requirement below is historical.
-
 ## Context
 
-Lashlang process types previously stored a flattened input type beside an
-independent `input_count`. That representation lost the parameter name for a
-single scalar or object input and could disagree about invocation shape. Host
-trigger operations also described an unconstrained process by inventing one
-`any` parameter. Neither representation was strong enough to verify a process
-value that arrived indirectly against the immutable artifact export it named.
+A process value may arrive through a tool or nested container. Its claimed type
+must agree with the immutable executable before registration. Arity alone
+cannot describe named calls.
 
 ## Decision
 
-A known process type contains one checked, ordered signature: every parameter's
-Lashlang name and type, followed by its output type. Arity and named invocation
-shape are derived from that signature. Parameter names must be valid source
-identifiers and unique. The sole source forms reuse declaration-list syntax:
+A known process type contains one checked, ordered signature: each parameter's
+name and type, followed by the output type. Arity and named invocation shape
+derive from it. Parameter names are valid identifiers and unique.
+`Process<(), bool>`, `Process<(message: str), bool>`, and
+`Process<(left: str, right: int), bool>` are canonical IR diagnostic renderings.
+TypeScript is the source dialect under
+[ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md).
 
-```lash
-Process<(), bool>
-Process<(message: str), bool>
-Process<(payload: { value: str }), bool>
-Process<(left: str, right: int), bool>
-```
+Hosts may declare an unknown process type when they cannot assert a signature.
+It renders as bare `Process`, implies no parameter name or arity, and is
+gradually consistent with known process types. Program-owned artifact IR
+requires complete known process types. The tagged decoder refuses unknown
+fields, invalid names, duplicates, and anonymous input/count shapes.
 
-The former anonymous `Process<input, output>` source and the artifact shape with
-`input` and `input_count` are refused. There is no compatibility reader.
+Known callable assignment requires equal arity and identical parameter names in
+declaration order. Parameters are contravariant and the result is covariant.
+[ADR 0073](0073-gradual-value-types-through-to-the-workflow-editor.md)'s gradual
+`any` consistency applies recursively. The linker checks process-valued
+arguments against receiving types, including nested containers and unions.
 
-Hosts may publish an unknown process type when an operation cannot truthfully
-assert a signature. Unknown is an opaque Rust API value and canonical Serde
-shape, renders as bare `Process` in diagnostics and TypeScript, and is refused
-in Lashlang source and program-owned artifact IR. It does not imply an arity or
-parameter name. Unknown is gradually consistent with known process types and
-with no non-process type.
+Engine resolution supplies the authoritative signature of an immutable
+process definition. A value carries a claim: an unknown claim adopts the
+derivation, and a known mismatch is refused before durable registration. The
+descriptor must also derive the claimed definition id.
 
-Known callable assignment requires equal arity and identical parameter names
-in declaration order. Parameter types are contravariant, result types are
-covariant, and ADR 0073's gradual `any` consistency applies recursively.
+Source linking infers and materializes omitted process output annotations.
+`ModuleArtifact::from_program` accepts complete IR and refuses a process without
+an explicit output; it does not invent `any`. Parameter names, order, types,
+and outputs participate in executable module and process-reference identity.
+The definition id excludes the signature claim because the engine derives it,
+as specified by
+[ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md).
 
-Process identities continue to contain immutable module, requirements, and
-process references rather than duplicating the signature. Before durable child
-registration, process-start ingress loads each process-valued argument's
-artifact, verifies the identity against its export, resolves aliases, and
-checks the artifact signature against the receiving parameter type. This walk
-covers nested objects, lists, and unions; a rejected union arm does not prevent
-a later arm from accepting the value. Existing trigger execution verification
-remains in place, as does the requirement that trigger registration map
-`trigger.event`, including for a zero-parameter target.
+Evidence: `crates/lashlang/src/ast.rs:219`, `:1252`, `:1354`,
+`crates/lashlang/src/trigger.rs:1100`,
+`crates/lashlang/src/linker/pass_validation.rs:4`, `:415`,
+`crates/lashlang/src/artifact.rs:273`, `:334`, `:1053`, and
+`crates/lash-core-execution/src/runtime/process/definition.rs:417`.
 
-Normal source compilation may omit a process result annotation because the
-linker infers and materializes the result before artifact construction. The
-public raw `ModuleArtifact::from_program` builder accepts only already-complete
-IR and refuses a process without an explicit output; it does not invent `any`.
+## Alternatives considered
 
-The process type has a new canonical wire and semantic hash encoding. The
-Lashlang semantic hash advances from v6 to v7, the workflow graph schema from 5
-to 6, and its type-facet schema from 1 to 2. The ModuleRef envelope remains v2.
-Bytecode, continuation, snapshot, and VM ABI versions do not change because no
-instruction or runtime-value representation changed. Stored artifacts using
-the anonymous process shape must be recompiled and republished.
-Execution-site IDs rooted in module or process identity, and downstream
-tool-intent and frame IDs derived from their call IDs, deliberately rekey under
-v7.
+A flattened input plus an independent count loses parameter names and permits
+contradictory invocation shapes. An invented `any` parameter asserts a name and
+arity the host cannot verify. One signature and an opaque unknown type avoid
+those contradictions.
 
 ## Consequences
 
-- Process parameter names, order, types, and outputs participate in immutable
-  module and process identity.
-- Zero, scalar, outer-named object, and multiple-parameter callables use one
-  representation through parsing, linking, artifacts, schemas, and TypeScript.
-- Host schemas can remain honest when they know only that a value is callable.
-- An externally or indirectly supplied process identity cannot satisfy a
-  different named signature before durable work is registered.
-- This adds only process-signature invariants. Existing enum, union, and object
-  construction rules are unchanged.
-
-This decision extends [ADR 0011](0011-self-contained-processes.md)'s immutable
-captured artifact identity and uses [ADR 0073](0073-gradual-value-types-through-to-the-workflow-editor.md)'s
-gradual assignment policy.
+- Zero, scalar, outer-named object, and multi-parameter callables use one type.
+- Host schemas can describe a callable without fabricating a shape.
+- A forged claim cannot authorize registration of a different executable.

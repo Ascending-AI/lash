@@ -16,10 +16,8 @@ use serde::{Deserialize, Serialize};
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
-/// Maximum canonical JSON bytes one recorded intent batch may declare, as
-/// [`ToolIntents::declared_canonical_bytes`] measures them: the execution
-/// environment a declaration captured from its session is not counted
-/// (FIG-4255).
+/// Maximum canonical JSON bytes one recorded intent batch may declare.
+/// Captured environments are stored separately; their digest references count.
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
 pub const TOOL_INTENT_MAX_PER_KIND: usize = 16;
@@ -53,39 +51,24 @@ impl ToolIntents {
         self.intents.is_empty()
     }
 
-    /// The canonical JSON bytes of what the batch declares, the measure
-    /// [`TOOL_INTENT_MAX_CANONICAL_BYTES`] bounds: the batch with every
-    /// captured execution environment left out.
-    ///
-    /// A declaration that runs work carries the execution environment of the
-    /// session that declared it, so realization can publish it (FIG-2999).
-    /// That environment is the session's policy — its prompt layers among
-    /// it — and its size is the host's, not the attempt's: counting it made
-    /// every child start of a turn under large project instructions a
-    /// deterministic refusal (FIG-4255). The environment still travels with
-    /// the declaration; only the budget leaves it out.
+    /// The canonical JSON size of the complete declaration batch.
     pub fn declared_canonical_bytes(&self) -> Result<usize, serde_json::Error> {
-        let mut declared = self.clone();
-        for intent in &mut declared.intents {
-            intent.leave_out_captured_env();
-        }
-        serde_json::to_vec(&declared).map(|bytes| bytes.len())
+        serde_json::to_vec(self).map(|bytes| bytes.len())
     }
 }
 
 impl ToolIntent {
-    /// Drops the execution environment this declaration captured from its
-    /// session. Exhaustive, so a new kind decides whether it captures one.
-    fn leave_out_captured_env(&mut self) {
+    /// Environments the declaration needs, without their stored bytes.
+    pub fn execution_env_ref(&self) -> Option<&crate::ProcessExecutionEnvRef> {
         match self {
-            Self::StartProcess(start) => start.declaration.env_spec = None,
-            Self::RegisterTrigger(registration) => registration.env_spec = None,
+            Self::StartProcess(start) => start.declaration.env_ref.as_ref(),
+            Self::RegisterTrigger(registration) => Some(&registration.draft.env_ref),
             Self::PublishDefinition(_)
             | Self::GetDefinition(_)
             | Self::SignalProcess(_)
             | Self::CancelProcess(_)
             | Self::EmitProcessEvent(_)
-            | Self::EmitTrigger(_) => {}
+            | Self::EmitTrigger(_) => None,
         }
     }
 }
@@ -288,6 +271,7 @@ pub struct DeclaredModuleArtifact {
 /// installs the subscription. A leaf attempt cannot register synchronously for
 /// the same reason it cannot emit synchronously — a subscription that outlived
 /// a failed attempt would wake a target the attempt never committed.
+#[serde(deny_unknown_fields)]
 pub struct RegisterTriggerIntent {
     /// The runtime whose authority owns the subscription.
     pub owner: RuntimeOwner,
@@ -296,12 +280,6 @@ pub struct RegisterTriggerIntent {
     pub owner_scope: crate::TriggerOwnerScope,
     /// The actor the declaring attempt resolved for the registration.
     pub actor: crate::ProcessOriginator,
-    /// The execution environment to publish under the realizing effect
-    /// scope's artifact owner, when the draft's `env_ref` names bytes not yet
-    /// durable. `None` when the attempt inherited an already-published env
-    /// ref from the process it runs inside.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_spec: Option<crate::ProcessExecutionEnvSpec>,
     pub draft: crate::TriggerSubscriptionDraft,
 }
 
@@ -625,7 +603,6 @@ mod tests {
                     actor: crate::ProcessOriginator::session(crate::SessionScope::new(
                         session_id.clone(),
                     )),
-                    env_spec: None,
                     owner: RuntimeOwner::Session(session_id),
                     draft: crate::TriggerSubscriptionDraft::for_process(
                         "subscription",

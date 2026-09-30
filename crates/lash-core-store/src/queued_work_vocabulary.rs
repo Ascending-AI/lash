@@ -31,6 +31,44 @@ pub enum SessionCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         instructions: Option<String>,
     },
+    /// A host's append to the session graph (FIG-4202). The bound turn owns
+    /// the session head, so a host append is a command the drive applies at
+    /// a turn boundary, against the boundary's resident head: its nodes land
+    /// after everything the bound turn committed. The request's
+    /// `operation_id` is the command's idempotency key. It settles as a
+    /// [`SessionCommandOutcome::AppendSessionNodes`]: appended, or refused
+    /// because its required ancestor left the active path.
+    AppendSessionNodes {
+        #[schemars(with = "serde_json::Value")]
+        request: Box<crate::session_append::AppendSessionNodesRequest>,
+    },
+    /// A host's plugin command (FIG-4202). The plugin's code runs only once
+    /// the drive admits the command, at a turn boundary, under the command
+    /// root's fence; its events, state and queued turns commit with the
+    /// command's settlement. It settles as a
+    /// [`SessionCommandOutcome::PluginOperation`].
+    RunPluginCommand {
+        name: String,
+        #[schemars(with = "serde_json::Value")]
+        args: serde_json::Value,
+    },
+    /// A host's plugin task (FIG-4202): a plugin command whose effects are
+    /// journaled under the command's own scope, so a redrive of the unsettled
+    /// command replays them. It settles as a
+    /// [`SessionCommandOutcome::PluginOperation`].
+    RunPluginTask {
+        name: String,
+        #[schemars(with = "serde_json::Value")]
+        args: serde_json::Value,
+    },
+    /// A host's durable frame open (FIG-4202): the drive opens the frame at
+    /// a turn boundary, in the commit that settles the command, and restarts
+    /// its live interpreter from the frame's seed. It settles as a
+    /// [`SessionCommandOutcome::OpenAgentFrame`].
+    OpenAgentFrame {
+        #[schemars(with = "serde_json::Value")]
+        request: Box<crate::OpenAgentFrameRequest>,
+    },
 }
 impl SessionCommand {
     pub fn kind(&self) -> &'static str {
@@ -38,6 +76,25 @@ impl SessionCommand {
             Self::ApplyConfigPatch { .. } => "apply_config_patch",
             Self::RefreshToolCatalog { .. } => "refresh_tool_catalog",
             Self::CompactContext { .. } => "compact_context",
+            Self::AppendSessionNodes { .. } => "append_session_nodes",
+            Self::RunPluginCommand { .. } => "run_plugin_command",
+            Self::RunPluginTask { .. } => "run_plugin_task",
+            Self::OpenAgentFrame { .. } => "open_agent_frame",
+        }
+    }
+
+    /// Whether the command applies alone, under its own scope, and settles
+    /// with a typed [`SessionCommandOutcome`] in the commit that applies it
+    /// (FIG-4201, FIG-4202). Config patches and catalog refreshes settle
+    /// without one.
+    pub fn settles_with_outcome(&self) -> bool {
+        match self {
+            Self::ApplyConfigPatch { .. } | Self::RefreshToolCatalog { .. } => false,
+            Self::CompactContext { .. }
+            | Self::AppendSessionNodes { .. }
+            | Self::RunPluginCommand { .. }
+            | Self::RunPluginTask { .. }
+            | Self::OpenAgentFrame { .. } => true,
         }
     }
 
@@ -83,11 +140,82 @@ pub enum SessionCommandSettlement {
     Refused {
         code: lash_core_llm::provider::ConfigRefusalCode,
     },
-    /// An administrative compaction settled: its commit completed the
-    /// command, and `outcome` is what it settled as (FIG-4201).
-    Compaction {
+    /// A command that settles with a typed outcome was applied: its commit
+    /// completed the command, and `outcome` is what it settled as, a typed
+    /// refusal included (FIG-4201, FIG-4202).
+    Applied {
         receipt: SessionCommandReceipt,
-        outcome: CompactContextOutcome,
+        outcome: SessionCommandOutcome,
+    },
+}
+
+/// What a command that settles with an outcome settled as (FIG-4201,
+/// FIG-4202). It is written with the commit that completes the command and
+/// read back from that commit's receipt, so a submitter on any runtime, or
+/// one reattaching by the command's receipt, sees the same answer.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+pub enum SessionCommandOutcome {
+    /// An administrative compaction's outcome.
+    CompactContext { outcome: CompactContextOutcome },
+    /// A host append's outcome: its nodes landed, or its required ancestor
+    /// left the active path and nothing was written.
+    AppendSessionNodes {
+        outcome: crate::session_append::AppendSessionNodesOutcome,
+    },
+    /// A host plugin command's or task's outcome.
+    PluginOperation {
+        outcome: PluginOperationCommandOutcome,
+    },
+    /// A host frame open's outcome.
+    OpenAgentFrame {
+        outcome: OpenAgentFrameCommandOutcome,
+    },
+    /// The command could not apply, for a reason its own outcome does not
+    /// name: nothing of it committed, and the command is settled, so it is
+    /// never applied again and the lane never waits on it.
+    Failed {
+        code: crate::RuntimeErrorCode,
+        message: String,
+    },
+}
+
+/// How a host plugin command or task the command lane applied settled
+/// (FIG-4202).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PluginOperationCommandOutcome {
+    /// The operation ran: its output, the runtime events its plugin emitted
+    /// (each with the id of the plugin that owns it) and the turn inputs it
+    /// queued. Its events and plugin state committed with the settlement.
+    Completed {
+        plugin_id: String,
+        output: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        events: Vec<lash_sansio::PluginRuntimeEvent>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pending_turn_inputs: Vec<crate::PendingTurnInput>,
+    },
+    /// The operation failed: nothing of it committed, and the command is
+    /// settled, so it is never applied again.
+    Failed { message: String },
+}
+
+/// How a host frame open the command lane applied settled (FIG-4202).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OpenAgentFrameCommandOutcome {
+    /// The open was accepted: a new frame opened, or the key named the
+    /// current frame and the open replayed it.
+    Opened {
+        outcome: crate::OpenAgentFrameOutcome,
+    },
+    /// The open was refused and nothing of it committed: the key named a
+    /// historical frame, the seed carried artifacts a host open cannot hand
+    /// over, or a follow-on owns the frame.
+    Refused {
+        code: crate::RuntimeErrorCode,
+        message: String,
     },
 }
 

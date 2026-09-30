@@ -192,7 +192,6 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
     };
     let other = RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        &[],
         crate::store::OperationId::turn(session_id.clone(), TurnId::from("another-turn"), "final"),
     );
     commit_runtime_state_for_test(&store, other, "other-owner")
@@ -212,7 +211,6 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
     };
     let own = RuntimeCommit::persisted_state_with_operation_for_testing(
         &after_other,
-        &[],
         crate::store::OperationId::turn(session_id.clone(), parked_turn.clone(), "final"),
     );
     commit_runtime_state_for_test(&store, own, "settling-owner")

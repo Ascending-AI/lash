@@ -54,6 +54,7 @@ fn operation_name(operation: &AdmittedOperation) -> String {
         AdmittedKind::Aggregate(_) => "aggregate".into(),
         AdmittedKind::Await { .. } => "await".into(),
         AdmittedKind::Sleep { .. } => "sleep".into(),
+        AdmittedKind::Control { .. } => "control".into(),
     }
 }
 

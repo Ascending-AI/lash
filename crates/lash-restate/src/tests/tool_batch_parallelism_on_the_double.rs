@@ -8,7 +8,8 @@
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 
 /// The standard protocol, which expands `batch` into the step's group.
-fn standard_factories() -> Vec<std::sync::Arc<dyn lash_core::facade_support::PluginFactory>> {
+pub(super) fn standard_factories()
+-> Vec<std::sync::Arc<dyn lash_core::facade_support::PluginFactory>> {
     vec![std::sync::Arc::new(
         lash_protocol_standard::StandardProtocolPluginFactory::new(),
     )]

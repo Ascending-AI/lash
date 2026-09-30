@@ -4,7 +4,7 @@
 //! pass, a *witnessed* nothing-to-do, a refusal that hands back its partial
 //! report, and a failure that is never laundered into a clean empty report.
 //!
-//! These laws exist because the four backends used to answer four different
+//! Historical, retired in 60e0e86b2a: these laws exist because the four backends used to answer four different
 //! ways: SQLite absorbed every error into a zero [`GcReport`], the in-memory
 //! store returned a zero report unconditionally, `lash-perf` returned a typed
 //! error, and Postgres propagated. All four were indistinguishable to a caller
@@ -251,7 +251,7 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
         0,
         "{backend}: a refusal reclaims nothing: {failure:?}"
     );
-    crate::AttachmentStore::get(attachments.as_ref(), &orphan.id)
+    crate::AttachmentStore::get(attachments.as_ref(), &orphan.id, 32 * 1024 * 1024)
         .await
         .expect("the refused sweep left the blob in place");
 }
@@ -317,7 +317,7 @@ async fn commit_generation(
     state.set_tool_state_snapshot(Some(
         crate::ToolState::default().with_generation_for_conformance(generation),
     ));
-    let commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     super::runtime_persistence::commit_runtime_state_for_test(
         store,
         commit,

@@ -378,7 +378,30 @@ impl SqliteProcessRegistry {
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             location: location.clone(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            trigger_delivery_bindings: super::TriggerDeliveryBindings::Detached,
         })
+    }
+
+    /// Attach the store set's trigger store at `triggers` to this registry's
+    /// connection, so a delivery's start is registered against the
+    /// delivery's binding (FIG-4369).
+    pub(crate) async fn with_attached_trigger_store(
+        mut self,
+        triggers: &DatabaseLocation,
+    ) -> tokio_rusqlite::Result<Self> {
+        let name = triggers.target().open_name();
+        self.conn
+            .call(move |conn| {
+                crate::conn::cached_execute(
+                    conn,
+                    crate::connection_sql::ATTACH_TRIGGER_STORE,
+                    params![name],
+                )
+                .map(|_| ())
+            })
+            .await?;
+        self.trigger_delivery_bindings = super::TriggerDeliveryBindings::Attached;
+        Ok(self)
     }
 
     /// Mint registered process ids from `mint` instead of at random: a fixture
@@ -400,6 +423,17 @@ impl SqliteProcessRegistry {
         self
     }
 
+    fn decode_process_record(
+        json: &str,
+    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
+        serde_json::from_str(json).map_err(|error| {
+            lash_core_execution::PluginError::StoredDataCorrupt {
+                record_kind: "process_registry".to_string(),
+                message: error.to_string(),
+            }
+        })
+    }
+
     /// The retained process registered under `start_key`, if any.
     pub(crate) fn load_process_by_start_key_conn(
         conn: &Connection,
@@ -413,7 +447,7 @@ impl SqliteProcessRegistry {
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+        json.map(|json| Self::decode_process_record(&json))
             .transpose()
     }
 
@@ -429,7 +463,7 @@ impl SqliteProcessRegistry {
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+        json.map(|json| Self::decode_process_record(&json))
             .transpose()
     }
 
@@ -540,6 +574,25 @@ impl SqliteProcessRegistry {
         Ok((receipt, arm))
     }
 
+    /// How many `event_type` events process `process_id`'s log holds.
+    fn count_events_of_type_conn(
+        conn: &Connection,
+        process_id: &ProcessId,
+        event_type: &str,
+    ) -> Result<u64, lash_core_execution::PluginError> {
+        conn.query_row(
+            process_sql().event.count_by_type_through_sequence.sql(),
+            params![
+                process_id.as_str(),
+                event_type,
+                crate::clamp_sequence_bound(u64::MAX)
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as u64)
+        .map_err(process_sqlite_error)
+    }
+
     /// Stage `requests` in order as one batch (FIG-3571): each goes through
     /// the append sequence against the in-memory projection, and the process
     /// is saved once, advancing the change clock once, when any of them moved
@@ -592,6 +645,23 @@ impl SqliteProcessRegistry {
             } else {
                 None
             };
+        // A signal's first append selects the wait it resolves from the
+        // signals of its type the log already holds (FIG-4298); a replayed
+        // signal carries the wait its first append selected.
+        let signal_events_before = if replay_lookup.is_none()
+            && lash_core_execution::runtime::process_signal_name_from_event_type(
+                &request.event_type,
+            )
+            .is_some()
+        {
+            Some(Self::count_events_of_type_conn(
+                conn,
+                &process_id,
+                &request.event_type,
+            )?)
+        } else {
+            None
+        };
         let wake_session_id = Self::wake_session_id_conn(conn, &process_id)?;
         let (last_sequence, sequence) =
             Self::next_event_sequence_conn(conn, &process_id, wake_session_id.as_ref())?;
@@ -601,6 +671,7 @@ impl SqliteProcessRegistry {
             sequence,
             last_sequence,
             replay_lookup,
+            signal_events_before,
             occurred_at_ms,
             wake_session_id.as_ref(),
             fleet_format,

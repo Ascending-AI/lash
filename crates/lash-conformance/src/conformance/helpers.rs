@@ -156,27 +156,6 @@ pub(crate) async fn load_window_state(
     crate::store::window_state(read, store.fleet_format()).map(|loaded| Some(loaded.state))
 }
 
-/// Every stored usage row of `session_id`, in `seq` order, paged through
-/// [`SessionHistoryStore::load_usage_ledger_page`](crate::store::SessionHistoryStore::load_usage_ledger_page).
-pub(crate) async fn load_usage_ledger(
-    store: &dyn RuntimeStore,
-    session_id: &crate::SessionId,
-) -> Result<Vec<crate::TokenLedgerEntry>, crate::StoreError> {
-    const PAGE: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(63);
-    let mut entries = Vec::new();
-    let mut after = None;
-    loop {
-        let page = store
-            .load_usage_ledger_page(session_id, after.as_ref(), PAGE)
-            .await?;
-        entries.extend(page.rows.into_iter().map(|row| row.entry));
-        match page.next {
-            Some(next) => after = Some(next),
-            None => return Ok(entries),
-        }
-    }
-}
-
 /// Every failure settlement of `session_id`, in `(committed_at_ms, turn_id)`
 /// order, paged through
 /// [`SessionHistoryStore::load_failure_evidence_page`](crate::store::SessionHistoryStore::load_failure_evidence_page).

@@ -141,6 +141,16 @@ impl SqliteDatabase {
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
 pub(crate) const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS worker_recovery (
+    scope_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    cpu_nanos INTEGER NOT NULL,
+    replacement INTEGER NOT NULL,
+    unknown_cpu_attempts INTEGER NOT NULL,
+    in_flight INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS blobs (
     hash    TEXT PRIMARY KEY,
     content BLOB NOT NULL
@@ -225,39 +235,77 @@ CREATE TABLE IF NOT EXISTS fork_lineage (
     PRIMARY KEY (session_id, ancestor_session_id)
 );
 
-CREATE TABLE IF NOT EXISTS usage_deltas (
-    seq                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id            TEXT NOT NULL,
-    operation_storage_key TEXT NOT NULL,
-    entry_ordinal         INTEGER NOT NULL,
-    payload_encoding_version INTEGER NOT NULL,
-    payload_hash          TEXT NOT NULL,
-    source               TEXT NOT NULL,
-    model                TEXT NOT NULL,
-    input_tokens         INTEGER NOT NULL,
-    output_tokens        INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS usage_facts (
+    seq                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_kind               TEXT NOT NULL CONSTRAINT ck_usage_facts_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id                 TEXT NOT NULL,
+    effect_key               TEXT NOT NULL,
+    call_ordinal             INTEGER NOT NULL CONSTRAINT ck_usage_facts_call_ordinal CHECK (call_ordinal >= 0),
+    provider_attempt         INTEGER NOT NULL CONSTRAINT ck_usage_facts_provider_attempt CHECK (provider_attempt >= 0),
+    fact_kind                TEXT NOT NULL,
+    disposition              TEXT NOT NULL,
+    run_id                   TEXT,
+    llm_call_id              TEXT NOT NULL,
+    source                   TEXT NOT NULL,
+    model                    TEXT NOT NULL,
+    input_tokens             INTEGER NOT NULL,
+    output_tokens            INTEGER NOT NULL,
     cache_read_input_tokens  INTEGER NOT NULL,
     cache_write_input_tokens INTEGER NOT NULL,
-    reasoning_output_tokens     INTEGER NOT NULL,
-    reconciled_call_id TEXT,
-    reconciled_attempt_ordinal INTEGER,
-    CONSTRAINT ck_usage_deltas_reconciled_pair CHECK ((reconciled_call_id IS NULL) = (reconciled_attempt_ordinal IS NULL)),
-    UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
+    reasoning_output_tokens  INTEGER NOT NULL,
+    generation_id            TEXT,
+    payload_hash             TEXT NOT NULL,
+    recorded_at_ms           INTEGER NOT NULL,
+    CONSTRAINT ck_usage_facts_kind CHECK (
+        (fact_kind = 'attempt' AND disposition IN ('reported', 'unreported') AND run_id IS NOT NULL)
+     OR (fact_kind = 'correction' AND disposition = 'reconciled' AND run_id IS NULL AND generation_id IS NOT NULL)),
+    CONSTRAINT ck_usage_facts_unreported_zero CHECK (disposition <> 'unreported' OR (
+        input_tokens = 0 AND output_tokens = 0 AND cache_read_input_tokens = 0
+        AND cache_write_input_tokens = 0 AND reasoning_output_tokens = 0)),
+    CONSTRAINT uq_usage_facts_identity UNIQUE (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
 );
-CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
-    ON usage_deltas(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_usage_facts_owner_seq
+    ON usage_facts(owner_kind, owner_id, seq);
+CREATE INDEX IF NOT EXISTS idx_usage_facts_unreported
+    ON usage_facts(owner_kind, owner_id, effect_key, call_ordinal, provider_attempt)
+    WHERE disposition = 'unreported';
 
-CREATE TABLE IF NOT EXISTS usage_delta_holes (
-    session_id TEXT NOT NULL,
-    seq INTEGER NOT NULL,
-    call_id TEXT NOT NULL,
-    attempt_ordinal INTEGER NOT NULL,
-    generation_id TEXT,
-    PRIMARY KEY (session_id, seq, call_id, attempt_ordinal),
-    FOREIGN KEY (seq) REFERENCES usage_deltas(seq) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS usage_runs (
+    owner_kind          TEXT NOT NULL CONSTRAINT ck_usage_runs_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id            TEXT NOT NULL,
+    effect_key          TEXT NOT NULL,
+    run_id              TEXT NOT NULL,
+    execution_scope_key TEXT NOT NULL,
+    source              TEXT NOT NULL,
+    model               TEXT NOT NULL,
+    admitted_at_ms      INTEGER NOT NULL,
+    state               TEXT NOT NULL,
+    unknown_reason      TEXT,
+    conflict_detail     TEXT,
+    resolved_at_ms      INTEGER,
+    PRIMARY KEY (owner_kind, owner_id, effect_key, run_id),
+    CONSTRAINT ck_usage_runs_state CHECK (
+        (state = 'open' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NULL)
+     OR (state = 'settled' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL)
+     OR (state = 'unknown' AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL
+         AND unknown_reason IN ('superseded_run', 'call_without_record', 'facts_unjournalable',
+                                'execution_ended', 'owner_retired'))
+     OR (state = 'conflicted' AND unknown_reason IS NULL AND conflict_detail IS NOT NULL
+         AND resolved_at_ms IS NOT NULL))
 );
-CREATE INDEX IF NOT EXISTS idx_usage_delta_holes_attempt
-    ON usage_delta_holes(session_id, call_id, attempt_ordinal);
+CREATE INDEX IF NOT EXISTS idx_usage_runs_open_owner
+    ON usage_runs(owner_kind, owner_id, admitted_at_ms) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_usage_runs_open_scope
+    ON usage_runs(owner_kind, owner_id, execution_scope_key) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_usage_runs_unresolved
+    ON usage_runs(owner_kind, owner_id, effect_key, run_id) WHERE state IN ('unknown', 'conflicted');
+
+CREATE TABLE IF NOT EXISTS usage_owner_retirements (
+    owner_kind    TEXT NOT NULL CONSTRAINT ck_usage_owner_retirements_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id      TEXT NOT NULL,
+    retired_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (owner_kind, owner_id)
+);
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id                       TEXT PRIMARY KEY,
@@ -652,37 +700,6 @@ CREATE TABLE IF NOT EXISTS referrer_fences (
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 
--- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
--- name, revision, pinned definition fingerprint, lifecycle tombstone and
--- change sequence, unique on owner scope and name. Written only by the
--- PublishDefinition intent under revision-and-fingerprint
--- compare-and-swap. The pinned ProcessDefinitionRef travels in record_json;
--- the fingerprint column is what the CAS fence compares. The lifecycle is
--- the FIG-1951 one-column enum with a paired-nullable delete timestamp, not
--- the two-boolean layout the trigger table still carries. Session-scoped
--- names follow the ADR 0049 deletion frontier; host- and platform-scoped
--- tombstones are never collected (ADR 0067).
-CREATE TABLE IF NOT EXISTS process_definitions (
-    definition_id  TEXT PRIMARY KEY,
-    owner_scope    TEXT NOT NULL,
-    name           TEXT NOT NULL,
-    revision       INTEGER NOT NULL,
-    fingerprint    TEXT NOT NULL,
-    lifecycle      TEXT NOT NULL,
-    deleted_at_ms  INTEGER,
-    change_seq     INTEGER NOT NULL,
-    created_at_ms  INTEGER NOT NULL,
-    updated_at_ms  INTEGER NOT NULL,
-    record_json    TEXT NOT NULL,
-    CONSTRAINT ck_process_definitions_lifecycle CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
-    UNIQUE(owner_scope, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_process_definitions_registrant
-    ON process_definitions(owner_scope, name);
-CREATE INDEX IF NOT EXISTS idx_process_definitions_change
-    ON process_definitions(change_seq);
-
 CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
     ON artifact_referrer_edges(referrer_kind, referrer_id);
 
@@ -690,6 +707,7 @@ CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
+    awaited_journal_key TEXT,
     obligation_id TEXT NOT NULL,
     obligation_state TEXT NOT NULL,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -709,6 +727,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
 CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
     ON artifact_cleanup_obligations(obligation_id)
     WHERE obligation_state = 'stalled';
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_awaited_journal
+    ON artifact_cleanup_obligations(awaited_journal_key)
+    WHERE awaited_journal_key IS NOT NULL AND obligation_state = 'due';
 
 
 CREATE TABLE IF NOT EXISTS release_stamp (
@@ -743,7 +764,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// at open and recreated; the old `sessions/` blob trees are unreachable garbage
 /// operators delete manually.
 ///
-/// Bumped to 11 for claim generation fencing (ADR 0029): queued-work and
+/// Bumped to 11 for claim generation fencing: queued-work and
 /// pending-turn-input rows replace their per-claim claimed-at and expiry
 /// columns with a single column pinning the session-execution-lease generation
 /// the claim was taken under (since replaced by root admission, FIG-3927).
@@ -1022,7 +1043,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// `attempts` — and the catalog gains `turn_park_clock`, the feed's sequence
 /// row, and `turn_park_events`, the durable ledger of park transitions. A
 /// pre-87 database is rejected at open and recreated.
-/// Bumped to 88 for FIG-3585: the durable `RuntimeErrorCode` vocabulary drops
+/// Historical, retired in 60e0e86b2a: bumped to 88 for FIG-3585: the durable `RuntimeErrorCode` vocabulary drops
 /// `runtime_perf_start_gate_retry` and `tool_completion_key_process_lifetime`,
 /// and the durable core no longer carries the await-event tables that
 /// store-delegated turn control used (the effect-replay database keeps its
@@ -1336,7 +1357,7 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     discard_reason    TEXT,
     delivery_json     TEXT NOT NULL,
     CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
-    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')),
+    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound', 'source_unreadable')),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
@@ -1373,6 +1394,7 @@ CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
+    awaited_journal_key TEXT,
     obligation_id TEXT NOT NULL,
     obligation_state TEXT NOT NULL,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1392,6 +1414,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
 CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
     ON artifact_cleanup_obligations(obligation_id)
     WHERE obligation_state = 'stalled';
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_awaited_journal
+    ON artifact_cleanup_obligations(awaited_journal_key)
+    WHERE awaited_journal_key IS NOT NULL AND obligation_state = 'due';
 
 CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,

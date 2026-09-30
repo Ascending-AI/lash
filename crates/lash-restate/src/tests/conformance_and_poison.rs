@@ -248,6 +248,7 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &RECOVERY_ARTIFACT_BACKEND,
         )
         .with_process_lifecycle(false),
@@ -380,6 +381,25 @@ lash_conformance::frame_open_redrive_tests!(
     }
 );
 
+// FIG-4297's bound-trigger duplicate law on a live endpoint: each emission
+// runs in a probe handler, the delivery's process in the endpoint's
+// `LashProcessWorkflow`, and the first emission's crash is a failed handler
+// attempt Restate redelivers.
+lash_conformance::bound_trigger_duplicate_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        // Restate state outlives a run: each run names its own session.
+        let prefix: &'static str =
+            Box::leak(format!("restate-bound-trigger-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, effect_host, stores, turn_runner)
+    }
+);
+
 /// ADR 0116 §7.3's declared-start tier on `harness`'s endpoint: the turn runs
 /// in a probe handler, each `spawn_agent` child session runs in the
 /// endpoint's `LashProcessWorkflow` on the law's worker, a crash is a failed
@@ -402,6 +422,7 @@ fn declared_start_tier(
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build(),
+                std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 &backend,
             )
             .with_process_lifecycle(true),
@@ -1555,11 +1576,13 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         process_invocation,
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::Signal {
-                process_id: fig1767_target(),
-                signal_name: "resume".to_string(),
-                signal_id: "fig1767-signal".to_string(),
-                request: lash_core::ProcessEventAppendRequest::new(
-                    "signal.resume",
+                signal: lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(
+                        fig1767_target(),
+                        "resume".to_string(),
+                        "fig1767-signal".to_string(),
+                    )
+                    .expect("signal identity"),
                     serde_json::json!({"source": "fig1767"}),
                 ),
             }),
@@ -1633,7 +1656,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             normalized_record,
-            r##"{"effect_journal_version":15,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_id\":\"p_00000000000070008000000000000001\",\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"85ee3e3e3b582d47e22a2995dae428d5932b79cf755ce8c28af76855b30cf293"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"p_00000000000070008000000000000001"}},"semantics":{},"occurred_at":0}}}}}"##,
+            r##"{"effect_journal_version":15,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"signal\":{\"identity\":{\"process_id\":\"p_00000000000070008000000000000001\",\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\"},\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"5fdcfce131d0cc8e7adc35dcd93313066c80d52144bd147c15d430cb6b0391e7"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"p_00000000000070008000000000000001"},"replay":{"key":"process:p_00000000000070008000000000000001:signal.resume:fig1767-signal"}},"semantics":{"signal_wait":{"ordinal":1}},"occurred_at":0}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -1669,11 +1692,13 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         process_invocation,
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::Signal {
-                process_id: fig1767_target(),
-                signal_name: "resume".to_string(),
-                signal_id: "fig1767-signal".to_string(),
-                request: lash_core::ProcessEventAppendRequest::new(
-                    "signal.resume",
+                signal: lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(
+                        fig1767_target(),
+                        "resume".to_string(),
+                        "fig1767-signal".to_string(),
+                    )
+                    .expect("signal identity"),
                     serde_json::json!({"source": "fig1767"}),
                 ),
             }),
@@ -1888,6 +1913,7 @@ pub(super) fn restate_replay_refuses_pre_effect_19_session_list_envelope() {
         serde_json::to_vec(&JournaledEffectRecord::Recorded(RecordedRuntimeEffect {
             envelope: Arc::new(recorded_envelope),
             outcome: Ok(RuntimeEffectOutcome::Sleep),
+            usage: None,
         }))
         .expect("encode predecessor Restate journal entry");
     let JournaledEffectRecord::Recorded(recorded) = serde_json::from_slice(&journal_wire)
@@ -1919,6 +1945,7 @@ pub(super) fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
     let recorded = RecordedRuntimeEffect {
         envelope: Arc::new(recorded_envelope),
         outcome: Ok(RuntimeEffectOutcome::Sleep),
+        usage: None,
     };
 
     let err = validate_recorded_effect_envelope(recorded, &reconstructed, None)
@@ -1950,6 +1977,7 @@ pub(super) fn recorded_runtime_effect_hash_match_returns_replayed_outcome() {
     let recorded = RecordedRuntimeEffect {
         envelope: Arc::new(envelope.clone()),
         outcome: Ok(RuntimeEffectOutcome::Sleep),
+        usage: None,
     };
 
     let outcome = validate_recorded_effect_envelope(recorded, &envelope, None)
@@ -2185,7 +2213,7 @@ pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
+async fn group_rank_allocator_refuses_exhaustion_without_a_reservation() {
     let harness = effect_group_conformance::LiveConformanceHarness::start_on(
         effect_group_conformance::HarnessServer::in_process(),
     )
@@ -2196,8 +2224,63 @@ async fn group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
-async fn live_group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
+async fn live_group_rank_allocator_refuses_exhaustion_without_a_reservation() {
     let harness = effect_group_conformance::LiveConformanceHarness::start().await;
     harness.rank_allocator_exhaustion().await;
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires isolated native Restate and PostgreSQL services"]
+async fn live_attachment_materialization_turn_witnesses() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+    let directory = tempfile::tempdir().expect("file store directory");
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachments");
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "service fixture reads its isolated PostgreSQL URL"
+    )]
+    let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("PostgreSQL URL");
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+        .await
+        .expect("PostgreSQL storage");
+    let stores: Vec<(&str, Arc<dyn lash_core::StoreSet>)> = vec![
+        (
+            "memory",
+            Arc::new(
+                lash_sqlite_store::SqliteStoreSet::memory()
+                    .await
+                    .expect("SQLite memory"),
+            ),
+        ),
+        (
+            "file",
+            Arc::new(
+                lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                    .await
+                    .expect("SQLite file"),
+            ),
+        ),
+        (
+            "postgres",
+            Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+            )),
+        ),
+    ];
+    for (name, stores) in stores {
+        let prefix = format!("native-attachment-budget-{}-{name}", harness.run_nonce());
+        lash_conformance::attachment_materialization_turn_witnesses(
+            &prefix,
+            harness.endpoint_host(),
+            stores,
+            harness.turn_runner(),
+        )
+        .await;
+    }
     harness.finish().await;
 }

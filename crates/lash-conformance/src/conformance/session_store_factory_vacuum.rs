@@ -36,7 +36,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
         .clone()
         .expect("retained-tombstone leaf");
     source
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit retained-tombstone source");
     factory
@@ -216,10 +216,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         .clone()
         .expect("session c leaf");
     store_c
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
-            &state_c,
-            &[],
-        ))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state_c))
         .await
         .expect("commit session c");
     factory.pin(&leaf_c).await.expect("pin leaf c");
@@ -235,10 +232,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         .clone()
         .expect("session d leaf");
     store_d
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
-            &state_d,
-            &[],
-        ))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state_d))
         .await
         .expect("commit session d");
     factory.pin(&leaf_d).await.expect("pin leaf d");
@@ -328,7 +322,7 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
         .clone()
         .expect("session leaf");
     store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit session");
 

@@ -127,6 +127,12 @@ impl<'de> Deserialize<'de> for VmContinuation {
     }
 }
 
+/// How many settled leaf results an await parked mid-aggregate may carry in
+/// its continuation ([`VmSuspendedOperation::Await`]). A run parked past it
+/// cannot be captured: it declines the park and its host answers the pending
+/// await in place.
+pub(crate) const VM_PARKED_AWAIT_SETTLED_LIMIT: usize = 1024;
+
 /// Where a parked continuation resumes, stated explicitly rather than
 /// implied by its instruction pointer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +157,10 @@ pub enum VmResumePoint {
 }
 
 /// The operation a continuation parked on without completing.
+///
+/// Under the pre-1.0 version freeze (FIG-3846) this vocabulary grows in place
+/// within `VM_CONTINUATION_FORMAT_VERSION` 29: a reader meets an unknown
+/// variant and refuses the continuation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum VmSuspendedOperation {
@@ -163,6 +173,20 @@ pub enum VmSuspendedOperation {
     ResourceOperation { operation: String },
     /// A sleep the run parked awaiting, the same way.
     Sleep,
+    /// A resource-operation batch (one aggregate await over pending
+    /// operations) the run parked awaiting, the same way: the operands and
+    /// the pending-request entries the batch consumes are restored, so the
+    /// continuation issues the same batch again (FIG-4275).
+    ResourceOperationBatch,
+    /// An await of a process handle, or of a tuple, list or record of them,
+    /// the run parked awaiting on its next pending handle (FIG-4275). The
+    /// awaited value stands on the operand stack; when `settled` is not zero,
+    /// a list of the `settled` leaf results the run had already received, in
+    /// traversal order, stands above it. Resuming walks the same value again,
+    /// takes those results for its first `settled` handles without asking the
+    /// host, and issues the await of the handle it parked on again. At most
+    /// [`VM_PARKED_AWAIT_SETTLED_LIMIT`] results ride in a continuation.
+    Await { settled: usize },
 }
 
 /// Where a whole-run dispatch loop stood in its cooperative-yield schedule
@@ -283,6 +307,10 @@ pub enum ContinuationError {
     FormatVersionMismatch { expected: u32, found: u32 },
     #[error("continuation bytes do not decode: {reason}")]
     Undecodable { reason: String },
+    #[error(
+        "an await parked with {settled} settled handle results, over the {limit}-result continuation bound"
+    )]
+    ParkedAwaitTooLarge { settled: usize, limit: usize },
     #[error(
         "continuation resumes by re-issuing {operation}, but instruction {instruction_pointer} does not issue it"
     )]

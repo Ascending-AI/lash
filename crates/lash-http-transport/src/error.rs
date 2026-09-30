@@ -41,6 +41,11 @@ pub enum HttpFailureContext {
     /// No operation-specific evidence was supplied.
     #[default]
     Other,
+    /// The reader refused bytes before copying or decoding them.
+    ResponseBodyTooLarge {
+        limit: usize,
+        received_at_least: usize,
+    },
     /// Reading bytes from an established HTTP response failed.
     ResponseRead {
         /// Underlying cause, without presentation-specific prefixes.
@@ -109,6 +114,20 @@ impl LlmTransportError {
         let mut error = Self::new(format!("HTTP response read failed: {detail}"));
         error.context = Box::new(HttpFailureContext::ResponseRead {
             detail: detail.into(),
+        });
+        error
+    }
+
+    pub fn response_body_too_large(limit: usize, received_at_least: usize) -> Self {
+        let mut error = Self::new(format!(
+            "HTTP response body exceeds the {limit}-byte limit, received at least {received_at_least} bytes"
+        ))
+        .with_kind(ProviderFailureKind::Validation)
+        .with_lash_code(TurnFailureCode::HttpResponseBodyTooLarge)
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable);
+        error.context = Box::new(HttpFailureContext::ResponseBodyTooLarge {
+            limit,
+            received_at_least,
         });
         error
     }

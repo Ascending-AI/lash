@@ -34,7 +34,6 @@ use crate::{
     ChannelTurnEvents, ModelSelection, TurnStreamState, apply_model_selection_to_session,
     assistant_text_for_display, commit_assistant_transcript, enqueue_button_trigger_command,
     enqueue_mail_received_trigger_command, model_spec_from_selection,
-    open_session_with_bounded_retry,
     restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
     workbench_owns_committed_agent_reply, workbench_turn_assistant_message_id,
 };
@@ -625,7 +624,7 @@ pub(crate) async fn workbench_turn_input(
             .map_err(|err| AppError::bad_request(err.to_string()))?;
         let stored = state
             .attachment_store
-            .get(&attachment_id)
+            .get(&attachment_id, lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes)
             .await
             // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
             .map_err(AppError::internal)?;
@@ -1126,22 +1125,11 @@ pub(crate) async fn record_turn_output_for_model(
         }
         _ => {
             if workbench_owns_committed_agent_reply(&output) {
-                let reply_commit_session_id = session.session_id().clone();
                 commit_assistant_transcript(
                     session,
                     identity.turn_id,
                     assistant_text.clone(),
                     model,
-                    || {
-                        open_session_with_bounded_retry(
-                            state,
-                            &reply_commit_session_id,
-                            "turn.reply_commit",
-                        )
-                    },
-                    |event, payload| {
-                        state.trace_for_session(&reply_commit_session_id, event, payload)
-                    },
                 )
                 .await?;
             }

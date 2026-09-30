@@ -686,11 +686,51 @@ jobs:
         run: python3 .release-tools/scripts/publish_workspace.py --version "${RELEASE_TAG#v}"
 
 
+  worker-artifacts:
+    name: Package SDK worker (${{ matrix.os }})
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            os: linux
+          - runner: macos-14
+            os: macos
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+      - name: Build the matching release worker
+        env:
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          python3 scripts/release_version.py stamp "${RELEASE_TAG#v}"
+          cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
+      - name: Bundle helper and exact SDK source
+        env:
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          python3 scripts/package_vm_worker.py --worker target/release/lash-vm-worker \
+            --out worker-artifacts --version "${RELEASE_TAG#v}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sdk-worker-${{ matrix.os }}
+          path: worker-artifacts/*
+          if-no-files-found: error
+
   publish:
     name: Publish SDK release
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [prepare-release, publish-crates]
+    needs: [prepare-release, publish-crates, worker-artifacts]
     permissions:
       contents: write
     env:
@@ -746,6 +786,13 @@ jobs:
           git tag "${RELEASE_TAG}" "${RELEASE_SHA}"
           git push origin "refs/tags/${RELEASE_TAG}"
 
+      - name: Download SDK worker bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: sdk-worker-*
+          merge-multiple: true
+          path: worker-artifacts
+
       - name: Publish release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         # Release notes are written manually: the release publishes with the
@@ -754,3 +801,7 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            worker-artifacts/*.tar.gz
+            worker-artifacts/*.sha256

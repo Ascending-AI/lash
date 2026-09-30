@@ -1,5 +1,5 @@
 //! FIG-4159: the parent brokers every worker effect and recovers a lost
-//! worker through the substrate, never by local rewind (ADR 0123).
+//! worker through the substrate (ADR 0123). Local rewind was retired in 9c1bbd2189.
 //!
 //! Every law runs model code on the in-process fake worker behind the real
 //! protocol types (`lash_vm_broker::testing`), under a real
@@ -581,7 +581,9 @@ impl ParentEffects for TierEffects<'_> {
                 }
                 serde_json::Value::Array(values)
             }
-            AdmittedKind::Await { .. } | AdmittedKind::Sleep { .. } => serde_json::Value::Null,
+            AdmittedKind::Await { .. }
+            | AdmittedKind::Sleep { .. }
+            | AdmittedKind::Control { .. } => serde_json::Value::Null,
         };
         Ok(Performed::outcome(EffectOutcome::Value(
             lash_vm_broker::authority::encode_value(&value),

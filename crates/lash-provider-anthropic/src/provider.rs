@@ -154,11 +154,11 @@ impl Provider for AnthropicProvider {
             }
             let text = read_http_body_text(
                 resp.body,
+                self.options.response_body_limit(),
                 timeouts.request_timeout,
                 "Anthropic response body timed out",
             )
-            .await
-            .unwrap_or_default();
+            .await?;
             return Err(http_error_envelope(
                 format!("Anthropic request failed with {}", status),
                 status,

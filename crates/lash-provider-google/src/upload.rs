@@ -143,11 +143,11 @@ impl GoogleOAuthProvider {
             let headers = start_resp.headers;
             let body = read_http_body_text(
                 start_resp.body,
+                self.options.response_body_limit(),
                 self.options.llm_timeouts().request_timeout,
                 "Gemini Files upload start body timed out",
             )
-            .await
-            .unwrap_or_default();
+            .await?;
             return Err(upload_http_error_envelope(
                 format!("Gemini Files upload start failed with {}", status),
                 status,
@@ -184,11 +184,11 @@ impl GoogleOAuthProvider {
             let headers = finalize_resp.headers;
             let body = read_http_body_text(
                 finalize_resp.body,
+                self.options.response_body_limit(),
                 self.options.llm_timeouts().request_timeout,
                 "Gemini Files upload finalize body timed out",
             )
-            .await
-            .unwrap_or_default();
+            .await?;
             return Err(upload_http_error_envelope(
                 format!("Gemini Files upload finalize failed with {}", status),
                 status,
@@ -201,6 +201,7 @@ impl GoogleOAuthProvider {
             first_header_value(&finalize_resp.headers, "x-goog-upload-status").map(str::to_string);
         let body = read_http_body_text(
             finalize_resp.body,
+            self.options.response_body_limit(),
             self.options.llm_timeouts().request_timeout,
             "Gemini Files upload finalize body timed out",
         )

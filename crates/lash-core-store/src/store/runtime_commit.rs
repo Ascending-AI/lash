@@ -8,90 +8,6 @@ use super::{
 use crate::SessionId;
 use crate::TurnId;
 
-const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
-pub(super) const USAGE_PAYLOAD_ENCODING_V4: u32 = USAGE_PAYLOAD_FAMILY_VERSION as u32;
-
-/// Permanent tag registry for runtime-usage payload identities.
-///
-/// Retired tags remain burned when variants are introduced in a later family
-/// version. Version 4 canonical bytes, in order:
-///
-/// The shared framing header owns the domain and family version. Source and
-/// model follow as length-prefixed strings, then the five signed counters in
-/// declaration order as big-endian `i64` values, then the disposition: tag `0`
-/// reported; tag `1` unreported followed by a `u64` hole count and, per hole,
-/// the call id, the `u32` attempt ordinal, and an optional generation id
-/// (`0` absent / `1` present + string); tag `2` reconciled followed by the
-/// corrected call id and its `u32` attempt ordinal.
-///
-/// The full destructures deliberately omit `..`: adding a semantic field to
-/// either durable DTO fails compilation until this projection is reconsidered.
-fn usage_payload_identity_bytes(entry: &crate::TokenLedgerEntry) -> Vec<u8> {
-    let crate::TokenLedgerEntry {
-        source,
-        model,
-        usage,
-        usage_disposition,
-    } = entry;
-    let crate::TokenUsage {
-        input_tokens,
-        output_tokens,
-        cache_read_input_tokens,
-        cache_write_input_tokens,
-        reasoning_output_tokens,
-    } = usage;
-
-    let mut identity = crate::stable_identity::IdentityEncoder::new(
-        "lash.runtime-usage-payload",
-        USAGE_PAYLOAD_FAMILY_VERSION,
-    );
-    identity.string(source);
-    identity.string(model);
-    identity.i64(*input_tokens);
-    identity.i64(*output_tokens);
-    identity.i64(*cache_read_input_tokens);
-    identity.i64(*cache_write_input_tokens);
-    identity.i64(*reasoning_output_tokens);
-    // v4: the disposition is part of the row's identity, so an unreported
-    // hole and a reconciled correction can never alias a reported row. Each
-    // hole projects its full descriptor — v3 projected only a count, which is
-    // why a reloaded row could not rebuild the attempts a host owes usage for.
-    match usage_disposition {
-        crate::LedgerUsageOutcome::Reported => identity.tag(0),
-        crate::LedgerUsageOutcome::Unreported { attempts } => {
-            identity.tag(1);
-            identity.sequence(attempts, |identity, attempt| {
-                let crate::UnreportedLedgerAttempt {
-                    call_id,
-                    attempt_ordinal,
-                    generation_id,
-                } = attempt;
-                identity.string(call_id);
-                identity.u32(*attempt_ordinal);
-                identity.optional(generation_id.as_deref(), |identity, generation_id| {
-                    identity.string(generation_id)
-                });
-            });
-        }
-        crate::LedgerUsageOutcome::Reconciled {
-            call_id,
-            attempt_ordinal,
-        } => {
-            identity.tag(2);
-            identity.string(call_id);
-            identity.u32(*attempt_ordinal);
-        }
-    }
-    identity.finish()
-}
-
-fn usage_payload_identity_hash(entry: &crate::TokenLedgerEntry) -> String {
-    crate::stable_hash::blake3_hex(
-        "lash-runtime-usage-payload/v4",
-        &usage_payload_identity_bytes(entry),
-    )
-}
-
 /// A committed frame switch's artifact half (ADR 0113 §3.1).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameTransition {
@@ -117,7 +33,7 @@ impl FrameTransition {
 
 /// Every frame a commit leaves, in the order it left them: the prior head's
 /// frame, then each frame whose open the commit appends, except the frame
-/// the new head holds (ADR 0113 §3.1, Lane G amendment). A store ends all of
+/// the new head holds (ADR 0113 §3.1). A store ends all of
 /// them in the commit's transaction, whether or not a [`FrameTransition`]
 /// rides the commit, so no frame outlives the commit that leaves it.
 #[must_use]
@@ -201,9 +117,6 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_base_leaf_node_id: Option<crate::NodeId>,
     pub checkpoint: HydratedSessionCheckpoint,
-    /// Usage rows published atomically by this commit, each carrying a stable
-    /// identity so retrying an unknown commit outcome cannot double-account.
-    pub usage_deltas: Vec<RuntimeUsageDelta>,
     /// Bounded, non-transcript evidence settled with this turn record.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
@@ -229,13 +142,14 @@ pub struct RuntimeCommit {
     /// Requires [`Self::drive_fence`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_commands: Option<crate::QueuedWorkCompletion>,
-    /// What the administrative compaction this commit applies settled as
-    /// (FIG-4201): the command's answer, which the receipt carries back to
-    /// its submitter. Requires [`Self::applied_commands`]. It is what the
-    /// commit's frame and settled rows already say, so the commit identity
-    /// covers it through them.
+    /// What the command this commit applies settled as, for a command that
+    /// settles with an outcome (FIG-4201, FIG-4202): the command's answer,
+    /// which the receipt carries back to its submitter. Requires
+    /// [`Self::applied_commands`]. It is what the commit's frame, nodes and
+    /// settled rows already say, so the commit identity covers it through
+    /// them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compact_context_outcome: Option<crate::CompactContextOutcome>,
+    pub command_outcome: Option<crate::SessionCommandOutcome>,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
     /// the value the head holds after the write, not a delta. A frame-switch
     /// commit writes it, the follow-on's terminal commit clears or replaces
@@ -285,15 +199,8 @@ impl RuntimeCommit {
     }
 
     #[track_caller]
-    pub fn persisted_state_for_test(
-        state: &crate::RuntimeSessionState,
-        usage_deltas: &[crate::TokenLedgerEntry],
-    ) -> Self {
-        Self::persisted_state_for_test_with_budget(
-            state,
-            usage_deltas,
-            Self::recommended_test_commit_budget(),
-        )
+    pub fn persisted_state_for_test(state: &crate::RuntimeSessionState) -> Self {
+        Self::persisted_state_for_test_with_budget(state, Self::recommended_test_commit_budget())
     }
 
     #[track_caller]
@@ -303,7 +210,6 @@ impl RuntimeCommit {
     )]
     pub fn persisted_state_for_test_with_budget(
         state: &crate::RuntimeSessionState,
-        usage_deltas: &[crate::TokenLedgerEntry],
         commit_budget: super::CommitBudget,
     ) -> Self {
         let caller = std::panic::Location::caller();
@@ -323,7 +229,6 @@ impl RuntimeCommit {
         Self::persisted_state_with_graph_commit_and_operation_and_budget(
             state,
             graph,
-            usage_deltas,
             operation,
             commit_budget,
             crate::store::FleetFormat::current(),
@@ -337,7 +242,6 @@ impl RuntimeCommit {
     )]
     pub fn persisted_state_with_operation_for_testing(
         state: &crate::RuntimeSessionState,
-        usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
     ) -> Self {
         let mut graph = state.pending_graph_commit();
@@ -347,7 +251,6 @@ impl RuntimeCommit {
         Self::persisted_state_with_graph_commit_and_operation_and_budget(
             state,
             graph,
-            usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
             crate::store::FleetFormat::current(),
@@ -363,7 +266,6 @@ impl RuntimeCommit {
     pub fn persisted_state_with_graph_commit(
         state: &crate::RuntimeSessionState,
         mut graph: GraphAppend,
-        usage_deltas: &[crate::TokenLedgerEntry],
     ) -> Self {
         let caller = std::panic::Location::caller();
         let operation = OperationId::new(
@@ -381,7 +283,6 @@ impl RuntimeCommit {
         Self::persisted_state_with_graph_commit_and_operation_and_budget(
             state,
             graph,
-            usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
             crate::store::FleetFormat::current(),
@@ -391,26 +292,10 @@ impl RuntimeCommit {
 
     pub fn persisted_state_with_operation(
         state: &mut crate::RuntimeSessionState,
-        usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
     ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
         Self::persisted_state_with_operation_and_budget(
             state,
-            usage_deltas,
-            operation,
-            Self::recommended_test_commit_budget(),
-            crate::store::FleetFormat::current(),
-        )
-    }
-
-    pub fn persisted_state_with_operation_and_staged_usage(
-        state: &mut crate::RuntimeSessionState,
-        usage_deltas: &[RuntimeUsageDelta],
-        operation: OperationId,
-    ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
-        Self::persisted_state_with_operation_and_staged_usage_and_budget(
-            state,
-            usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
             crate::store::FleetFormat::current(),
@@ -420,341 +305,15 @@ impl RuntimeCommit {
     pub fn persisted_state_with_graph_commit_and_operation(
         state: &crate::RuntimeSessionState,
         graph: GraphAppend,
-        usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
     ) -> Result<Self, StoreError> {
         Self::persisted_state_with_graph_commit_and_operation_and_budget(
             state,
             graph,
-            usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
             crate::store::FleetFormat::current(),
         )
-    }
-}
-
-/// Durable identity for one usage row submitted through a runtime commit.
-///
-/// The operation key, ordinal, payload-encoding version, and payload hash are assigned before
-/// the first commit attempt and must be reused byte-for-byte until a commit containing the row
-/// has a confirmed outcome.
-///
-/// `payload_hash` is lowercase hexadecimal BLAKE3 of Lash's hand-written,
-/// domain-prefixed, length-framed projection of [`crate::TokenLedgerEntry`] and
-/// its nested [`crate::TokenUsage`]. Binding both version and content makes
-/// reuse of an operation ordinal for a different row a distinct durable
-/// identity while preserving exact retry deduplication at one encoder version.
-///
-/// This store family has no in-place schema migration. Bumping the payload
-/// encoder version therefore follows the same recreation-only operator flow as
-/// a store schema bump. Cross-version retry continuity is bounded by that
-/// policy: Lash does not claim that usage identities survive store recreation
-/// or deduplicate across encoder versions.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct RuntimeUsageDeltaIdentity {
-    /// Canonical [`OperationId::storage_key`] of the operation that first
-    /// staged this row.
-    pub operation_storage_key: String,
-    /// Zero-based row position within that operation's staged usage batch.
-    pub entry_ordinal: u64,
-    /// Version of the hand-written payload projection used by `payload_hash`.
-    pub payload_encoding_version: u32,
-    /// BLAKE3 of the entry's versioned canonical projection, encoded as 64
-    /// lowercase hexadecimal characters.
-    pub payload_hash: String,
-}
-
-impl RuntimeUsageDeltaIdentity {
-    /// Construct the full identity for `entry` using Lash's canonical payload
-    /// encoding.
-    pub fn for_entry(
-        operation_storage_key: String,
-        entry_ordinal: u64,
-        entry: &crate::TokenLedgerEntry,
-    ) -> Self {
-        let payload_hash = usage_payload_identity_hash(entry);
-        Self {
-            operation_storage_key,
-            entry_ordinal,
-            payload_encoding_version: USAGE_PAYLOAD_ENCODING_V4,
-            payload_hash,
-        }
-    }
-}
-
-#[cfg(test)]
-mod usage_payload_identity_tests {
-    use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
-
-    macro_rules! define_usage_payload_v4_corpus {
-        ($(
-            $row:literal => crate::TokenLedgerEntry {
-                source: $source:expr,
-                model: $model:expr,
-                usage: crate::TokenUsage {
-                    input_tokens: $input_tokens:expr,
-                    output_tokens: $output_tokens:expr,
-                    cache_read_input_tokens: $cache_read_input_tokens:expr,
-                    cache_write_input_tokens: $cache_write_input_tokens:expr,
-                    reasoning_output_tokens: $reasoning_output_tokens:expr $(,)?
-                },
-                usage_disposition: $usage_disposition:expr $(,)?
-            }
-        ),+ $(,)?) => {
-            fn usage_payload_v4_corpus() -> Vec<(&'static str, crate::TokenLedgerEntry)> {
-                vec![$((
-                    $row,
-                    crate::TokenLedgerEntry {
-                        source: $source,
-                        model: $model,
-                        usage: crate::TokenUsage {
-                            input_tokens: $input_tokens,
-                            output_tokens: $output_tokens,
-                            cache_read_input_tokens: $cache_read_input_tokens,
-                            cache_write_input_tokens: $cache_write_input_tokens,
-                            reasoning_output_tokens: $reasoning_output_tokens,
-                        },
-                        usage_disposition: $usage_disposition,
-                    },
-                )),+]
-            }
-        };
-    }
-
-    // The macro repeats the complete TokenLedgerEntry and TokenUsage shapes in
-    // every fixture. A field addition cannot compile until the corpus is
-    // updated; any projection change then moves the exact golden bytes.
-    // Neither v4 DTO has an Option field, so empty/non-empty strings pin the
-    // string absence/presence boundary; the disposition variants pin each
-    // tagged arm of the v4 suffix (reported, unreported hole, reconciled
-    // correction).
-    define_usage_payload_v4_corpus! {
-        "empty_strings_zero_usage" => crate::TokenLedgerEntry {
-            source: String::new(),
-            model: String::new(),
-            usage: crate::TokenUsage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                reasoning_output_tokens: 0,
-            },
-            usage_disposition: crate::LedgerUsageOutcome::Reported,
-        },
-        "representative_nested_usage" => crate::TokenLedgerEntry {
-            source: "turn\0source".to_string(),
-            model: "provider/model-λ".to_string(),
-            usage: crate::TokenUsage {
-                input_tokens: 1,
-                output_tokens: 2,
-                cache_read_input_tokens: 3,
-                cache_write_input_tokens: 4,
-                reasoning_output_tokens: 5,
-            },
-            usage_disposition: crate::LedgerUsageOutcome::Reported,
-        },
-        "all_counters_i64_max" => crate::TokenLedgerEntry {
-            source: "max".to_string(),
-            model: "max".to_string(),
-            usage: crate::TokenUsage {
-                input_tokens: i64::MAX,
-                output_tokens: i64::MAX,
-                cache_read_input_tokens: i64::MAX,
-                cache_write_input_tokens: i64::MAX,
-                reasoning_output_tokens: i64::MAX,
-            },
-            usage_disposition: crate::LedgerUsageOutcome::Reported,
-        },
-        "signed_counter_edges" => crate::TokenLedgerEntry {
-            source: "signed".to_string(),
-            model: "edges".to_string(),
-            usage: crate::TokenUsage {
-                input_tokens: i64::MIN,
-                output_tokens: -1,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 1,
-                reasoning_output_tokens: i64::MAX,
-            },
-            usage_disposition: crate::LedgerUsageOutcome::Reported,
-        },
-        "unreported_after_abort_hole" => crate::TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "openrouter/model".to_string(),
-            usage: crate::TokenUsage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                reasoning_output_tokens: 0,
-            },
-            usage_disposition: crate::LedgerUsageOutcome::unreported([
-                crate::UnreportedLedgerAttempt {
-                    call_id: "call-hole-1".to_string(),
-                    attempt_ordinal: 0,
-                    generation_id: Some("gen-hole-1".to_string()),
-                },
-                // Pins the absent-generation tag: an attempt that never got far
-                // enough to have a generation id is a fact, not missing data.
-                crate::UnreportedLedgerAttempt {
-                    call_id: "call-hole-2".to_string(),
-                    attempt_ordinal: 3,
-                    generation_id: None,
-                },
-            ]),
-        },
-        "reconciled_correction" => crate::TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "openrouter/model".to_string(),
-            usage: crate::TokenUsage {
-                input_tokens: 120,
-                output_tokens: 35,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                reasoning_output_tokens: 7,
-            },
-            usage_disposition: crate::LedgerUsageOutcome::Reconciled {
-                call_id: "call-7".to_string(),
-                attempt_ordinal: 1,
-            },
-        },
-    }
-
-    #[test]
-    fn usage_payload_encoding_v4_golden_identity_corpus() {
-        let rendered = usage_payload_v4_corpus()
-            .into_iter()
-            .enumerate()
-            .map(|(entry_ordinal, (name, entry))| {
-                let identity = RuntimeUsageDeltaIdentity::for_entry(
-                    format!("golden:{name}"),
-                    entry_ordinal as u64,
-                    &entry,
-                );
-                let rendered_identity = format!(
-                    "{}:{}:{}:{}",
-                    identity.operation_storage_key,
-                    identity.entry_ordinal,
-                    identity.payload_encoding_version,
-                    identity.payload_hash
-                );
-                (
-                    name,
-                    format!(
-                        "{}|{}|{rendered_identity}",
-                        hex(&usage_payload_identity_bytes(&entry)),
-                        identity.payload_hash
-                    ),
-                )
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let expected = include_str!("testdata/usage_payload_encoding_v4.hex")
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                line.split_once('=')
-                    .expect("name=preimage|payload_hash|full_identity golden corpus row")
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let missing = rendered
-            .iter()
-            .filter(|(name, _)| !expected.contains_key(*name))
-            .map(|(name, actual)| format!("{name}={actual}"))
-            .collect::<Vec<_>>();
-        assert!(
-            missing.is_empty(),
-            "missing golden corpus rows:\n{}",
-            missing.join("\n")
-        );
-        assert_eq!(rendered.len(), expected.len(), "golden corpus row count");
-        for (name, actual) in rendered {
-            let expected = expected
-                .get(name)
-                .expect("rendered golden corpus row was checked above");
-            assert_eq!(
-                actual, **expected,
-                "v4 preimage, payload hash, or full identity moved for {name}"
-            );
-        }
-    }
-
-    #[test]
-    fn usage_identity_version_participates_in_equality() {
-        let entry = usage_payload_v4_corpus().pop().expect("usage fixture").1;
-        let current = RuntimeUsageDeltaIdentity::for_entry("operation".to_string(), 0, &entry);
-        assert_eq!(current.payload_encoding_version, USAGE_PAYLOAD_ENCODING_V4);
-        let mut future = current.clone();
-        future.payload_encoding_version += 1;
-        assert_ne!(current, future);
-    }
-
-    #[test]
-    fn runtime_commit_rejects_a_payload_version_hash_mismatch() {
-        let entry = usage_payload_v4_corpus().pop().expect("usage fixture").1;
-        let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("usage-payload-version"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[entry]);
-        commit.usage_deltas[0].identity.payload_encoding_version += 1;
-
-        let error = commit
-            .validate_operation_session()
-            .expect_err("future version with a v2 hash must be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("payload encoding version or hash does not match"),
-            "unexpected validation error: {error}"
-        );
-    }
-}
-
-/// One identity-bearing usage row in a [`RuntimeCommit`].
-///
-/// Integrator class (ADR 0051): **store and durable-substrate implementors**
-/// persist the identity beside the row and ignore a duplicate identity inside
-/// the same transaction as the rest of the commit.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RuntimeUsageDelta {
-    /// Stable exactly-once publication identity.
-    pub identity: RuntimeUsageDeltaIdentity,
-    /// Usage counters published under that identity.
-    pub entry: crate::TokenLedgerEntry,
-}
-
-impl RuntimeUsageDelta {
-    pub fn for_operation(
-        operation: &OperationId,
-        entries: &[crate::TokenLedgerEntry],
-    ) -> Result<Vec<Self>, StoreError> {
-        let operation_storage_key = operation.storage_key()?;
-        entries
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(ordinal, entry)| {
-                let entry_ordinal = u64::try_from(ordinal).map_err(|_| {
-                    StoreError::Backend(
-                        "usage delta ordinal does not fit durable u64 identity".to_string(),
-                    )
-                })?;
-                let identity = RuntimeUsageDeltaIdentity::for_entry(
-                    operation_storage_key.clone(),
-                    entry_ordinal,
-                    &entry,
-                );
-                Ok(Self { identity, entry })
-            })
-            .collect()
     }
 }
 
@@ -864,11 +423,6 @@ pub struct RuntimeCommitReceipt {
     /// receipt replay must return the first attempt's values for the resident
     /// graph to converge with durable history.
     pub realized_node_timestamps: Vec<RealizedNodeTimestamp>,
-    /// Usage identities actually present in the transaction represented by
-    /// this result. A replay returns the first attempt's list, allowing a host
-    /// to retain re-ridden staged rows that the first attempt did not carry.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub committed_usage_delta_identities: Vec<RuntimeUsageDeltaIdentity>,
     /// Bounded failure evidence owned by this durable turn settlement.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
@@ -879,10 +433,11 @@ pub struct RuntimeCommitReceipt {
     /// replayed switch commit returns the fact it wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_follow_on: Option<super::PendingFollowOn>,
-    /// What the administrative compaction the commit applied settled as
-    /// (FIG-4201), so the batch's completion answers its submitter.
+    /// What the command the commit applied settled as (FIG-4201,
+    /// FIG-4202), so the batch's completion answers its submitter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compact_context_outcome: Option<crate::CompactContextOutcome>,
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub command_outcome: Option<crate::SessionCommandOutcome>,
     /// Canonical input applications settled by this idempotent turn commit.
     ///
     /// Keeping these identities in the durable turn-commit result lets hosts
@@ -1026,8 +581,8 @@ pub fn ensure_supported_receipt_version_for_fleet(
 /// A plain commit carries no append identity. An append carries its canonical
 /// version, hash, and node count as one variant; only the ancestor fence is
 /// genuinely optional. A semantic boundary carries the FIG-2480 request-identity
-/// receipt for exactly the record-config, create-session, and usage-ledger
-/// operations: the operation is a typed field beside the versioned canonical
+/// receipt for exactly the record-config and create-session operations: the
+/// operation is a typed field beside the versioned canonical
 /// request hash, never recoverable only from the hash.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -1082,9 +637,6 @@ pub enum SemanticBoundaryOperation {
     /// `create-session`: register a newly materialized child session.
     #[serde(rename = "create-session")]
     CreateSession,
-    /// `usage-ledger`: flush staged child usage after its turn.
-    #[serde(rename = "usage-ledger")]
-    UsageLedger,
 }
 
 impl SemanticBoundaryOperation {
@@ -1093,7 +645,6 @@ impl SemanticBoundaryOperation {
         match self {
             Self::RecordConfig => "record-config",
             Self::CreateSession => "create-session",
-            Self::UsageLedger => "usage-ledger",
         }
     }
 
@@ -1103,7 +654,6 @@ impl SemanticBoundaryOperation {
         match key {
             "record-config" => Some(Self::RecordConfig),
             "create-session" => Some(Self::CreateSession),
-            "usage-ledger" => Some(Self::UsageLedger),
             _ => None,
         }
     }
@@ -1210,7 +760,7 @@ impl RuntimeCommit {
     /// operation and canonical request content (FIG-2480).
     ///
     /// Call this as the final step of building a record-config,
-    /// create-session, or usage-ledger commit, after every semantic field is
+    /// or create-session commit, after every semantic field is
     /// in place: the identity hash is computed from the commit itself, and
     /// store validation refuses a stamp that no longer matches the content it
     /// rides with. Refuses every operation outside the adopted set.
@@ -1325,7 +875,6 @@ mod tests {
         for (operation, wire_operation) in [
             (SemanticBoundaryOperation::RecordConfig, "record-config"),
             (SemanticBoundaryOperation::CreateSession, "create-session"),
-            (SemanticBoundaryOperation::UsageLedger, "usage-ledger"),
         ] {
             let identity = AppendRequestIdentity::SemanticBoundary {
                 operation,

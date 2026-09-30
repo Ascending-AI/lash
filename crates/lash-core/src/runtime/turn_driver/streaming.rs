@@ -195,6 +195,7 @@ impl RuntimeTurnDriver<'_> {
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
         cancel: &CancellationToken,
+        usage_call: crate::UsageCall,
     ) -> RuntimeLlmCallOutcome {
         let mut request = (*request).clone();
         let protocol_suppressed_stop_sequences =
@@ -276,9 +277,12 @@ impl RuntimeTurnDriver<'_> {
         let task_sideband = completion_sideband.clone();
         let charge_safety = self.policy.charge_safety.clone();
         let call_id = crate::provider::call_id_for_scope(&llm_request.scope);
+        // The provider task holds the call's dispatch gate; the body keeps
+        // the call and seals it with whatever record this body settles on,
+        // the synthetic one of a cancellation included.
         let mut llm_task = crate::task::spawn(async move {
             call_provider
-                .complete_prepared(llm_request, task_sideband, charge_safety)
+                .complete_prepared(llm_request, task_sideband, charge_safety, &usage_call)
                 .await
         });
         let mut llm_task_abort = AbortOnDrop::new(llm_task.abort_handle());

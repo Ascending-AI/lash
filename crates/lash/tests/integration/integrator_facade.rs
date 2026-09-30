@@ -174,9 +174,7 @@ fn snapshot_agent_frame_is_constructible_from_the_facade() {
 /// projection key with exactly the authored payload.
 #[test]
 fn facade_tool_binding_is_dialect_agnostic() {
-    use lash::tools::{
-        TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinition, ToolDefinitionBindingExt,
-    };
+    use lash::tools::{TOOL_BINDING_KEY, ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
 
     let binding = ToolBinding::new(["tools"], "lookup")
         .with_authority_type("LookupTool")
@@ -192,7 +190,7 @@ fn facade_tool_binding_is_dialect_agnostic() {
 
     let manifest = definition.manifest();
     assert_eq!(
-        manifest.bindings.get(TYPESCRIPT_TOOL_BINDING_KEY),
+        manifest.bindings.get(TOOL_BINDING_KEY),
         Some(&serde_json::to_value(&binding).expect("binding serializes")),
     );
 }

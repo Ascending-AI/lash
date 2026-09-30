@@ -1,16 +1,14 @@
 //! The history segment of the multi-session store (ADR 0112 §1.3, §5 to §8).
 //!
-//! These are the only store reads that decode graph bodies, usage rows or
-//! turn receipts. A window read is bounded by the session's current frame;
+//! These are the only store reads that decode graph bodies or turn receipts. A window read is bounded by the session's current frame;
 //! every other read that returns history is paged under an explicit budget,
 //! and the rest are predicates that return no content.
 use std::num::{NonZeroU32, NonZeroU64};
 
 use super::{BlobRef, HydratedSessionCheckpoint, PendingFollowOn, SessionHeadRef, StoreError};
-use crate::usage::SessionUsageTotals;
 use crate::{
     FrameNodeId, NodeId, PersistedSessionConfig, SessionGraph, SessionId, SessionNodeRecord,
-    TokenLedgerEntry, TurnFailureSettlement, TurnId,
+    TurnFailureSettlement, TurnId,
 };
 
 /// Which head a window read resolves its leaf from.
@@ -39,7 +37,6 @@ pub struct SessionWindowRead {
     pub window: SessionGraph,
     pub checkpoint_ref: Option<BlobRef>,
     pub checkpoint: Option<HydratedSessionCheckpoint>,
-    pub usage: SessionUsageTotals,
 }
 
 impl SessionWindowRead {
@@ -49,7 +46,6 @@ impl SessionWindowRead {
     /// Integrator class (ADR 0051): **store and durable-substrate
     /// implementors**. The struct is `#[non_exhaustive]`, so this is how a
     /// backend outside this crate builds one.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         session_id: SessionId,
         head_revision: u64,
@@ -58,7 +54,6 @@ impl SessionWindowRead {
         window: SessionGraph,
         checkpoint_ref: Option<BlobRef>,
         checkpoint: Option<HydratedSessionCheckpoint>,
-        usage: SessionUsageTotals,
     ) -> Result<Self, StoreError> {
         if window.nodes.is_empty() != window.anchor().is_none() {
             return Err(StoreError::StoredDataCorrupt {
@@ -84,7 +79,6 @@ impl SessionWindowRead {
             window,
             checkpoint_ref,
             checkpoint,
-            usage,
         })
     }
 }
@@ -248,52 +242,6 @@ fn hex_nibble(digit: u8) -> u8 {
     }
 }
 
-/// One page of a session's full usage rows, in `seq` order (ADR 0112 §8).
-#[derive(Clone, Debug)]
-pub struct UsageLedgerPage {
-    pub rows: Vec<UsageLedgerRow>,
-    /// `Some` only when more rows exist.
-    pub next: Option<UsageLedgerCursor>,
-}
-
-/// One stored usage row.
-#[derive(Clone, Debug)]
-pub struct UsageLedgerRow {
-    pub seq: u64,
-    pub operation_storage_key: String,
-    pub entry: TokenLedgerEntry,
-}
-
-/// Session-bound position after one usage row.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct UsageLedgerCursor {
-    session_id: SessionId,
-    after_seq: u64,
-}
-
-impl UsageLedgerCursor {
-    pub fn new(session_id: SessionId, after_seq: u64) -> Self {
-        Self {
-            session_id,
-            after_seq,
-        }
-    }
-
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
-    }
-
-    /// The last `seq` the previous page returned.
-    pub fn after_seq(&self) -> u64 {
-        self.after_seq
-    }
-
-    /// Refuse a cursor minted for another session.
-    pub fn check_session(&self, session_id: &SessionId) -> Result<(), StoreError> {
-        check_cursor_session(&self.session_id, session_id)
-    }
-}
-
 /// One page of a session's turn failure evidence, ordered by
 /// `(committed_at_ms, turn_id)` (ADR 0112 §8).
 #[derive(Clone, Debug)]
@@ -361,7 +309,7 @@ fn check_cursor_session(
 #[async_trait::async_trait]
 pub trait SessionHistoryStore: Send + Sync {
     /// The session's frame at the selected leaf, from its `FrameOpen` to the
-    /// leaf, with the head, checkpoint and usage totals of the same snapshot.
+    /// leaf, with the head and checkpoint of the same snapshot.
     ///
     /// - The frame is the `frame_node_id` column of the selected leaf row.
     ///   Under `Current` the head's `current_frame_node_id` must equal it, or
@@ -371,8 +319,7 @@ pub trait SessionHistoryStore: Send + Sync {
     ///   answers `None`: a base the store no longer holds is
     ///   [`StoreError::TurnBaseNotRetained`].
     /// - `config` is the head's when the frame is the head's current frame,
-    ///   and the frame's `FrameOpen` config otherwise. `usage` is the live
-    ///   session's totals under both selectors.
+    ///   and the frame's `FrameOpen` config otherwise.
     /// - Rows are validated as one anchored chain (§5), and a violation is
     ///   [`StoreError::InvalidWindowAnchor`] or
     ///   [`StoreError::StoredDataCorrupt`], never a smaller window.
@@ -415,22 +362,6 @@ pub trait SessionHistoryStore: Send + Sync {
         node_id: &NodeId,
     ) -> Result<bool, StoreError>;
 
-    /// The session's usage totals: one aggregate row per `(source, model)`
-    /// plus the outstanding holes. It decodes no reported usage row.
-    async fn load_usage_totals(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionUsageTotals, StoreError>;
-
-    /// One page of the session's full usage rows in `seq` order. `next` is
-    /// `Some` only when more rows exist.
-    async fn load_usage_ledger_page(
-        &self,
-        session_id: &SessionId,
-        after: Option<&UsageLedgerCursor>,
-        limit: NonZeroU32,
-    ) -> Result<UsageLedgerPage, StoreError>;
-
     /// One page of the session's failure-bearing turn receipts, ordered by
     /// `(committed_at_ms, turn_id)`. It decodes exactly the receipts it
     /// returns.
@@ -458,15 +389,5 @@ mod tests {
             LineageStamp::of_lineage(std::iter::empty()),
             LineageStamp::of_lineage([(&a, 0)])
         );
-    }
-
-    #[test]
-    fn a_cursor_refuses_another_session() {
-        let cursor = UsageLedgerCursor::new(SessionId::from("a"), 4);
-        assert!(cursor.check_session(&SessionId::from("a")).is_ok());
-        assert!(matches!(
-            cursor.check_session(&SessionId::from("b")),
-            Err(StoreError::CursorForeignSession { .. })
-        ));
     }
 }

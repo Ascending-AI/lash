@@ -1,232 +1,103 @@
 # Process transitions are events; the record is a fold
 
-Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) narrows the
-merge-key paragraph below. `merge_key` and authority become per-item data for
-the drain policy and traces, not composition gates: wakes and host input share
-one FIFO prefix, and session commands form a separate class-level lane applied
-at turn boundaries, unbatched except that adjacent config patches coalesce.
-Every wake terminal raises the redelivery floor in its own transaction, and a
-wake content conflict is a non-blocking discard (ADR 0101 §8, §9).
-
-The process event log is the durable history of a process. The process record is
-its transactionally maintained read projection, not a second source of truth.
-
-The governing invariant is:
-
-> No field of the process record may be written except as the projection of an
-> appended event. Replaying the log into an empty record fold must reproduce the
-> stored record field-for-field.
-
-Registration supplies the immutable base of the fold. Every subsequent process
-transition is an event. The store inserts that event and saves its projected
-record in the same transaction. A batch of events (a run boundary's summary
-prelude and its transition; ADR 0100 R4) folds each event in order exactly as
-appending it alone would and saves the projected record once. Reads continue to use the stored projection;
-they do not refold the log.
-
-The former `wake_target` exception is closed. Wake subscription is queryable
-edge state in the indexed `wake_session_id` column, not a lifecycle-record
-field. `process.subscription_retargeted` is its durable audit event; retargeting
-updates the edge and discards pending deliveries to the old target in one
-transaction. Session deletion clears the indexed edge without changing the
-process record or event log.
-
-This decision closes the split that previously let first-started facts, wait
-entry and clearance, external references, and abandon requests mutate the
-record without an event. Lifecycle events are reserved runtime facts with
-deterministic replay identities. They are wake-inert unless a separate,
-producer-declared event carries wake semantics.
+The process event log is durable transition history. Registration supplies the
+immutable base; the stored `ProcessRecord` is its transactionally maintained
+read projection. Every lifecycle mutation appends an event and saves the fold
+in the same transaction. Replaying ordered events from the registration base
+reproduces the record field-for-field.
 
 ## Context
 
-The process-subsystem end state was subjected to three independent adversarial
-reviews. Their consensus retained the existing process ontology and the
-same-transaction event projection, while identifying the eventless lifecycle
-mutations as the source of record/log divergence. The maintainer ratified the
-result on 2026-07-26.
+First-started facts, wait transitions, external references, cancellation,
+terminal outcomes and parks need one auditable transition path. Reads use the
+stored projection instead of refolding history. A batch folds each event in
+order as individual appends would, then saves the record once.
 
-Seven rulings settle the wider end state:
+## Rendering and visibility
 
-1. Observation uses typed outcomes, weak observers, payload-free tombstones,
-   and a mandatory prune watermark. Counted receipts are rejected.
-2. Undeliverable wakes become typed durable discards — target gone, expired, or
-   retargeted — visible in reports and re-drivable only by explicit host action.
-3. Lash has one trust domain, the host. Correctness fences and tool-layer
-   visibility remain; a separate authorization apparatus does not.
-4. Constant and selector dedupe-key variants are deleted.
-5. Session deletion always retains process execution. Hosts compose any
-   cancellation policy explicitly.
-6. Maximum attempts are producer-declared at registration beside recovery
-   disposition, not configured as a factory knob.
-7. The delivery sequence is staged: the early process waves may proceed with
-   the current parallel work, while later delivery and observer waves wait on
-   their prerequisite contracts and land as a stacked change.
+Wake subscription and observers are edge state, not lifecycle fields.
+`wake_session_id` is indexed routing truth.
+`process.subscription_retargeted` records its audit event, while retargeting
+updates the edge and discards eligible pending deliveries transactionally.
+Observer-added and observer-removed events audit the
+`process_observers(session_id, process_id)` relation without changing process
+lifecycle or extending retention.
 
-## Supersession and rendering
+Session deletion removes its observer edges and wake routing while retaining
+process execution. It is a bulk session-lifecycle fact, not a fan-out of
+per-edge events for a deleted endpoint. Process pruning removes child edges
+with the process. Single-use session ids prevent delete-and-reuse ambiguity
+(ADR 0049).
 
-The durable-core design's “Grants are a counted reference” heading is
-superseded by the weak-observer ruling. A live observer does not extend the
-retention lifetime by holding a counted receipt.
+Rendering distinguishes a retained row, a host projection with its mandatory
+prune watermark and a typed `NoLongerRetained` outcome. An absent retained
+payload is not an empty process. Process identity is the minted id under
+ADR 0107; scope lifetime is a registration fact under ADR 0108.
 
-The durable-core fork-rendering requirement is discharged by a three-layer
-story: a live row while retained, a host projection carrying a mandatory prune
-watermark after projection, and a typed “no longer retained” result once
-neither layer can render the process. Absence is therefore explicit rather than
-being confused with an empty or inaccessible process.
+## 3. Host policy surface
 
-Visibility is likewise edge state rather than fold state. The
-`process_observers(session_id, process_id)` relation is query truth, while
-`process.observer_added` and `process.observer_removed` are replay-keyed audit
-events. Observer removal never changes lifecycle or retention. Session ids are
-single-use under [ADR 0049](0049-session-ids-are-used-once.md), so an observer
-edge cannot suffer delete-and-reuse ABA ambiguity.
+Lash has one host trust domain and implements no authentication or
+authorization policy. Observer-edge visibility and tool filters are query and
+model-presentation rules.
 
-Forks take the host's exact `ProcessRef` selections, including incarnation.
-The host lists the intended session's current observed processes and filters
-that snapshot; an empty selection is history-only. Historical writer provenance
-and host-declared lineage do not select observers. A retained point remains
-forkable after its writer is deleted.
+Hosts explicitly choose initial process observers, session-creation and fork
+observer selections, and later replay-keyed observer mutations. Session and
+fork creation retain an observer intent before cross-store publication and
+consume it after idempotent application. Opening reconciles an interrupted
+publication. Typed unavailable, missing and pruned outcomes describe each
+selection; history position and writer provenance do not select observers.
 
-Fork creation persists those exact references as pending observer intents.
-Publication uses per-process best-effort reconciliation, with typed receipts
-for unavailable, missing, pruned, and superseded runs. Opening the session
-reconciles an interrupted publication idempotently. A reused process name never
-retargets a selected reference. This is not a cross-store atomic transaction.
+A factory-scoped `ProcessToolVisibilityFilter` applies only after observer
+visibility, to session process tools. It is synchronous, infallible and
+narrow-only; core intersects its returned ids with visible candidates. It
+does not govern admin reads, projections, wake delivery, cleanup or pruning.
+A run-local handle can address its process independently of the session tool
+filter.
 
-## Host policy surface
+Input and process wakes compose under ADR 0101's FIFO admission policy.
+Per-item merge metadata is not a composition gate. Wake delivery has its own
+ownership token; retargeting discards work that has not entered delivery,
+while a reclaimed in-flight delivery retains its original target. A stale
+claimant cannot settle a successor's delivery. Typed delivery reports and
+explicit redrive preserve host decisions about discarded ordering barriers.
 
-All four host visibility decisions are now explicit data at their decision
-points:
+Each claimed wake is attempted independently. Expiry is checked before reading
+its source process, so an unreadable source cannot prevent expiry or a sibling's
+delivery. A permanent source-read failure records the typed `source_unreadable`
+discard. A transient failure releases its claim with bounded backoff; the next
+attempt never moves beyond the original expiry. If a settlement write fails,
+only that row waits for claim lapse, and the rest of the claimed page continues.
+These delivery outcomes do not change the source process's lifecycle.
 
-1. `ProcessStartOptions::initial_observers` selects the observer edges created
-   atomically with a process start. Wake routing never creates an observer.
-2. `SessionCreateRequest::observed_processes` requests edges for a new session.
-   Durable sessions commit an `ObserverIntent` before publishing those edges,
-   then consume it after idempotent application; opening a session replays an
-   intent left by a crash. The returned `SessionHandle::observed_processes`
-   reports a typed outcome for every id; unknown and pruned processes do not
-   fail session creation.
-3. `ForkRequest::observed_processes` supplies incarnation-pinned runs and
-   fork creation persists their pending replay intents.
-4. Hosts may add or remove an observer explicitly through the standard
-   replay-keyed observer-event path.
+A `SourceUnreadable` head remains an ordering barrier. After repairing the
+source, the host calls `redrive_wake_delivery` with the delivery id named by
+`wake_delivery_report`.
 
-No path creates an unnamed edge: a tool-start request names its initiating
-session in `ProcessStartRequest::observers` before the start reaches the
-registry, while host starts, session creation, forks, and explicit observer
-mutations use the recorded choices above.
-
-Historical observer-event authors remain opaque audit payloads. A stored
-`by.kind = "fork_inheritance"` neither selects observers nor changes the process
-fold; readers preserve it as the recorded historical fact. Current fork
-selectors and intent attribution fields are removed at the session-store and
-remote-protocol cutover.
-
-Hosts may also register one factory-scoped
-`ProcessToolVisibilityFilter`. It applies only to the session process tools
-(`list`, `signal`, `cancel`, and `await`) after observer-edge visibility has
-been established. The filter is synchronous, in-process, no-I/O, infallible,
-and narrow-only. Core intersects its result with the edge-visible candidates,
-so returning a foreign process id cannot widen visibility. Decisions are pure
-per `(session, candidate)`; Lash may evaluate singleton candidates. Run-local
-handle possession remains a capability and bypasses the filter.
-
-The filter is never consulted by the read model, projections, the wake driver,
-cleanup, prune, or admin/host reads. Structured decision traces record the
-candidate set, returned set, policy, and outcome; ordinary tool results persist
-the model-visible outcome in turn history.
-
-Every queued-work producer stamps an independent optional `merge_key` when it
-is safe for adjacent events to share a turn. An absent key is an explicit
-never-merge decision; the key is not derived from provenance or event identity.
-Process wakes use the constant `PROCESS_WAKE_MERGE_KEY` and therefore batch by
-default. Candidate wakes still have to match work class, delivery policy,
-authority principal, and elevation. Control and cancellation work never batch.
-
-At claim time the store renders the exact model-facing wake causes and admits
-only work that leaves the host-required action-token reserve inside the active
-model's context window. The same host policy bounds a claim to 64 rows and a
-30-second maximum pending age by default. There is no quiet-window timer.
-Producer-side event-identity deduplication remains independent of receiver-side
-turn merging, and structured claim traces record the candidate metadata,
-rendered size, applicable bounds, and selection.
-
-Retention likewise requires an explicit choice. Both terminal-process pruning
-and tombstone compaction take `ProjectionWatermark::{UpTo(cursor),NoProjector}`;
-there is no optional or silently defaulted watermark.
-
-Session deletion is the deliberate exception to per-edge observer audit events:
-it removes all observer rows and wake routing owned by that session without
-appending `observer_removed` or subscription-retarget events. The deletion is
-one bulk session-lifecycle fact; the audit lane records addressability changes
-while both endpoints remain addressable, rather than fan-out events for a
-session that no longer exists. Process pruning likewise removes its child edge
-rows with the process.
-
-Wake retargeting and session deletion discard only deliveries that have not
-entered the durable `enqueuing` claim state. A claimed delivery settles
-truthfully against its original target; retargeting bounds work not yet in
-flight. If a driver crashes after claiming, bounded stale-claim recovery mints
-a new ownership token. The old claimant can no longer settle or defer that
-delivery. Recovery may still truthfully deliver the reclaimed wake to the
-retargeted-away target: retargeting bounds deliveries that were not already in
-flight, and receiver allocation-floor deduplication absorbs any retry.
-
-A discarded group head normally remains an ordering barrier: skipping it could
-discard delivery intent without an explicit host decision. The one exception is
-the typed `sequence_rewound` discard, which is permanent-by-construction and
-does not block later, higher sequences. `wake_delivery_report` therefore names
-each blocked `(target_session_id, process_id)` group, the discarded head and
-reason, and the delivery id to pass to `redrive_wake_delivery`. A
-retargeted-away group receives no new deliveries, so any block there is moot.
-The live operational case is an `Expired` head on a current target; the host
-redrives that named head explicitly.
-
-After pruning, observer rows no longer exist. Consequently, a caller that
-guesses any retained tombstone id can receive its terminal label and prune
-timestamp through the typed no-longer-retained result; that informational
-probe cannot prove the caller was formerly an observer. Lash's single-host
-trust-domain ruling accepts this limited disclosure.
+Pruning and tombstone compaction require an explicit
+`ProjectionWatermark::{UpTo, NoProjector}` choice. Session deletion does not
+implicitly cancel processes; hosts compose cancellation policy explicitly.
 
 ## Shipped storage boundary
 
-The reject-and-recreate schema stores lifecycle JSON beside extracted,
-indexed query columns: originator id, wake session, identity kind and
-label, waiting, timestamps, status, and change sequence. It adds
-`process_observers` with a composite session/process key and reverse index, and
-payload-free `process_tombstones` carrying the deletion change sequence.
-Segment handovers remain in their existing tables but are exposed only through
-the substrate-scoped `ProcessContinuationStore`.
-
-`ProcessStatus` is the sole label-only lifecycle enum. Terminal payloads live
-in `ProcessRecord::outcome`; list and projection queries can filter lifecycle
-without decoding those outputs. SQL backends push every `ProcessListFilter`
-predicate into the query.
+SQLite and PostgreSQL store lifecycle JSON beside indexed query fields,
+observer edges and payload-free process tombstones. `ProcessStatus` is a
+label-only lifecycle enum; terminal payloads live in `ProcessRecord::outcome`.
+Continuation state uses the engine's scoped continuation contract.
 
 ## Consequences
 
-Lifecycle retries deduplicate through deterministic replay keys. A failed
-append cannot change the record, and an exact replay cannot create another
-transition. First-writer-wins and write-once rules remain model constraints
-enforced before projection.
+A failed append cannot change the fold, and a replay key cannot create a
+second transition. First-writer and write-once constraints are checked before
+projection. Every registry must pass the record-refolding conformance law.
 
-Every process-registry backend must pass the same conformance test: after each
-registration, lifecycle transition, signal, cancellation request, terminal
-outcome, replay, and failed append, folding the complete event log from the
-registration base must equal the stored record field-for-field.
+The best-effort event sink is observation; the durable event log is the
+reconciliation source. Event-page consumers ignore unknown event kinds so
+additional runtime facts remain additive. Counted observer receipts are
+rejected because visibility does not own process retention.
 
-External consumers of `event_page` observe additive reserved event kinds,
-including lifecycle transitions, observer audit events, and subscription
-retargets. Consumers must ignore unknown event kinds so future runtime facts
-remain additive. The best-effort `ProcessEventSink` emits these events as well;
-the durable event log remains the reconcile source.
+## Implementation
 
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 10:
-[ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md),
-[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md),
-[ADR 0110](0110-the-engine-owns-process-recovery.md) and
-[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) replace
-older process identity, lifetime, recovery and ownership descriptions here.
-Event folding remains this ADR's rule.
+- [Event projection and refolding](../../crates/lash-core-execution/src/runtime/process/validation.rs).
+- [SQLite event transaction](../../crates/lash-sqlite-store/src/process_registry/support.rs) and [PostgreSQL event transaction](../../crates/lash-postgres-store/src/postgres/process_helpers.rs).
+- [Registry concerns, visibility and retention](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs).
+- [Record-fold law](../../crates/lash-conformance/src/conformance/process_registry.rs).

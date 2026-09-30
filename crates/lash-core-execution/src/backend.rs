@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::engine::BuildGeneration;
 use crate::{
     AttachmentStore, Clock, DeploymentStore, EffectHost, ModuleArtifactStore,
-    ProcessContinuationStore, ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry,
-    ProcessWorkWiring, SessionWorkEngine, TriggerStore,
+    ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
+    SessionWorkEngine, TriggerStore,
 };
 
 /// The identity of one store set: the storage it names, such as a SQLite
@@ -153,19 +153,19 @@ impl Backend {
         self.stores().trigger_store()
     }
 
-    /// The named process-definition registry.
-    pub fn process_definition_registry(&self) -> Arc<dyn ProcessDefinitionRegistry> {
-        self.stores().process_definition_registry()
-    }
-
     /// The store of process execution environments.
     pub fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
         self.stores().process_env_store()
     }
 
     /// The store of immutable process-definition descriptors.
-    pub fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
-        self.stores().process_definitions()
+    pub fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+        self.stores().definition_store()
+    }
+
+    /// Parent-owned worker accounting on this backend.
+    pub fn worker_recovery(&self) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore> {
+        self.stores().worker_recovery()
     }
 
     /// The attachment byte store sessions write through.
@@ -191,6 +191,11 @@ impl Backend {
         &self,
     ) -> Arc<dyn crate::store::generation_drain::GenerationDrainStore> {
         self.stores().generation_drain()
+    }
+
+    /// Owner-scoped accounting, independent of conversation commits.
+    pub fn usage_accounting(&self) -> Arc<dyn crate::UsageAccountingStore> {
+        self.stores().usage_accounting()
     }
 
     /// The store set's obligation ledger of `kind`.
@@ -252,6 +257,8 @@ impl std::fmt::Debug for Backend {
 /// one. Every accessor hands out a handle on the store set's one instance of
 /// that port.
 pub trait StoreSet: Send + Sync {
+    /// Owner-scoped usage facts and dispatch liabilities.
+    fn usage_accounting(&self) -> Arc<dyn crate::UsageAccountingStore>;
     /// The identity of this store set's storage.
     fn binding_identity(&self) -> &StoreBindingId;
 
@@ -274,16 +281,16 @@ pub trait StoreSet: Send + Sync {
     /// The durable trigger subscriptions and occurrences.
     fn trigger_store(&self) -> Arc<dyn TriggerStore>;
 
-    /// The named process-definition registry.
-    fn process_definition_registry(&self) -> Arc<dyn ProcessDefinitionRegistry>;
-
     /// The store of process execution environments.
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore>;
 
     /// The store of immutable process-definition descriptors (ADR 0113
     /// §3.6), in the same database as the modules and environments their
     /// manifests name.
-    fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionStore>;
+    fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore>;
+
+    /// Parent-owned recovery counters for model-code executions.
+    fn worker_recovery(&self) -> Arc<dyn crate::store::worker_recovery::WorkerRecoveryStore>;
 
     /// The attachment byte store sessions write through.
     fn attachment_store(&self) -> Arc<dyn AttachmentStore>;

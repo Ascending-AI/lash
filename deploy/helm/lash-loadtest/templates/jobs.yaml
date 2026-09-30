@@ -56,11 +56,12 @@ spec:
             - {name: LASH_POSTGRES_DATABASE_URL, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: database-url}}}
           resources: {{ toJson .Values.driver.resources }}
 {{- $replacement := index .Values.workers.generationImages .Values.workers.generation }}
-{{- if $replacement }}
+{{- if and $replacement .Values.workers.migrate }}
 ---
 # A worker generation built apart from the bootstrap image is a replacement
 # build (FIG-4169's rolling deploy): its own operator binary expands the
 # store before its workers start. Expanding an expanded store is a no-op.
+# `workers.migrate: false` skips it, as the rollback to N does (FIG-3805).
 apiVersion: batch/v1
 kind: Job
 metadata:

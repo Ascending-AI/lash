@@ -211,7 +211,8 @@ def main(argv: list[str]) -> int:
         print("VM static-state check failed:", file=sys.stderr)
         print("\n".join(f"  {problem}" for problem in problems), file=sys.stderr)
         return 1
-    return 0
+    import subprocess
+    return subprocess.call([sys.executable,str(Path(__file__).with_name("check-vm-parent-paths.py")),str(root)])
 
 
 if __name__ == "__main__":

@@ -291,7 +291,6 @@ impl SessionReadMeta {
             plugin_state_ref: None,
             plugin_state_generations: Default::default(),
             execution_state_ref: None,
-            usage: crate::SessionUsageTotals::default(),
             checkpoint_ref: None,
         }
     }

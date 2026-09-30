@@ -468,7 +468,7 @@ mod tests {
         let recorded = defs[0]
             .manifest
             .bindings
-            .get(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY)
+            .get(lash_tool_support::TOOL_BINDING_KEY)
             .expect("mcp tool carries its tool binding");
         assert_eq!(
             recorded.get("module_path"),

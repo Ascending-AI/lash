@@ -1,50 +1,25 @@
-# RLM History Renders in the Emission Format
+# RLM history renders in the emission format
 
 ## Status
 
 accepted
 
-Amended 2026-09-24 (FIG-3016, FIG-3021): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
-makes TypeScript the sole RLM dialect, so the emitted cell is
-`<typescript>…</typescript>` and the renderer is the tag-parameterized
-`render_cell_text`. The decision is unchanged.
-
-Amended 2026-09-28 (FIG-3931): each printed value is rendered when its cell
-completes and stored with its typed value. Prompt builds reuse the stored text.
-
 ## Decision
 
-The RLM history renderer presents each prior step in the exact grammar the model must emit. A prior executed step renders as an **assistant** message containing `{prose}\n<typescript>\n{code}\n</typescript>` — the canonical cell produced by `render_cell_text` — followed by a **user** message carrying that step's stored printed text, error, and final value. Plain user turns and prose-only finishes keep their roles and render bounded prompt previews, with a `history[N].content` reference for retrieving full content when truncated. The `--- history[N] · … ---` header, the `Code:` framing, and the indented source are removed entirely: **history format equals emission format**. The model's reasoning lane and the `history[N].output[M]` runtime binding are unchanged. A trajectory print now stores both its model-facing text and its typed value.
+In RLM's cell channel, history uses the grammar the model emits: one assistant message containing prose and a `<typescript>...</typescript>` cell, followed by a user observation containing stored printed text, error and final value. The dialect renderer folds buffered assistant prose into its trajectory entry. Standalone messages retain their roles and use bounded previews with `history[N].content` handles for full retrieval. ADR 0083 owns native-channel exchanges; ADR 0116 owns opaque tool results.
 
-## Why
+## Rules and guarantees
 
-RLM requires the model to emit a paired `<typescript>…</typescript>` cell (`cell_scan.rs`), but lash rendered prior steps back into the prompt in a different meta-format inside assistant-role messages (`driver/history.rs`). A model shown its own past turns in a wrapper it never emits imitates the wrapper. Observed live (`z-ai/glm-5.2`): the model produced `--- history[31] · assistant message · 0 chars ---` / `--- history[32] · lashlang step · protocol_iteration 2 ---` as its turn; the extractor found no cell; under `Natural` termination the turn finished with that echo as the user-facing answer.
+A committed assistant transcript is the canonical representation of a completed turn. The history projection uses chronological provenance to omit that turn's redundant successful terminal step, paired assistant content and unobserved echo. A terminal step without a committed assistant message stays visible. Content equality is not the criterion.
 
-The root cause is a representation mismatch — the input history format differs from the output emission format — compounded by placing the meta-format in assistant-role messages, which trains the model in-context to continue it. Rendering history in the emission grammar removes the mismatch by construction. This is the design every mature code-as-action agent converges on (smolagents replays the verbatim code in the assistant role; CodeAct/MINT and OpenHands do the same via tags or the native tool channel).
+Printed values retain both their typed value and text rendered at cell completion. Prompt construction reuses stored text. Prompt messages and `RlmHistoryProjection` use compact canonical indices; omitted protocol entries consume no `history[N]` index. Output and attachment retrieval handles use those same indices.
+
+The rolling cache breakpoint marks the last canonical history message before the current iteration's volatile tail. Failed cells remain visible while repair is needed; the prompt drops repaired failure branches within the same user/event turn boundary, identified by plugin provenance. Durable history remains append-only.
+
+## Why and alternatives
+
+Showing assistant history in a wrapper the model never emits encourages it to imitate that wrapper. An anti-echo instruction leaves that representation mismatch in place and is rejected. Splitting prose and code into two assistant messages is rejected because the emitted step is one message and provider role alternation needs a clean step/observation pair.
 
 ## Consequences
 
-- **One renderer, one format.** The meta-format header strings, the `Code:` framing, the inline `history[N].output[M]` gluing, and the `indent_source` helper are deleted, not flagged. No `RlmHistoryFormat` enum, no env switch, no dual path. Helpers left with no caller (`message_role_label`, `indent_source`) are removed in the same change.
-- **Step folding.** A step is stored as two consecutive chronological entries — an assistant prose `Message` then a `RlmTrajectoryEntry`. The renderer folds them into one assistant message (prose then cell). `lash_core::visit_turn_view` is a push visitor with no lookahead, so folding uses a pending-prose buffer flushed at end-of-iteration; a prose entry with no following step renders standalone (the prose-only finish case).
-- **Completed-turn precedence.** A committed assistant transcript message is the canonical representation of a completed turn. When the chronological event order proves that a successful terminal step and a later assistant message occur before the next user/event turn boundary, the terminal step, its paired `RlmAssistantContent`, and its never-observed output echo are omitted. This is provenance-based precedence: message and finish content are never compared. A terminal step with no same-turn committed assistant message remains in trajectory form without information loss.
-- **Caching preserved.** History stays append-only and the rolling cache breakpoint (`mark_last_history_text_cache_breakpoint`) still fences the last canonical history message before the volatile current-iteration tail. Prints are rendered once at cell completion; changing render parameters or the renderer affects only future prints. Current variable previews remain after the breakpoint.
-- **Canonical projection indices.** The prompt renderer and `RlmHistoryProjection` run the same completed-turn canonicalization. `history[N]` is a compact semantic list: suppressed protocol-internal entries consume no index, and rendered `history[N].output[M]` / attachment re-fetch handles remap chronological source indices to the resulting compact index.
-- **No migration.** Each new trajectory event stores its printed text and typed value in place. A resumed session reuses stored text rather than applying the current renderer to prior prints. The format is changed in place under the version freeze, with no backfill or dual-read window.
-
-## Considered Alternatives
-
-- **Keep the meta-format, add an anti-echo system instruction.** Rejected: it patches the representation mismatch with prose instead of removing it; weaker models still imitate the salient in-context format.
-- **Native tool-call transport (cell as `tool_use`, result as `tool_result`).** Historical rejection, superseded by [ADR 0083](0083-rlm-native-tool-channel.md), which admits and pins both channels. The original rationale was: it pushes lashlang source into a JSON-string argument — the encoding code-as-action exists to avoid — and contradicts RLM's deliberate empty tool array (`tools: Arc::new(Vec::new())`, `tool_choice: LlmToolChoice::None`). It buys no caching or robustness the in-format text rendering lacks.
-- **Two assistant messages (prose, then cell) instead of folding.** Rejected: back-to-back assistant turns do not match how the model emits and stress provider role-alternation; folding yields clean `User → Assistant → User` alternation, one step per pair.
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Item 23: [ADR 0116](0116-tools-are-opaque.md) supersedes the old tool-output
-rendering path. The emission-format rule for RLM cells survives.
-
-## Amendment (FIG-4163, 2026-09-30)
-
-Plain-message history uses bounded previews with retrievable full content; emission-format cell rendering remains the cell-channel contract, while ADR 0083 governs native exchanges.
-[`message_text`](../../crates/lash-protocol-rlm/src/driver/history.rs) and
-`long_user_message_gets_full_history_reference` in
-[the history tests](../../crates/lash-protocol-rlm/src/driver/tests.rs) pin the preview and retrieval reference.
+History rendering and emission share one cell grammar. Stored prints keep their original rendering across resume. [History rendering](../../crates/lash-protocol-rlm/src/driver/history.rs) and [semantic history projection](../../crates/lash-protocol-rlm/src/projection/context.rs) own the implementation.

@@ -2,182 +2,150 @@
 
 ## Status
 
-Accepted 2026-09-25 (FIG-3607, PR-1: the identity cutover). The lifetime
-vocabulary of [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
-is unchanged by this slice except that its process arm names a `ProcessId`;
-the lifetime rework (`Until`/`Detached`) is
-[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
-
-Amends [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
-and [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
-§1: a process opener and a process parent scope are the minted id, and there
-is no incarnation.
+Accepted.
 
 ## Context
 
-A process used to be named by a caller-chosen `ProcessId` plus a
-store-assigned incarnation. The name did three jobs at once: it was the
-idempotency key of the start, the address every later command used, and the
-display name. Every reader had to carry the `(name, incarnation)` pair,
-because a pruned name could be registered again and a bare name then
-addressed the wrong lifetime. The pair leaked into handles, cursors, wake
-deliveries, attachment owners, effect openers, trace keys and three wire
-formats, and the registration fingerprint existed only to decide whether a
-repeat under the same name was "the same" start.
-
-Historically, it also broke recovery after prune (FIG-3611 L4/L5): a
-re-registered name reused the synthetic sessions derived from the pruned
-process's name, which prune had tombstoned, so the new lifetime could not
-create them. A process runtime has no sessions since ADR 0124.
+A start needs an idempotency key, while every later operation needs the
+identity of one process lifetime. Keeping those identities separate lets a
+retry find its retained result without making a caller's name the address
+of every future process registered under that name.
 
 ## Decision
 
 ### 1. A process id is minted, never chosen, never reused
 
-`ProcessId` is `p_` followed by 32 lowercase hex digits of a UUIDv7. Only the
-process registrar mints one, inside the transaction that registers the
-process. There is no construction from an arbitrary string: an id is minted
-or parsed back from bytes a registrar minted, and deserialization validates
-the spelling. Every derived identity (its effect opener, its attachment
-referrer (`process_record`), its trace graph key, its handle) is derived
-from the minted id, so no two lifetimes can share one.
+`ProcessId` is `p_` followed by 32 lowercase hexadecimal digits of a
+UUIDv7. The registrar mints it inside the registration transaction, after
+admission checks. Parsing and deserialization validate that spelling and
+the UUID version and variant. Production registration mints a fresh id;
+fixture generators can install a sequential test mint.
 
-`ProcessIncarnation`, `ProcessRef`, `resolve_process_ref`, every `*_ref`
-registry method, the `IncarnationSuperseded` refusals and the `Retired`
-history retention are deleted. A pruned id refuses as
-`ProcessNoLongerRetained`; an id no registrar minted refuses as
-`ProcessUnknown`.
+Handles, process effect openers and process-record artifact referrers name
+that id. While its tombstone is retained, a pruned id answers
+`ProcessNoLongerRetained`; an unknown id answers `ProcessUnknown`. Tombstone
+compaction removes that distinction. A display label is descriptive data;
+there is no label-to-process lookup.
 
-### 2. A start is keyed by an optional, trusted `StartKey`
+Evidence: `crates/lash-sansio/src/identity.rs:212`,
+`crates/lash-core-store/src/process_identity.rs:19`, and
+`crates/lash-sqlite-store/src/process_registry/registration.rs:74`, and
+`crates/lash-core-execution/src/runtime/process/registry_concerns.rs:846`.
 
-`StartKey` is idempotency only. It is a framed digest (family
-`lash.process-start-key` v1) over admitted operation identity, never over
-submitted content, source or compiler identity, or the minted result. Each
-start path has its own namespace:
+### 2. A start is keyed by an optional `StartKey`
 
-1. a recorded tool intent: its replay key;
-2. an orchestrating tool call: its admitted scope, call id and start ordinal;
-3. a trigger delivery: occurrence, subscription, subscription incarnation and
-   revision;
-4. a host or remote caller: the caller's bytes;
-5. a keyless host start: a fresh random key, so it is always new.
+A `StartKey` is a framed digest in the `lash.process-start-key` v1 family.
+Its preimage identifies the admitted operation, not the submitted content,
+source, compiler or minted result. The start paths have separate namespaces:
 
-While a process registered under a key is retained, registration under the
-same key returns that process (`Existing`) whatever the retry submitted. The
-key is **trusted**: content is never compared. A changed-content retry adopts
-none of its staged artifacts; they are released. After the process is pruned
-the key starts a new process with a new id.
+- A tool intent uses its recorded replay key.
+- A trigger delivery uses its occurrence, subscription, subscription
+  incarnation and revision.
+- A host or remote caller supplies bytes to `StartKey::for_host`.
+- A keyless host start uses its admitted scope and start ordinal, so replay
+  issues the same key.
 
-There is no name lookup. A host that wants a readable name sets the
-registration's display label; nothing resolves a label to a process.
+Host bytes alone determine a host key across the store set. Originators and
+deployment namespaces that share a store share that key space. The host
+owns any partitioning policy; Lash performs no authorization decision.
+
+A tool-intent or trigger key is trusted. A repeat returns the retained
+process as `Existing` regardless of the retry's submitted content. A host
+key, supplied or keyless, fences the start. Its input, lifetime, ancestry,
+session capability, identity, event types, provenance, wake target and
+environment must match the retained registration. A mismatch returns
+`PluginError::StartKeyConflict { start_key }`, whose error names only the key.
+
+The request's key is private. Host entry points accept only the host family
+and refuse another family as `start_key_family_refused`. Derivation and
+parsing of internal families require `StartKeyDerivation`, which the facade
+and runtime root do not export. After pruning, a key can register a fresh
+process with a fresh id.
+
+Evidence: `crates/lash-core-store/src/process_identity.rs:190`,
+`crates/lash-core-execution/src/runtime/process/validation.rs:1003`, and
+`crates/lash-core-execution/src/runtime/process/model/start_request.rs:217`.
 
 ### 3. The start effect is addressed by the key
 
-A journaled start is the effect `process:start:{start key}`; its staging
-owner is keyed the same way. The minted id is a result the start records, and
-a redrive reads it back. A journaled start without a key is refused
-(`process_start_key_missing`).
+A journaled start is `process:start:{start key}`. Its staging referrer is
+`Start(key)`. A missing key refuses as `process_start_key_missing`. The
+recorded result contains the minted id and `Created` or `Existing`, so replay
+answers the disposition the first execution observed.
 
-The start records whether it created the process or found it (`Created` or
-`Existing`) beside the id, so a redrive answers what the first execution saw.
-A host start answers a `ProcessStartReceipt` of the id, the key and that
-disposition; the remote protocol's `RemoteProcessStartReceipt` carries the
-same three, with the key as its digest.
+Host and remote start receipts carry the id, key and disposition. A repeat
+that returns `Existing` releases its staged content rather than adopting it
+into the retained process.
 
-### 4. A declared start answers a slot, not a handle
+Artifact cleanup must preserve a concurrent start's committed content. A
+start that finds its staging referrer ended holds the content under its own
+`ProcessRecord(id)`; cleanup protects committed rows it encounters under the
+same referrer. [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md)
+§3.3 owns those artifact rules.
 
-A tool attempt that declares a start cannot know the id. It answers
-`{"__start_slot__": <intent index>}`; the attempt coordinator replaces the
-slot with the handle of the realized start of that intent index before any
-model or cell sees the output. A slot whose start did not realize is a typed
-failure (`process_start_unrealized`), never a handle.
+Evidence: `crates/lash-core-execution/src/runtime/effect/envelope.rs:910`,
+`crates/lash-core-execution/src/runtime/process/start_staging.rs:327`, and
+`crates/lash-restate/src/controller/process_command.rs:281`.
+
+### 4. A declared start answers a slot
+
+A declaring tool answers `{"__start_slot__": <intent index>}`. The attempt
+coordinator replaces the slot with the realized process handle before
+projecting a successful result to the model or cell. If the declared start
+does not realize, the result is the typed `process_start_unrealized` failure.
+
+Registration records a declared start's consumer hold atomically with its
+process row. Retention cannot prune a held row. The consumer releases the
+hold after incorporating settlement; its opener's close also releases the
+hold. Cancellation and lifetime are separate obligations, as specified in
+[ADR 0116](0116-tools-are-opaque.md) §3.
+
+Evidence: `crates/lash-sansio/src/handle.rs:168`,
+`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs:803`,
+`crates/lash-sqlite-store/src/process_registry/registration.rs:104`, and
+`crates/lash-sqlite-store/src/process_registry/prune_api.rs:119`.
 
 ### 5. A trigger delivery binds its process after the start
 
-A delivery reservation is unbound until its start registers; the router then
-binds the minted id to the delivery. Recovery starts only unbound
-reservations, under their delivery start key, so a crash between registration
-and binding converges on the process the key already registered.
+A delivery reservation has no process until the start registers. The router
+then binds its minted id. Recovery starts an unbound reservation under its
+delivery key and binds the result. A crash between registration and binding
+therefore converges on the process retained under that key. Binding also
+settles the delivery obligation, as specified in
+[ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) §3.
 
-### 6. Clean cutover
+A bound delivery never mints again, although §2 lets a key register afresh
+once its process is pruned. A delivery's key finds nothing after the bound
+process is pruned, while the binding outlives it. When the key finds nothing,
+the registrar reads the delivery's binding in the same transaction. A bound
+delivery registers nothing and refuses as `TriggerDeliveryBound`, and its
+emitter answers the bound process (FIG-4369). The binding is written once, and
+a bind precedes the prune of its process, so the check sees every bind whose
+process is absent from the key lookup.
 
-Every persisted or wire shape that carried a name or an incarnation is bumped
-and refuses its predecessor typed, before any effect: the SQLite and
-PostgreSQL schemas, the remote protocol (window 100), the trace schema (35),
-the Restate process journal, the effect journal, the process-command journal
-payload, the tool-child request, the parent-scope payload, the wake-delivery
-format, the lashlang segment state and the handle and cursor spellings
-(`lashpc3`). There is no migration.
+Evidence: `crates/lash-core-execution/src/triggers/router.rs:666`.
+
+### 6. Durable identity shapes
+
+Persisted and wire process references use the minted id. Start envelopes
+carry the key separately, and the start's recorded receipt carries its
+result. Process identity parsing is strict. Durable-format compatibility is
+owned by [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md);
+the pre-1.0 version freeze applies to these shapes.
+
+Evidence: `crates/lash-sansio/src/identity.rs:304` and
+`crates/lash-core-store/src/process_identity.rs:303`.
 
 ## Consequences
 
-- **Known gap until PR-2**: there is no retention guard. A start whose result
-  was lost **and** whose process was then pruned can double-start: the redrive
-  finds no retained process under its key and registers a new one. Journal
-  loss already refuses as `SubstrateLost`. The law "a redrive after prune
-  returns the recorded id" holds whenever the start's recorded result
-  survives.
-- The fence-lift machinery that let a pruned name be registered again is no
-  longer reachable from registration; it is removed with the scope fences in
-  PR-2.
-- Downstream hosts that looked processes up by name must switch to the minted
-  `ProcessId` returned by the start, or to their own `StartKey`.
+Callers retain the returned `ProcessId` to address the process. A readable
+label cannot serve as that address. Reusing a start key after pruning creates
+a different lifetime, while a journal that retains its start result returns
+its recorded id. Declared-start consumer holds protect the result until the
+consumer settles it.
 
-## Amendment (FIG-3562, 2026-09-29): the orchestration start-key namespace is deleted
-
-Namespace 2 of §2, "an orchestrating tool call: its admitted scope, call id
-and start ordinal", is deleted with orchestrating tools ([ADR 0116](0116-tools-are-opaque.md)). A spawn is a
-declared start keyed by its tool intent (namespace 1). The family stays
-`lash.process-start-key` v1, changed in place under the freeze. The known
-retention gap is closed for declared starts: registration writes a consumer
-hold on the process row, prune refuses a held row, and the hold is released
-only after the parked call's settlement is incorporated or its opener's scope
-closes ([ADR 0116](0116-tools-are-opaque.md) §3.6).
-
-## Amendment (FIG-4111, 2026-09-29): host keys are global and fence their start
-
-Replaces §2 items 4–5 and "the key is **trusted**". Since
-[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md) the
-originator is provenance only, and a process's lifetime is an explicit
-`Until`/`Detached` decision with its grant. So lash mixes nothing into a host
-key: `StartKey::for_host(bytes)` takes the bytes alone, and the same bytes are
-one key across the **store set**. Key uniqueness is the registry's start-key
-index, so deployment namespaces that share a store
-([ADR 0111](0111-a-deployment-namespace-prefixes-every-restate-name.md))
-share keys; partitioning keys between tenants is the host's job.
-
-Derived keys (tool intent, trigger delivery) stay trusted. A host key, whether
-supplied or keyless, fences its start. A retry returns the retained process
-only if its input, lifetime decision, ancestry, session capability, identity,
-event types, originator, wake target and environment all match. Otherwise it
-is refused as `PluginError::StartKeyConflict { start_key }`
-(`process_start_key_conflict`), which names the key and nothing of the
-retained process: not its id, its originator or its input. The same holds for
-a second start in one scope under one host key: it shares the scope's start
-effect, and a different start there is the same conflict, never a replay
-divergence. Lash never decides whether a caller may use a key
-([ADR 0014](0014-operational-policy-stays-with-the-host.md),
-[ADR 0046](0046-process-transitions-are-events-record-is-a-fold.md)).
-
-Only the host rails mint host keys: `ProcessStartRequest::with_host_start_key`
-(the facade's `start`) and the remote start conversion. A request's key is
-private, and a host rail refuses a request that carries any other family as
-`start_key_family_refused`. The derived families (`for_tool_intent`,
-`for_trigger_delivery`, `for_keyless_host`) and `StartKey::parse` take a
-`StartKeyDerivation` that no facade exports, so host, plugin and
-model-written code cannot build or submit a key in them. A keyless host start
-keeps its scope-plus-ordinal key (not a random one, as §2 item 5 said) so
-replay reissues it. After prune a key starts a new process with a new id for
-any caller, and the pruned id refuses as `ProcessNoLongerRetained`. Minting a
-`ProcessId` takes the registrar's `ProcessIdRegistrar`; tests name processes
-they never registered with `ProcessId::fixture`.
-
-A global key lets two originators' starts meet under one `Start(key)` referrer
-([ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) §3.3).
-A terminal refusal that ends `Start(key)` never strands a concurrent start
-staged there. After its row commits, a start that staged under `Start(key)`
-checks for the fence and, if it finds one, holds its content under
-`ProcessRecord(id)` itself. A row that committed before the fence, after the
-refusing start read the key, is held by the cleanup executor when it applies
-`Start(key)`'s end (ADR 0113, FIG-4130 amendment); the refusing start no
-longer reads the registry again.
+A caller-chosen process address would combine retry identity and lifetime
+identity. A separate incarnation would require every handle and command to
+carry another identity. A minted id names the lifetime directly. Host-key
+content checks make retries explicit without turning submitted content into
+the idempotency key.

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use super::control_intent::ControlIntentId;
 use super::{DriveFence, SessionHeadRef, StoreError};
 use crate::{BatchId, InputId, SessionId, TurnId};
-use lash_sansio::TurnStop;
+use lash_sansio::{TurnFinish, TurnOutcome, TurnStop};
 
 /// A turn commit's identity: the logical root and the physical ordinal of
 /// the attempt that commits it. Derived, never minted: the ordinal is the
@@ -104,16 +104,59 @@ impl RootTerminalKind {
     }
 }
 
+/// The outcome a root's final physical turn committed with: it finished, or
+/// it stopped. A frame switch never ends a root (its root goes on in the
+/// next physical turn), so it has no spelling here. Encoded as the matching
+/// [`TurnOutcome`] variant.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootCommittedOutcome {
+    Finished(TurnFinish),
+    Stopped(TurnStop),
+}
+
+impl RootCommittedOutcome {
+    /// The committed outcome `outcome` ends a root with; `None` for a frame
+    /// switch, which ends none.
+    #[must_use]
+    pub fn of_turn_outcome(outcome: &TurnOutcome) -> Option<Self> {
+        match outcome {
+            TurnOutcome::Finished(finish) => Some(Self::Finished(finish.clone())),
+            TurnOutcome::Stopped(stop) => Some(Self::Stopped(stop.clone())),
+            TurnOutcome::AgentFrameSwitch { .. } => None,
+        }
+    }
+
+    /// Why the turn stopped; `None` when it finished.
+    #[must_use]
+    pub fn stop(&self) -> Option<&TurnStop> {
+        match self {
+            Self::Finished(_) => None,
+            Self::Stopped(stop) => Some(stop),
+        }
+    }
+}
+
+impl From<RootCommittedOutcome> for TurnOutcome {
+    fn from(outcome: RootCommittedOutcome) -> Self {
+        match outcome {
+            RootCommittedOutcome::Finished(finish) => Self::Finished(finish),
+            RootCommittedOutcome::Stopped(stop) => Self::Stopped(stop),
+        }
+    }
+}
+
 /// Why a root is terminal: the transaction that wrote its evidence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cause", rename_all = "snake_case")]
 pub enum RootTerminalCause {
     /// The root's final physical turn committed (the head-commit
-    /// transaction).
+    /// transaction), with `outcome`: what the root answers every input it
+    /// took, read from this row alone (FIG-4345).
     Committed {
         commit: TurnCommitId,
         turn: TurnId,
-        stop: Option<TurnStop>,
+        outcome: RootCommittedOutcome,
     },
     /// An operator cancelled the parked root (its control intent).
     OperatorCancelled { intent: ControlIntentId },
@@ -139,6 +182,11 @@ pub enum RootTerminalCause {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         refusal_cause: Option<crate::RuntimeErrorCause>,
     },
+    /// A command root applied the session's open command run and admitted
+    /// no turn (ADR 0101 §4, FIG-4202). Its end, written once the command
+    /// lane is empty, arms its scope close as every root's end does, so the
+    /// root's journal is retired like any other.
+    CommandsApplied,
 }
 
 impl RootTerminalCause {
@@ -146,7 +194,7 @@ impl RootTerminalCause {
     #[must_use]
     pub fn kind(&self) -> RootTerminalKind {
         match self {
-            Self::Committed { stop, .. } => RootTerminalKind::of_stop(stop.as_ref()),
+            Self::Committed { outcome, .. } => RootTerminalKind::of_stop(outcome.stop()),
             Self::OperatorCancelled { .. } | Self::Forked { .. } | Self::SessionDeleted { .. } => {
                 RootTerminalKind::Cancelled
             }
@@ -158,6 +206,7 @@ impl RootTerminalCause {
                 }
             }
             Self::Refused { .. } => RootTerminalKind::Failed,
+            Self::CommandsApplied => RootTerminalKind::Answered,
         }
     }
 }
@@ -206,15 +255,15 @@ pub struct RootTerminalWrite {
     pub commit: TurnCommitId,
     /// The physical turn that reached the terminal.
     pub turn: TurnId,
-    /// Why the turn stopped; `None` when it completed.
-    pub stop: Option<TurnStop>,
+    /// The outcome the turn committed with.
+    pub outcome: RootCommittedOutcome,
 }
 
 impl RootTerminalWrite {
     /// The kind this write answers.
     #[must_use]
     pub fn kind(&self) -> RootTerminalKind {
-        RootTerminalKind::of_stop(self.stop.as_ref())
+        RootTerminalKind::of_stop(self.outcome.stop())
     }
 
     /// The cause this write records.
@@ -223,7 +272,7 @@ impl RootTerminalWrite {
         RootTerminalCause::Committed {
             commit: self.commit.clone(),
             turn: self.turn.clone(),
-            stop: self.stop.clone(),
+            outcome: self.outcome.clone(),
         }
     }
 
@@ -276,24 +325,25 @@ pub enum RootTerminalWriteDecision {
     AlreadyWritten,
 }
 
-/// What [`RootStore::end_refused_root`] did (FIG-4018, FIG-4200).
+/// What [`RootStore::end_refused_root`] or [`RootStore::end_command_root`]
+/// did (FIG-4018, FIG-4200, FIG-4202).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RefusedRootEnd {
-    /// The write ended the root with the refusal.
+pub enum RootEnd {
+    /// The write ended the root.
     Ended(RootTerminal),
     /// The root already had terminal evidence, which stands: a replay of the
     /// run that wrote the end, or whatever else ended the root first. Nothing
     /// was written.
     AlreadyEnded(RootTerminal),
-    /// The refused run no longer owns the root: a later admission sealed a
-    /// newer drive epoch, and the root is that execution's to end. Nothing
-    /// was written.
+    /// The run no longer owns the root: a later admission sealed a newer
+    /// drive epoch, and the root is that execution's to end. Nothing was
+    /// written.
     Superseded,
     /// The store holds no row for the root. Nothing was written.
     Unknown,
 }
 
-impl RefusedRootEnd {
+impl RootEnd {
     /// The root's terminal evidence, when the root has ended.
     #[must_use]
     pub fn terminal(&self) -> Option<&RootTerminal> {
@@ -472,12 +522,12 @@ pub trait RootStore: Send + Sync {
     /// scope close. The session's next admission then drives a new root.
     ///
     /// A root that already has terminal evidence is left as it is and
-    /// answers [`RefusedRootEnd::AlreadyEnded`], so a replay of the run that
+    /// answers [`RootEnd::AlreadyEnded`], so a replay of the run that
     /// wrote the end writes nothing more. A root with no row answers
-    /// [`RefusedRootEnd::Unknown`]. Otherwise the transaction checks that
+    /// [`RootEnd::Unknown`]. Otherwise the transaction checks that
     /// the run still owns the root ([`refused_run_owns_root`]) before it
     /// writes: a run whose fence a later admission superseded answers
-    /// [`RefusedRootEnd::Superseded`] and never ends its successor's root
+    /// [`RootEnd::Superseded`] and never ends its successor's root
     /// (FIG-4200).
     async fn end_refused_root(
         &self,
@@ -485,7 +535,25 @@ pub trait RootStore: Send + Sync {
         root: &TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<RefusedRootEnd, StoreError>;
+    ) -> Result<RootEnd, StoreError>;
+
+    /// End command root `root`, whose run under `fence` applied the
+    /// session's command lane until it was empty, with
+    /// [`RootTerminalCause::CommandsApplied`] (FIG-4202).
+    ///
+    /// A command root binds no rows, so the store holds no row for it until
+    /// this write: the transaction opens the root's row and writes its
+    /// terminal, which arms its scope close. A root that already has terminal
+    /// evidence answers [`RootEnd::AlreadyEnded`], so a replay of the run
+    /// that wrote the end writes nothing more. A run whose fence a later
+    /// admission superseded answers [`RootEnd::Superseded`] and writes
+    /// nothing: that admission applies the lane.
+    async fn end_command_root(
+        &self,
+        fence: &DriveFence,
+        root: &TurnId,
+        at_ms: u64,
+    ) -> Result<RootEnd, StoreError>;
 
     /// The root that took accepted input `input`: the root its admission bound
     /// it to, or for a checkpoint delivery the root whose commit applied it.
@@ -562,6 +630,49 @@ pub struct RootAdmission {
     /// The executable generation the root runs under (FIG-3571): a redrive
     /// under another one is refused before any effect.
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
+    /// The execution that runs the root (FIG-4403): recovery judges the
+    /// root by it, never by the root's name.
+    pub executor: RootExecutor,
+}
+
+/// The execution that runs an admitted root, recorded with its admission
+/// (FIG-4403).
+///
+/// An engine's lost-root recovery reads it to learn whose absence would
+/// prove the root lost. The first admission records it, and every later
+/// admission of the root reads it back unchanged with the rest of the
+/// record, so recovery decides from an immutable admitted fact (ADR 0105
+/// §1).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "run", rename_all = "snake_case")]
+pub enum RootExecutor {
+    /// The engine's own run of the root, keyed by the root's session and id
+    /// (Restate's `LashTurn/{session}:{root}`).
+    Root,
+    /// The drive of the execution `scope`, which runs the root inline and
+    /// holds no engine run of it: a process's run
+    /// ([`ExecutionScope::Process`](crate::ExecutionScope::Process)) drives
+    /// its child session's turn and every root admitted ahead of it that
+    /// way, and so does an in-process session drive or queue drain under
+    /// its own scope.
+    Inline { scope: crate::ExecutionScope },
+}
+
+impl RootExecutor {
+    /// The executor a stored admission (`session_roots.admission_json`)
+    /// records, read without decoding the rows it admitted.
+    pub fn from_stored_admission(admission_json: &str) -> Result<Self, StoreError> {
+        #[derive(Deserialize)]
+        struct Recorded {
+            executor: RootExecutor,
+        }
+        serde_json::from_str::<Recorded>(admission_json)
+            .map(|recorded| recorded.executor)
+            .map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "RootAdmission",
+                message: format!("root admission executor: {error}"),
+            })
+    }
 }
 
 impl RootAdmission {
@@ -648,7 +759,7 @@ pub enum RootAdmissionRefusal {
 /// resident head the root is admitted on; the store replaces its
 /// `generation` with the durable state generation it reads inside the
 /// admission transaction. `turn_index` and `generation` are recorded as
-/// given.
+/// given, and so is `executor`.
 #[derive(Clone, Debug)]
 pub struct AdmitRootRequest {
     /// The fence of the drive admission the root runs under: the one
@@ -662,6 +773,8 @@ pub struct AdmitRootRequest {
     pub turn_index: u64,
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
     pub admitted_generation: crate::build_generation::BuildGeneration,
+    /// The execution that runs the root, recorded as given.
+    pub executor: RootExecutor,
 }
 
 impl AdmitRootRequest {
@@ -831,7 +944,12 @@ mod tests {
                 &TurnId::from(root),
                 u64::from(ordinal),
             ),
-            stop,
+            outcome: match stop {
+                None => RootCommittedOutcome::Finished(TurnFinish::AssistantMessage {
+                    text: String::new(),
+                }),
+                Some(stop) => RootCommittedOutcome::Stopped(stop),
+            },
         }
         .into_terminal(SessionId::from("s"), 3, 10)
     }

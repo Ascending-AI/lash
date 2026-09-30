@@ -2,10 +2,11 @@
 //! restore.
 
 use super::*;
-use crate::dialect::{RlmDialectServices, TypescriptDialect};
+use crate::dialect::{RlmDialectServices, SessionDialect};
 use lashlang::{
-    DurableFragment, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Record as FlowRecord, Value as FlowValue,
+    DurableBaseline, DurableFragment, ProjectedHostDescriptor, ProjectedReadRequest,
+    ProjectedReadResponse, ProjectedValue, Record as FlowRecord, State as FlowState,
+    Value as FlowValue,
 };
 use serde_json::json;
 
@@ -415,8 +416,7 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     let retained_bytes = state
         .vm
         .state()
-        .snapshot()
-        .to_canonical_bytes()
+        .bytes()
         .expect("retained canonical state")
         .len();
     let changed_bytes = measure_snapshot(&changed).checkpoint_bytes;
@@ -1103,12 +1103,12 @@ fn leaf_bearing_hydration_and_live_target()
 
 fn assert_live_state_untouched(live: &RlmExecutionState) {
     assert_eq!(
-        live.vm.state().snapshot().globals().get("live"),
+        live.vm.state().globals().get("live"),
         Some(&FlowValue::String("untouched".into())),
         "a rejected restore must not replace live globals"
     );
     assert!(
-        live.vm.state().snapshot().globals().get("kept").is_none(),
+        live.vm.state().globals().get("kept").is_none(),
         "a rejected restore must not leak the source's globals"
     );
 }
@@ -1399,10 +1399,12 @@ fn excludes_custom_projected_globals_without_rendering_or_materializing() {
 
 #[test]
 fn the_dialect_pins_snapshot_engine_id() {
-    let dialect = TypescriptDialect::new(
+    let dialect = SessionDialect::new(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
         RlmDialectServices {
-            artifact_store: crate::testing::memory_artifact_store_blocking(),
+            workers: lash_vm_client::service::Service::default(),
+            artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),

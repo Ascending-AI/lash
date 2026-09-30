@@ -478,21 +478,26 @@ pub trait DeploymentStore:
         through: crate::store::ParkFeedCursor,
     ) -> Result<(), crate::StoreError>;
 
-    /// Open logical roots in `(session, root)` order, after `after`. Recovery
-    /// checks their engine runs in bounded pages; it never guesses liveness
-    /// from a missing terminal row alone.
+    /// Open logical roots in `(session, root)` order, after `after`, each
+    /// with the executor its recorded admission names (FIG-4403). Recovery
+    /// checks the execution that runs each in bounded pages; it never guesses
+    /// liveness from a missing terminal row alone.
     async fn non_terminal_roots_page(
         &self,
         after: Option<&crate::engine::RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::engine::RootRef>, crate::StoreError>;
+    ) -> Result<Vec<crate::engine::OpenRoot>, crate::StoreError>;
 
-    /// End a root only after the engine proved its one workflow run failed
-    /// terminally. The write settles the root's ingress and arms scope close
-    /// atomically. An already terminal or deleted root is a no-op.
+    /// End an open root `SubstrateLost` on the engine's evidence `loss` that
+    /// its execution is gone ([`RootRunLoss`](crate::engine::RootRunLoss)).
+    /// The write settles the root's ingress and arms scope close
+    /// atomically. An already terminal or deleted root is a no-op, and so is
+    /// a root with no run on the engine that never recorded its admission:
+    /// it started nothing, and its ingress obligation still drives it.
     async fn end_lost_root(
         &self,
         target: &crate::engine::RootRef,
+        loss: crate::engine::RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError>;
 
@@ -521,16 +526,9 @@ pub trait DeploymentStore:
     /// and after receipt pruning. The permanent identity tombstone is exempt.
     /// No daemon, clock read or live policy lookup runs this operation.
     ///
-    /// The sweep is also the durable owner of deferred effect-scope
-    /// retirement (ADR 0049, ADR 0067): every session-free runtime-operation
-    /// scope whose operation has recorded its receipt and under which nothing
-    /// is live any more (no effect in progress, no group still waiting on a
-    /// child, no unresolved promise) is retired under the same fence the
-    /// receipt-time retirement takes, in this same transaction. A receipt
-    /// whose scope is still live is retained past the horizon so the proof
-    /// survives until the scope can go. Stores whose effect journal lives
-    /// elsewhere (the in-memory store, or a host that keeps its journal in
-    /// its own engine) retire nothing here.
+    /// SQL stores reclaim their retained storage evidence here. Effect scopes,
+    /// journal entries, groups and promises belong to Restate, so this sweep
+    /// does not retire engine scopes or decide whether an invocation is live.
     async fn reclaim_retained_evidence(
         &self,
         bound: crate::store::RetentionBound,

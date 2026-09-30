@@ -1,4 +1,4 @@
-use crate::dialect::TypescriptDialect;
+use crate::dialect::SessionDialect;
 use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -42,11 +42,11 @@ use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 
 #[derive(Clone)]
 pub struct NativeDriver {
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
 }
 
 impl NativeDriver {
-    pub(crate) fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
+    pub(crate) fn with_dialect(dialect: Arc<SessionDialect>) -> Self {
         Self { dialect }
     }
 }
@@ -342,7 +342,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 state.assistant_parts = parts;
                 actions.push(DriverAction::Emit(SessionStreamEvent::Message {
                     text: code.clone(),
-                    kind: self.dialect.code_stream_kind(),
+                    kind: lash_core::session_model::StreamMessageKind::Code,
                 }));
                 actions.push(DriverAction::Start(PendingWork::Exec {
                     language: self.dialect.language_id().to_string(),

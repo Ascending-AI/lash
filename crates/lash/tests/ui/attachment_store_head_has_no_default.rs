@@ -21,7 +21,7 @@ impl AttachmentStore for HeadlessStore {
         ))
     }
 
-    async fn get(&self, _id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(&self, _id: &AttachmentId, _max_bytes: u64) -> Result<StoredAttachment, AttachmentStoreError> {
         Err(AttachmentStoreError::NotFound(
             AttachmentId::parse("absent").expect("literal is a valid attachment id"),
         ))

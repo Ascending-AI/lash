@@ -29,8 +29,9 @@ pub use context::{DriveObservation, ObservedEvent, ReplayKey, activity_projectio
 pub use contracts::{BuildGeneration, BuildGenerationParseError, DriveRequest, UpgradePolicy};
 pub use control::{
     EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, NoEngineControl,
-    NoScopeClose, ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RootRef, ScopeCloseSink,
-    SessionControlEngine, StalledExecution, begin_session_close_replay_key,
+    NoScopeClose, OpenRoot, ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RootRef,
+    RootRunLoss, ScopeCloseSink, SessionControlEngine, StalledExecution,
+    begin_session_close_replay_key,
 };
 pub use drive::{
     DRIVE_CONTINUATION_PREFIX, DriveAbort, DriveHold, DriveLoop, DriveOutcome, DriveStop,

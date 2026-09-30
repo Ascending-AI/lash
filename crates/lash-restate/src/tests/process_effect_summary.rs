@@ -649,3 +649,53 @@ async fn a_boundary_refuses_a_changed_summary_payload_without_reaching_the_progr
         "the refused batch committed no terminal either"
     );
 }
+
+/// FIG-3805: a durable process stamps its effect occurrences with the `F` its
+/// process registry recorded, never the build's own epoch. The synthetic N+1
+/// opens a fleet still at `F = 1` and must write the vocabulary N reads until
+/// finalize; a process runtime that bound `FleetFormat::current()` stamped
+/// N+1's vocabulary and N refused the occurrence after a rollback.
+#[tokio::test]
+async fn a_process_stamps_its_effect_occurrences_with_the_registrys_fleet_epoch() {
+    let registry = process_registry();
+    let registration = counting_lashlang_registration().await;
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .expect("register the effect-summary process")
+        .id;
+    let executions = Arc::new(AtomicUsize::new(0));
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let (_, prelude) = terminal(
+        run_invocation(
+            Arc::clone(&registry),
+            &executions,
+            &context,
+            &process_id,
+            &registration,
+        )
+        .await
+        .expect("run the invocation"),
+    );
+    let recorded = registry.fleet_format();
+    let expected = recorded.writer_version(lash_core::surface_format!(
+        lash_core::PROCESS_EVENT_VOCABULARY_VERSION
+    ));
+    let stamped = prelude
+        .iter()
+        .filter(|request| request.event_type == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
+        .map(|request| request.payload["vocabulary_version"].clone())
+        .collect::<Vec<_>>();
+    assert!(
+        !stamped.is_empty(),
+        "the terminal batch carries occurrences"
+    );
+    assert!(
+        stamped
+            .iter()
+            .all(|version| *version == serde_json::json!(expected)),
+        "every occurrence states the vocabulary registry F={recorded} writes ({expected}), \
+         not this build's F={}: {stamped:?}",
+        lash_core::FleetFormat::current()
+    );
+}

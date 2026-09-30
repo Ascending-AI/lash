@@ -198,6 +198,7 @@ pub async fn run(spec: &CaseSpec, seed: u64) -> CaseReport {
         violations: Vec::new(),
         notes: Vec::new(),
         ticks: 0,
+        tick_times: Vec::new(),
     };
     match tokio::time::timeout(
         CASE_WALL_LIMIT,
@@ -297,7 +298,6 @@ async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, sta
     } else {
         spec.bound
     };
-    let bound = detection_bound.limit();
     if spec.bound == super::DetectionBound::AttemptCeiling {
         // Hundreds of ticks, each awaiting its own relay pass: the wait for
         // the engine to settle only lets host work the pass handed off land,
@@ -305,30 +305,32 @@ async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, sta
         world.set_quiesce_budget(Duration::from_millis(20));
     }
     let min_tick = super::TICK - super::TICK / 10;
-    let max_ticks = (bound.as_millis() / min_tick.as_millis()) as usize + 2;
+    let max_ticks = (detection_bound.limit().as_millis() / min_tick.as_millis()) as usize + 2;
     let mut last = Vec::new();
-    let mut ticked_at_ms = None;
     for tick in 0..=max_ticks {
         world.quiesce().await;
         last = invariants::check(&world, &expected).await;
         if last.is_empty() {
             // Detected at the first tick after which every invariant held,
             // not after the harness's own wait for the engine to settle; with
-            // no tick yet, at the check itself.
-            let detected_ms = ticked_at_ms.unwrap_or_else(|| world.now_ms());
-            let after = Duration::from_millis(detected_ms.saturating_sub(origin_ms));
-            report.detected_after = Some(after);
-            if after > bound {
-                report.violations.push(format!(
-                    "recovered after {after:?} of sim time, past the §1.8 bound ({}) of {bound:?}",
-                    detection_bound.label()
-                ));
+            // no tick yet, at the check itself. The bound is judged in passes
+            // from the tick the obligation became eligible at; the sim time
+            // is reported beside it.
+            let detected_ms = report.tick_times.last().map_or_else(
+                || world.now_ms().saturating_sub(origin_ms),
+                |at| u64::try_from(at.as_millis()).unwrap_or(u64::MAX),
+            );
+            report.detected_after = Some(Duration::from_millis(detected_ms));
+            if let Err(violation) = detection_bound.judge(&report.tick_times, tick) {
+                report.violations.push(violation);
             }
             break;
         }
         if tick < max_ticks {
             match world.tick().await {
-                Ok(at_ms) => ticked_at_ms = Some(at_ms),
+                Ok(at_ms) => report
+                    .tick_times
+                    .push(Duration::from_millis(at_ms.saturating_sub(origin_ms))),
                 Err(error) => {
                     report.violations.push(error);
                     break;
@@ -350,6 +352,14 @@ async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, sta
                 .map(|line| format!("diagnosis: {line}")),
         );
     } else {
+        for (name, audit) in &expected.audits {
+            report.violations.extend(
+                audit(&world)
+                    .await
+                    .into_iter()
+                    .map(|entry| format!("[{name}] {entry}")),
+            );
+        }
         report
             .violations
             .extend(invariants::probe_live_sessions(&world, &expected, 4).await);
@@ -423,6 +433,7 @@ mod tests {
             violations: Vec::new(),
             notes: Vec::new(),
             ticks: 0,
+            tick_times: Vec::new(),
         };
         Box::pin(tokio::time::timeout(
             CASE_WALL_LIMIT,
@@ -464,6 +475,7 @@ mod tests {
             violations: Vec::new(),
             notes: Vec::new(),
             ticks: 0,
+            tick_times: Vec::new(),
         };
         Box::pin(tokio::time::timeout(
             CASE_WALL_LIMIT,
@@ -484,6 +496,84 @@ mod tests {
                 .detected_after
                 .is_some_and(|after| after > spec.bound.limit()),
             "the abandoned claim must outlive the due-row bound: {report:#?}"
+        );
+        assert!(report.passed(), "{report:#?}");
+    }
+
+    /// Recover `staged` with the harness stalling `stall` before every tick,
+    /// as FIG-4161's crash run did on a host whose Restate server logged
+    /// stalls of up to 48 s.
+    async fn recover_under_harness_stalls(
+        spec: &CaseSpec,
+        seed: u64,
+        staged: Staged,
+        stall: Duration,
+    ) -> CaseReport {
+        let mut report = CaseReport {
+            seed,
+            test_name: spec.test_name(),
+            crashed: false,
+            detected_after: None,
+            violations: Vec::new(),
+            notes: Vec::new(),
+            ticks: 0,
+            tick_times: Vec::new(),
+        };
+        staged.world.stall_harness_before_each_tick(stall);
+        Box::pin(tokio::time::timeout(
+            CASE_WALL_LIMIT,
+            recover_staged(spec, seed, &mut report, staged),
+        ))
+        .await
+        .expect("the stalled recovery finished within the wall limit");
+        report
+    }
+
+    /// FIG-4161's ingress seed with the harness stalling 25 s before every
+    /// tick: the claim lapses between the second and the third tick, the
+    /// third retakes it, and the input is driven once. The recovery lands
+    /// past the §1.8 bound in sim time only because the stalls moved the
+    /// clock; in passes it meets the bound (FIG-4309).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_lapsed_ingress_claim_meets_its_bound_under_harness_stalls() {
+        let seed = 0x5ead_8d74_e2c9_07a4;
+        let point = super::super::CrashPoint::AfterStateCommit;
+        let spec = super::super::case(Seam::Ingress, point).expect("registered ingress cell");
+        let staged = ingress::stage(point, seed)
+            .await
+            .expect("stage the ingress cell");
+        let report =
+            recover_under_harness_stalls(spec, seed, staged, Duration::from_secs(25)).await;
+        assert!(report.crashed, "{report:#?}");
+        assert!(
+            report
+                .detected_after
+                .is_some_and(|after| after > spec.bound.limit()),
+            "the stalls must carry the recovery past the store-time bound: {report:#?}"
+        );
+        assert!(report.passed(), "{report:#?}");
+    }
+
+    /// FIG-4161's 131 s session-delete seed with the harness stalling 45 s
+    /// before every tick: the close's lapsed claim is retaken and the delete
+    /// it arms is delivered within the bound's two passes (FIG-4309).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_lapsed_session_delete_meets_its_bound_under_harness_stalls() {
+        let seed = 0x58e4_b8c5_ff7e_d3c9;
+        let point = super::super::CrashPoint::AfterStateCommit;
+        let spec =
+            super::super::case(Seam::SessionDelete, point).expect("registered session-delete cell");
+        let staged = intent::stage_delete(point, seed)
+            .await
+            .expect("stage the session-delete cell");
+        let report =
+            recover_under_harness_stalls(spec, seed, staged, Duration::from_secs(45)).await;
+        assert!(report.crashed, "{report:#?}");
+        assert!(
+            report
+                .detected_after
+                .is_some_and(|after| after > spec.bound.limit()),
+            "the stalls must carry the recovery past the store-time bound: {report:#?}"
         );
         assert!(report.passed(), "{report:#?}");
     }

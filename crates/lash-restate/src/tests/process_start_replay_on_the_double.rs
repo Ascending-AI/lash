@@ -22,7 +22,6 @@ fn start_envelope(
     let command = ProcessCommand::Start {
         registration,
         observers: Vec::new(),
-        env_spec: None,
         execution_context: Box::new(ProcessExecutionContext::default()),
     };
     let effect_id = command.effect_id();
@@ -196,7 +195,7 @@ pub(super) async fn a_keyless_host_start_replays_to_the_process_it_started(seed:
         )
         .keyed_in(scoped)
         .expect("a keyless host start is keyed in its scope")
-        .into_registration(None)
+        .into_registration()
     };
     let attempt = |crash: bool| -> lash_restate_test::HandlerAttempt {
         let registry = Arc::clone(&registry);

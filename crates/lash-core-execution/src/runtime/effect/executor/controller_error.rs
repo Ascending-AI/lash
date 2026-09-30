@@ -30,6 +30,12 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::StartKeyConflict { .. } => {
                 Self::new(RuntimeErrorCode::ProcessStartKeyConflict, err.to_string())
             }
+            err @ PluginError::TriggerDeliveryBound { .. } => {
+                Self::new(RuntimeErrorCode::TriggerDeliveryBound, err.to_string())
+            }
+            err @ PluginError::TriggerDeliveryRetired { .. } => {
+                Self::new(RuntimeErrorCode::TriggerDeliveryRetired, err.to_string())
+            }
             err @ PluginError::ProcessCancelConflict { .. } => {
                 Self::new(RuntimeErrorCode::ProcessCancelConflict, err.to_string())
             }

@@ -16,9 +16,6 @@
 //! carry authority in: a capture naming a grant is refused, and the root the
 //! parent assembles takes its resolutions from its own state only.
 //!
-//! Until execution moves out of process (tsvm-d), the parent calls the
-//! `worker_side` functions in process; they are the only code here that
-//! decodes guest state semantically.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,6 +50,7 @@ pub(crate) struct RlmWorkerEnvelopeRefusal {
 }
 
 impl RlmWorkerEnvelope {
+    #[cfg(test)]
     pub(crate) fn encode(&self) -> Vec<u8> {
         encode(self)
     }
@@ -82,60 +80,4 @@ fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, RlmWorkerEnve
     rmp_serde::from_slice(bytes).map_err(|error| RlmWorkerEnvelopeRefusal {
         details: error.to_string(),
     })
-}
-
-/// What the worker does with guest state: install it on its instance, and
-/// capture it back as fragments.
-pub(super) mod worker_side {
-    use super::{RlmWorkerCapture, RlmWorkerEnvelope, RlmWorkerEnvelopeRefusal, decode};
-    use lashlang::{DurableBaseline, DurableFragment};
-    use serde_bytes::ByteBuf;
-
-    /// Installs a worker envelope on `vm`: the semantic decode of every
-    /// fragment, regular expressions included, happens here.
-    pub(in crate::executor) fn install(
-        vm: &mut lashlang::VmInstance,
-        envelope: &[u8],
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<DurableBaseline, InstallError> {
-        let envelope: RlmWorkerEnvelope = decode(envelope).map_err(InstallError::Envelope)?;
-        let fragments = envelope
-            .globals
-            .iter()
-            .map(|(name, body)| (name.as_str(), body.as_slice()));
-        vm.restore_durable_parts(&envelope.state_header, fragments, fleet_format)
-            .map_err(InstallError::Snapshot)
-    }
-
-    #[derive(Debug)]
-    pub(in crate::executor) enum InstallError {
-        Envelope(RlmWorkerEnvelopeRefusal),
-        Snapshot(lashlang::SnapshotDecodeError),
-    }
-
-    /// The worker's capture of its guest state relative to `since`: the
-    /// encoded capture, and the baseline the next capture diffs against.
-    pub(in crate::executor) fn capture(
-        vm: &lashlang::VmInstance,
-        since: &DurableBaseline,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<(Vec<u8>, DurableBaseline), lashlang::ContinuationError> {
-        let parts = vm.state().durable_parts(since, fleet_format)?;
-        let mut capture = RlmWorkerCapture {
-            state_header: ByteBuf::from(parts.header),
-            changed: Default::default(),
-            unchanged: Default::default(),
-        };
-        for (name, fragment) in parts.fragments {
-            match fragment {
-                DurableFragment::Changed(body) => {
-                    capture.changed.insert(name, ByteBuf::from(body));
-                }
-                DurableFragment::Unchanged => {
-                    capture.unchanged.insert(name);
-                }
-            }
-        }
-        Ok((capture.encode(), parts.baseline))
-    }
 }

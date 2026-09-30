@@ -36,7 +36,7 @@ impl CancelledStart {
         );
         RestateRuntimeEffectController::new_for_test(Arc::clone(&self.context))
             .execute_effect(
-                start_recovery_effect(start_key, &spec),
+                start_recovery_effect(self.stores.env_store.as_ref(), start_key, &spec).await,
                 registry_local_executor(self.stores.registry.clone())
                     .with_process_env_store(Arc::clone(&self.stores.env_store))
                     .with_process_starts(

@@ -647,7 +647,8 @@ class Campaign:
         # warm-up from the driver's first send.
         steady_from = self.start() + int(self.workload['warmup_s']) * 1_000_000
         self.record('campaign', 'campaign', 'started', self.args.run, {
-            'workload': self.args.workload_name, 'faults': self.faults, 'phase_start_us': steady_from,
+            'campaign': 'faults', 'workload': self.args.workload_name, 'faults': self.faults,
+            'phase_start_us': steady_from,
             'warmup_s': self.workload['warmup_s'],
             'recovery_stable_s': self.stable_s, 'settle_s': self.settle_s,
         })

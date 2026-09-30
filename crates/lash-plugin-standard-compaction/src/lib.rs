@@ -307,7 +307,6 @@ struct CompactionSnapshotIdentity<'a> {
     plugin_state_ref: &'a Option<lash_core::store::BlobRef>,
     plugin_state_generations: &'a BTreeMap<String, u64>,
     execution_state_ref: &'a Option<lash_core::store::BlobRef>,
-    usage: &'a lash_core::SessionUsageTotals,
     checkpoint_ref: &'a Option<lash_core::store::BlobRef>,
 }
 
@@ -373,7 +372,6 @@ fn compaction_request_identity(
         plugin_state_ref,
         plugin_state_generations,
         execution_state_ref,
-        usage,
         checkpoint_ref,
     } = snapshot;
     let node_indices = session_graph
@@ -414,7 +412,6 @@ fn compaction_request_identity(
             plugin_state_ref,
             plugin_state_generations,
             execution_state_ref,
-            usage,
             checkpoint_ref,
         },
         prompt_text,

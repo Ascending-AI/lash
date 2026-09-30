@@ -125,6 +125,7 @@ pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::L
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     lash::LashCore::rlm_builder(
@@ -1085,6 +1086,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -1736,6 +1738,7 @@ async fn live_workbench_restate_state_over_stores(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend.clone().into(),
     )
     .with_lashlang_execution_sink(lashlang_execution_sink);
@@ -1975,6 +1978,7 @@ fn test_workbench_core(backend: lash::Backend) -> LashCore {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)

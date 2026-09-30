@@ -276,7 +276,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         &self,
         after: Option<&lash_core_execution::engine::RootRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::RootRef>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::engine::OpenRoot>, StoreError> {
         let session = after.map_or("", |key| key.session.as_str());
         let root = after.map_or("", |key| key.root.as_str());
         let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
@@ -294,15 +294,24 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         .map_err(crate::store_sqlx_error)?;
         rows.into_iter()
             .map(|row| {
-                Ok(lash_core_execution::engine::RootRef {
-                    session: SessionId::from(
-                        row.try_get::<String, _>(0)
-                            .map_err(crate::store_sqlx_error)?,
-                    ),
-                    root: lash_sansio::TurnId::from(
-                        row.try_get::<String, _>(1)
-                            .map_err(crate::store_sqlx_error)?,
-                    ),
+                let admission = row
+                    .try_get::<Option<String>, _>(2)
+                    .map_err(crate::store_sqlx_error)?;
+                Ok(lash_core_execution::engine::OpenRoot {
+                    target: lash_core_execution::engine::RootRef {
+                        session: SessionId::from(
+                            row.try_get::<String, _>(0)
+                                .map_err(crate::store_sqlx_error)?,
+                        ),
+                        root: lash_sansio::TurnId::from(
+                            row.try_get::<String, _>(1)
+                                .map_err(crate::store_sqlx_error)?,
+                        ),
+                    },
+                    executor: admission
+                        .as_deref()
+                        .map(lash_core_execution::store::RootExecutor::from_stored_admission)
+                        .transpose()?,
                 })
             })
             .collect()
@@ -311,11 +320,12 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
     async fn end_lost_root(
         &self,
         target: &lash_core_execution::engine::RootRef,
+        loss: lash_core_execution::engine::RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
         let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let result = crate::session_roots::end_lost_root_tx(&mut tx, target, at_ms).await?;
+        let result = crate::session_roots::end_lost_root_tx(&mut tx, target, loss, at_ms).await?;
         tx.commit().await.map_err(crate::store_sqlx_error)?;
         Ok(result)
     }
@@ -865,21 +875,47 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
 
 #[async_trait::async_trait]
 impl lash_core_execution::AttachmentRootSet for PostgresStore {
-    async fn live_attachment_refs(
+    async fn attachment_root_page(
         &self,
-    ) -> Result<std::collections::BTreeSet<lash_core_execution::AttachmentId>, StoreError> {
-        let ids: Vec<String> = sqlx::query_scalar(
-            crate::attachments::attachment_sql()
-                .edges
-                .select_rooted_ids
-                .sql(),
-        )
-        .fetch_all(&self.pool)
-        .await
+        source: lash_core_execution::attachments::AttachmentRootSource,
+        after: Option<&lash_core_execution::AttachmentId>,
+    ) -> Result<lash_core_execution::attachments::AttachmentRootPage, StoreError> {
+        use lash_core_execution::attachments::{AttachmentRootPage, AttachmentRootSource};
+        let sql = crate::attachments::attachment_sql();
+        let after = after
+            .map(lash_core_execution::AttachmentId::as_str)
+            .unwrap_or("");
+        let limit = AttachmentRootPage::QUERY_LIMIT as i64;
+        let ids: Vec<String> = match source {
+            AttachmentRootSource::Referrer(kind) => {
+                sqlx::query_scalar(sql.edges.select_root_page.sql())
+                    .bind(kind.as_str())
+                    .bind(after)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await
+            }
+            AttachmentRootSource::OtherReferrers => {
+                sqlx::query_scalar(sql.edges.select_other_root_page.sql())
+                    .bind(after)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await
+            }
+            AttachmentRootSource::PendingWrites => {
+                sqlx::query_scalar(sql.pending.select_root_page.sql())
+                    .bind(after)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await
+            }
+        }
         .map_err(store_sqlx_error)?;
-        ids.into_iter()
-            .map(|id| attachment_id_from_sql("attachment root", "attachment_id", id))
-            .collect()
+        AttachmentRootPage::from_rows(
+            ids.into_iter()
+                .map(|id| attachment_id_from_sql("attachment root", "attachment_id", id))
+                .collect::<Result<_, _>>()?,
+        )
     }
     async fn list_condemnations(
         &self,

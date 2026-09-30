@@ -257,6 +257,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 lash_restate::RestateConnectionConfig {
                     control_timeout_ms: 30_000,
                     attach_ceiling_ms: 6 * 60 * 60 * 1_000,
+                    ..lash_restate::RestateConnectionConfig::default()
                 },
             ),
             lash_restate::RestateConnection::with_client(
@@ -278,10 +279,13 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     if let Some(warn_tokens) = continue_as_warn_tokens_from_environment(context_window_tokens)? {
         rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
     }
-    let factory =
-        lash_protocol_rlm::RlmProtocolPluginFactory::new(rlm_config, &backend.clone().into())
-            .with_deferred_tool_resolver(deferred_tools.resolver())
-            .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        rlm_config,
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &backend.clone().into(),
+    )
+    .with_deferred_tool_resolver(deferred_tools.resolver())
+    .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
     // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
     // second bound, so a turn whose cells never committed re-called the
     // provider until someone noticed — one measured send bought 1,223 calls.

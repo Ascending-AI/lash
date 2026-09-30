@@ -578,8 +578,10 @@ pub trait PluginFactory: Send + Sync {
 /// Integrator class (ADR 0051): **protocol and process-engine implementors**.
 /// This is the argument of the only method that yields
 /// [`ProcessEngine`](crate::ProcessEngine)s, so it is named by whoever ships an
-/// engine — never by a host, which acquires engines by installing the plugin
-/// that contributes them. It therefore has no facade home by design.
+/// engine, and by a host whose factory wraps one that does (the RLM protocol
+/// factory, say): the wrapper forwards it, or the wrapped factory's engines
+/// are never contributed. The facade exports it as
+/// `lash::plugins::ProcessEngineContributionContext` (FIG-4373).
 pub struct ProcessEngineContributionContext<'a> {
     extensions: &'a PluginExtensions,
     trace_context: &'a crate::TraceContext,

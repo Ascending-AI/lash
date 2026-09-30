@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 
 #[cfg(feature = "rlm")]
 use super::harness::AgentScenarioRun;
-use lash_core::testing::behavior_transcript::{Actor, Component, Entry, Usage};
+use lash_core::testing::behavior_transcript::{Actor, Component, Entry};
 #[cfg(feature = "rlm")]
 use lash_core::testing::behavior_transcript::{Attr, IdKind, Kind};
 use lash_core::testing::checkpoint_observer::{CheckpointComponentWriteKind, CheckpointWriteEvent};
@@ -86,36 +86,24 @@ pub(super) fn assert_typed_checkpoint_transcript(writes: &[CheckpointWriteEvent]
         transcript.record(commit_entry(write));
     }
     let rendered = transcript.render();
-    let usage = rendered
+    let commits = rendered
         .lines()
-        .filter_map(|line| {
-            line.split_once("usage                 ")
-                .map(|(_, value)| value)
-        })
-        .collect::<Vec<_>>();
-    let expected = writes
-        .iter()
-        .map(|write| {
-            let u = &write.usage;
-            format!(
-                "entries={} input={} output={} cache_read={} cache_write={} reasoning={} total={}",
-                u.entries,
-                u.input_tokens,
-                u.output_tokens,
-                u.cache_read_input_tokens,
-                u.cache_write_input_tokens,
-                u.reasoning_output_tokens,
-                i128::from(u.input_tokens)
-                    + i128::from(u.output_tokens)
-                    + i128::from(u.cache_read_input_tokens)
-                    + i128::from(u.cache_write_input_tokens)
-            )
+        .filter(|line| {
+            line.contains(lash_core::testing::behavior_transcript::CHECKPOINT_COMMIT_EVENT)
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        usage, expected,
-        "every accepted commit must emit its observed usage"
+        commits.len(),
+        writes.len(),
+        "every accepted commit must emit its commit line"
     );
+    for (line, write) in commits.iter().zip(writes) {
+        let revision = format!("{}->{}", write.revision_before, write.revision_after);
+        assert!(
+            line.contains(&revision),
+            "the commit line carries its revision {revision}: {line}"
+        );
+    }
 }
 
 #[cfg(feature = "rlm")]
@@ -209,14 +197,9 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
         lash_core::TurnEvent::QueuedMessagesCommitted {
             messages,
             checkpoint,
-        } => {
-            // Queued-message ingress persists host-authored messages before a
-            // provider turn runs, so there is no recorded usage at this seam.
-            Entry::new(Kind::Commit, actor(), "queued_messages.committed")
-                .attr(Attr::int("messages", messages.len() as u64))
-                .attr(Attr::debug_token("checkpoint", checkpoint))
-                .usage(Usage::none())
-        }
+        } => Entry::new(Kind::Commit, actor(), "queued_messages.committed")
+            .attr(Attr::int("messages", messages.len() as u64))
+            .attr(Attr::debug_token("checkpoint", checkpoint)),
         lash_core::TurnEvent::FinalValue { value } => {
             Entry::new(Kind::Outcome, actor(), "turn.final_value").attr(Attr::json("value", value))
         }
@@ -310,14 +293,6 @@ fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
         Actor::session(write.attributed_session().to_string()),
         write.revision_before,
         write.revision_after,
-        Usage::new(
-            write.usage.entries,
-            write.usage.input_tokens,
-            write.usage.output_tokens,
-            write.usage.cache_read_input_tokens,
-            write.usage.cache_write_input_tokens,
-            write.usage.reasoning_output_tokens,
-        ),
     );
     for component in &write.components {
         entry = entry.component(match &component.kind {
@@ -356,7 +331,6 @@ mod tests {
             turn_index: revision_before as usize + 1,
             revision_before,
             revision_after: revision_before + 1,
-            usage: Default::default(),
             components: vec![CheckpointComponentWrite {
                 component,
                 kind: CheckpointComponentWriteKind::Stored {

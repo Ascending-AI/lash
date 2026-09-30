@@ -78,7 +78,10 @@ pub(super) fn primary_format(surface: DurableSurface) -> DurableFormat {
 }
 
 /// Every format observation one item yields.
-pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
+pub(super) fn extract(
+    item: &DurableItem,
+    #[cfg(feature = "rlm")] workers: &lash_vm_client::service::Service,
+) -> Vec<Extraction> {
     let format = primary_format(item.surface);
     let payload = match &item.payload {
         DurablePayload::Json(text) => Payload::Json(text.as_str()),
@@ -104,7 +107,11 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
         DurableSurface::StartedProcess => started_process(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
-        DurableSurface::ModuleArtifact => module_artifact(payload),
+        DurableSurface::ModuleArtifact => module_artifact(
+            payload,
+            #[cfg(feature = "rlm")]
+            workers,
+        ),
         _ => Vec::new(),
     }
 }
@@ -116,7 +123,10 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
 /// future shape is a decided refusal. Without the verifier, the manifest row
 /// remains visible but stored artifacts are honestly undecidable. Malformed
 /// JSON is likewise undecidable because it is not evidence of another build.
-fn module_artifact(payload: Payload<'_>) -> Vec<Extraction> {
+fn module_artifact(
+    payload: Payload<'_>,
+    #[cfg(feature = "rlm")] workers: &lash_vm_client::service::Service,
+) -> Vec<Extraction> {
     let format = DurableFormat::ModuleArtifact;
     #[cfg(not(feature = "rlm"))]
     {
@@ -137,23 +147,26 @@ fn module_artifact(payload: Payload<'_>) -> Vec<Extraction> {
                 }];
             }
         };
-        if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(bytes)
-            && (raw.get("family").is_none() || raw.get("encoding").is_none())
-        {
-            return vec![Extraction::Undecodable {
+        use lash_vm_client::service::{ArtifactVerification, Request, Response};
+        match workers.request(Request::VerifyArtifact {
+            bytes: bytes.to_vec(),
+        }) {
+            Ok(Response::ArtifactVerification(ArtifactVerification::Match)) => {
+                vec![Extraction::IdentityMatch { format }]
+            }
+            Ok(Response::ArtifactVerification(ArtifactVerification::Undecodable { reason })) => {
+                vec![Extraction::Undecodable { format, reason }]
+            }
+            Ok(Response::ArtifactVerification(ArtifactVerification::IdentityMismatch {
+                detail,
+            })) => vec![Extraction::IdentityMismatch { format, detail }],
+            Ok(_) => vec![Extraction::Undecodable {
                 format,
-                reason: "module artifact carries no family and encoding envelope".to_string(),
-            }];
-        }
-        match lashlang::ModuleArtifact::from_store_bytes(bytes) {
-            Ok(_) => vec![Extraction::IdentityMatch { format }],
-            Err(lashlang::ModuleArtifactError::Codec(reason)) => vec![Extraction::Undecodable {
-                format,
-                reason: format!("module artifact is not readable JSON: {reason}"),
+                reason: "unexpected worker artifact verification response".into(),
             }],
-            Err(error) => vec![Extraction::IdentityMismatch {
+            Err(error) => vec![Extraction::Undecodable {
                 format,
-                detail: error.to_string(),
+                reason: format!("worker artifact verification failed: {error}"),
             }],
         }
     }
@@ -477,6 +490,14 @@ mod tests {
     use super::*;
     use lash_sansio::ProcessId;
     use lash_sansio::SessionId;
+
+    fn extract(item: &DurableItem) -> Vec<Extraction> {
+        super::extract(
+            item,
+            #[cfg(feature = "rlm")]
+            &lash_vm_client::service::Service::default(),
+        )
+    }
 
     fn item(surface: DurableSurface, payload: DurablePayload) -> DurableItem {
         DurableItem {

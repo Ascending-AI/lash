@@ -32,7 +32,7 @@ pub(super) fn admission_id(request: &DriveRequestId, ordinal: u32) -> AdmissionI
 
 /// A store fault inside an admission step: the attempt's, never the step's
 /// outcome. A session-state generation refusal keeps its typed code.
-fn store_fault(context: &str, error: StoreError) -> RuntimeEffectControllerError {
+pub(super) fn store_fault(context: &str, error: StoreError) -> RuntimeEffectControllerError {
     let mut fault =
         RuntimeEffectControllerError::from(crate::runtime::runtime_error_from_store_commit(error));
     fault.message = format!("{context}: {}", fault.message);
@@ -73,6 +73,7 @@ impl RuntimeEffectLocalRunner for AdmitDriveRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::AdmitDrive { request } = &envelope.command else {
             return Err(executor_mismatch("drive admission", &envelope));
@@ -161,14 +162,15 @@ impl AdmitDriveRunner {
             None => false,
         };
 
-        let Some((root, work)) = self.next_root(&store, redrive_unsettled).await? else {
+        let Some((root, work)) = self.next_root(&store).await? else {
             return Ok(AdmitVerdict::Idle);
         };
-        // The command lane drains first (ADR 0101 §4): commands, queued work
-        // and an owed follow-on are admitted while the redrive is unsettled;
-        // a turn input and the parked root itself wait for it. The refusal is
-        // the attempt's — never a recorded verdict — so the engine's retry
-        // re-decides admission after the redrive settles.
+        // The parked root is bound to the session and owns its head
+        // (FIG-4202): while its redrive is unsettled, nothing is admitted
+        // ahead of it, session commands included, and a turn input waits for
+        // it too. The refusal is the attempt's — never a recorded verdict —
+        // so the engine's retry re-decides admission after the redrive
+        // settles.
         let parked_root = park.as_ref().is_some_and(|park| park.turn_id == root);
         if redrive_unsettled && (parked_root || matches!(work, AdmittedWork::Input { .. })) {
             return Err(RuntimeEffectControllerError::new(
@@ -224,12 +226,12 @@ impl AdmitDriveRunner {
     /// next-turn input, or the queued turn work pending before it. The root
     /// of an input is its host id (its source key) when it has one, else its
     /// input id; a queued-work head's root and a command root are named by
-    /// this admission. While the parked root's redrive is unsettled the
-    /// command lane drains ahead of that root, which waits for its redrive.
+    /// this admission. An unfinished root owns the session head, so no
+    /// command applies while it is bound, a parked root awaiting its
+    /// redrive included (FIG-4202).
     async fn next_root(
         &self,
         store: &crate::store::SessionStore,
-        redrive_unsettled: bool,
     ) -> Result<Option<(TurnId, AdmittedWork)>, RuntimeEffectControllerError> {
         if let Some(owed) = store
             .load_pending_follow_on()
@@ -255,7 +257,7 @@ impl AdmitDriveRunner {
                 };
                 (unfinished.root, work)
             });
-        if unfinished.is_some() && !redrive_unsettled {
+        if unfinished.is_some() {
             return Ok(unfinished);
         }
         let admission = admission_id(&self.request.request, self.ordinal);
@@ -270,9 +272,6 @@ impl AdmitDriveRunner {
                     head: command.enqueue_seq,
                 },
             )));
-        }
-        if unfinished.is_some() {
-            return Ok(unfinished);
         }
         let queued = store
             .list_queued_work()
@@ -340,6 +339,7 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::SealDriveAdmission { admitted } = &envelope.command else {
             return Err(executor_mismatch("drive seal", &envelope));

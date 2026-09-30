@@ -4,20 +4,19 @@
 //!
 //! Both laws race a loser that the tier cannot finish on its own: the
 //! `law_spend_commit` leaf spends a managed-LLM call, commits its final record
-//! and parks inside its drain on an [`IntentSink`]. Its spend (§13) and the
-//! process its drain starts (§6) are facts only the opener's incorporation
-//! lands, so they are what the laws observe — through the opener's own usage
-//! sink and possession set, the two channels its accounting commits from.
+//! and parks inside its drain on an [`IntentSink`]. The process its drain
+//! starts (§6) is a fact only the opener's incorporation lands, so it is what
+//! the laws observe, through the opener's possession set. Its spend is its
+//! own `ToolAttempt` run's, delivered by the engine (ADR 0125), and no longer
+//! rides the incorporation.
 
-use pretty_assertions::assert_eq;
 use tokio_util::sync::CancellationToken;
 
-use super::incorporation::RecordingCharge;
 use super::*;
 
 /// An opener's execution context over `host`, as a turn's phase context is:
-/// its own opener state, the host's closing seam, the charge sink its
-/// incorporations land in, and the cancellation its turn would carry.
+/// its own opener state, the host's closing seam, and the cancellation its
+/// turn would carry.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -28,7 +27,6 @@ fn opener_context(
     provider: Arc<dyn crate::ToolProvider>,
     processes: Arc<dyn crate::ProcessService>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    charge: Arc<RecordingCharge>,
     cancel: CancellationToken,
 ) -> crate::RuntimeExecutionContext<'static> {
     let admitted = crate::admit(opener_scope(session_id));
@@ -47,10 +45,9 @@ fn opener_context(
     .tool_catalog(crate::ToolCatalog::from_tool_definitions(leaf_definitions()))
     .tool_registry(Arc::new(tool_registry))
     .processes(processes)
-    .direct_completions(
-        crate::DirectCompletionClient::from_fn(|_request, _source| Ok(law_direct_completion()))
-            .with_usage_charge_sink(charge),
-    )
+    .direct_completions(crate::DirectCompletionClient::from_fn(
+        |_request, _source| Ok(law_direct_completion()),
+    ))
     .borrowed_effect_controller(controller)
     .route_tool_children()
     .build()
@@ -98,18 +95,9 @@ fn aggregate(
     }
 }
 
-/// What an opener's end must have incorporated from the spending loser: its
-/// one spend, once, and the process its drain started.
-async fn assert_loser_incorporated(
-    context: &crate::RuntimeExecutionContext<'_>,
-    charge: &RecordingCharge,
-    law: &str,
-) {
-    assert_eq!(
-        charge.count(),
-        1,
-        "{law}: the loser's spend was charged into the opener's ledger exactly once"
-    );
+/// What an opener's end must have incorporated from the spending loser: the
+/// process its drain started.
+async fn assert_loser_incorporated(context: &crate::RuntimeExecutionContext<'_>, law: &str) {
     assert!(
         !context.started_process_ids().is_empty(),
         "{law}: the process the loser's drain started is the opener's possession"
@@ -119,7 +107,7 @@ async fn assert_loser_incorporated(
 /// §6, §7, §13: a turn cancelled while its `any` is parked on rank 2 — rank 1
 /// consumed as a rejection — hands the group back to its opener. A loser whose
 /// final record committed before the cancel keeps its authority, drains and
-/// ranks afterwards; the opener's end incorporates that rank: its spend and
+/// ranks afterwards; the opener's end incorporates that rank and
 /// the process it started.
 #[expect(
     clippy::expect_used,
@@ -145,7 +133,6 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
         ),
         sink: Arc::clone(&sink),
     });
-    let charge = Arc::new(RecordingCharge::default());
     let cancel = CancellationToken::new();
     let context = opener_context(
         &host,
@@ -153,7 +140,6 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
         Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
         processes,
         Arc::clone(&scenario.process_env_store),
-        Arc::clone(&charge),
         cancel.clone(),
     );
     let spender = format!("{session_id}-spender");
@@ -200,7 +186,7 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
         .close_opener_groups()
         .await
         .expect("the opener's end closes, finalizes and incorporates");
-    assert_loser_incorporated(&context, &charge, "a cancelled aggregate's committed loser").await;
+    assert_loser_incorporated(&context, "a cancelled aggregate's committed loser").await;
 }
 
 /// §7, §13, W16: an opener's end records `closing` and then fails — the worker
@@ -260,7 +246,6 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
             Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
             Arc::clone(&processes),
             Arc::clone(&scenario.process_env_store),
-            Arc::new(RecordingCharge::default()),
             CancellationToken::new(),
         );
         let outcome = first.call_tool_aggregate(race()).await;
@@ -285,14 +270,12 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
         );
         first_end.abort();
 
-        let charge = Arc::new(RecordingCharge::default());
         let retried = opener_context(
             &host,
             &session_id,
             Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
             processes,
             Arc::clone(&scenario.process_env_store),
-            Arc::clone(&charge),
             CancellationToken::new(),
         );
         let ending = retried.clone();
@@ -308,6 +291,6 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
             .expect("the retried end finishes once the drain lands")
             .expect("the retried end's task")
             .expect("the retried end finalizes and incorporates");
-        assert_loser_incorporated(&retried, &charge, "an abandoned end's closing group").await;
+        assert_loser_incorporated(&retried, "an abandoned end's closing group").await;
     }
 }

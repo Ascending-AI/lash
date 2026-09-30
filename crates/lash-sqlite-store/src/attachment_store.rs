@@ -47,7 +47,7 @@ lash_store_sql::statements! {
              DO UPDATE SET stored_at_ms = MAX(stored_at_ms, excluded.stored_at_ms)";
 
         /// The bytes held under `?1`.
-        select_content = "SELECT content FROM attachment_blobs WHERE attachment_id = ?1";
+        select_content = "SELECT length(content), CASE WHEN length(content) <= ?2 THEN content END FROM attachment_blobs WHERE attachment_id = ?1";
 
         /// One blob's identity and freshness, without its bytes.
         select_ref = "SELECT attachment_id, stored_at_ms FROM attachment_blobs
@@ -196,22 +196,34 @@ impl AttachmentStore for SqliteAttachmentStore {
         Ok(reference)
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
         let attachment_id = id.as_str().to_string();
-        self.conn
+        let sql_limit = i64::try_from(max_bytes).unwrap_or(i64::MAX);
+        let row = self
+            .conn
             .call(move |connection| {
                 connection
                     .query_row(
                         attachment_blob_sql().select_content.sql(),
-                        params![attachment_id],
-                        |row| row.get::<_, Vec<u8>>(0),
+                        params![attachment_id, sql_limit],
+                        |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
                     )
                     .optional()
             })
             .await
-            .map_err(|error| backend_error("get", error))?
-            .map(|bytes| StoredAttachment { bytes })
-            .ok_or_else(|| AttachmentStoreError::NotFound(id.clone()))
+            .map_err(|error| backend_error("get", error))?;
+        match row {
+            Some((_, Some(bytes))) => Ok(StoredAttachment { bytes }),
+            Some((byte_len, None)) => Err(AttachmentStoreError::ReadLimitExceeded {
+                byte_len,
+                max_bytes,
+            }),
+            None => Err(AttachmentStoreError::NotFound(id.clone())),
+        }
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {

@@ -304,11 +304,28 @@ crash matrix's invariants and the soak's own checks hold. The server double
 runs on manual time with Restate's default retry policy, so a replay's
 backoff spans virtual time as it does against a real server.
 
-`chaos_soak_smoke` runs two epochs, about two minutes, and is `dev-deferred`.
+`chaos_soak_smoke` runs two epochs within a four-minute wall-time budget and
+is `dev-deferred`.
 `chaos_soak_release` is ignored; `just chaos-soak` and release.yml's
-`chaos-soak` job run it for 90 minutes. A failed epoch prints its seed, its
-violations and the trace of its steps. The `LASH_CHAOS_SOAK_*` settings it
-prints replay the epoch alone. `LASH_CHAOS_SOAK_STEPS` cuts the plan to a
+`chaos-soak` job run it for 90 minutes. Each epoch writes its case name, seed,
+active step or check phase, elapsed
+wall time and recovery progress directly to stderr, outside libtest capture.
+Buck2 also retains a separate progress file per case and epoch in the test
+report's undeclared-output directory. Steps have a 60-second watchdog; each epoch has a four-minute
+watchdog capped by the remaining soak duration. Open-ended runs stop admitting
+new epochs when less than a full epoch budget remains. A timeout records terminal
+and obligation state before bounded shutdown, then fails with its seed,
+violations and partial step trace. Host calls observe crashes since the last
+completed restart, including a crash that fired before admission. A crash
+during restart triggers another restart instead of being marked handled.
+While host work awaits a reply or a held root awaits recovery, the driver
+advances to pending retries' due times. Backoff still spans virtual time,
+and the stores and server share that clock; waiting for the next plan tick
+would deadlock a call whose answer depends on a retry.
+Held model calls deliberately never
+settle, so their worlds wait at most 50 ms per settle attempt while recovery
+and end-state checks retain their virtual-time bounds. The
+`LASH_CHAOS_SOAK_*` settings it prints replay the epoch alone. `LASH_CHAOS_SOAK_STEPS` cuts the plan to a
 prefix, and `LASH_CHAOS_SOAK_WITHOUT=<kind,...>` replaces step kinds with
 quiesces while keeping every other step where it was.
 

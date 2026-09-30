@@ -303,19 +303,20 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     Ok(())
 }
 
-/// A per-turn protocol override naming the retired `dialect` field cannot
-/// re-point the language a turn is served in, and never reaches durable state.
+/// A per-turn protocol override naming another `dialect` cannot re-point the
+/// language a turn is served in, and never replaces the session's recorded
+/// dialect.
 ///
 /// `SendBuilder::protocol_turn_options` is public host surface and the merge
 /// behind it is a shallow key merge, so a host-supplied `{"dialect":"..."}` is
-/// a write that reaches the protocol without passing through create-time
-/// resolution. TypeScript is now the only language (ADR 0096), so the field
-/// cannot select anything — but a turn that silently accepted it would leave a
-/// bundle whose prompt and recorded options disagree, which is the
-/// mislabeled-evidence class this layer exists to close.
+/// a write that reaches the protocol without passing through the host's
+/// selection. The dialect is the host's choice where it constructs the
+/// protocol (ADR 0096), so the field cannot select anything — but a turn that
+/// silently accepted it would leave a bundle whose prompt and recorded options
+/// disagree, which is the mislabeled-evidence class this layer exists to close.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<()> {
+async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("rlm-dialect-turn-override")
@@ -387,22 +388,22 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
         );
     }
 
-    // And the durable bag never took the field, so the next open is not
-    // refused as a pre-cutover record.
+    // And the durable bag keeps the host's selection, so the next open under
+    // the same host is not refused.
     let reopened = core
         .session("rlm-dialect-turn-override")
         .created()
         .await
         .open()
         .await?;
-    assert!(
+    assert_eq!(
         reopened
             .read_view()
             .protocol_turn_options()
             .payload
-            .get("dialect")
-            .is_none(),
-        "a per-turn override must not write the retired field into durable state"
+            .get("dialect"),
+        Some(&serde_json::json!("typescript")),
+        "a per-turn override must not replace the session's recorded dialect"
     );
     Ok(())
 }

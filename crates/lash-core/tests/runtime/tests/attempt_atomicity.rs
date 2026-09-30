@@ -182,11 +182,11 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier<'_> {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
             .controller()
-            .await_group_child_drain_admission(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 }
@@ -426,7 +426,19 @@ fn tool_context_with_provider<'run>(
             Some(TurnId::from(TURN.to_string())),
         );
     let direct_completions = if bind_direct_client_to_attempt {
-        direct_completions.with_tool_attempt_parent_invocation(attempt_parent.clone())
+        // The attempt's usage run, begun as the tool-attempt runner begins it:
+        // a direct completion inside an attempt is one call of that run
+        // (ADR 0125).
+        direct_completions
+            .with_tool_attempt_parent_invocation(attempt_parent.clone())
+            .with_usage_run(
+                fixtures
+                    .runtime
+                    .host
+                    .core
+                    .usage_accounting()
+                    .begin(&attempt_effect_envelope()),
+            )
     } else {
         direct_completions
     };
@@ -443,8 +455,7 @@ fn tool_context_with_provider<'run>(
             Arc::clone(&fixtures.trigger_store),
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
         )),
-        process_definitions: None,
-        process_engines: Default::default(),
+        process_engines: lash_core::testing::process_engine_fixture(),
         effect_controller,
         direct_completions,
         parent_invocation: Some(attempt_parent.clone()),
@@ -1420,11 +1431,11 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier<'_> {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
             .controller()
-            .await_group_child_drain_admission(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 }
@@ -1650,7 +1661,16 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
             .runtime_session_services()
             .expect("attempt-atomicity session manager")
             .direct_completion_client(scoped, Some(TurnId::from(TURN.to_string())))
-            .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation());
+            .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation())
+            // The attempt's usage run, as the tool-attempt runner begins it.
+            .with_usage_run(
+                fixtures
+                    .runtime
+                    .host
+                    .core
+                    .usage_accounting()
+                    .begin(&attempt_effect_envelope()),
+            );
 
         lash_core::RuntimeEffectController::execute_effect(
             &sentinel,
@@ -1836,6 +1856,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
                         1,
                         1,
                         envelope.invocation.into_runtime_invocation(),
+                        None,
                         None,
                         None,
                     )

@@ -88,8 +88,8 @@ impl lash_core::SessionDeleteExecution for HandlerExecution<'_> {
 
 /// Run `attempt` over a delete context for `session_id` inside one
 /// `SessionDelete` handler on `double`, which `core` runs over.
-pub(super) async fn in_delete_handler<T>(
-    double: &lash_restate_test::RestateTestBackend,
+pub(super) async fn in_delete_handler<T, Stores: lash_core::StoreSet + ?Sized>(
+    double: &lash_restate_test::RestateTestBackend<Stores>,
     core: &LashCore,
     session_id: impl AsRef<str>,
     attempt: impl AsyncFnOnce(lash_core::SessionDeleteContext<'_>) -> Result<T>,

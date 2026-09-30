@@ -44,26 +44,38 @@ pub fn register_trigger_tool_definition() -> ToolDefinition {
 /// surface. The artifact store is the module store the draft preparation
 /// resolves the target's authoritative signature against.
 pub fn register_trigger_tool_provider(
+    workers: lash_vm_client::service::Service,
     artifact_store: lashlang::LashlangArtifacts,
 ) -> StaticToolProvider<RegisterTriggerTools> {
     StaticToolProvider::new(
         vec![register_trigger_tool_definition()],
-        RegisterTriggerTools { artifact_store },
+        RegisterTriggerTools {
+            artifact_store,
+            workers,
+        },
     )
 }
 
 pub struct RegisterTriggerTools {
+    workers: lash_vm_client::service::Service,
     artifact_store: lashlang::LashlangArtifacts,
 }
 
 #[async_trait::async_trait]
 impl StaticToolExecute for RegisterTriggerTools {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
-        execute_register_trigger_tool_call(call.context, call.args, &self.artifact_store).await
+        execute_register_trigger_tool_call(
+            &self.workers,
+            call.context,
+            call.args,
+            &self.artifact_store,
+        )
+        .await
     }
 }
 
 pub async fn execute_register_trigger_tool_call(
+    workers: &lash_vm_client::service::Service,
     context: &AttemptContext<'_>,
     args: &Value,
     artifact_store: &lashlang::LashlangArtifacts,
@@ -72,11 +84,17 @@ pub async fn execute_register_trigger_tool_call(
         Ok(request) => request,
         Err(error) => return refuse(error.to_string()),
     };
-    let prepared =
-        match prepare_trigger_draft(artifact_store, context.definition_engines(), &request).await {
-            Ok(prepared) => prepared,
-            Err(error) => return refuse(error.to_string()),
-        };
+    let prepared = match prepare_trigger_draft(
+        workers,
+        artifact_store,
+        context.definition_engines(),
+        &request,
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(error) => return refuse(error.to_string()),
+    };
     let owner = context.owner().runtime_owner();
     let session_scope = match context.owner() {
         lash_core::ExecutionOwner::SessionFrame {
@@ -114,21 +132,9 @@ pub async fn execute_register_trigger_tool_call(
         .and_then(|spawn| spawn.wake_session_id.as_ref())
         .map(|session| lash_core::SessionScope::new(session.clone()))
         .or(session_scope);
-    // A process's env is already durable, so the draft names its reference
-    // verbatim and the intent publishes nothing. A session's env is not, so
-    // the draft names the content-addressed reference and the intent carries
-    // the spec for realization to publish under its own artifact owner.
-    let (env_ref, env_spec) = match context.inherited_process_execution_env_ref() {
-        Some(env_ref) => (env_ref, None),
-        None => {
-            let env_spec = context.process_execution_env_spec();
-            match env_spec.stable_ref() {
-                Ok(env_ref) => (env_ref, Some(env_spec)),
-                Err(error) => {
-                    return refuse(format!("failed to encode process execution env: {error}"));
-                }
-            }
-        }
+    let env_ref = match context.process_execution_env_ref() {
+        Ok(env_ref) => env_ref,
+        Err(error) => return refuse(error.to_string()),
     };
     let draft = match prepared.into_draft(env_ref, wake_target) {
         Ok(draft) => draft,
@@ -144,7 +150,6 @@ pub async fn execute_register_trigger_tool_call(
                 owner,
                 owner_scope,
                 actor,
-                env_spec,
                 draft,
             },
         ))]),
@@ -177,7 +182,7 @@ mod tests {
             definition
                 .manifest
                 .bindings
-                .get(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY),
+                .get(lash_tool_support::TOOL_BINDING_KEY),
             Some(
                 &serde_json::to_value(lash_core::ToolBinding::new(["triggers"], "register"))
                     .expect("binding serializes")
@@ -213,8 +218,10 @@ mod tests {
     async fn register_trigger_provider_advertises_only_the_registration_tool() {
         use lash_core::ToolProvider as _;
 
-        let provider =
-            register_trigger_tool_provider(crate::lib_tests::memory_artifact_store().await);
+        let provider = register_trigger_tool_provider(
+            lash_vm_client::service::Service::default(),
+            crate::lib_tests::memory_artifact_store().await,
+        );
         let manifests = provider.tool_manifests();
         assert_eq!(manifests.len(), 1);
         assert_eq!(manifests[0].name, "register_trigger");

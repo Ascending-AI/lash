@@ -506,7 +506,7 @@ macro_rules! delegate_process_lifecycle {
 pub(crate) use delegate_process_lifecycle;
 
 macro_rules! delegate_process_observer_registry {
-    ($wrapper:ty, $inner:ident) => {
+    ($wrapper:ty, $inner:ident $(, $delete:ident)?) => {
         #[async_trait::async_trait]
         impl $crate::runtime::process::registry_concerns::ProcessObserverRegistry for $wrapper {
             async fn add_observer(
@@ -583,9 +583,15 @@ macro_rules! delegate_process_observer_registry {
                 &self,
                 session_id: &SessionId,
             ) -> Result<$crate::ProcessSessionDeleteReport, $crate::PluginError> {
-                self.$inner.delete_session_process_state(session_id).await
+                delegate_process_observer_registry!(@delete self, session_id, $inner $(, $delete)?)
             }
         }
+    };
+    (@delete $this:ident, $session:ident, $inner:ident) => {
+        $this.$inner.delete_session_process_state($session).await
+    };
+    (@delete $this:ident, $session:ident, $inner:ident, $delete:ident) => {
+        $this.$delete($session).await
     };
 }
 pub(crate) use delegate_process_observer_registry;

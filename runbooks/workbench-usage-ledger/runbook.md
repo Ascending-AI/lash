@@ -21,8 +21,8 @@ provider-reported counters, canonical arithmetic, and equality between surfaces.
 
 ## Scenario-specific golden rules
 
-1. **Use the canonical report.** `/api/state.usage` is `session.usage_report()`, not a
-   browser accumulator. Save the entire object before comparing the rendered rail.
+1. **Use the canonical report.** `/api/state.usage` is `session.usage().await?.report()`,
+   the session owner's durable accounting (ADR 0125), not a browser accumulator. Save the entire object before comparing the rendered rail.
 2. **Reasoning output is a subset.** For API and trace rows, total tokens are
    `input_tokens + output_tokens + cache_read_input_tokens + cache_write_input_tokens`.
    Never add `reasoning_output_tokens` again.
@@ -43,20 +43,12 @@ provider-reported counters, canonical arithmetic, and equality between surfaces.
 
 ## Token-usage overflow triage
 
-`token usage counter ... overflowed while accumulating` is deliberately fail closed. An
-overflowing, unconfirmed row remains in the resident session's process-local
-`shared_token_ledger`, so the next turn on that same resident session re-fails. Do not
-retry the turn in place and do not edit the durable token ledger.
-
-Operator remediation is to replace the resident Lash session/runtime and reconstruct it
-from the last committed `RuntimePersistence` state. For Workbench, that is
-`bash scripts/agent-workbench-dev.sh restart --port <port>` with the same data directory and
-store — the verified non-destructive same-configuration replacement, which is the remedy this
-section offers and is not blocked. Cold reconstruction clears only the non-durable `shared_token_ledger`; the committed
-`RuntimeSessionState.token_ledger`, graph, checkpoint, and session identity remain the
-store-authoritative state. If cold reconstruction itself reports an overflow, the bad
-rows are already durable: stop, retain the database evidence, and escalate for data
-repair rather than looping restarts.
+A usage fact is written once per provider attempt by the engine and never rides a session
+commit (ADR 0125), so no resident ledger can poison a later turn. A turn that fails with
+`token usage counter ... overflowed while accumulating turn usage` overflowed its own
+in-turn context-window count; the attempt facts it had already delivered stay counted. The
+display report saturates rather than failing (`saturated == true`, golden rule 6). Retain the
+database evidence (`usage_facts`, `usage_runs`) for RCA; do not edit accounting rows.
 
 ## Working material
 
@@ -75,7 +67,8 @@ repair rather than looping restarts.
 - API truth: `GET /api/state`, especially `usage.usage`, `usage.by_source_model`, and
   `usage.entry_count`.
 - Disk truth: `<data-dir>/trace.jsonl` and the selected SQLite/Postgres session store — for
-  SQLite that is `<data-dir>/lash-sessions/durable-core.db`. `<data-dir>/sessions.json` is
+  SQLite that is `<data-dir>/lash-sessions/durable-core.db`, whose `usage_facts` rows are
+  the session owner's accounting. `<data-dir>/sessions.json` is
   **not** disk truth for this row: it lists the launcher's own boot-created session and never
   the URL-supplied session that owned the turn, so a driver that reads it fails Phase 0 on a
   correct system.
@@ -113,7 +106,6 @@ and a positive canonical call sum. `llm_call_completed.response.usage` carries t
 counters but **no** `total_tokens` — compute the canonical sum from them (golden rule 2),
 and do not read a null field. Then gate:
 
-- `/api/state.usage.entry_count == usage.by_source_model.length`;
 - the canonical session total equals the sum of every `by_source_model[].usage.total_tokens`;
 - each report row is no larger than the session total;
 - the session total is at least the sum of the selected trace call usage;

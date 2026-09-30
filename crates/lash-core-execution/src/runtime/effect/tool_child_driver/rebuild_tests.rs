@@ -117,7 +117,6 @@ fn a_max_depth_subagent_has_no_spawn_on_either_path() {
             &request,
             super::tests::child_controller(),
             spec(3),
-            &ToolUsageLedger::new(),
         )
         .expect("the lent client's test service binds to any recorded authority");
 
@@ -159,7 +158,6 @@ fn a_context_under_another_subagent_context_is_refused_on_either_path() {
                 &request,
                 super::tests::child_controller(),
                 spec(3),
-                &ToolUsageLedger::new(),
             )
             .err()
             .unwrap_or_else(|| panic!("{path:?}: the disagreeing context is refused"));
@@ -192,7 +190,6 @@ fn a_built_childs_waits_observe_its_recorded_turn_gate() {
                 &request,
                 super::tests::child_controller(),
                 spec(3),
-                &ToolUsageLedger::new(),
             )
             .expect("the lent client's test service binds to any recorded authority"),
         );

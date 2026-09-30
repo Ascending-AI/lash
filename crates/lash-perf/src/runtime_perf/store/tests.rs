@@ -80,10 +80,9 @@ async fn successful_commits_are_counted_after_the_inner_store_accepts_them() {
         .root_store(&SessionId::from("counted"))
         .await
         .expect("create the counted session store");
-    let commit = RuntimeCommit::persisted_state_for_test(
-        &state_with_one_pending_node(&SessionId::from("counted")),
-        &[],
-    );
+    let commit = RuntimeCommit::persisted_state_for_test(&state_with_one_pending_node(
+        &SessionId::from("counted"),
+    ));
     let expected_node_count = commit.graph.nodes().len();
     assert!(expected_node_count > 0, "fixture must commit graph nodes");
 
@@ -107,10 +106,9 @@ async fn rejected_commits_do_not_change_the_instrumentation_counter() {
         .root_store(&SessionId::from("root"))
         .await
         .expect("create the root session store");
-    let mut commit = RuntimeCommit::persisted_state_for_test(
-        &state_with_one_pending_node(&SessionId::from("root")),
-        &[],
-    );
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state_with_one_pending_node(
+        &SessionId::from("root"),
+    ));
     commit.expected_head_revision = 99;
 
     let error = SessionCommitStore::commit_runtime_state(store.as_ref(), commit)

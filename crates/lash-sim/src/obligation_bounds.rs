@@ -527,6 +527,118 @@ struct SlowReleases {
     parks: Mutex<Vec<u64>>,
 }
 
+struct HeldRecovery;
+
+#[async_trait::async_trait]
+impl SessionControlEngine for HeldRecovery {
+    async fn reconcile_parks(
+        &self,
+        _: &dyn ParkRecoveryWriter,
+        _: EnginePage,
+    ) -> Result<ParkReconcileReport, EngineRefusal> {
+        std::future::pending().await
+    }
+    async fn resume_root(
+        &self,
+        _: &RootRef,
+        _: Option<&lash_core::store::EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        Ok(EngineAck::NothingHeld)
+    }
+    async fn release_root(
+        &self,
+        _: &RootRef,
+        _: Option<&lash_core::store::EnginePark>,
+    ) -> Result<EngineAck, EngineRefusal> {
+        Ok(EngineAck::Released)
+    }
+}
+
+/// A stuck leader repair must return within the arm budget, so the fixed
+/// interval keeps reaching due retries after the first delivery failed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn held_recovery_preserves_the_interval_and_due_retry_bound() {
+    use lash_core::engine::{ReconcileArm, ReconcileCursor, RecoveryPassBudget};
+    use lash_core::runtime::drive::{
+        RECOVERY_TICK, ReconcileParts, RecoveryInterval, RelayLanes, reconcile_once,
+    };
+    let clock = SimClock::new();
+    let work = Arc::new(Work(Arc::new(HeldRecovery)));
+    let world = World::closed_on(
+        "held-recovery",
+        true,
+        1,
+        Arc::new(HeldRecovery),
+        clock.clone(),
+    )
+    .await;
+    let ticks = Arc::new(Mutex::new(Vec::new()));
+    let schedule = {
+        let clock = clock.clone();
+        let sessions = world.stores.session_store_factory();
+        let scopes = world.close.clone();
+        let relays: Vec<Arc<dyn ObligationRelay>> =
+            vec![world.relay.clone(), world.scope_close.clone()];
+        let ticks = ticks.clone();
+        tokio::spawn(async move {
+            let lanes = RelayLanes::new(clock.clone(), RecoveryPassBudget::default());
+            let mut interval = RecoveryInterval::new(clock.clone(), RECOVERY_TICK);
+            let mut cursor = ReconcileCursor::default();
+            loop {
+                interval.tick().await;
+                let at = clock.logical_ms();
+                let tick = reconcile_once(
+                    &ReconcileParts {
+                        sessions: sessions.as_ref(),
+                        work: work.as_ref(),
+                        scopes: scopes.as_ref(),
+                        processes: None,
+                        clock: clock.as_ref(),
+                        duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
+                        relays: &relays,
+                        lanes: &lanes,
+                    },
+                    &cursor,
+                    NonZeroUsize::MIN.saturating_add(63),
+                )
+                .await;
+                cursor = tick.next.clone();
+                ticks.lock().expect("ticks").push((at, tick));
+            }
+        })
+    };
+    let start = clock.logical_ms();
+    while clock.logical_ms() < start + 25_000 {
+        clock.advance_by(100).await;
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    schedule.abort();
+    let _ = schedule.await;
+    let obligation = world.obligation().await;
+    let ticks = ticks.lock().expect("ticks");
+    assert!(
+        ticks.len() >= 3,
+        "held recovery stopped the interval: {ticks:?}"
+    );
+    for (index, (at, tick)) in ticks.iter().enumerate() {
+        assert!(
+            *at <= start + index as u64 * 10_000 + 1_000,
+            "tick missed its grid: {ticks:?}"
+        );
+        assert!(
+            tick.failures
+                .iter()
+                .any(|failure| failure.arm == ReconcileArm::Parks),
+            "arm timeout is reported"
+        );
+    }
+    assert_eq!(
+        obligation,
+        Some(ObligationState::Delivered),
+        "the later tick retries due work"
+    );
+}
+
 #[async_trait::async_trait]
 impl SessionControlEngine for SlowReleases {
     async fn reconcile_parks(

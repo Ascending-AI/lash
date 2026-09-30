@@ -9,7 +9,10 @@ async fn typed_http_failure(body: &'static str) -> lash_core::provider::Provider
     let mut handle = ProviderHandle::new(provider.into_components());
 
     handle
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
+        )
         .await
         .expect_err("typed HTTP failure must not succeed")
 }

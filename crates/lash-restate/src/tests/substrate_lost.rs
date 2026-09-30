@@ -1070,7 +1070,11 @@ pub(super) async fn lost_run_pass_resubmits_the_latest_segment_even_when_its_ref
         &crate::services::DEFAULT_NAMESPACE,
         &segment.registry,
         &segment.continuations,
-        std::num::NonZeroUsize::new(16).expect("non-zero"),
+        crate::session_control::RecoveryScan {
+            limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
+            after: &mut None,
+            deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+        },
     )
     .await
     .expect("the lost-run pass");

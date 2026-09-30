@@ -500,10 +500,10 @@ impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
     async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
-        commit_seq: u64,
+        rank: u64,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
-            .await_group_child_drain_admission(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, rank)
             .await
     }
 }

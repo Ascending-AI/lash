@@ -245,7 +245,6 @@ async fn end_oracle_root(
             None,
             HydratedSessionCheckpoint::default(),
             Vec::new(),
-            Vec::new(),
         ),
         fence,
         settlement,
@@ -262,7 +261,11 @@ async fn end_oracle_root(
         commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
         turn,
         root,
-        stop: None,
+        outcome: lash_core::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     store
         .commit_runtime_state(commit)

@@ -1035,6 +1035,9 @@ fn report(state: &MigrationState, executed: Vec<MigrationStep>) -> MigrationRepo
 }
 
 /// Takes the advisory lock in the requested mode on a detached connection.
+/// PostgreSQL bounds this lock wait at 30 seconds, independent of inherited
+/// timeouts. Committing the acquisition transaction restores those timeouts
+/// while retaining the session lock for the migration work.
 ///
 /// Session-scoped locks demand this shape — the connection is owned, so a
 /// cancelled future or an error path still releases the lock when the session
@@ -1043,18 +1046,28 @@ fn report(state: &MigrationState, executed: Vec<MigrationStep>) -> MigrationRepo
 async fn lock_connection(pool: &PgPool, shared: bool) -> Result<sqlx::PgConnection, StoreError> {
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
     let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
-    let locked = sqlx::query(if shared {
-        "SELECT pg_advisory_lock_shared($1, $2)"
-    } else {
-        "SELECT pg_advisory_lock($1, $2)"
-    })
-    .bind(lock_namespace)
-    .bind(lock_key)
-    .execute(&mut connection)
-    .await
-    .map_err(store_sqlx_error);
+    let locked = async {
+        let begin = sqlx::Connection::begin(&mut connection);
+        let mut tx = begin.await.map_err(store_sqlx_error)?;
+        sqlx::raw_sql("SET LOCAL lock_timeout = '30s'; SET LOCAL statement_timeout = 0")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(if shared {
+            "SELECT pg_advisory_lock_shared($1, $2)"
+        } else {
+            "SELECT pg_advisory_lock($1, $2)"
+        })
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+    .await;
     match locked {
-        Ok(_) => Ok(connection),
+        Ok(()) => Ok(connection),
         Err(error) => {
             let _ = sqlx::Connection::close(connection).await;
             Err(error)
@@ -1068,9 +1081,8 @@ async fn lock_connection(pool: &PgPool, shared: bool) -> Result<sqlx::PgConnecti
 async fn read_state_under_lock(
     connection: &mut sqlx::PgConnection,
 ) -> Result<MigrationState, StoreError> {
-    let mut tx = sqlx::Connection::begin(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
+    let begin = sqlx::Connection::begin(&mut *connection);
+    let mut tx = begin.await.map_err(store_sqlx_error)?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await
@@ -1313,9 +1325,8 @@ async fn verify_changed_catalog(
     let conformant = verification.is_conformant();
     #[cfg(feature = "synthetic-next")]
     let conformant = {
-        let mut tx = sqlx::Connection::begin(&mut *connection)
-            .await
-            .map_err(store_sqlx_error)?;
+        let begin = sqlx::Connection::begin(&mut *connection);
+        let mut tx = begin.await.map_err(store_sqlx_error)?;
         let findings = crate::schema_shape::synthetic_next_findings(&mut tx, &verification).await?;
         tx.rollback().await.map_err(store_sqlx_error)?;
         findings.is_empty()
@@ -1688,9 +1699,9 @@ pub async fn plan_migrations(
     result
 }
 
-/// The migrate runner needs two connections at most — one holds the advisory
-/// lock while it works — and the usual statement timeouts, not a worker's
-/// pool shape.
+/// The migrate runner needs two connections at most: one holds the advisory
+/// lock while it works. Migration statements inherit deployment timeouts;
+/// [`lock_connection`] bounds advisory acquisition separately.
 async fn migrate_pool(database_url: &str) -> Result<PgPool, StoreError> {
     postgres_pool_options(&PostgresStoreConfig {
         max_connections: 2,

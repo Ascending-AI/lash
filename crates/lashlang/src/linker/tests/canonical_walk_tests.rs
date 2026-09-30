@@ -13,7 +13,7 @@ fn scan_tick_process() -> Declaration {
     )
 }
 
-/// `await triggers.register({ source: <source>, target: scan, inputs: { tick: trigger.event } })?`
+/// `await triggers.register({ source: <source>, target: { definition: scan }, inputs: { tick: trigger.event } })?`
 fn register_scan_trigger(source: Expr) -> Expr {
     triggers_call(
         "register",
@@ -170,7 +170,7 @@ fn trigger_registration_in_the_catch_path_lowers_from_its_own_scope() {
     // try { source = timer.Schedule({ expr: "0 9 * * *" }) }
     // catch error { await triggers.register({
     //   source: source,
-    //   target: scan,
+    //   target: { definition: scan },
     //   inputs: { tick: trigger.event }
     // })? }
     //
@@ -219,14 +219,14 @@ fn registration_call(expr: &Expr) -> (&Expr, &[Expr]) {
 fn assignment_indexes_retain_lowering_and_their_own_registrations_in_evaluation_order() {
     // process scan(tick: timer.Tick) { finish tick.fired_at }
     // items[await triggers.register({
-    //   source: timer.Schedule({ expr: "0 8 * * *" }), target: scan,
+    //   source: timer.Schedule({ expr: "0 8 * * *" }), target: { definition: scan },
     //   inputs: { tick: trigger.event }
     // })?] = await triggers.register({
-    //   source: timer.Schedule({ expr: "0 9 * * *" }), target: scan,
+    //   source: timer.Schedule({ expr: "0 9 * * *" }), target: { definition: scan },
     //   inputs: { tick: trigger.event }
     // })?
     // await triggers.register({
-    //   source: timer.Schedule({ expr: "0 10 * * *" }), target: scan,
+    //   source: timer.Schedule({ expr: "0 10 * * *" }), target: { definition: scan },
     //   inputs: { tick: trigger.event }
     // })?
     let register_at = |expr: &str| register_scan_trigger(timer_schedule(expr));

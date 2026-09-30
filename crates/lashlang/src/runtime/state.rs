@@ -581,7 +581,7 @@ impl Snapshot {
     }
 }
 
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SnapshotDecodeError {
     #[error("snapshot version {found} is incompatible with version {expected}")]

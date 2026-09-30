@@ -122,7 +122,7 @@ fn owner_key(owner: &crate::RuntimeOwner) -> String {
 async fn commit(store: &Arc<dyn RuntimeStore>, state: &mut RuntimeSessionState) {
     let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
         store,
-        RuntimeCommit::persisted_state_for_test(state, &[]),
+        RuntimeCommit::persisted_state_for_test(state),
         "plugin-state-law",
     )
     .await
@@ -223,7 +223,7 @@ pub async fn plugin_state_boundary_trace(
     );
     drop(rebuilt);
     state.refresh_plugin_states(&plugins);
-    let changed = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let changed = RuntimeCommit::persisted_state_for_test(&state);
     assert!(
         matches!(
             changed.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
@@ -234,7 +234,7 @@ pub async fn plugin_state_boundary_trace(
     commit(&store, &mut state).await;
     assert_ne!(state.plugin_state_ref(), before.as_ref());
     state.refresh_plugin_states(&plugins);
-    let unchanged = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let unchanged = RuntimeCommit::persisted_state_for_test(&state);
     assert!(
         matches!(
             unchanged.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],

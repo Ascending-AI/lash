@@ -5,17 +5,17 @@ use lash_core::plugin::{CodeExecutorPlugin, ProtocolSessionContext};
 use lash_core::{SessionError, SessionHistoryRecord};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
-use crate::dialect::{DialectSession, TypescriptDialect};
+use crate::dialect::{DialectSession, SessionDialect};
 use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
 
 pub(crate) struct RlmRuntimeState {
-    dialect: Arc<TypescriptDialect>,
+    dialect: Arc<SessionDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
     execution: tokio::sync::Mutex<DialectSession>,
 }
 
 impl RlmRuntimeState {
-    pub(crate) fn new(dialect: Arc<TypescriptDialect>) -> Result<Self, SessionError> {
+    pub(crate) fn new(dialect: Arc<SessionDialect>) -> Result<Self, SessionError> {
         Ok(Self {
             execution: tokio::sync::Mutex::new(dialect.create_session()),
             dialect,
@@ -39,7 +39,8 @@ impl RlmRuntimeState {
         deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::RlmDialectServices {
-            artifact_store: crate::testing::memory_artifact_store_blocking(),
+            workers: lash_vm_client::service::Service::default(),
+            artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
             deferred_tool_resolver,
             deferred_trigger_resolver: None,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -47,7 +48,8 @@ impl RlmRuntimeState {
             code_renderer: Default::default(),
             channel: crate::plugin::RlmChannel::Cell,
         };
-        Self::new(Arc::new(crate::dialect::TypescriptDialect::new(
+        Self::new(Arc::new(crate::dialect::SessionDialect::new(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
             lash_lashlang_runtime::LashlangSurface::default(),
             services,
         )))

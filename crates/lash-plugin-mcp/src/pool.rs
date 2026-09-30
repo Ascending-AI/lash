@@ -12,6 +12,7 @@
 //!
 //! The wire-level transport is provided by the official [`rmcp`] SDK.
 
+mod catalog;
 mod lifecycle_actor;
 
 use lash_sansio::sync::{LockResultExt, MutexExt, RwLockExt};
@@ -175,6 +176,7 @@ struct McpEntry {
     /// never routes through the actor.
     service: tokio::sync::watch::Receiver<Option<Arc<PublishedService>>>,
     actor_tx: tokio::sync::mpsc::UnboundedSender<LifecycleCommand>,
+    refresh_requested: tokio::sync::watch::Sender<u64>,
     actor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     active_pid: Arc<AtomicU32>,
     /// Cached, prefixed tool definitions for this server, refreshed on every
@@ -202,6 +204,8 @@ struct McpEntry {
     #[cfg(test)]
     refresh_install_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
+    refresh_notifications: AtomicU64,
+    #[cfg(test)]
     panic_actor_on_quit: AtomicBool,
     #[cfg(test)]
     shutdown_wedge_pid: AtomicU32,
@@ -226,9 +230,9 @@ struct McpToolListRefresh {
 
 #[async_trait::async_trait]
 impl McpToolListChangedHandler for McpToolListRefresh {
-    async fn refresh_tools(&self, peer: Peer<RoleClient>) {
+    async fn refresh_tools(&self, _peer: Peer<RoleClient>) {
         if let Some(entry) = self.entry.upgrade() {
-            entry.refresh_tools(peer, self.service_generation).await;
+            entry.request_tool_refresh(self.service_generation);
         }
     }
 }
@@ -975,19 +979,16 @@ impl McpEntry {
     ) -> Arc<Self> {
         let (actor_tx, actor_rx) = tokio::sync::mpsc::unbounded_channel();
         let (published_tx, service) = tokio::sync::watch::channel(None);
+        let (refresh_requested, refresh_requests) = tokio::sync::watch::channel(0);
         let active_pid = Arc::new(AtomicU32::new(0));
-        let shutdown_policy = *config.shutdown_policy();
-        let reconnect_initial_backoff = config.reconnect_initial_backoff();
-        let keepalive_interval = config.liveness_probe_interval();
         Arc::new_cyclic(|weak| {
             let actor = LifecycleActor::new(
                 weak.clone(),
                 actor_rx,
+                refresh_requests,
                 published_tx,
                 Arc::clone(&active_pid),
-                shutdown_policy,
-                reconnect_initial_backoff,
-                keepalive_interval,
+                &config,
             );
             let actor_handle = tokio::spawn(actor.run());
             Self {
@@ -998,6 +999,7 @@ impl McpEntry {
                 host_services,
                 service,
                 actor_tx,
+                refresh_requested,
                 actor_handle: Mutex::new(Some(actor_handle)),
                 active_pid,
                 imported_tools: RwLock::new(BTreeMap::new()),
@@ -1015,6 +1017,8 @@ impl McpEntry {
                 probe_completed: tokio::sync::Notify::new(),
                 #[cfg(test)]
                 refresh_install_hook: RwLock::new(None),
+                #[cfg(test)]
+                refresh_notifications: AtomicU64::new(0),
                 #[cfg(test)]
                 panic_actor_on_quit: AtomicBool::new(false),
                 #[cfg(test)]
@@ -1086,32 +1090,20 @@ impl McpEntry {
         result.await.unwrap_or(Err(McpError::PoolShutDown))
     }
 
-    async fn refresh_tools(&self, peer: Peer<RoleClient>, observed_generation: u64) {
-        let discovery_timeout = self.config.startup_timeout();
-        let tools = match timeout(discovery_timeout, peer.list_all_tools()).await {
-            Ok(Ok(tools)) => tools,
-            Ok(Err(error)) => {
-                tracing::warn!(
-                    server = %self.server_name,
-                    error = %error,
-                    "MCP tools/list refresh failed after list-changed notification"
-                );
-                return;
-            }
-            Err(_) => {
-                tracing::warn!(
-                    server = %self.server_name,
-                    timeout_ms = discovery_timeout.as_millis() as u64,
-                    "MCP tools/list refresh timed out after list-changed notification"
-                );
-                return;
-            }
-        };
+    fn request_tool_refresh(&self, generation: u64) {
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return;
+        }
         #[cfg(test)]
-        self.pause_before_refresh_install().await;
-        let _ = self.actor_tx.send(LifecycleCommand::InstallToolCatalog {
-            generation: observed_generation,
-            tools,
+        self.refresh_notifications.fetch_add(1, Ordering::SeqCst);
+        // Every signal marks one latest value dirty. An older service cannot
+        // erase a newer generation's notification.
+        self.refresh_requested.send_if_modified(|latest| {
+            if generation < *latest {
+                return false;
+            }
+            *latest = generation;
+            true
         });
     }
 
@@ -1691,3 +1683,7 @@ mod policy_tests;
 #[cfg(test)]
 #[path = "pool_unit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "catalog_peer_tests.rs"]
+mod catalog_peer_tests;

@@ -142,20 +142,23 @@ pub async fn a_committed_root_answers_its_terminal_by_root(
         "a pending input has no root"
     );
     let outcome = drive(&runner, &parts, "root-answered-drive").await;
-    assert!(
-        matches!(&outcome.ran[..], [RootOutcome::Committed { root: ran, .. }] if *ran == root),
-        "{outcome:?}"
-    );
+    let committed = match &outcome.ran[..] {
+        [RootOutcome::Committed { root: ran, outcome }] if *ran == root => outcome.clone(),
+        _ => panic!("the root commits: {outcome:?}"),
+    };
     let evidence = terminal(&parts, &root)
         .await
         .expect("the root's final commit wrote its evidence");
     assert_eq!(evidence.kind, RootTerminalKind::Answered);
+    // The evidence carries the outcome the root committed, so a follower
+    // answers from this row alone (FIG-4345).
     assert_eq!(
         evidence.cause,
         RootTerminalCause::Committed {
             commit: TurnCommitId::new(root.clone(), 0),
             turn: root.clone(),
-            stop: None,
+            outcome: crate::store::RootCommittedOutcome::of_turn_outcome(&committed)
+                .expect("a committed root ended in a finish or a stop"),
         }
     );
     assert!(evidence.head_revision.is_some(), "a head commit wrote it");
@@ -192,17 +195,18 @@ pub async fn a_host_id_naming_a_terminal_root_is_answered_not_rerun(
         .derive_node_ids(&state.session_id, &operation)
         .expect("derive commit node ids");
     let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        &state,
-        graph,
-        &[],
-        operation,
+        &state, graph, operation,
     )
     .expect("build the earlier epoch's commit");
     commit.root_terminal = Some(Box::new(RootTerminalWrite {
         root: root.clone(),
         commit: TurnCommitId::new(root.clone(), 0),
         turn: root.clone(),
-        stop: None,
+        outcome: crate::store::RootCommittedOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: String::new(),
+            },
+        ),
     }));
     parts
         .store
@@ -955,9 +959,11 @@ pub async fn a_root_crashed_at_its_report_handover_still_closes_its_scope(
 /// A redelivered command root replays its recorded journal (FIG-3893, ADR
 /// 0101 §4): a root that applied the session's queued command dies before
 /// the engine records its end. The redelivered execution replays the same
-/// journal and answers the same outcome; the command applied once, and the
-/// root admitted no turn-lane row, so it has no terminal evidence and no
-/// scope to close.
+/// journal and answers the same outcome, and the command applied once. A
+/// command root ends like any other root (FIG-4202): its end writes its
+/// terminal evidence, `CommandsApplied`, and arms its scope's close, which
+/// runs once, after that evidence is durable, however many executions
+/// replay it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1043,12 +1049,16 @@ pub async fn a_command_roots_redrive_replays_its_recorded_outcome(
     };
     assert!(root.as_str().starts_with("drive-commands:"), "{first:?}");
     assert_eq!(again, first, "the redrive answers the recorded outcome");
+    let ended = terminal(&parts, root)
+        .await
+        .expect("a command root's end writes its terminal evidence");
+    assert_eq!(ended.cause, RootTerminalCause::CommandsApplied);
+    assert_eq!(ended.kind, RootTerminalKind::Answered);
     assert_eq!(
-        terminal(&parts, root).await,
-        None,
-        "a command root admits no turn-lane row and writes no evidence"
+        closes.closes(),
+        vec![(root.clone(), true)],
+        "the command root's scope closed once, after its evidence was durable"
     );
-    assert!(closes.closes().is_empty(), "no root scope was opened");
     assert!(
         parts
             .store

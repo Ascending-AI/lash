@@ -411,7 +411,7 @@ fn persisted_commit(session: &SessionId) -> lash_core::RuntimeCommit {
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+    lash_core::RuntimeCommit::persisted_state_for_test(&state)
 }
 
 async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {

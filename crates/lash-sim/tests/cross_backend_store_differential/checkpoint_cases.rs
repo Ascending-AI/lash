@@ -15,7 +15,6 @@ pub(super) fn bodies_then_ref_only() -> GeneratedCase {
                     turn_id: "checkpoint-bodies",
                 }),
                 checkpoint: CheckpointSpec::Bodies,
-                usage: true,
                 adopt_attachment: false,
             },
             StoreOperation::Commit {
@@ -26,7 +25,6 @@ pub(super) fn bodies_then_ref_only() -> GeneratedCase {
                     turn_id: "checkpoint-refs",
                 }),
                 checkpoint: CheckpointSpec::PriorRefs,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::ColdReopenSession,
@@ -49,7 +47,6 @@ pub(super) fn bodies_then_cleared() -> GeneratedCase {
                     turn_id: "checkpoint-bodies-before-clear",
                 }),
                 checkpoint: CheckpointSpec::Bodies,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::Commit {
@@ -60,7 +57,6 @@ pub(super) fn bodies_then_cleared() -> GeneratedCase {
                     turn_id: "checkpoint-cleared",
                 }),
                 checkpoint: CheckpointSpec::ClearedComponents,
-                usage: false,
                 adopt_attachment: false,
             },
             StoreOperation::ColdReopenSession,
@@ -82,7 +78,6 @@ pub(super) fn missing_component_ref() -> GeneratedCase {
                 turn_id: "missing-component",
             }),
             checkpoint: CheckpointSpec::MissingExecutionStateRef,
-            usage: false,
             adopt_attachment: false,
         }],
     }

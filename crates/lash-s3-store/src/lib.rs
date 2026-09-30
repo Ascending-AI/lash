@@ -243,8 +243,12 @@ impl AttachmentStore for S3AttachmentStore {
         put_at_path(&*self.store, self.content_path(&meta.id)?, bytes, meta).await
     }
 
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        get_at_path(&*self.store, self.content_path(id)?, id).await
+    async fn get(
+        &self,
+        id: &AttachmentId,
+        max_bytes: u64,
+    ) -> Result<StoredAttachment, AttachmentStoreError> {
+        get_at_path(&*self.store, self.content_path(id)?, id, max_bytes).await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
@@ -319,16 +323,45 @@ async fn get_at_path(
     store: &dyn ObjectStore,
     content_path: Path,
     id: &AttachmentId,
+    max_bytes: u64,
 ) -> Result<StoredAttachment, AttachmentStoreError> {
-    let bytes = store
+    let result = store
         .get(&content_path)
         .await
-        .map_err(|err| map_object_store_get_error(err, id))?
-        .bytes()
+        .map_err(|err| map_object_store_get_error(err, id))?;
+    read_result(result, max_bytes).await
+}
+
+async fn read_result(
+    result: object_store::GetResult,
+    max_bytes: u64,
+) -> Result<StoredAttachment, AttachmentStoreError> {
+    let mut stream = result.into_stream();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream
+        .try_next()
         .await
         .map_err(|err| backend_error("read", err))?
-        .to_vec();
-
+    {
+        let byte_len = (bytes.len() as u64).saturating_add(chunk.len() as u64);
+        if byte_len > max_bytes {
+            return Err(AttachmentStoreError::ReadLimitExceeded {
+                byte_len,
+                max_bytes,
+            });
+        }
+        if byte_len > bytes.capacity() as u64 {
+            let capacity = byte_len
+                .max((bytes.capacity() as u64).saturating_mul(2))
+                .min(max_bytes);
+            let additional = usize::try_from(capacity - bytes.len() as u64)
+                .map_err(|error| AttachmentStoreError::Contract(error.to_string()))?;
+            bytes
+                .try_reserve_exact(additional)
+                .map_err(|error| AttachmentStoreError::Contract(error.to_string()))?;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     Ok(StoredAttachment { bytes })
 }
 
@@ -425,6 +458,55 @@ mod tests {
     use lash_conformance::ReopenableAttachmentStore;
     use lash_core::{AttachmentTypeMetadata, MediaType};
     use object_store::aws::AmazonS3ConfigKey;
+
+    #[tokio::test]
+    async fn s3_attachment_materialization_read_budgets() {
+        lash_conformance::attachment_materialization_read_budgets(Arc::new(
+            S3AttachmentStore::from_object_store(
+                Arc::new(object_store::memory::InMemory::new()),
+                None,
+            ),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn falsely_small_object_metadata_refuses_stream_before_next_chunk() {
+        use futures_util::StreamExt;
+        let raw = object_store::memory::InMemory::new();
+        let path = Path::from("fixture");
+        raw.put(&path, object_store::PutPayload::from_static(b"12345"))
+            .await
+            .expect("seed");
+        let mut result = raw.get(&path).await.expect("get");
+        result.meta.size = 0;
+        result.range = 0..0;
+        result.payload = object_store::GetResultPayload::Stream(
+            futures_util::stream::iter([
+                Ok(object_store::PutPayload::from_static(b"1234")
+                    .iter()
+                    .next()
+                    .expect("chunk")
+                    .clone()),
+                Ok(object_store::PutPayload::from_static(b"5")
+                    .iter()
+                    .next()
+                    .expect("chunk")
+                    .clone()),
+            ])
+            .chain(futures_util::stream::once(async {
+                panic!("reader must stop at the limit")
+            }))
+            .boxed(),
+        );
+        assert!(matches!(
+            read_result(result, 4).await,
+            Err(AttachmentStoreError::ReadLimitExceeded {
+                byte_len: 5,
+                max_bytes: 4
+            })
+        ));
+    }
 
     /// Malformed stored ids fail listing instead of silently losing blobs.
     #[tokio::test]
@@ -661,6 +743,43 @@ mod tests {
         .await;
     }
 
+    async fn partial_root_handles() -> lash_conformance::AttachmentReferrerHandles {
+        let mut config = live_s3_config().expect("live S3 is required for this law");
+        config.prefix = Some(format!("partial-roots/{}", unique_case_suffix()));
+        let stores = lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open store set");
+        lash_conformance::AttachmentReferrerHandles {
+            factory: lash_core::StoreSet::session_store_factory(&stores),
+            cleanup: lash_core::StoreSet::artifact_cleanup(&stores),
+            bytes: Arc::new(move || {
+                Arc::new(S3AttachmentStore::from_config(config.clone()).expect("S3 store"))
+                    as Arc<dyn AttachmentStore>
+            }),
+            insert_edge: Arc::new(|_, _, _| {
+                Box::pin(async { panic!("this law uses normal referrer writes") })
+            }),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live S3-compatible storage"]
+    async fn skipped_attachment_referrer_kind_cannot_authorize_s3_delete() {
+        lash_conformance::skipped_attachment_referrer_kind_cannot_authorize_delete(
+            partial_root_handles().await,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live S3-compatible storage"]
+    async fn truncated_attachment_root_page_cannot_authorize_s3_delete() {
+        lash_conformance::truncated_attachment_root_page_cannot_authorize_delete(
+            partial_root_handles().await,
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn duplicate_puts_are_content_addressed_when_live_s3_configured() {
         let Some(config) = live_s3_config() else {
@@ -695,13 +814,13 @@ mod tests {
         );
         let reference = store.put(vec![4, 5, 6, 7], meta).await.expect("put");
         store
-            .get(&reference.id)
+            .get(&reference.id, 32 * 1024 * 1024)
             .await
             .expect("present before delete");
 
         store.delete(&reference.id).await.expect("delete content");
         let err = store
-            .get(&reference.id)
+            .get(&reference.id, 32 * 1024 * 1024)
             .await
             .expect_err("content must be gone after delete");
         assert!(

@@ -103,12 +103,19 @@ mod session_driver;
 mod session_reconcile;
 mod turn;
 mod turn_handler;
+mod usage_accounting;
 mod wire;
+pub use wire::{CallDecodeError, JsonDecodeError, JsonDecodeLimits};
 
 pub use restate_sdk;
 
 pub use compat::{
     COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, RESTATE_WIRE_VERSION, Reply, VersionRange,
+};
+
+pub use usage_accounting::{
+    LashUsageAccounting, USAGE_ACCOUNTING_WIRE_VERSION, UsageAccountingSettle,
+    UsageExecutionRetirement, UsageOwnerDrain, UsageOwnerRetiredWire,
 };
 
 pub use controller::{
@@ -134,11 +141,11 @@ pub use effect_group::{
     EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadGetResponse,
     EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupPhase,
     EffectGroupProbeAdoptResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
-    EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
-    EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
+    EffectGroupReadRankResponse, EffectGroupRecordSettlementRequest,
     EffectGroupRecordSettlementResponse, EffectGroupRefusal, EffectGroupRefusalRequest,
-    EffectGroupRegisterRefusalResponse, EffectGroupRegisterRequest, EffectGroupRegisterResponse,
-    EffectGroupRetireResponse, EffectGroupRetirementCancelResponse, EffectGroupSettlementRecord,
+    EffectGroupRegisterDispatchRequest, EffectGroupRegisterDispatchResponse,
+    EffectGroupRegisterRefusalResponse, EffectGroupRetireResponse,
+    EffectGroupRetirementCancelResponse, EffectGroupSettlementRecord,
     EffectGroupSettlementTerminal, EffectGroupShape, EffectGroupWaitResolution,
 };
 pub use effect_host::RestateEffectHost;
@@ -165,7 +172,7 @@ pub use process::{
     SegmentStarted, resume_parked_process,
 };
 pub use process_attach::RestateProcessAttachRequest;
-pub use serve::serve_endpoint;
+pub use serve::{RestateEndpointLimits, serve_endpoint};
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use session_driver::{
     LASH_SESSION_DRIVE_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRootCloseRequest,
@@ -235,3 +242,7 @@ pub(crate) type JournaledStepFuture<'a, T> =
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/response_body_budget.rs"]
+mod response_body_budget_tests;

@@ -4,180 +4,94 @@
 
 Accepted.
 
-Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
-surface. TypeScript is the only shipped authoring dialect today; future
-dialects target the same IR and VM with independent semantics (FIG-4276). This ADR's separation
-of machine from language stands and is what made the retirement cheap: "Lashlang"
-below names the IR and VM. What is gone is the second front end, not a second
-machine.
-
-Amended 2026-09-24 (FIG-3019): the isolation copies went with the surface. The
-compiler emits only ECMA reference semantics; `DeepCopy` and
-`DeepCopyLoopBinding` are deleted. A durable heap is written as a forest, or as
-a validated graph when it has sharing (`validate_persisted_graph`), and the
-wire's `reference_semantics` flag records only which of the two it is, not a
-dialect. The passages below on isolation lowering, a dialect-scoped durable
-validator and consulting a segment's dialect are historical. The collection,
-metering and heap size schedule contracts stand.
-
 ## Context
 
-RLM execution runs authored code in a durable VM. Until now that VM had exactly
-one language above it, so the machine and the language were free to be the same
-thing: Lashlang's value semantics could live in the machine, because nothing
-else executed there.
-
-Adding a second dialect ends that freedom. A TypeScript dialect is
-reference-semantic by definition — two bindings can name one object, mutation
-through either is visible through both, and `===` compares identity. Lashlang is
-value-semantic: a store copies, and mutation through one binding is never
-observable through another (ADR 0076). One of the two has to be the machine's
-semantics and the other has to be produced by lowering, or there have to be two
-machines.
-
-Two machines is the expensive answer, and the expense is not in the interpreter
-loop. It is in everything durable: continuation and bytecode formats, the
-persisted heap, the allocation counter, the GC schedule, the logical-byte
-metering schedule (ADR 0055), checkpoint components (ADR 0056), the execution
-bounds contract, the exception machinery's handler and finally stacks and their
-scope-extent validation. Each of those is a durable contract that a host
-operates and a cold restore has to agree with. Forking them per dialect means
-two determinism stories, two drain procedures, two sets of format versions, and
-a fix in one that silently does not land in the other.
-
-So the question is not whether to share a machine but which semantics the shared
-machine has.
+A source dialect needs identity, closures, exceptions, bounds and durable
+continuations. Duplicating the machine for each language would duplicate its
+persistence and metering contracts. The shared IR and VM execute lowered
+programs; source-language semantics belong to the front end.
 
 ## Decision
 
-The VM is a heap substrate with reference semantics. Value semantics is a
-dialect lowering.
+The VM stores heap objects by identity and preserves references. Binding two
+names to one object and mutating through either name affects that object.
+TypeScript is the shipped source dialect and lowers ECMA reference semantics
+into this machine. The machine does not insert isolation copies at stores.
+ADR 0061 defines the dialect/IR boundary; ADR 0091 owns expression lowering.
 
-Heap objects are addressed by identity and the heap primitives are
-reference-preserving: they duplicate a reference where the machine's operation
-says to duplicate a reference, and nothing in the VM copies a graph on its own
-initiative. Lashlang's value semantics is produced entirely by the Lashlang
-compiler, which inserts a recursive isolation copy at every durable store — name
-and slot stores, global stores, every container member, iterator bindings,
-effect-result bindings, and the `State` patch APIs, enumerated in ADR 0076. A
-dialect that wants reference semantics omits that lowering and writes the
-reference straight through. The decision lives in the compiler, in one direction
-only.
-
-The proof obligation for the lowering is behavioral, not structural: Lashlang's
-full existing battery stays green unchanged. An expectation edit in a Lashlang
-test is evidence that the lowering is wrong, not that the test was — the
-language is defined by what it already does, and the heap substrate is only
-allowed to change how that is achieved.
+A dialect is a compiler front end with its own accepted semantics and evidence.
+If its language requires copying, its lowering must express that behavior using
+the shared machine's contracts. It does not require a second heap VM.
 
 ### Why the reverse design is not available
 
-Putting value semantics in the machine and building a reference dialect on top
-is not a symmetric trade that we happened to decide the other way. It does not
-work.
-
-A value-semantic machine has no identity to hand out. Its durable form names a
-forest — roots and the trees they own — and sharing has no encoding in it at
-all, which is exactly the property ADR 0076 relies on. A reference dialect
-lowered onto it would have to synthesize identity in guest-visible state: an
-object table held as an ordinary machine value, every property read and write
-indirected through it, `===` and aliasing implemented in emitted code. That
-table is then the real heap, and every substrate contract measures the wrong
-thing. The collector would sweep the machine's trees while liveness actually
-lived in the dialect's table, so nothing would ever be collected until the
-dialect implemented its own reachability; the logical-byte schedule would meter
-table entries rather than objects; the deterministic identity a continuation
-persists would be the machine's, not the one the guest can observe. The dialect
-would have re-implemented a heap VM inside a VM, and paid for both.
-
-The asymmetry is the point. Removing a copy is a compiler edit. Adding identity
-is a second machine.
+A machine that implicitly copies every value cannot directly represent aliasing
+or identity comparisons. A reference dialect would need a guest object table
+and indirect property operations. That table would act as a second heap,
+separate from the machine's collector and memory meter. Native identity lets
+collection, bounds and persistence describe the same objects the guest sees.
 
 ### What the substrate owns, and no dialect may tune
 
-Because both dialects share one wire and one determinism story, the following
-are substrate contracts, fixed for every dialect:
+The shared machine owns:
 
-- **Deterministic identity.** Object IDs are allocation-ordered and never
-  reused, so two independent runs of the same program dump byte-identical
-  continuations.
-- **Deterministic collection.** A non-moving stop-the-world mark-sweep triggered
-  purely by the monotonic allocation counter every 1,024 allocations, and
-  additionally wherever a boundary needs the live set exactly — at a park, at
-  snapshot capture, and at a committing batch of global patches. A dialect does
-  not get its own trigger; two triggers on one wire is two determinism stories.
-- **Metering.** Live logical bytes under the versioned Lashlang heap size
-  schedule, never allocator or RSS measurements, bounded by the explicit
-  `memory_limit` of ADR 0055.
-- **Persistence of the counters.** The allocation counter, live logical bytes,
-  and the size-schedule version ride in the continuation, so a resumed segment
-  meters as one continuous execution rather than restarting the schedule.
-- **Measured structural bounds.** The AST nesting cap of 64 is derived from the
-  measured stack cliff of the link/compile/execute pipeline, not from a grammar.
-  Every dialect front end must land inside it: Lashlang's parser cap was reduced
-  from 40 to 30 so that its worst two-AST-levels-per-syntactic-level shape lands
-  at 63, and a TypeScript front end owes the same measurement rather than its
-  own budget.
+- allocation-ordered object IDs that are not reused;
+- non-moving mark-sweep collection every 1,024 allocations and at boundaries
+  that need an exact live set;
+- logical-memory charges under the registered heap-size schedule and the
+  explicit execution bounds of ADR 0055;
+- counters and heap state carried across durable continuation handovers; and
+- the shared AST nesting cap of 64, checked before linking and compilation.
 
-Function values, closures and stackless call frames, and the exception layer's
-handler and finally stacks with their scope-extent validation and durable
-error origin are likewise substrate machinery: a dialect selects which of it to
-emit, never how it behaves once emitted. One consequence is already binding on
-the TypeScript lowering: a TypeScript `return` must lower to a real function
-return and never to `Expr::Finish`, which is a process terminal and
-deliberately does not run pending `finally` blocks.
+A front end must produce IR within the shared structural bound. TypeScript has
+its own earlier source-nesting diagnostic; that diagnostic does not change the
+machine's cap.
+
+Function values, closures, stackless call frames, handler/finally stacks and
+error routing also belong to the VM. A TypeScript `return` is a function return
+that executes pending cleanups. `Expr::Finish` is an execution terminal and
+cannot substitute for that return.
 
 ### Relationship to ADR 0076
 
-ADR 0076 stands as written and is not restated here. Read together, the split is
-this: ADR 0076 decides what *Lashlang's* durable state may look like — a forest
-of exclusively owned trees, enforced by a validator at every durable boundary in
-release builds — and this ADR decides that the same rule is a dialect invariant
-rather than a property of the machine.
+Runtime roots hold the actual heap references. Host views are projections of
+those roots and do not define durable ownership. ADR 0076 governs this
+root/view boundary and validation of persistent heap state.
 
-That distinction has a consequence which must be named rather than discovered.
-A reference-semantic dialect omits the isolation lowering and therefore produces
-graphs with sharing, which the forest validator refuses by construction. So the
-durable-boundary validator becomes dialect-scoped: the segment's pinned dialect
-selects it, and Lashlang's remains exactly the validator ADR 0076 specifies,
-with no relaxation. The general object graph a reference dialect persists needs
-its own wire contract — how sharing is expressed, and how a cold restore
-reconstructs it identically — and that contract is an obligation of the
-TypeScript dialect work, not a decision taken here. Until it exists and is
-enforced with the same "refused at both ends" discipline, no reference-semantic
-dialect may write durable state.
+At capture the VM collects the reachable heap and first checks whether it is an
+exclusively owned forest. If the forest check fails, it validates a shared
+acyclic graph. Shared references and supported exotics persist as graph state;
+cycles and dangling references fail validation. The reader checks the same
+shape obligations. The wire's `reference_semantics` flag describes the stored
+forest/graph form, not a source dialect.
+
+Each object persists once under its heap ID. Fragments assign objects to the
+first root that discovers them, so references across roots preserve identity.
+A reader need not infer ownership from a language selector.
 
 ### Format versions
 
-The substrate layers shipped so far move the durable contracts to bytecode
-format 8, continuation format 6, `lashlang-vm-abi-v6`, and snapshot format 5.
-ADR 0055's clean-cutover rule applies unchanged: deployments drain or recreate
-parked Lashlang processes, older bytes are neither migrated nor decoded, and no
-compatibility decoder exists at any of these version boundaries.
-
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
+`lash::formats` exposes the current bytecode, continuation, ABI, snapshot and
+heap-schedule contracts. Their writers and readers use the registered fleet
+version windows. ADR 0115 owns compatibility, migration and drain rules.
+During the pre-1.0 freeze, shapes change in place without version bumps or
+upcasters.
 
 ## Consequences
 
-- One VM, one durable format family, one determinism story, and one metering
-  schedule serve both dialects. A defect fixed in the substrate is fixed for
-  every dialect at once.
-- Lashlang pays the isolation copy on every durable store, which is inherent to
-  copy semantics and already accepted in ADR 0076. A copy-on-write
-  representation behind identical observable semantics remains possible later.
-- A reference-semantic dialect gets identity, aliasing, and `===` for free from
-  the substrate, and owes only its own durable-graph wire contract and
-  validator.
-- The forest rule is no longer a global truth about persisted VM state. Any
-  future reader of durable heap state must consult the segment's dialect before
-  assuming ownership structure.
-- A dialect that needs something the substrate cannot express must argue it at
-  the substrate, where both dialects will get it, rather than forking the
-  machine. Adding a second VM is a decision that reopens this ADR.
+- One VM and durable format family serve source front ends with independent
+  semantics and evidence.
+- Aliasing, collection and logical accounting refer to the same heap objects.
+- Durable state can be a forest or a validated shared graph. A forest-only
+  assumption is insufficient for a reader.
+- A front end that needs an operation the IR cannot express must extend the
+  shared machine contract. A second VM requires a separate decision.
 
-## Amendment (FIG-4125, 2026-09-29)
+## Code evidence
 
-Item 24: [ADR 0091](0091-one-lowering-walk-owns-expression-semantics.md) and
-[ADR 0064](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md)
-supersede the older lowering and language-scope sketches. The heap-VM ownership
-rule survives.
+- [Dialect contract](../../crates/lash-protocol-rlm/src/dialect.rs#L33).
+- [Heap identity and counters](../../crates/lashlang/src/runtime/heap.rs#L103).
+- [AST bound](../../crates/lashlang/src/ast.rs#L140).
+- [Forest or graph capture](../../crates/lashlang/src/runtime/state.rs#L699).
+- [Shared-object partition](../../crates/lashlang/src/runtime/heap/partition.rs#L1).
+- [Format manifest](../../crates/lash/src/formats.rs#L339).

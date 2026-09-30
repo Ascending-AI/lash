@@ -242,6 +242,20 @@ named `<name>-workers-<generation>`. A generation with its own image in
 `workers.generationImages` also renders its migrate hook. Worker `i`'s
 control port stays reachable across generations as `<name>-worker-<i>-control`.
 
+# Rolling-upgrade campaign
+
+`just e2e-rolling-cluster` runs this topology with
+`scripts/loadtest_upgrade.py` in place of the fault controller: N and the
+synthetic N+1 side by side under the same load, through the ADR 0106 §6
+choreography. Worker generations `initial` (N), `next` (N+1), `rollback`
+(N) and `final` (N+1) each serve their own URI; each image carries its
+own build's `lashctl`, run inside that generation's pod. The rollback
+generation sets `workers.migrate: false`, so N never runs its migrate over
+N+1's expansion. The campaign skips the quorum-loss hold and the results
+archive, and the driver judges the upgrade classes of
+`runbooks/restate-postgres-workers/src/load/upgrade_verify.rs`. The
+runbook is `runbooks/rolling-upgrade/`.
+
 # Scaleway profile
 
 Scaleway provisioning and release qualification are PENDING until the account

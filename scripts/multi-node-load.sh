@@ -17,8 +17,13 @@ if [[ "${1:-}" != --locked ]]; then
 fi
 shift
 target="${1:-local}"
-if [[ $# -gt 1 ]] || [[ "$target" != local && "$target" != scaleway ]]; then
-  echo "usage: multi-node-load.sh [local|scaleway]" >&2; exit 2
+# The campaign the controller runs against the load: the FIG-4169 fault
+# campaign, or the FIG-3805 rolling upgrade (N to the synthetic N+1 with a
+# rollback leg, finalize and the stale-writer fence).
+campaign="${2:-faults}"
+if [[ $# -gt 2 ]] || [[ "$target" != local && "$target" != scaleway ]] || \
+    [[ "$campaign" != faults && "$campaign" != rolling-upgrade ]]; then
+  echo "usage: multi-node-load.sh [local|scaleway] [faults|rolling-upgrade]" >&2; exit 2
 fi
 if [[ "$target" == scaleway ]]; then
   echo "the scaleway load target is PENDING: it needs a provisioned Scaleway Kapsule cluster," >&2
@@ -30,11 +35,11 @@ if kind get clusters | grep -Fx "$name"; then echo "refusing to reuse cluster $n
 # All calls name this run's kubeconfig. Never change the user's context.
 chart=deploy/helm/lash-loadtest
 profile="${LASH_LOADTEST_VALUES:-$chart/values-local.yaml}"
-python3 - "$chart/values.yaml" "$profile" "$run" "$name" <<'PYVALUES'
+python3 - "$chart/values.yaml" "$profile" "$run" "$name" "$campaign" <<'PYVALUES'
 import json, pathlib, sys, yaml
 sys.path.insert(0, 'scripts')
 from loadtest_connection_budget import peak_connections
-base, profile, directory, tag = sys.argv[1:]
+base, profile, directory, tag, campaign = sys.argv[1:]
 values = yaml.safe_load(open(base))
 def merge(target, overlay):
     for key, value in overlay.items():
@@ -48,6 +53,9 @@ if (values['restate']['replicas'] != 3 or values['restate']['partitions'] != 24
     raise SystemExit('the v1 topology proof requires three Restate nodes, 24 partitions and replication two')
 if values['s3']['mode'] != 'garage':
     raise SystemExit('the local proof uses run-owned Garage storage')
+if campaign == 'rolling-upgrade':
+    # The rollback and the roll each serve three worker generations at once.
+    values['postgres']['maxGenerations'] = 3
 values['postgres']['maxConnections'] = peak_connections(values)
 values['image']['tag'] = tag
 values['driver']['enabled'] = False
@@ -246,6 +254,9 @@ json.dump({'target': target, 'cluster': f'kind:{cluster}', 'namespace': namespac
 PYPLACEMENT
 # Hold one node down while new durable traffic runs. A replicas=2 scale-down
 # retains node 2's PVC/identity; the remaining two must commit fresh work.
+# The rolling-upgrade campaign proves the upgrade, not quorum loss: it keeps
+# all three nodes up and goes straight to the smoke registration.
+if [[ "$campaign" == faults ]]; then
 "${k[@]}" scale "statefulset/${resource}-restate" --replicas=2
 "${k[@]}" wait --for=delete "pod/${resource}-restate-2" --timeout=120s
 stable=0
@@ -265,11 +276,13 @@ for attempt in $(seq 1 90); do
 done
 ((stable >= 2))
 cat "$run/availability.txt"
+fi
 printf 'driver:\n  enabled: true\n' > "$run/driver-values.yaml"
 helm template topology "$chart" --namespace "$namespace" "${values[@]}" -f "$run/driver-values.yaml" \
   --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py job smoke | "${k[@]}" apply -f -
 "${k[@]}" wait --for=condition=complete "job/${resource}-smoke" --timeout=300s
 "${k[@]}" logs "job/${resource}-smoke" -c smoke > "$run/smoke.log"
+if [[ "$campaign" == faults ]]; then
 ctl snapshots create --trim-log > "$run/snapshots.txt" 2>&1
 if grep -E 'ERROR|Failed|failed' "$run/snapshots.txt"; then exit 1; fi
 [[ $(grep -c 'Snapshot created for partition' "$run/snapshots.txt") -eq 24 ]]
@@ -281,27 +294,47 @@ for attempt in $(seq 1 90); do
   sleep 2
 done
 python3 scripts/check_loadtest_cluster.py recovery "$run/nodes.json" "$run/recovered-status.txt" "$resource-restate-2"
+fi
 for attempt in $(seq 1 60); do
   "${k[@]}" exec "deployment/${resource}-proxy-${generation}" -- wget -qO- "http://${resource}-metrics:9090/api/v1/targets" > "$run/metrics-targets.json"
   if python3 scripts/check_loadtest_cluster.py metrics "$run/metrics-targets.json" > "$run/metrics.txt"; then break; fi
   sleep 2
 done
 python3 scripts/check_loadtest_cluster.py metrics "$run/metrics-targets.json"
-printf 'topology gates passed: restate_nodes=3 metadata_members=3 replication=2 public_turns=1 peer_reads=1 quorum_nodes_unavailable=1\n' | tee "$run/result.txt"
+if [[ "$campaign" == faults ]]; then
+  printf 'topology gates passed: restate_nodes=3 metadata_members=3 replication=2 public_turns=1 peer_reads=1 quorum_nodes_unavailable=1\n' | tee "$run/result.txt"
+else
+  printf 'topology gates passed: restate_nodes=3 metadata_members=3 replication=2 public_turns=1 peer_reads=1\n' | tee "$run/result.txt"
+fi
 # The durable workload (FIG-4168) under the fault campaign (FIG-4169): every
 # public durable operation class keeps running while the controller kills a
 # busy worker, restarts a Restate leader and rolls the workers to the
 # synthetic N+1 with a generation drain. The driver reconciles the witness
 # ledgers, fault classes included, once the campaign ends.
+# The rolling-upgrade campaign (FIG-3805 phase B) runs the ADR 0106 §6
+# choreography instead, under the same load; its steps are the ledger's
+# `half-roll`, `rollback`, `roll`, `finalize` and `fence` rows.
 fault_campaign="${LASH_LOADTEST_FAULT_CAMPAIGN:-true}"
 [[ "$fault_campaign" == true || "$fault_campaign" == false ]] || { echo "LASH_LOADTEST_FAULT_CAMPAIGN must be true or false" >&2; exit 1; }
+if [[ "$campaign" == rolling-upgrade && "$fault_campaign" != true ]]; then
+  echo "the rolling-upgrade campaign needs the load to run until its campaign ends" >&2; exit 1
+fi
 load_run="$workload-$(date -u +%Y%m%d%H%M%S)"
-printf 'load:\n  enabled: true\n  faultCampaign: %s\n  run: %s\n' "$fault_campaign" "$load_run" > "$run/load-values.yaml"
+# The rolling upgrade's five steps each wait out a Helm rollout, a drain and
+# every session answering; its load gets a longer deadline than a fault run.
+if [[ "$campaign" == rolling-upgrade ]]; then load_deadline=1800; fi
+printf 'load:\n  enabled: true\n  faultCampaign: %s\n  run: %s\n  activeDeadlineSeconds: %s\n' \
+  "$fault_campaign" "$load_run" "$load_deadline" > "$run/load-values.yaml"
 helm template topology "$chart" --namespace "$namespace" "${values[@]}" -f "$run/load-values.yaml" \
   --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py job load | "${k[@]}" apply -f -
 "${k[@]}" rollout status "deployment/${resource}-fault-probe" --timeout=120s
 campaign_status=0
-if [[ "$fault_campaign" == true ]]; then
+if [[ "$campaign" == rolling-upgrade ]]; then
+python3 scripts/loadtest_upgrade.py --kubeconfig "$KUBECONFIG" --namespace "$namespace" --name "$resource" \
+  --run "$load_run" --workload "crates/lash-perf/workloads/$workload.json" --workload-name "$workload" \
+  --run-dir "$run" --chart "$chart" --values "$run/run-values.yaml" \
+  --initial-tag "$name" --next-tag "$name-next" 2>&1 | tee "$run/upgrade.log" || campaign_status=$?
+elif [[ "$fault_campaign" == true ]]; then
 python3 scripts/loadtest_faults.py --kubeconfig "$KUBECONFIG" --namespace "$namespace" --name "$resource" \
   --run "$load_run" --workload "crates/lash-perf/workloads/$workload.json" --workload-name "$workload" \
   --run-dir "$run" --chart "$chart" --values "$run/run-values.yaml" \
@@ -316,7 +349,11 @@ for attempt in $(seq 1 "$load_deadline"); do
   if ((recovery_collected == 0)) && "${k[@]}" exec "job/${resource}-load" -c load -- test -f /tmp/load-measurements.recovery-ready >/dev/null 2>&1; then
     "${k[@]}" exec "job/${resource}-load" -c load -- cat /tmp/load-measurements.jsonl > "$run/recovery-measurements.log"
     recovery_status=0
-    python3 scripts/loadtest_measurements.py "$run/recovery-measurements.log" "$results_root" --recovery-only || recovery_status=$?
+    # Fault recovery qualification reads the fault campaign's kinds; the
+    # rolling upgrade's steps are judged by the driver's witness verdict.
+    if [[ "$campaign" == faults ]]; then
+      python3 scripts/loadtest_measurements.py "$run/recovery-measurements.log" "$results_root" --recovery-only || recovery_status=$?
+    fi
     "${k[@]}" exec "job/${resource}-load" -c load -- touch /tmp/load-measurements.recovery-collected
     recovery_collected=1
     if ((recovery_status != 0)); then campaign_status=$recovery_status; fi
@@ -336,6 +373,16 @@ for attempt in $(seq 1 "$load_deadline"); do
   sleep 1
 done
 "${k[@]}" logs "job/${resource}-load" -c load > "$run/load.log"
+if [[ "$campaign" == rolling-upgrade ]]; then
+  # The upgrade proof is the witness verdict; it takes no measurement
+  # archive, which belongs to the FIG-3790 baseline.
+  grep '^load \|^load witness' "$run/load.log" > "$run/load-witness.txt" || true
+  ((campaign_status == 0))
+  grep -F 'load witness verdict=passed' "$run/load.log"
+  [[ "$load_state" == 1/* ]]
+  printf 'rolling upgrade passed: %s\n' "$(grep -F 'load witness verdict=passed' "$run/load.log")" | tee -a "$run/result.txt"
+  exit 0
+fi
 measure_status=0
 if ((load_collected == 1)); then
   python3 scripts/loadtest_measurements.py "$run/measurements.log" "$results_root" || measure_status=$?

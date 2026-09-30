@@ -15,6 +15,7 @@ fn deferred_tools_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     )
     .with_deferred_tool_resolver(deferred.resolver());

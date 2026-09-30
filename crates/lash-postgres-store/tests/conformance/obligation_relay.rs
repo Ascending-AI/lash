@@ -4,14 +4,14 @@
 use super::{pg_law_stores, reset, storage};
 
 lash_conformance::obligation_relay_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database_fixture, storage)) = storage().await else {
         eprintln!("skipping Postgres obligation relay conformance: database is not configured");
         return;
     };
     reset(storage.pool()).await;
     let (attachments, stores) = pg_law_stores(&storage);
     (
-        (database_lock, attachments),
+        (database_fixture, attachments),
         lash_conformance::ObligationLawFixture {
             stores,
             prefix: "postgres".to_owned(),
@@ -20,14 +20,14 @@ lash_conformance::obligation_relay_tests!({
 });
 
 lash_conformance::recovery_leader_tests!(|label| {
-    let Some((database_lock, storage)) = storage().await else {
+    let Some((database_fixture, storage)) = storage().await else {
         eprintln!("skipping Postgres recovery leader conformance: database is not configured");
         return;
     };
     reset(storage.pool()).await;
     let (attachments, stores) = pg_law_stores(&storage);
     (
-        (database_lock, attachments),
+        (database_fixture, attachments),
         lash_conformance::LeaseLawFixture {
             store: stores.recovery_leader(),
             name: format!("recovery:{label}"),
@@ -44,7 +44,7 @@ lash_conformance::recovery_leader_tests!(|label| {
 async fn a_registry_armed_obligation_is_due_for_a_relay_clock_behind_the_database() {
     use lash_core_execution::store::{ObligationKey, ObligationKind};
 
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!("skipping the Postgres registry clock law: database is not configured");
         return;
     };
@@ -131,7 +131,7 @@ fn cleanup_kind_check(extra: &[&str]) -> String {
 /// This build refuses the row typed, stalls it and keeps its bytes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unknown_referrer_kind_is_refused_typed_and_stalled() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some((_database_fixture, storage)) = storage().await else {
         eprintln!("skipping the Postgres unknown referrer kind law: database is not configured");
         return;
     };

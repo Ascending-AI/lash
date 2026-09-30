@@ -207,6 +207,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         env_store: Some(&env_store),
         engines: Some(&engines),
         engines_required: false,
+        session_catalog: None,
         executor: "conformance process start",
         starter,
     };
@@ -225,16 +226,33 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     let bytes_b = spec_b.to_store_bytes().expect("B's environment bytes");
     assert_ne!(spec_a.stable_ref().expect("A's environment ref"), env_b);
 
+    for (starter, spec) in [(&starter_a, &spec_a), (&starter_b, &spec_b)] {
+        crate::publish_process_execution_env(
+            env_store.as_ref(),
+            &crate::ReferrerClaim::guarded(
+                crate::ArtifactReferrer::Execution(starter.clone()),
+                crate::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .expect("declaration claim"),
+            spec,
+        )
+        .await
+        .expect("publish captured environment");
+    }
     let paused = faults.pause_next_registration();
-    let start_b = crate::register_process_start(&stores_b, engine_start(), &[], Some(&spec_b));
+    let start_b = crate::register_process_start(
+        &stores_b,
+        engine_start().with_execution_env_ref(Some(env_b.clone())),
+        &[],
+    );
     let refuse_a = async {
         // B has staged under `Start(key)` and holds before its row.
         paused.wait_until_validated().await;
         let refused = crate::register_process_start(
             &stores_a,
-            crate::started_until_starter(engine_start(), ended_scope.clone()),
+            crate::started_until_starter(engine_start(), ended_scope.clone())
+                .with_execution_env_ref(Some(spec_a.stable_ref().expect("A environment"))),
             &[],
-            Some(&spec_a),
         )
         .await
         .expect_err("A's starter has ended");
@@ -390,6 +408,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         env_store: Some(&env_store),
         engines: Some(&engines_a),
         engines_required: true,
+        session_catalog: None,
         executor: "conformance process start",
         starter: &starter_a,
     };
@@ -398,6 +417,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         env_store: Some(&env_store),
         engines: Some(&engines_b),
         engines_required: true,
+        session_catalog: None,
         executor: "conformance process start",
         starter: &starter_b,
     };
@@ -420,19 +440,36 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     let bytes_b = spec_b.to_store_bytes().expect("B's environment bytes");
     assert_ne!(env_a, env_b);
 
+    for (starter, spec) in [(&starter_a, &spec_a), (&starter_b, &spec_b)] {
+        crate::publish_process_execution_env(
+            env_store.as_ref(),
+            &crate::ReferrerClaim::guarded(
+                crate::ArtifactReferrer::Execution(starter.clone()),
+                crate::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .expect("declaration claim"),
+            spec,
+        )
+        .await
+        .expect("publish captured environment");
+    }
     let a_read_the_key = faults_a.pause_next_start_key_read();
     let refuse_a = crate::register_process_start(
         &stores_a,
-        crate::started_until_starter(engine_start(), ended_scope),
+        crate::started_until_starter(engine_start(), ended_scope)
+            .with_execution_env_ref(Some(env_a.clone())),
         &[],
-        Some(&spec_a),
     );
     let start_b = async {
         // A has staged, been refused, and read the key: no record yet.
         a_read_the_key.wait_until_validated().await;
-        let started = crate::register_process_start(&stores_b, engine_start(), &[], Some(&spec_b))
-            .await
-            .expect("B registers under the key");
+        let started = crate::register_process_start(
+            &stores_b,
+            engine_start().with_execution_env_ref(Some(env_b.clone())),
+            &[],
+        )
+        .await
+        .expect("B registers under the key");
         // The starter's own hold on the module ends with its start.
         ports
             .modules()
@@ -462,6 +499,18 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         Some(&crate::drive::relay::RelayVerdict::Delivered),
         "the relay applied A's end of `Start(key)` before A went on"
     );
+
+    // The declarations have settled. Only B's retained process may hold
+    // its environment after both starter journals end.
+    for starter in [starter_a, starter_b] {
+        env_store
+            .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+                referrer: crate::ArtifactReferrer::Execution(starter),
+                carries: Vec::new(),
+            })
+            .await
+            .expect("end the declaration's journal referrer");
+    }
 
     let module_held = || async {
         ports
@@ -611,15 +660,6 @@ impl ArtifactCleanupAuthorities for KeyRecords {
             "the law asks no subscription revision `{revision:?}`"
         ))
     }
-
-    async fn definition_revision_current(
-        &self,
-        revision: &crate::DefinitionRevisionId,
-    ) -> Result<bool, String> {
-        Err(format!(
-            "the law asks no definition revision `{revision:?}`"
-        ))
-    }
 }
 
 /// The store set's cleanup ledger, where arming `start`'s `Ended` record has
@@ -727,10 +767,124 @@ impl crate::ArtifactCleanupLedger for RelayOnEnd {
         self.inner.nudge(referrer, now_ms).await
     }
 
+    async fn nudge_awaiting_journal(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+        now_ms: u64,
+    ) -> Result<u64, crate::StoreError> {
+        self.inner.nudge_awaiting_journal(journal, now_ms).await
+    }
+
     async fn load_cleanup(
         &self,
         id: &crate::ObligationId,
     ) -> Result<Option<crate::ArtifactCleanup>, crate::StoreError> {
         self.inner.load_cleanup(id).await
+    }
+}
+
+/// FIG-4256: two realized starts refer to one captured environment, and their
+/// persisted process rows remain bounded even with 128 KiB of instructions.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+pub async fn two_starts_share_one_captured_environment(
+    registry: Arc<dyn crate::ProcessRegistry>,
+    env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) {
+    let starter = crate::ExecutionScope::runtime_operation("shared-captured-environment")
+        .journal_identity()
+        .expect("starter");
+    let declaration = crate::ArtifactReferrer::Execution(starter.clone());
+    let claim = crate::ReferrerClaim::guarded(
+        declaration.clone(),
+        crate::ArtifactCleanupPlan::AwaitJournal,
+    )
+    .expect("declaration claim");
+    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    policy.prompt = crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
+        crate::PromptSlot::ProjectInstructions,
+        "instructions",
+        "x".repeat(128 * 1024),
+    ));
+    let spec = crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+    let stores = crate::ProcessStartStores {
+        registry: registry.as_ref(),
+        env_store: Some(&env_store),
+        engines: None,
+        engines_required: false,
+        executor: "shared environment law",
+        starter: &starter,
+        session_catalog: None,
+    };
+    let mut records = Vec::new();
+    for key in ["shared-environment-first", "shared-environment-second"] {
+        let env_ref = crate::publish_process_execution_env(env_store.as_ref(), &claim, &spec)
+            .await
+            .expect("capture environment");
+        let start_key = crate::StartKey::for_host(key);
+        let start = crate::register_process_start(
+            &stores,
+            crate::ProcessRegistration::new(
+                crate::ProcessInput::Engine {
+                    kind: "test-engine".to_owned(),
+                    payload: serde_json::Value::Null,
+                },
+                crate::ProcessProvenance::host(),
+                crate::Lifetime::Detached,
+            )
+            .with_start_key(Some(start_key.clone()))
+            .with_execution_env_ref(Some(env_ref.clone())),
+            &[],
+        )
+        .await
+        .expect("realize start");
+        let record = start.record;
+        assert!(
+            serde_json::to_vec(&record).expect("process row").len()
+                < crate::TOOL_INTENT_MAX_CANONICAL_BYTES
+        );
+        env_store
+            .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+                referrer: crate::ArtifactReferrer::Start(start_key),
+                carries: vec![crate::ArtifactCarry {
+                    artifact: crate::ArtifactName {
+                        store: crate::ArtifactStoreId::ProcessEnv,
+                        artifact_ref: env_ref.as_str().to_owned(),
+                    },
+                    to: crate::ArtifactReferrer::ProcessRecord(record.id.clone()),
+                }],
+            })
+            .await
+            .expect("start settles onto record");
+        records.push(record);
+    }
+    assert_ne!(records[0].id, records[1].id);
+    assert_eq!(records[0].env_ref, records[1].env_ref);
+    env_store
+        .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+            referrer: declaration,
+            carries: Vec::new(),
+        })
+        .await
+        .expect("declaration journal ends");
+    let env_ref = records[0].env_ref.as_ref().expect("shared environment");
+    for (index, record) in records.iter().enumerate() {
+        env_store
+            .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+                referrer: crate::ArtifactReferrer::ProcessRecord(record.id.clone()),
+                carries: Vec::new(),
+            })
+            .await
+            .expect("process ends");
+        assert_eq!(
+            env_store
+                .get_process_execution_env(env_ref)
+                .await
+                .expect("stored copy")
+                .is_some(),
+            index == 0
+        );
     }
 }

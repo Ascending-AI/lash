@@ -21,12 +21,15 @@ workspace = true
 # The in-process fake worker the broker's laws run behind the protocol types.
 testing = []
 
+# The broker shares the VM's detached effect vocabulary, but never opens VM
+# snapshots or continuations and never compiles or executes model code.
 # The broker is parent code: it depends on the protocol and the parent's
 # identity vocabulary, and on nothing that could decode or run guest state
 # (ADR 0123).
 [dependencies]
 lash-core-store = { workspace = true }
 lash-sansio = { workspace = true }
+lashlang = { workspace = true }
 lash-vm-protocol = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }

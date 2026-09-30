@@ -187,7 +187,14 @@ pub(crate) async fn read_state_projection(
             .map(Into::into)
             .collect()
     };
-    let usage = persisted.usage_report();
+    // Usage is engine-owned accounting, read by owner from the usage ledger
+    // (ADR 0125): the same lease-free durable read, independent of the head.
+    let usage = state
+        .core
+        .owner_usage(&lash::RuntimeOwner::Session(session_id.clone()))
+        .await
+        .map_err(AppError::internal)?
+        .report();
     let mut turn_failure_settlements = Vec::new();
     let mut after = None;
     if !catalog_absent {

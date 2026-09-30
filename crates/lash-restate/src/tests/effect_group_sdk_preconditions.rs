@@ -347,9 +347,14 @@ async fn run_witnesses(target: WitnessServer) {
                 .expect("bind EG0 Restate endpoint");
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
             let server = tokio::spawn(async move {
-                crate::serve_endpoint(listener, endpoint, async {
-                    let _ = shutdown_rx.await;
-                })
+                crate::serve_endpoint(
+                    listener,
+                    endpoint,
+                    crate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
+                    async {
+                        let _ = shutdown_rx.await;
+                    },
+                )
                 .await;
             });
             wait_for_endpoint(bind_addr).await;
@@ -709,9 +714,14 @@ where
         .await
         .unwrap_or_else(|error| panic!("POST {url} failed: {error}"));
     let status = response.status;
-    let bytes = lash_http_transport::read_http_body_bytes(response.body, None, "witness body")
-        .await
-        .unwrap_or_else(|error| panic!("read POST {url} response: {error}"));
+    let bytes = lash_http_transport::read_http_body_bytes(
+        response.body,
+        16 * 1024 * 1024,
+        None,
+        "witness body",
+    )
+    .await
+    .unwrap_or_else(|error| panic!("read POST {url} response: {error}"));
     let status = http::StatusCode::from_u16(status).expect("a valid HTTP status");
     assert!(
         status.is_success(),

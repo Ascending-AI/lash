@@ -227,7 +227,7 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
             lash_core::ArtifactReferrerPorts::new(
                 lash_core::StoreSet::module_artifacts(&stores),
                 stores.process_env_store(),
-                lash_core::StoreSet::process_definitions(&stores),
+                lash_core::StoreSet::definition_store(&stores),
                 lash_core::StoreSet::attachment_referrers(&stores),
                 lash_core::StoreSet::artifact_cleanup(&stores),
                 Arc::new(lash_core::facade_support::SystemClock),
@@ -243,7 +243,6 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
                 TRIGGER_INTENT_CUTOVER_SESSION,
                 lash_core::FrameNodeId::new("test-frame").expect("test frame id"),
             )),
-            env_spec: None,
             draft: lash_core::TriggerSubscriptionDraft::for_process(
                 format!("test/restate-foreign-{foreign_field}"),
                 env_ref,

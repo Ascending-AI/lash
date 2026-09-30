@@ -10,10 +10,12 @@
 //! of the command reads its recorded base and its summary back, and a
 //! settled command is never committed again: its replay adopts the head its
 //! commit published (FIG-4258). One commit opens the frame,
-//! resets the stored execution state and the prompt usage, persists the
-//! compaction's billed usage and settles the command with its outcome
+//! resets the stored execution state and the prompt usage and settles the
+//! command with its outcome
 //! ([`CompactContextOutcome`](super::CompactContextOutcome)), which the
-//! submitter reads back from the batch's completion.
+//! submitter reads back from the batch's completion. The compaction's billed
+//! usage is not part of that commit: its summarizer call is a spending
+//! effect whose usage run the engine delivers (ADR 0125).
 //!
 //! A storeless runtime keeps a direct path,
 //! [`LashRuntime::compact_storeless_context`]: it has no drive and no durable
@@ -235,14 +237,12 @@ impl LashRuntime {
     }
 
     /// Commit what `run` did as the command's one commit (F2): the frame, its
-    /// seed, the execution-state and prompt-usage reset, the compaction's
-    /// staged billed usage and the command's settlement with its outcome,
-    /// under the command root's fence.
+    /// seed, the execution-state and prompt-usage reset and the command's
+    /// settlement with its outcome, under the command root's fence.
     ///
     /// A replay of a command this root already settled commits nothing
-    /// (FIG-4258): it adopts the durable head and drops the billed usage its
-    /// journaled summary re-recorded, which the settling commit persisted.
-    /// The replay must not present the fence again. The drive that applied
+    /// (FIG-4258): it adopts the durable head. The replay must not present
+    /// the fence again. The drive that applied
     /// the command goes on to the input queued behind it, whose seal
     /// supersedes the command root's fence, and Restate replays the whole
     /// drive from its journal: the store checks a commit's fence before its
@@ -291,14 +291,10 @@ impl LashRuntime {
         }
         let operation =
             crate::OperationId::new(self.state.queue_drain_scope(&batch_id), "session-command");
-        let staged =
-            session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
-                .map_err(super::runtime_error_from_store_commit)?;
         if self
             .session_command_run_settled(&store, &completion)
             .await?
         {
-            staged.discard_staged();
             self.invalidate_resident_session_state();
             self.reload_invalidated_resident_session_state().await?;
             drop(RuntimeNamedPhase::begin(
@@ -308,17 +304,10 @@ impl LashRuntime {
             return Ok(true);
         }
         loop {
-            for delta in staged.deltas() {
-                self.state
-                    .usage
-                    .fold_checked(&delta.entry)
-                    .map_err(super::runtime_error_from_store_commit)?;
-            }
             let fleet_format = self.fleet_format();
             let (mut commit, persisted_node_ids) =
-                crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
+                crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                     &mut self.state,
-                    staged.deltas(),
                     operation.clone(),
                     self.host.core.durability.commit_budget,
                     fleet_format,
@@ -346,12 +335,9 @@ impl LashRuntime {
             };
             commit.drive_fence = Some(Box::new(drive_fence.clone()));
             commit.applied_commands = Some(completion.clone());
-            commit.compact_context_outcome = Some(outcome);
+            commit.command_outcome = Some(super::SessionCommandOutcome::CompactContext { outcome });
             let error = match store.commit_runtime_state_verified(commit).await {
                 Ok(result) => {
-                    staged
-                        .confirm_identities(&result.committed_usage_delta_identities)
-                        .map_err(super::runtime_error_from_store_commit)?;
                     self.state.apply_persisted_commit_result(result);
                     self.state.mark_node_ids_persisted(persisted_node_ids);
                     if switch.is_some() {
@@ -385,9 +371,6 @@ impl LashRuntime {
                     }
                 }
                 error => {
-                    // The journaled completion re-records the billed usage
-                    // when a redrive replays it, so the staged rows go.
-                    staged.discard_staged();
                     return match error {
                         // A host withdrew the command since the lane was
                         // read: nothing applied, and the lane is read again

@@ -127,7 +127,7 @@ async fn seed(
         );
     }
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed lineage conformance graph");
     let nodes = window_node_ids(&store).await;
@@ -177,7 +177,7 @@ async fn append(store: &SessionStore, count: usize) -> Vec<lash_core::NodeId> {
         );
     }
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit lineage append");
     window_node_ids(store).await

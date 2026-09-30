@@ -37,7 +37,7 @@ def _rloc(file):
 
 def _lash_batch_test_impl(ctx):
     lines = []
-    runfiles = ctx.runfiles(files = [ctx.file._runner, ctx.file._junit_xml])
+    runfiles = ctx.runfiles(files = [ctx.file._runner, ctx.file._junit_xml, ctx.file._selection])
     for target in ctx.attr.tests:
         executable = target[DefaultInfo].files_to_run.executable
         if executable == None:
@@ -81,6 +81,10 @@ _lash_batch_test = rule(
         ),
         "_junit_xml": attr.label(
             default = "//tools/bazel:junit_xml.py",
+            allow_single_file = True,
+        ),
+        "_selection": attr.label(
+            default = "//tools/bazel:libtest_selection.py",
             allow_single_file = True,
         ),
         "_runner": attr.label(

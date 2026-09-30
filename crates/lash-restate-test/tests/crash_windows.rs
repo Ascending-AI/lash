@@ -23,6 +23,12 @@
 //!   again: the restarted deployment's reconcile tick takes the reservation's
 //!   `TriggerDelivery` obligation and starts exactly one process, bound to
 //!   the delivery, which runs to its terminal once.
+//! * **The recovery pass inside a process's drive (FIG-4378, FIG-4403).** A
+//!   `SessionTurn` process runs its child root, and every root its drive
+//!   admits ahead of it in a reused session, in its own run, never as a
+//!   `LashTurn` run. The lost-root pass runs while such a root holds its
+//!   model call, keeps the root and its admitted input, and the root
+//!   commits.
 
 #![expect(
     clippy::unwrap_used,
@@ -452,6 +458,7 @@ fn process_core(engine: &Engine, executions: &Arc<AtomicUsize>) -> lash::LashCor
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -487,7 +494,15 @@ async fn publish_process(engine: &Engine) -> lash_core::ProcessStartRequest {
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(process_env_spec())
+    .with_env_ref(
+        lash_core::publish_process_execution_env(
+            engine.lash_backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(process_env_spec()),
+        )
+        .await
+        .expect("publish captured environment"),
+    )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
 }
 
@@ -1155,6 +1170,8 @@ async fn live_restate_a_crash_between_a_trigger_reservation_and_its_start_recove
 
 #[path = "crash_windows/recovery.rs"]
 mod recovery;
+#[path = "crash_windows/signal_admission.rs"]
+mod signal_admission;
 
 /// This test crate's one path to a session that may not exist yet
 /// (FIG-4112): only `create` creates, so this creates `session_id` with the
@@ -1507,6 +1524,7 @@ async fn cell_parity(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
@@ -1637,3 +1655,8 @@ async fn live_restate_cell_replay_positional_parity_and_nested_isolation() {
         "the live positional engine agrees after cold cell replay"
     );
 }
+
+#[path = "crash_windows/attachment_delivery.rs"]
+mod attachment_delivery;
+#[path = "crash_windows/process_root_recovery.rs"]
+mod process_root_recovery;

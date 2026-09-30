@@ -799,9 +799,7 @@ impl TriggerOwnerScope {
 /// Three states, one carrier. The tombstone's deletion time lives in the only
 /// variant where it means anything, so a tombstone without a time — and a time
 /// without a tombstone — is unrepresentable in the type, in both backends'
-/// column pair, and in the wire tag simultaneously. Mirrors
-/// [`crate::process_registry::ProcessDefinitionLifecycle`], the sibling
-/// registry that already carries its lifecycle this way.
+/// column pair, and in the wire tag simultaneously.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "lifecycle",
@@ -1646,6 +1644,27 @@ pub struct TriggerIngressReceipt {
     /// under the same idempotency key and returned it (FIG-3070).
     #[serde(default, skip_serializing_if = "crate::StoreRealization::is_realized")]
     pub realization: crate::StoreRealization,
+}
+
+/// An emission's journaled decision about one delivery it ingested
+/// (FIG-4297), recorded before the delivery's start is prepared.
+///
+/// The first execution decides from the reservation the store answered: an
+/// unbound delivery is admitted to start, a bound one to the process it is
+/// bound to. Every replay serves the recorded decision and never the
+/// reservation the store answers now, which a later bind or a replayed ingest
+/// has moved on (FIG-806). So a replay of an emission that found the delivery
+/// unbound consumes the start it journaled, and an emission that found it
+/// bound never registers or schedules a process: after that process was
+/// pruned, its start key would mint another one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "admission", rename_all = "snake_case")]
+pub enum TriggerDeliveryAdmission {
+    /// The delivery was unbound: start the process its start key names, and
+    /// bind it.
+    Start,
+    /// The delivery was bound to `process_id`: answer it, starting nothing.
+    Bound { process_id: ProcessId },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

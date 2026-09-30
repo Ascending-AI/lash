@@ -38,6 +38,8 @@ mod provider_variation_matrix;
 pub mod provider_variations;
 pub mod recording;
 pub mod replay;
+#[cfg(test)]
+mod response_body_budget;
 pub mod runner;
 pub mod runtime_boundaries;
 pub mod runtime_contracts;
@@ -49,7 +51,6 @@ pub mod state_checker;
 pub mod store;
 pub mod trace;
 mod transcript;
-mod usage_oracle;
 
 fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
     static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();

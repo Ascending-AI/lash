@@ -68,6 +68,7 @@ pub(super) async fn execute_drive(
                                 generation: Some(lash_core::ExecutableGeneration::new(format!(
                                     "blake3:live-{live_generation}"
                                 ))),
+                                executor: lash_core::store::RootExecutor::Root,
                             }),
                         },
                     })

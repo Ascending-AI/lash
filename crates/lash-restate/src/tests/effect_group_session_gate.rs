@@ -196,8 +196,7 @@ async fn a_pre_cutover_sessions_group_child_is_refused_before_its_tool_is_dispat
                 "commit_child".to_string(),
                 serde_json::json!({
                     "type": "committed",
-                    "commit_seq": 0,
-                    "blocking_positions": [],
+                    "rank": 1,
                 }),
             ),
             (

@@ -66,6 +66,7 @@ async fn lookup_generation(
     let status = response.status;
     let body = read_http_body_text(
         response.body,
+        provider.options.response_body_limit(),
         Some(GENERATION_LOOKUP_TIMEOUT),
         "OpenRouter generation lookup body timed out",
     )

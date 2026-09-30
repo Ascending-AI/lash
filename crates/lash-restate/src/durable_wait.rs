@@ -38,7 +38,10 @@ use restate_sdk::serde::Json;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+mod observer;
 mod root_retirement;
+
+pub(crate) use self::observer::{WaitObserver, observe_durable_wait};
 
 use self::root_retirement::closed_root_cancel_prefix;
 use crate::compat::{Call, Reply};

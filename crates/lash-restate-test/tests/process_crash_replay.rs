@@ -106,6 +106,7 @@ fn build_core(restate: &RestateTestBackend, executions: &Arc<AtomicUsize>) -> la
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
@@ -218,13 +219,21 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
-        lash_core::SessionPolicy {
-            model: model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-    ))
+    .with_env_ref(
+        lash_core::publish_process_execution_env(
+            restate.lash_backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: model_spec(),
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                },
+            )),
+        )
+        .await
+        .expect("publish captured environment"),
+    )
     .with_extra_event_types(
         lash_lashlang_runtime::lashlang_process_event_types()
             .into_iter()
@@ -440,21 +449,14 @@ async fn run_process(scenario: Scenario) -> Run {
             let core = core.clone();
             let process_id = process_id.clone();
             Box::pin(async move {
-                let event_type = lash_core::facade_support::process_signal_event_type(SIGNAL)
-                    .expect("the signal event type");
-                let request =
-                    lash_core::ProcessEventAppendRequest::new(event_type, json!({"go": 1}))
-                        .with_replay_key(lash_core::facade_support::process_signal_wait_key(
-                            &process_id,
-                            SIGNAL,
-                            "signal-1",
-                        ));
+                let signal = lash_core::ProcessSignal::new(
+                    lash_core::ProcessSignalIdentity::new(process_id, SIGNAL, "signal-1")
+                        .expect("the signal identity"),
+                    json!({"go": 1}),
+                );
                 // A signal to a process already cancelled is refused; the
                 // terminal says what happened.
-                let _ = core
-                    .processes()
-                    .signal(&process_id, SIGNAL, "signal-1", request, scoped)
-                    .await;
+                let _ = core.processes().signal(signal, scoped).await;
             })
         })
         .await

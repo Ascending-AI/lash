@@ -39,6 +39,7 @@ pub(super) struct HostBridge<'run> {
     /// The cell's journaled binding set, against the live registry (FIG-3587).
     cell_bindings: lash_lashlang_runtime::CellToolBindings,
     artifact_store: lashlang::LashlangArtifacts,
+    workers: lash_vm_client::service::Service,
     /// This cell's own cancellation scope, beside the turn's. A cancelled tool
     /// call ends the cell here, so `is_cancelled` refuses its next effect
     /// instead of the guest catching the cancellation as a rejected call. A
@@ -55,6 +56,7 @@ pub(super) struct HostBridgeConfig<'run> {
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
     pub artifact_store: lashlang::LashlangArtifacts,
+    pub workers: lash_vm_client::service::Service,
 }
 
 type HostAbilityFuture<'a> =
@@ -74,6 +76,7 @@ impl<'run> HostBridge<'run> {
             deferred_execution_grants: config.deferred_execution_grants,
             cell_bindings: config.cell_bindings,
             artifact_store: config.artifact_store,
+            workers: config.workers,
             cancellation: ExecutionCancellation::new(),
         }
     }
@@ -505,6 +508,9 @@ impl LashlangExecutionTrace {
 }
 
 impl HostBridge<'_> {
+    pub(super) fn host_environment_description(&self) -> lashlang::LashlangHostEnvironment {
+        self.host_environment.clone()
+    }
     async fn resource_operation(
         &self,
         operation: String,
@@ -576,6 +582,7 @@ impl HostBridge<'_> {
         {
             let in_flight = commands.enter(command, CommandShape::Value).await?;
             let result = lash_lashlang_runtime::execute_trigger_operation(
+                &self.workers,
                 &in_flight.ctx,
                 &self.artifact_store,
                 trigger_operation,
@@ -752,6 +759,7 @@ impl HostBridge<'_> {
                 lashlang::TriggerHostOperation::from_host_operation(&host_operation)
             {
                 let result = lash_lashlang_runtime::execute_trigger_operation(
+                    &self.workers,
                     &in_flight.ctx,
                     &self.artifact_store,
                     trigger_operation,

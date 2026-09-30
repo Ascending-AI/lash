@@ -161,14 +161,17 @@ CREATE TABLE IF NOT EXISTS lash_fork_lineage (
     PRIMARY KEY (session_id, ancestor_session_id)
 );
 
-CREATE TABLE IF NOT EXISTS lash_usage_deltas (
+CREATE TABLE IF NOT EXISTS lash_usage_facts (
     seq BIGSERIAL PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    operation_storage_key TEXT NOT NULL,
-    entry_ordinal BIGINT NOT NULL,
-    -- These two columns are write-time durable identity, not read-side integrity checks.
-    payload_encoding_version INTEGER NOT NULL,
-    payload_hash TEXT NOT NULL,
+    owner_kind TEXT NOT NULL CONSTRAINT ck_usage_facts_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id TEXT NOT NULL,
+    effect_key TEXT NOT NULL,
+    call_ordinal BIGINT NOT NULL CONSTRAINT ck_usage_facts_call_ordinal CHECK (call_ordinal >= 0),
+    provider_attempt BIGINT NOT NULL CONSTRAINT ck_usage_facts_provider_attempt CHECK (provider_attempt >= 0),
+    fact_kind TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    run_id TEXT,
+    llm_call_id TEXT NOT NULL,
     source TEXT NOT NULL,
     model TEXT NOT NULL,
     input_tokens BIGINT NOT NULL,
@@ -176,28 +179,60 @@ CREATE TABLE IF NOT EXISTS lash_usage_deltas (
     cache_read_input_tokens BIGINT NOT NULL,
     cache_write_input_tokens BIGINT NOT NULL,
     reasoning_output_tokens BIGINT NOT NULL,
-    reconciled_call_id TEXT,
-    reconciled_attempt_ordinal BIGINT,
-    CONSTRAINT ck_usage_deltas_reconciliation_pair CHECK ((reconciled_call_id IS NULL) = (reconciled_attempt_ordinal IS NULL)),
-    UNIQUE (
-        session_id,
-        operation_storage_key,
-        entry_ordinal,
-        payload_encoding_version,
-        payload_hash
-    )
-);
-
-CREATE TABLE IF NOT EXISTS lash_usage_delta_holes (
-    session_id TEXT NOT NULL,
-    seq BIGINT NOT NULL REFERENCES lash_usage_deltas(seq) ON DELETE CASCADE,
-    call_id TEXT NOT NULL,
-    attempt_ordinal BIGINT NOT NULL,
     generation_id TEXT,
-    PRIMARY KEY (session_id, seq, call_id, attempt_ordinal)
+    -- Write-time identity comparison, not a read-side integrity check.
+    payload_hash TEXT NOT NULL,
+    recorded_at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_usage_facts_kind CHECK (
+        (fact_kind = 'attempt' AND disposition IN ('reported', 'unreported') AND run_id IS NOT NULL)
+     OR (fact_kind = 'correction' AND disposition = 'reconciled' AND run_id IS NULL AND generation_id IS NOT NULL)),
+    CONSTRAINT ck_usage_facts_unreported_zero CHECK (disposition <> 'unreported' OR (
+        input_tokens = 0 AND output_tokens = 0 AND cache_read_input_tokens = 0
+        AND cache_write_input_tokens = 0 AND reasoning_output_tokens = 0)),
+    CONSTRAINT uq_usage_facts_identity UNIQUE (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
 );
-CREATE INDEX IF NOT EXISTS idx_lash_usage_delta_holes_identity
-    ON lash_usage_delta_holes(session_id, call_id, attempt_ordinal);
+CREATE INDEX IF NOT EXISTS idx_lash_usage_facts_owner_seq
+    ON lash_usage_facts(owner_kind, owner_id, seq);
+CREATE INDEX IF NOT EXISTS idx_lash_usage_facts_unreported
+    ON lash_usage_facts(owner_kind, owner_id, effect_key, call_ordinal, provider_attempt)
+    WHERE disposition = 'unreported';
+
+CREATE TABLE IF NOT EXISTS lash_usage_runs (
+    owner_kind TEXT NOT NULL CONSTRAINT ck_usage_runs_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id TEXT NOT NULL,
+    effect_key TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    execution_scope_key TEXT NOT NULL,
+    source TEXT NOT NULL,
+    model TEXT NOT NULL,
+    admitted_at_ms BIGINT NOT NULL,
+    state TEXT NOT NULL,
+    unknown_reason TEXT,
+    conflict_detail TEXT,
+    resolved_at_ms BIGINT,
+    PRIMARY KEY (owner_kind, owner_id, effect_key, run_id),
+    CONSTRAINT ck_usage_runs_state CHECK (
+        (state = 'open' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NULL)
+     OR (state = 'settled' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL)
+     OR (state = 'unknown' AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL
+         AND unknown_reason IN ('superseded_run', 'call_without_record', 'facts_unjournalable',
+                                'execution_ended', 'owner_retired'))
+     OR (state = 'conflicted' AND unknown_reason IS NULL AND conflict_detail IS NOT NULL
+         AND resolved_at_ms IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_lash_usage_runs_open_owner
+    ON lash_usage_runs(owner_kind, owner_id, admitted_at_ms) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_lash_usage_runs_open_scope
+    ON lash_usage_runs(owner_kind, owner_id, execution_scope_key) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_lash_usage_runs_unresolved
+    ON lash_usage_runs(owner_kind, owner_id, effect_key, run_id) WHERE state IN ('unknown', 'conflicted');
+
+CREATE TABLE IF NOT EXISTS lash_usage_owner_retirements (
+    owner_kind TEXT NOT NULL CONSTRAINT ck_usage_owner_retirements_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id TEXT NOT NULL,
+    retired_at_ms BIGINT NOT NULL,
+    PRIMARY KEY (owner_kind, owner_id)
+);
 
 CREATE TABLE IF NOT EXISTS lash_session_meta (
     session_id TEXT PRIMARY KEY,
@@ -603,7 +638,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
 
 CREATE TABLE IF NOT EXISTS lash_attachment_referrer_edges (
     attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (char_length(attachment_id) > 0),
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'start_input', 'process_record')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (attachment_id, referrer_kind, referrer_id)
 );
@@ -613,7 +648,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_referrer_edges_referrer
 CREATE TABLE IF NOT EXISTS lash_attachment_pending_writes (
     write_id      TEXT PRIMARY KEY CONSTRAINT ck_attachment_pending_writes_write_id CHECK (char_length(write_id) = 32),
     attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (char_length(attachment_id) > 0),
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'start_input', 'process_record')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_id CHECK (char_length(referrer_id) > 0),
     begun_at_ms   BIGINT NOT NULL
 );
@@ -865,7 +900,7 @@ CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
     discard_reason TEXT,
     delivery_json TEXT NOT NULL,
     CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
-    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')),
+    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound', 'source_unreadable')),
     FOREIGN KEY (process_id) REFERENCES lash_processes(process_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_pending
@@ -980,34 +1015,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_registrant
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_source
     ON lash_trigger_subscriptions(source_type, source_key, lifecycle);
 
--- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
--- name, revision, pinned definition fingerprint, lifecycle tombstone and
--- change sequence, unique on owner scope and name. The pinned
--- ProcessDefinitionRef travels in record_json; the fingerprint column is what
--- the revision-and-fingerprint compare-and-swap compares. The lifecycle is
--- the FIG-1951 one-column enum with a paired-nullable delete timestamp.
--- Session-scoped names follow the ADR 0049 deletion frontier; host- and
--- platform-scoped tombstones are never collected (ADR 0067).
-CREATE TABLE IF NOT EXISTS lash_process_definitions (
-    definition_id TEXT PRIMARY KEY,
-    owner_scope TEXT NOT NULL,
-    name TEXT NOT NULL,
-    revision BIGINT NOT NULL,
-    fingerprint TEXT NOT NULL,
-    lifecycle TEXT NOT NULL,
-    deleted_at_ms BIGINT,
-    change_seq BIGINT NOT NULL,
-    created_at_ms BIGINT NOT NULL,
-    updated_at_ms BIGINT NOT NULL,
-    record_json TEXT NOT NULL,
-    CONSTRAINT ck_process_definitions_lifecycle CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
-    UNIQUE(owner_scope, name)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_registrant
-    ON lash_process_definitions(owner_scope, name);
-CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_change
-    ON lash_process_definitions(change_seq);
-
 CREATE TABLE IF NOT EXISTS lash_trigger_occurrences (
     occurrence_id TEXT PRIMARY KEY,
     idempotency_key TEXT NOT NULL UNIQUE,
@@ -1075,7 +1082,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE
@@ -1083,15 +1090,16 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
 CREATE TABLE IF NOT EXISTS lash_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision', 'session', 'upload')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (char_length(referrer_id) > 0),
     ended_at_ms   BIGINT NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
 );
 CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision', 'session', 'upload')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
+    awaited_journal_key TEXT,
     obligation_id TEXT NOT NULL,
     obligation_state TEXT NOT NULL DEFAULT 'due',
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1111,6 +1119,9 @@ CREATE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_due
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_stalled
     ON lash_artifact_cleanup_obligations(obligation_id)
     WHERE obligation_state = 'stalled';
+CREATE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_awaited_journal
+    ON lash_artifact_cleanup_obligations(awaited_journal_key)
+    WHERE awaited_journal_key IS NOT NULL AND obligation_state = 'due';
 
 -- Which lash release wrote this database, recorded so a host running store
 -- preflight can answer "which release reopens this store" before wiring a
@@ -1172,3 +1183,13 @@ ON CONFLICT (singleton) DO NOTHING;
 INSERT INTO lash_catalog_identity (singleton, catalog_id)
 VALUES (TRUE, gen_random_uuid()::text)
 ON CONFLICT (singleton) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS lash_worker_recovery (
+    scope_id TEXT PRIMARY KEY,
+    revision BIGINT NOT NULL,
+    attempts INTEGER NOT NULL,
+    cpu_nanos BIGINT NOT NULL,
+    replacement INTEGER NOT NULL,
+    unknown_cpu_attempts INTEGER NOT NULL,
+    in_flight INTEGER NOT NULL
+);
