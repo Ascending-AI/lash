@@ -2719,6 +2719,7 @@ derive_mutation_jobs() {{
                 "perf-dhat-heap",
                 "upgrade-harness-synthetic-next",
                 "lashctl-synthetic-next",
+                "loadtest-worker-synthetic-next",
                 "regress-stable-features",
                 "host-features",
             },
@@ -2727,6 +2728,15 @@ derive_mutation_jobs() {{
         for lane, labels in sorted(lanes.items()):
             with self.subTest(lane=lane):
                 self.assertTrue(labels, f"lane {lane} compiles nothing")
+
+        worker_labels = set(lanes["loadtest-worker-synthetic-next"])
+        self.assertTrue(
+            {
+                "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_c3ba64b6",
+                "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_fa541d90",
+            }.issubset(worker_labels),
+            "the rolling-deploy lane must compile the predecessor and successor workers",
+        )
 
         job = workflow_job_block(WORKFLOW.read_text(encoding="utf-8"), "feature-lanes")
         self.assertIn("//:feature_lanes", job)
