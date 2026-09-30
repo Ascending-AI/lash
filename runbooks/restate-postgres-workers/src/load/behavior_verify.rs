@@ -115,8 +115,8 @@ pub(super) fn verify(
         external.started.first() == Some(&promotion.process_id)
             && promotion.session_origin
             && promotion.engine == "lashlang"
-            && !promotion.record_name.is_empty()
-            && promotion.artifact_name == promotion.record_name,
+            && !promotion.record_definition.is_empty()
+            && promotion.artifact_definition == promotion.record_definition,
         format!("session process's immutable artifact does not resolve: {promotion:?}"),
     );
     Ok(())

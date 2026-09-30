@@ -2,7 +2,7 @@ use super::*;
 use crate::load::ReportedStatus;
 use crate::load::behavior::{
     self, AuxiliaryEvidence, BehaviorReport, EditEvidence, FrameEvidence, HistoryEvidence,
-    OccurrenceEvidence, PromotionEvidence,
+    OccurrenceEvidence,
 };
 use lash_restate::RestateControllerContext as _;
 
@@ -239,16 +239,14 @@ impl LoadWorker {
             .await
             .map_err(terminal)?
             .ok_or_else(|| terminal("promotion module missing"))?;
-        let promotion = PromotionEvidence {
-            process_id: process_id.clone(),
-            session_origin: matches!(&record.provenance.originator,lash_core::ProcessOriginator::Session {session_id:origin,..} if origin.as_str()==session_id),
-            engine: kind.clone(),
-            record_name: input.process_name,
-            artifact_name: artifact
-                .process_name_for_ref(&input.process_ref)
-                .unwrap_or_default()
-                .into(),
-        };
+        let promotion = behavior::promotion(
+            process_id.clone(),
+            matches!(&record.provenance.originator,lash_core::ProcessOriginator::Session {session_id:origin,..} if origin.as_str()==session_id),
+            kind.clone(),
+            &record.identity,
+            &input,
+            &artifact,
+        );
         let edited = self
             .behavior_turn(controller, &session, run, "edit")
             .await?;

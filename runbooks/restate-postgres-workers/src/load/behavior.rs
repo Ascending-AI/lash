@@ -55,8 +55,11 @@ pub struct PromotionEvidence {
     pub process_id: String,
     pub session_origin: bool,
     pub engine: String,
-    pub record_name: String,
-    pub artifact_name: String,
+    /// The immutable definition the registry record was admitted from.
+    pub record_definition: String,
+    /// The definition the stored module artifact derives for the record's
+    /// process ref, empty when the artifact exports no such process.
+    pub artifact_definition: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BehaviorReport {
@@ -67,6 +70,45 @@ pub struct BehaviorReport {
     pub external: OccurrenceEvidence,
     pub edit: EditEvidence,
     pub promotion: PromotionEvidence,
+}
+
+/// The promotion readback of one started process: its registry record and the
+/// immutable module artifact its persisted engine input names. A process is
+/// identified by its definition id, never by a name (ADR 0095, ADR 0107 §1);
+/// the persisted input carries no process name.
+pub(crate) fn promotion(
+    process_id: String,
+    session_origin: bool,
+    engine: String,
+    record: &lash_core::ProcessIdentity,
+    input: &lash::process::LashlangProcessInput,
+    artifact: &lashlang::ModuleArtifact,
+) -> PromotionEvidence {
+    let artifact_definition = artifact
+        .process_name_for_ref(&input.process_ref)
+        .and_then(|_| {
+            lashlang::ProcessDefinitionIdentity::new(
+                artifact.module_ref().clone(),
+                artifact.host_requirements_ref().clone(),
+                input.process_ref.clone(),
+                String::new(),
+            )
+            .draft()
+            .ok()
+        })
+        .map(|draft| draft.id().to_string())
+        .unwrap_or_default();
+    PromotionEvidence {
+        process_id,
+        session_origin,
+        engine,
+        record_definition: record
+            .definition_id
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        artifact_definition,
+    }
 }
 
 fn seed(text: &str) -> Vec<lash_core::SessionAppendNode> {
