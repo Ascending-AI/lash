@@ -411,6 +411,19 @@ terminal proposed there would sit at a position where a re-execution's journal
 already holds the body's commands. A body whose budget stays exhausted parks
 once its engine's bounded retry runs out.
 
+The same holds for every verdict of the host's worker budget, pool capacity or
+recovery store, wherever it is met: a refused reservation, a deadline or the
+cumulative CPU or attempt bound met mid-run, a full queue, a checkout timeout
+or a restart storm. A replay reaches such a verdict at another position, and
+another host with capacity not at all, so it is never an execution's recorded
+outcome. A process body fails its attempt retryably. An RLM cell fails its
+attempt retryably too: it seals nothing, the model never sees the verdict, and
+the turn journals nothing after it, not even its cancellation peek, since the
+retry runs the cell again. Only a limit the run itself exhausted — fuel, heap
+or frame depth, measured by the VM against the run's own bounds — is recorded:
+the process terminal `process_execution_bound_exhausted`, or the cell's
+program failure (FIG-4451).
+
 An owned child also installs a kernel CPU ceiling before guest work, from its
 current process CPU and the configured execution CPU budget. It remains
 in force across every effect response and if the parent dies. Only reset for a

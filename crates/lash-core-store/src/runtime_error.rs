@@ -1771,6 +1771,16 @@ impl RuntimeEffectControllerError {
         error
     }
 
+    /// Whether this failure is the attempt's own: an uncommitted derivation
+    /// marked safe to execute again ([`Self::retryable_response_derivation`],
+    /// [`Self::retryable_uncommitted_derivation`]). The retry runs the failed
+    /// work again, so nothing may be journaled after it in its place — a
+    /// cell that failed on its host's worker verdict records no cancellation
+    /// peek either (FIG-4451).
+    pub fn is_attempt_fault(&self) -> bool {
+        self.journal_disposition.is_retryable_derivation()
+    }
+
     /// Marks this failure of an uncommitted host derivation — an
     /// execution-environment sync's rebuild, or a recorded execution-environment
     /// load, or a presentation whose recorded renderer is unavailable — as

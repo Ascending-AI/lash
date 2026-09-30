@@ -803,6 +803,8 @@ async fn execute_lashlang(
     }
     .run()
     .await;
+    // Only a run limit is the body's terminal. A host verdict (its deadline,
+    // CPU or attempt accounting) fails the attempt retryably below (FIG-4451).
     let run = match run {
         Ok(run) => run,
         Err(
@@ -816,7 +818,7 @@ async fn execute_lashlang(
                         lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
                     ),
             },
-        ) => {
+        ) if !limit.is_host_verdict() => {
             #[cfg(any(test, feature = "testing"))]
             assert!(
                 !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),

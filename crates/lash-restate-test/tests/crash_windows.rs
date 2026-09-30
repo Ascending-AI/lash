@@ -1695,3 +1695,6 @@ mod process_root_recovery;
 
 #[path = "crash_windows/journal_settlement_cleanup.rs"]
 mod journal_settlement_cleanup;
+
+#[path = "crash_windows/worker_verdicts.rs"]
+mod worker_verdicts;

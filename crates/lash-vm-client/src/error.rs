@@ -26,6 +26,29 @@ pub enum PoolError {
 }
 
 impl PoolError {
+    /// Whether this is a verdict of the host and the attempt that met it:
+    /// its worker budget (a deadline, cumulative CPU or replacement
+    /// attempts), its pool's capacity, or its recovery store. It is read
+    /// live, outside any recorded step, and a replay or another host with
+    /// capacity answers it differently, so it fails the attempt and is never
+    /// an execution's recorded outcome (FIG-4451).
+    pub fn is_host_verdict(&self) -> bool {
+        match self {
+            Self::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
+                limit.is_host_verdict()
+            }
+            Self::Recovery { .. }
+            | Self::QueueFull { .. }
+            | Self::CheckoutTimedOut
+            | Self::RestartStorm
+            | Self::RetryLimitExceeded => true,
+            Self::ProtocolVersion(_)
+            | Self::Infrastructure(_)
+            | Self::InvalidConfiguration
+            | Self::UnsupportedPlatform
+            | Self::Io { .. } => false,
+        }
+    }
     pub fn protocol(error: impl std::fmt::Display) -> Self {
         InfrastructureOutcome::ProtocolViolation {
             reason: error.to_string(),

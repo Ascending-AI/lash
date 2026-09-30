@@ -2,7 +2,7 @@ use super::*;
 
 const SIGNAL: &str = "go";
 
-fn worker(core: &lash::LashCore) -> lash::durability::DurableProcessWorker {
+pub(super) fn worker(core: &lash::LashCore) -> lash::durability::DurableProcessWorker {
     lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config().expect("worker config"),
     )
@@ -68,7 +68,7 @@ async fn waiting_request_with_sleep(
     }])
 }
 
-async fn start(
+pub(super) async fn start(
     engine: &Engine,
     core: &lash::LashCore,
     request: lash_core::ProcessStartRequest,
@@ -312,7 +312,10 @@ async fn across_wait(
 /// recorded `lash.process.complete` straight after its admission, where
 /// every later execution of the same segment ran the body: a journal the
 /// handler could never replay.
-async fn segment_journals_end_where_their_bodies_ran(engine: &Engine, runs: &[Invocation]) {
+pub(super) async fn segment_journals_end_where_their_bodies_ran(
+    engine: &Engine,
+    runs: &[Invocation],
+) {
     const COMPLETE: &str = "lash.process.complete";
     let ordinal = |target: &str| {
         target
@@ -533,7 +536,7 @@ async fn process_completion_wait_tracks_only_owned_invocations() {
     }
 }
 
-async fn terminal_fact_is_settled(engine: &Engine, id: &lash_core::ProcessId) {
+pub(super) async fn terminal_fact_is_settled(engine: &Engine, id: &lash_core::ProcessId) {
     let registry = engine.lash_backend().process_registry();
     assert_eq!(
         registry
