@@ -336,8 +336,10 @@ store witness through Buck2's implicit test dependency contract; the combined
 57-plus-one execution on joined source remains in progress.
 
 Native link validation exposed missing Cargo build-script link directives.
-Fixups now forward `rustc_link_lib` and `rustc_link_search` for AWS-LC, Ring and
-SQLite through Reindeer's supported configuration. Earlier library compilation
+AWS-LC, Ring and SQLite were fixed one crate at a time. BLAKE3's SIMD objects
+then failed the VM-worker link. The generator now forwards `rustc_link_lib`
+and `rustc_link_search` for every third-party build script. Opt-outs need a
+documented fixup, and a graph contract rejects a run without forwarding. Earlier library compilation
 did not establish complete binary-link coverage. The joined Slack binary link
 is the current acceptance probe for this correction.
 

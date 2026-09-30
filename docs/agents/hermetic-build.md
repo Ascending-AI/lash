@@ -38,6 +38,15 @@ nested-Cargo tests, release artifacts and named recipes retain their contracts.
 | `kiln sync` | Regenerates dependency and first-party rules from canonical Cargo inputs. |
 | `kiln clean` | Cleans this checkout's Buck2 state. |
 
+Package patterns work as in stock Buck2. `kiln check //crates/lash-store-sql/...`
+selects every generated Cargo target beneath the package; `//pkg:all`, `//pkg:`
+and `//...` also work. `build`, `check` and `clippy` map each target to the
+output its label would select. They include manual targets and omit feature-lane
+variants. A `check`, `clippy` or `doc` pattern must match a generated target.
+A `build` pattern that matches none passes to Buck2 unchanged. `kiln test`
+drops manual targets from patterns. `kiln analyze` accepts labels and patterns
+as its dependency universe.
+
 Use the owning target while editing. `python3 scripts/dev-test.py --dry-run`
 prints the diff, labels, revisions and commands. `--dependents` includes reverse
 dependencies within the developer partition. Complete batches are substituted
@@ -99,7 +108,14 @@ or Cargo features.
 
 Reindeer fixups under `tools/buck2/fixups/` describe AWS-LC, SQLite, ring and
 other native dependencies. Build scripts use declared compiler/linker, headers
-and runtime inputs. Proc macros and build scripts remain host tools. The
+and runtime inputs. Reindeer has no global fixup default. `sync.py` therefore
+forwards `rustc-link-lib` and `rustc-link-search` output from every third-party
+build script, as Cargo does. To opt a crate out, set `rustc_link_lib = false`
+or `rustc_link_search = false` in its fixups, with a reason comment on the line
+above. The graph contracts reject missing forwarding, stale opt-outs and
+redundant `true` fixups. `rustc-link-arg*` needs no forwarding: Cargo applies
+it only to the emitting package's own binaries, tests and cdylibs. The
+contracts require third-party packages to contribute libraries only. Proc macros and build scripts remain host tools. The
 first-party RLM schema and VM-worker fingerprint generation retain their
 build-script outputs and environment. Browser tests declare the pinned Node
 interpreter and script inputs, including feature variants; Cargo retains its
