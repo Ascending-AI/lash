@@ -13,11 +13,16 @@ pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 1;
 #[cfg(feature = "synthetic-next")]
 pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 2;
 
-/// Whether this build encodes and decodes envelope `version`: its own, and
-/// for the synthetic N+1 also N's, one back.
-const fn blob_envelope_admits(version: u32) -> bool {
-    version == SQLITE_BLOB_ENVELOPE_VERSION
-        || (cfg!(feature = "synthetic-next") && version + 1 == SQLITE_BLOB_ENVELOPE_VERSION)
+/// Whether this build encodes and decodes envelope `version`: the envelope
+/// surface's supported range, its newest and every older version a
+/// `Lift::Decoder` row admits (FIG-3802). The envelope keeps its shape across
+/// them, so each decodes natively.
+fn blob_envelope_admits(version: u32) -> bool {
+    lash_core_execution::store::upcast_chain_covers(
+        lash_core_execution::surface_format!(SQLITE_BLOB_ENVELOPE_VERSION),
+        version,
+        SQLITE_BLOB_ENVELOPE_VERSION,
+    )
 }
 
 /// Read a stored process id: a column this store only ever wrote from a
@@ -251,6 +256,9 @@ pub(crate) fn encode_msgpack<T: serde::Serialize>(
 pub(crate) fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     rmp_serde::from_slice(bytes).ok()
 }
+
+#[cfg(test)]
+mod guarded_surface_tests;
 
 #[cfg(test)]
 mod tests {

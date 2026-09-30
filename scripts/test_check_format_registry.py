@@ -90,6 +90,35 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
 }
 """
 
+GUARDED = """
+pub const GUARDED_SURFACES: &[GuardedSurface] = &[
+    GuardedSurface {
+        constant: "WIRE_VERSION",
+        owner: "demo",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+];
+"""
+
+LAWS = """
+const OWNER: &str = "demo";
+
+#[test]
+fn every_guarded_surface_decodes_its_supported_range() {
+    laws::every_guarded_surface_decodes_its_supported_range(OWNER, &probes());
+}
+
+#[test]
+fn unknown_version_is_refused_with_zero_mutation() {
+    laws::unknown_version_is_refused_with_zero_mutation(OWNER, &probes());
+}
+
+#[test]
+fn upcast_preserves_immutable_bytes_and_hashes() {
+    laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes());
+}
+"""
+
 ENGINE_REGISTRY = """
 pub struct EngineDurableFormat {
     pub id: &'static str,
@@ -116,6 +145,8 @@ class FormatRegistryTests(unittest.TestCase):
         self.repo = Path(self._tmp.name)
         self.write("crates/demo/src/lib.rs", SOURCE)
         self.write("crates/demo/tests/old.rs", "const FIXTURE_V1_VERSION: u32 = 1;\n")
+        self.write(str(gate.GUARDED_REGISTRY), GUARDED)
+        self.write("crates/demo/src/guarded_surface_tests.rs", LAWS)
         self.registry_text = REGISTRY
         self.manifest = MANIFEST
 
@@ -271,6 +302,50 @@ class FormatRegistryTests(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("engine format `demo.engine_wire`", problems[0])
         self.assertIn("no registered surface claims", problems[0])
+
+    def test_a_migrate_surface_outside_the_guarded_table_fails(self) -> None:
+        self.write(str(gate.GUARDED_REGISTRY), GUARDED.split("    GuardedSurface {")[0] + "];\n")
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("WIRE_VERSION is a migrate surface outside GUARDED_SURFACES", problems[0])
+
+    def test_a_stated_unguarded_reason_admits_a_migrate_surface(self) -> None:
+        self.write(str(gate.GUARDED_REGISTRY), GUARDED.split("    GuardedSurface {")[0] + "];\n")
+        self.registry_text = REGISTRY.replace(
+            'upgrade = "migrate"\n', 'upgrade = "migrate"\nunguarded = "a DDL stamp"\n'
+        )
+        self.assertEqual(self.problems(), [])
+
+    def test_a_guarded_row_cannot_also_be_unguarded(self) -> None:
+        self.registry_text = REGISTRY.replace(
+            'upgrade = "migrate"\n', 'upgrade = "migrate"\nunguarded = "a DDL stamp"\n'
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("also states unguarded", problems[0])
+
+    def test_a_guarded_row_must_name_a_migrate_surface(self) -> None:
+        self.write(str(gate.GUARDED_REGISTRY), GUARDED.replace("WIRE_VERSION", "PEER_PROTOCOL_VERSION"))
+        problems = self.problems()
+        self.assertTrue(
+            any("row PEER_PROTOCOL_VERSION must name exactly one" in p for p in problems),
+            problems,
+        )
+
+    def test_a_guarded_owner_must_run_every_law(self) -> None:
+        self.write(
+            "crates/demo/src/guarded_surface_tests.rs",
+            LAWS.replace("laws::upcast_preserves_immutable_bytes_and_hashes", "skipped"),
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("owned by demo, which does not run the guarded-surface laws", problems[0])
+
+    def test_a_guarded_owner_must_run_the_laws_as_itself(self) -> None:
+        self.write(str(gate.GUARDED_REGISTRY), GUARDED.replace('owner: "demo"', 'owner: "other"'))
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("owned by other", problems[0])
 
 
 class RealRepositoryTests(unittest.TestCase):

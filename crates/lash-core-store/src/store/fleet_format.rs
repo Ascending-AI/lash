@@ -212,43 +212,46 @@ impl FleetFormat {
         surface.build_newest()
     }
 
-    /// The recorded versions a reader of `surface` admits — ADR 0106 §2's
-    /// `[N-1, N]` window expressed concretely: this build's newest version,
-    /// plus the version `F` records for the surface, which is what the
-    /// fleet's writers still emit while a finalize is pending (FIG-3796).
+    /// The recorded versions a reader of `surface` admits (ADR 0106 §2,
+    /// ADR 0115 §5): the supported range of a [`GUARDED_SURFACES`] row, plus
+    /// the version `F` pins the surface's writers to.
     ///
-    /// A reader meets [`ReadWindow::newest`] payloads verbatim; a payload at
-    /// `F`'s older version climbs to the newest through the surface's
-    /// [`RecordUpcaster`] hooks before it decodes. Anything outside the pair
-    /// is refused exactly as an exact-version decoder refuses it.
+    /// A guarded surface admits every version from the oldest its
+    /// [`RecordUpcaster`] chain lifts to the newest, up to this build's
+    /// newest: `[oldest, newest]`. The range is fail-closed — it reaches down
+    /// only as far as the chain is unbroken, so no reader admits a version it
+    /// cannot transform — and `F` does not narrow it. That is what keeps a
+    /// finalized fleet reading the rows and objects its predecessor wrote
+    /// while backfills and object sweeps still run, and what keeps immutable
+    /// history readable forever: a [`SurfaceReads::History`] surface reaches
+    /// down to its permanent floor.
     ///
-    /// Immutable history is read through a permanent floor instead (ADR 0115
-    /// §5): a surface [`HISTORY_FLOORS`] names admits every version from its
-    /// floor to the newest, whatever `F` says, so history written before a
-    /// finalize stays readable after it. The floor is fail-closed: it reaches
-    /// down only as far as the surface's [`RecordUpcaster`] chain lifts a
-    /// payload to the newest, so no reader admits a version it cannot
-    /// transform.
+    /// A payload at an older admitted version climbs to the newest through
+    /// the surface's [`RecordUpcaster`] rows before it decodes; anything
+    /// outside the window is refused exactly as an exact-version decoder
+    /// refuses it. A surface no row guards (a wire, a cursor) admits its
+    /// newest version and `F`'s pin.
     pub fn read_window(self, surface: SurfaceFormat) -> ReadWindow {
         let newest = surface.build_newest();
         ReadWindow {
             newest,
             recorded: self.writer_version(surface),
-            oldest: history_floor(surface)
+            oldest: guarded_surface(surface)
+                .and_then(|guarded| guarded.reads.floor())
                 .map_or(newest, |floor| oldest_upcastable(surface, floor, newest)),
         }
     }
 }
 
 /// The versions a reader admits for one surface: what the fleet writes now,
-/// what this build decodes natively, and, for immutable history, every
-/// version from the surface's permanent floor up.
+/// what this build decodes natively, and every version the surface's
+/// upcaster chain lifts from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReadWindow {
     newest: u32,
     recorded: u32,
     /// The oldest version admitted below `newest`: `newest` itself for a
-    /// surface without a history floor.
+    /// surface without an upcaster chain.
     oldest: u32,
 }
 
@@ -264,84 +267,215 @@ impl ReadWindow {
         self.recorded
     }
 
-    /// The oldest version the window admits through a history floor; the
-    /// newest version when the surface has none.
+    /// The oldest version the window admits through the surface's upcaster
+    /// chain; the newest version when the surface has none.
     pub const fn oldest(self) -> u32 {
         self.oldest
     }
 
+    /// The contiguous range the surface's decoder reads, `[oldest, newest]`:
+    /// the surface's supported range, whatever `F` records.
+    pub fn supported(self) -> VersionRange {
+        VersionRange::between(self.oldest, self.newest)
+    }
+
     /// Whether a reader admits `version`: `F`'s recorded version for the
-    /// surface (FIG-3796), or any version in `[oldest, newest]`, which is the
-    /// build's newest alone unless the surface has a history floor.
+    /// surface (FIG-3796), or any version of [`Self::supported`].
     pub fn admits(self, version: u32) -> bool {
         version == self.recorded || (self.oldest <= version && version <= self.newest)
     }
+
+    /// Whether `version` reaches the newest through a lift: an admitted
+    /// version below the newest. The decoder hands such a payload to
+    /// [`upcast_json_record`], or to its own predecessor decoder for a
+    /// [`Lift::Decoder`] surface.
+    pub fn lifts(self, version: u32) -> bool {
+        self.admits(version) && version != self.newest
+    }
 }
 
-/// One immutable-history surface and its permanent read floor (ADR 0115 §5):
-/// the oldest version of the surface any build of this line still reads.
-/// `F` never moves it.
+/// How a guarded surface's stored records live, which decides how far down
+/// its readers must reach (ADR 0115 §5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HistoryFloor {
+pub enum SurfaceReads {
+    /// Immutable history: preserved byte for byte, hashed, and never
+    /// rewritten. Its readers admit every version from `floor` up, forever:
+    /// no backfill or sweep ever moves a record off an old version, so the
+    /// upcaster of every step from the floor is permanent and `F` never
+    /// moves the floor.
+    History {
+        /// The oldest version any build of this line still reads.
+        floor: u32,
+    },
+    /// Mutable state: rows a writer rewrites in place, and Restate objects an
+    /// `upgrade` handler rewrites. Its readers admit whatever the upcaster
+    /// chain lifts; after the release that finalized it, backfills and
+    /// object sweeps move every record to the newest version, and the next
+    /// release may drop the lift.
+    Mutable,
+    /// A projection derived from a source lash keeps (a workflow graph from
+    /// its module). Its readers admit only the newest version and regenerate
+    /// an older record from the source instead of lifting it, so it never
+    /// registers a lift.
+    Derived,
+}
+
+impl SurfaceReads {
+    /// The lowest version the window may reach through the upcaster chain;
+    /// `None` for a derived projection, which admits only its newest.
+    pub const fn floor(self) -> Option<u32> {
+        match self {
+            Self::History { floor } => Some(floor),
+            Self::Mutable => Some(1),
+            Self::Derived => None,
+        }
+    }
+}
+
+/// One guarded surface: a stamped stored record whose readers go through
+/// `F`'s read window and the [`RECORD_UPCASTERS`] chain, never an
+/// exact-version check (FIG-3802).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuardedSurface {
     /// The name the surface registers under in `scripts/versioned-surfaces.toml`.
     pub constant: &'static str,
-    /// The oldest version readers admit, lifted to the newest through the
-    /// surface's [`RecordUpcaster`] chain.
-    pub floor: u32,
+    /// The crate that owns the surface's constant, decoder and law probe.
+    pub owner: &'static str,
+    /// How far down its readers reach.
+    pub reads: SurfaceReads,
 }
 
-/// The surfaces whose records are immutable history: preserved byte for
-/// byte, never rewritten, and read through a permanent floor rather than
-/// `F`'s `{recorded, newest}` pair (ADR 0115 §5).
+/// Every guarded surface: each stamped record lash stores and reads back,
+/// with the crate that decodes it and how far down its readers reach
+/// (FIG-3802, ADR 0115 §5).
 ///
-/// Every floor is 1, the first version at the cut; the upcasters that let a
-/// later build read below its newest are FIG-3802's.
-pub const HISTORY_FLOORS: &[HistoryFloor] = &[
-    HistoryFloor {
+/// The registry gate (`scripts/check_format_registry.py`) holds this table
+/// equal to the `upgrade = "migrate"` rows of
+/// `scripts/versioned-surfaces.toml` that no compatibility descriptor or
+/// exclusion covers, and each owner's `every_guarded_surface_decodes_its_supported_range`
+/// law refuses a row it has no probe for. Every history floor is 1, the
+/// first version at the cut.
+pub const GUARDED_SURFACES: &[GuardedSurface] = &[
+    GuardedSurface {
         constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
-        floor: 1,
+        owner: "lash-core-store",
+        reads: SurfaceReads::History { floor: 1 },
     },
-    HistoryFloor {
+    GuardedSurface {
         constant: "SESSION_CHECKPOINT_SCHEMA_VERSION",
-        floor: 1,
+        owner: "lash-core-store",
+        reads: SurfaceReads::History { floor: 1 },
     },
-    HistoryFloor {
+    GuardedSurface {
         constant: "CHECKPOINT_COMPONENT_ENCODING_VERSION",
-        floor: 1,
+        owner: "lash-core-store",
+        reads: SurfaceReads::History { floor: 1 },
     },
-    HistoryFloor {
+    GuardedSurface {
         constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
-        floor: 1,
+        owner: "lash-core-store",
+        reads: SurfaceReads::History { floor: 1 },
     },
-    HistoryFloor {
-        constant: "RLM_SNAPSHOT_VERSION",
-        floor: 1,
+    GuardedSurface {
+        constant: "SESSION_HEAD_META_SCHEMA_VERSION",
+        owner: "lash-core-store",
+        reads: SurfaceReads::Mutable,
     },
-    HistoryFloor {
-        constant: "LASHLANG_SNAPSHOT_VERSION",
-        floor: 1,
+    GuardedSurface {
+        constant: "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
+        owner: "lash-core-store",
+        reads: SurfaceReads::Mutable,
     },
-    HistoryFloor {
-        constant: "HEAP_SIZE_SCHEDULE_VERSION",
-        floor: 1,
+    GuardedSurface {
+        constant: "PROCESS_WAKE_DELIVERY_FORMAT_VERSION",
+        owner: "lash-core-execution",
+        reads: SurfaceReads::Mutable,
     },
-    HistoryFloor {
-        constant: "NATIVE_TRANSPORT_VERSION",
-        floor: 1,
+    GuardedSurface {
+        constant: "CURRENT_SESSION_STATE_VERSION",
+        owner: "lash-core-store",
+        reads: SurfaceReads::Mutable,
     },
-    HistoryFloor {
+    GuardedSurface {
+        constant: "OBLIGATION_LEDGER_VOCABULARY_VERSION",
+        owner: "lash-core-store",
+        reads: SurfaceReads::Mutable,
+    },
+    GuardedSurface {
         constant: "PROCESS_EVENT_VOCABULARY_VERSION",
-        floor: 1,
+        owner: "lash-core-execution",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
+        constant: "SCOPE_STORAGE_PAYLOAD_VERSION",
+        owner: "lash-core-execution",
+        reads: SurfaceReads::Mutable,
+    },
+    GuardedSurface {
+        constant: "LASHLANG_SNAPSHOT_VERSION",
+        owner: "lashlang",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
+        constant: "HEAP_SIZE_SCHEDULE_VERSION",
+        owner: "lashlang",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
+        constant: "WORKFLOW_GRAPH_SCHEMA_VERSION",
+        owner: "lashlang",
+        reads: SurfaceReads::Derived,
+    },
+    GuardedSurface {
+        constant: "RLM_SNAPSHOT_VERSION",
+        owner: "lash-protocol-rlm",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
+        constant: "NATIVE_TRANSPORT_VERSION",
+        owner: "lash-protocol-rlm",
+        reads: SurfaceReads::History { floor: 1 },
+    },
+    GuardedSurface {
+        constant: "NATIVE_DRIVER_STATE_VERSION",
+        owner: "lash-protocol-rlm",
+        reads: SurfaceReads::Mutable,
+    },
+    GuardedSurface {
+        constant: "SQLITE_BLOB_ENVELOPE_VERSION",
+        owner: "lash-sqlite-store",
+        reads: SurfaceReads::Mutable,
+    },
+    GuardedSurface {
+        constant: "EFFECT_GROUP_STATE_FORMAT_VERSION",
+        owner: "lash-restate",
+        reads: SurfaceReads::Mutable,
+    },
+    GuardedSurface {
+        constant: "EFFECT_GROUP_PAYLOAD_FORMAT_VERSION",
+        owner: "lash-restate",
+        reads: SurfaceReads::Mutable,
+    },
+    GuardedSurface {
+        constant: "DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
+        owner: "lash-restate",
+        reads: SurfaceReads::Mutable,
+    },
+    // A `LashTurn` workflow's outcome is written once by its `run` and no
+    // handler may rewrite a finished workflow's state, so it is history.
+    GuardedSurface {
+        constant: "LASH_TURN_OUTCOME_FORMAT_VERSION",
+        owner: "lash-restate",
+        reads: SurfaceReads::History { floor: 1 },
     },
 ];
 
-/// The permanent floor of `surface`, when it is immutable history.
-pub fn history_floor(surface: SurfaceFormat) -> Option<u32> {
+/// The [`GUARDED_SURFACES`] row of `surface`, when one guards it.
+pub fn guarded_surface(surface: SurfaceFormat) -> Option<&'static GuardedSurface> {
     let constant = surface.constant_name();
-    HISTORY_FLOORS
+    GUARDED_SURFACES
         .iter()
-        .find(|entry| entry.constant == constant)
-        .map(|entry| entry.floor)
+        .find(|guarded| guarded.constant == constant)
 }
 
 /// The oldest version at or above `floor` from which the surface's upcaster
@@ -354,44 +488,64 @@ fn oldest_upcastable(surface: SurfaceFormat, floor: u32, newest: u32) -> u32 {
     oldest
 }
 
-/// One registered transform lifting a registered surface's recorded payload
-/// from `from_version` to `from_version + 1` — a reader's upcaster hook
-/// (FIG-3796).
+/// How one [`RecordUpcaster`] row lifts a payload a generation.
+#[derive(Clone, Copy)]
+pub enum Lift {
+    /// A transform of the record's decoded JSON tree. The tree it leaves is
+    /// the next generation's, including the record's own version field; a
+    /// Restate object family's lift rewrites the stamped value's body.
+    Tree(fn(&mut serde_json::Value) -> Result<(), crate::StoreError>),
+    /// The surface's bytes are not a JSON tree — a canonical binary encoding,
+    /// a label vocabulary, a byte envelope — so its own decoder reads
+    /// `from_version` natively, beside the newest. The row is what admits the
+    /// version: the decoder asks [`ReadWindow::lifts`] and dispatches on it,
+    /// and its owner's law proves it reads what the row admits.
+    Decoder,
+}
+
+impl std::fmt::Debug for Lift {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Tree(_) => "Tree",
+            Self::Decoder => "Decoder",
+        })
+    }
+}
+
+/// One registered lift of a guarded surface's recorded payload from
+/// `from_version` to `from_version + 1` — a reader's upcaster hook
+/// (FIG-3796, FIG-3802).
 ///
 /// A build that bumps a surface's format registers the row here, and every
-/// reader that admits the older half of its window lifts the payload a
-/// generation at a time until it reaches the build's newest shape. The hook
-/// owns the whole lift for its step: the payload tree it leaves is the next
-/// generation's, including the record's `schema_version` field.
+/// reader that admits the older version lifts the payload a generation at a
+/// time until it reaches the build's newest shape.
+#[derive(Clone, Copy, Debug)]
 pub struct RecordUpcaster {
     /// The name the surface registers under in `scripts/versioned-surfaces.toml`.
     pub constant: &'static str,
     /// The recorded version the row lifts from.
     pub from_version: u32,
-    /// The transform applied to the record's decoded JSON tree.
-    pub upcast: fn(&mut serde_json::Value) -> Result<(), crate::StoreError>,
+    /// How the row lifts it.
+    pub lift: Lift,
 }
 
 /// The upcaster hooks readers consult when a recorded version is older than
-/// the build's newest — the transform half of the `[N-1, N]` window
-/// (FIG-3796).
+/// the build's newest — the transform half of every guarded surface's read
+/// window (FIG-3796, FIG-3802). This is the one place a lift is registered:
+/// an object family's, a SQL row's, and history's alike.
 ///
-/// 1.0 registers none: every registered surface is at its first shipped
-/// generation, so no `N-1` payload can exist and no transform is owed yet.
-/// The slot exists so the first format bump hangs its transform in one
-/// visible place rather than teaching each decoder a new rule.
+/// 1.0 registers none: every guarded surface is at its first shipped
+/// generation, so no older payload can exist and no transform is owed yet.
+/// The first real successor hangs its rows here, as the synthetic one does.
 #[cfg(not(feature = "synthetic-next"))]
 pub const RECORD_UPCASTERS: &[RecordUpcaster] = &[];
 
-/// Phase A's synthetic N+1 (ADR 0115 §6) registers the permanent history
-/// upcaster of the session node body it bumps, so history N wrote stays
-/// readable after finalize through the surface's floor.
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves every guarded surface one
+/// version on without changing its shape, and registers each step's lift:
+/// the version N wrote is admitted, lifted and decoded, before and after
+/// finalize, and history N wrote stays readable through its floor.
 #[cfg(feature = "synthetic-next")]
-pub const RECORD_UPCASTERS: &[RecordUpcaster] = &[RecordUpcaster {
-    constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
-    from_version: crate::session_graph::SESSION_NODE_BODY_SCHEMA_VERSION - 1,
-    upcast: crate::session_graph::upcast_synthetic_node_body,
-}];
+pub const RECORD_UPCASTERS: &[RecordUpcaster] = super::synthetic_next::RECORD_UPCASTERS;
 
 /// The identity of one registered durable surface — what a writer or reader
 /// asks `F` about.
@@ -449,38 +603,7 @@ const WRITER_PINS: &[WriterPin] = &[];
 /// stored surface it bumps to the version N reads: before finalize N+1 writes
 /// only what N reads.
 #[cfg(feature = "synthetic-next")]
-const WRITER_PINS: &[WriterPin] = &[
-    WriterPin {
-        constant: "SESSION_HEAD_META_SCHEMA_VERSION",
-        generation: 1,
-        version: super::SESSION_HEAD_META_SCHEMA_VERSION,
-    },
-    WriterPin {
-        constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
-        generation: 1,
-        version: crate::session_graph::SESSION_NODE_BODY_SCHEMA_VERSION - 1,
-    },
-    WriterPin {
-        constant: "EFFECT_GROUP_STATE_FORMAT_VERSION",
-        generation: 1,
-        version: 1,
-    },
-    WriterPin {
-        constant: "RESTATE_WIRE_VERSION",
-        generation: 1,
-        version: 1,
-    },
-    WriterPin {
-        constant: "SQLITE_BLOB_ENVELOPE_VERSION",
-        generation: 1,
-        version: 1,
-    },
-    WriterPin {
-        constant: "PROCESS_CURSOR_VERSION",
-        generation: 1,
-        version: lash_sansio::PROCESS_CURSOR_VERSION - 1,
-    },
-];
+const WRITER_PINS: &[WriterPin] = super::synthetic_next::WRITER_PINS;
 
 /// The [`SurfaceFormat`] a call site hands [`FleetFormat::writer_version`]
 /// names a registered surface and carries the constant's own value as its
@@ -631,13 +754,15 @@ where
 }
 
 /// Lifts `value` from `from_version` to `to_version` for `surface` through
-/// the registered [`RecordUpcaster`] hooks, one generation per row
+/// the registered [`RecordUpcaster`] tree lifts, one generation per row
 /// (FIG-3796).
 ///
-/// The walk is fail-closed: a step with no hook refuses the record rather
+/// The walk is fail-closed: a step with no row refuses the record rather
 /// than decoding a half-lifted payload, so a reader that admits an older
 /// version without a transform reports the same unsupported-version error
-/// the exact-version path reports.
+/// the exact-version path reports. A [`Lift::Decoder`] step is the
+/// surface's own decoder's to take, never a tree walk's, and is refused the
+/// same way.
 pub fn upcast_json_record(
     record_kind: &'static str,
     surface: SurfaceFormat,
@@ -647,41 +772,35 @@ pub fn upcast_json_record(
 ) -> Result<(), StoreError> {
     let mut version = from_version;
     while version != to_version {
-        let Some(hook) = RECORD_UPCASTERS
-            .iter()
-            .find(|hook| hook.constant == surface.constant_name() && hook.from_version == version)
-        else {
+        let Some(Lift::Tree(lift)) = upcaster(surface, version).map(|row| row.lift) else {
             return Err(StoreError::UnsupportedRecordSchemaVersion {
                 record_kind,
                 actual: from_version,
                 expected: to_version,
             });
         };
-        (hook.upcast)(value)?;
+        lift(value)?;
         version += 1;
     }
     Ok(())
+}
+
+/// The [`RecordUpcaster`] row lifting `surface` from `from_version`.
+pub fn upcaster(surface: SurfaceFormat, from_version: u32) -> Option<&'static RecordUpcaster> {
+    let constant = surface.constant_name();
+    RECORD_UPCASTERS
+        .iter()
+        .find(|row| row.constant == constant && row.from_version == from_version)
 }
 
 /// Whether a [`RecordUpcaster`] chain can lift `surface`'s recorded
 /// `from_version` to `to_version` — the fleetless leg of the reader window
 /// for decode sites (serde impls, wire parsers) that cannot consult `F`
 /// directly. A surface with no registered chain admits exactly its newest
-/// version, which is the whole of its window while no `N-1` exists
-/// (FIG-3796).
+/// version (FIG-3796).
 pub fn upcast_chain_covers(surface: SurfaceFormat, from_version: u32, to_version: u32) -> bool {
-    let mut version = from_version;
-    while version != to_version {
-        let Some(hook) = RECORD_UPCASTERS
-            .iter()
-            .find(|hook| hook.constant == surface.constant_name() && hook.from_version == version)
-        else {
-            return false;
-        };
-        let _ = hook;
-        version += 1;
-    }
-    true
+    from_version <= to_version
+        && (from_version..to_version).all(|version| upcaster(surface, version).is_some())
 }
 
 pub fn decode_versioned_json_record<T>(
@@ -733,7 +852,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{FLEET_WRITABLE_RANGE, FleetFormat, SurfaceFormat, history_floor};
+    use super::{FLEET_WRITABLE_RANGE, FleetFormat, SurfaceFormat, SurfaceReads, guarded_surface};
     use crate::StoreError;
     use crate::compat::{CompatRefusal, VersionRange};
 
@@ -815,23 +934,33 @@ mod tests {
     #[test]
     fn history_is_read_through_its_permanent_floor() {
         let history = SurfaceFormat::of("SESSION_NODE_BODY_SCHEMA_VERSION", 1);
-        assert_eq!(history_floor(history), Some(1));
+        assert_eq!(
+            guarded_surface(history).map(|guarded| guarded.reads),
+            Some(SurfaceReads::History { floor: 1 })
+        );
         let window = FleetFormat::current().read_window(history);
         assert_eq!((window.oldest(), window.newest()), (1, 1));
         assert!(window.admits(1) && !window.admits(2));
 
-        // Fail-closed: without an upcaster chain the floor reaches no lower
+        // Fail-closed: without an upcaster chain the window reaches no lower
         // than the newest version.
-        let unlifted = SurfaceFormat::of("crate::SESSION_CHECKPOINT_SCHEMA_VERSION", 4);
+        let unlifted = SurfaceFormat::of("crate::SESSION_CHECKPOINT_SCHEMA_VERSION", 40);
         let window = FleetFormat::current().read_window(unlifted);
-        assert_eq!(window.oldest(), 4);
-        assert!(window.admits(4) && !window.admits(1));
+        assert_eq!(window.oldest(), 40);
+        assert!(window.admits(40) && !window.admits(1));
 
-        // A surface that is not history keeps `F`'s `{recorded, newest}` pair.
-        let mutable = SurfaceFormat::of("SESSION_HEAD_META_SCHEMA_VERSION", 3);
-        assert_eq!(history_floor(mutable), None);
+        // A mutable surface reaches as far down as its chain, whatever `F`
+        // records; a surface no row guards keeps `F`'s `{recorded, newest}`.
+        let mutable = SurfaceFormat::of("SESSION_HEAD_META_SCHEMA_VERSION", 30);
+        assert_eq!(
+            guarded_surface(mutable).map(|guarded| guarded.reads),
+            Some(SurfaceReads::Mutable)
+        );
         let window = FleetFormat::current().read_window(mutable);
-        assert_eq!(window.oldest(), 3);
-        assert!(window.admits(3) && !window.admits(2));
+        assert_eq!(window.oldest(), 30);
+        assert!(window.admits(30) && !window.admits(29));
+        let wire = SurfaceFormat::of("RESTATE_WIRE_VERSION", 30);
+        assert_eq!(guarded_surface(wire), None);
+        assert_eq!(FleetFormat::current().read_window(wire).oldest(), 30);
     }
 }

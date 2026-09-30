@@ -246,6 +246,11 @@ fn parse_protocol_turn_options_schema_version(
 }
 
 /// Schema version stamped on the persisted protocol turn-options envelope.
+///
+/// Phase A's synthetic N+1 does not move it: the stamp is part of the
+/// semantic-boundary request identities and intent hashes a retried request
+/// reproduces, so a successor that moves it must first decide how those
+/// identities cross the roll.
 pub const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 fn ensure_protocol_turn_options_schema_version(
     actual: u32,

@@ -63,6 +63,8 @@ fn snapshot_and_continuation_codecs_share_the_prototype_chain_key_guard() {
     );
 }
 
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn authored_continuation_fixture_decodes_and_re_encodes_exactly() {
     let continuation: VmContinuation =
@@ -90,8 +92,11 @@ fn authored_continuation_fixture_decodes_and_re_encodes_exactly() {
 /// A binding cell (FIG-3707) on the wire: a slot holds the reference, the
 /// cell holds the binding's value, and the pair decodes and re-encodes to the
 /// same bytes.
+#[cfg(not(feature = "synthetic-next"))]
 const AUTHORED_CELL_CONTINUATION: &str = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{"next_id":2,"allocation_counter":1,"live_logical_bytes":88,"size_schedule_version":3,"objects":[{"id":1,"object":{"kind":"cell","value":{"kind":"number","value":{"version":1,"bits":4613937818241073152}}}}]},"resume":{"kind":"next_instruction"}}"#;
 
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn a_binding_cell_decodes_and_re_encodes_exactly() {
     let continuation: VmContinuation = serde_json::from_str(AUTHORED_CELL_CONTINUATION)

@@ -24,6 +24,14 @@ class; and every manifest row is exactly one registered surface whose
 ``manifest`` names it. That is what makes the manifest's exhaustiveness claim
 checkable rather than aspirational.
 
+Every ``upgrade = "migrate"`` surface is held to FIG-3802's decoder laws: it
+is a row of ``GUARDED_SURFACES`` in
+``crates/lash-core-store/src/store/fleet_format.rs``, or it states why it is
+not (``unguarded = "<reason>"``). Every row names a registered migrate
+surface, and the crate it names as owner runs the three guarded-surface laws
+under ``const OWNER`` set to its own name, so a row cannot be added without
+its decoders being driven through its supported range.
+
 Only the Python standard library is used.
 """
 
@@ -75,6 +83,20 @@ ENGINE_ROW = re.compile(
     r"upgrade_policy:\s*UpgradePolicy::(?P<policy>\w+)"
 )
 ENGINE_ENTRY = re.compile(r"\bEngineDurableFormat\s*\{")
+GUARDED_REGISTRY = Path("crates/lash-core-store/src/store/fleet_format.rs")
+GUARDED_TABLE = re.compile(
+    r"pub const GUARDED_SURFACES: &\[GuardedSurface\] = &\[(?P<body>.*?)\n\];",
+    re.DOTALL,
+)
+GUARDED_ROW = re.compile(
+    r"GuardedSurface\s*\{\s*constant:\s*\"(?P<constant>\w+)\",\s*"
+    r"owner:\s*\"(?P<owner>[\w-]+)\","
+)
+GUARDED_LAWS = (
+    "every_guarded_surface_decodes_its_supported_range",
+    "unknown_version_is_refused_with_zero_mutation",
+    "upcast_preserves_immutable_bytes_and_hashes",
+)
 TEST_ATTRIBUTE = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
 
 
@@ -302,6 +324,80 @@ def engine_manifest_rows(repo: Path) -> tuple[dict[str, str], dict[str, str]]:
     return rows, policies
 
 
+def guarded_rows(text: str) -> dict[str, str]:
+    """``GUARDED_SURFACES`` as constant -> owner crate."""
+    table = GUARDED_TABLE.search(text)
+    if table is None:
+        raise RegistryError(f"{GUARDED_REGISTRY} declares no GUARDED_SURFACES table")
+    body = table.group("body")
+    matches = list(GUARDED_ROW.finditer(body))
+    entries = len(re.findall(r"\bGuardedSurface\s*\{", body))
+    if len(matches) != entries:
+        raise RegistryError(
+            f"{GUARDED_REGISTRY}: {entries} GUARDED_SURFACES rows but {len(matches)} "
+            "parse as `constant: \"...\", owner: \"...\"`"
+        )
+    rows: dict[str, str] = {}
+    for match in matches:
+        constant = match.group("constant")
+        if constant in rows:
+            raise RegistryError(f"{GUARDED_REGISTRY}: {constant} is guarded twice")
+        rows[constant] = match.group("owner")
+    return rows
+
+
+def runs_guarded_laws(repo: Path, owner: str) -> bool:
+    """Whether crate ``owner`` runs every guarded-surface law as itself."""
+    sources = repo / "crates" / owner / "src"
+    declaration = f'const OWNER: &str = "{owner}";'
+    for path in sorted(sources.rglob("*.rs")) if sources.is_dir() else []:
+        text = path.read_text(encoding="utf-8")
+        if declaration in text and all(f"laws::{law}(OWNER" in text for law in GUARDED_LAWS):
+            return True
+    return False
+
+
+def guarded_problems(repo: Path, registry: Registry) -> list[str]:
+    problems: list[str] = []
+    rows = guarded_rows((repo / GUARDED_REGISTRY).read_text(encoding="utf-8"))
+    migrate: dict[str, list[str]] = {}
+    for key, raw in sorted(registry.surfaces.items()):
+        unguarded = raw.get("unguarded")
+        if raw.get("upgrade") != "migrate":
+            if unguarded is not None:
+                problems.append(f"{key} states unguarded but is not a migrate surface")
+            continue
+        constant = raw.get("constant")
+        migrate.setdefault(constant, []).append(key)
+        if constant in rows and unguarded is not None:
+            problems.append(f"{key} is a GUARDED_SURFACES row and also states unguarded")
+        elif constant not in rows and unguarded is None:
+            problems.append(
+                f"{key} is a migrate surface outside GUARDED_SURFACES: add its row "
+                f"to {GUARDED_REGISTRY} and run the guarded-surface laws over its "
+                "decoders, or state unguarded = \"<reason>\""
+            )
+        elif unguarded is not None and (
+            not isinstance(unguarded, str) or not unguarded.strip()
+        ):
+            problems.append(f"{key} unguarded must state a reason")
+    for constant, owner in sorted(rows.items()):
+        keys = migrate.get(constant, [])
+        if len(keys) != 1:
+            problems.append(
+                f"GUARDED_SURFACES row {constant} must name exactly one registered "
+                f"migrate surface; names {len(keys)}"
+            )
+        if not runs_guarded_laws(repo, owner):
+            problems.append(
+                f"GUARDED_SURFACES row {constant} is owned by {owner}, which does not "
+                f"run the guarded-surface laws: crates/{owner}/src needs a test "
+                f"module with const OWNER: &str = \"{owner}\" calling each of "
+                + ", ".join(GUARDED_LAWS)
+            )
+    return problems
+
+
 def row_label(row: str) -> str:
     """How a table row prints in a finding: a facade variant or an engine id."""
     if row.startswith("engine:"):
@@ -435,6 +531,7 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
                 f"DurableFormat::{variant} has an upgrade_policy() arm but no "
                 f"manifest row; every durable format must be in {MANIFEST}"
             )
+    problems.extend(guarded_problems(repo, registry))
     return problems
 
 

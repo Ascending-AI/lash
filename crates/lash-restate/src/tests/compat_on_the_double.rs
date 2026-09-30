@@ -122,6 +122,10 @@ fn compat_refusal(error: &crate::RestateHttpError) -> RestateCompatError {
         .unwrap_or_else(|| panic!("the refusal is typed: {message}"))
 }
 
+/// The newest format of every object family: the one a fresh object is
+/// stamped at, whatever the build.
+const NEWEST: u32 = crate::EFFECT_GROUP_STATE_FORMAT_VERSION as u32;
+
 fn compat_bytes(format: u32, min_reader: u32, min_writer: u32) -> Vec<u8> {
     serde_json::to_vec(&ObjectCompat {
         format,
@@ -132,7 +136,11 @@ fn compat_bytes(format: u32, min_reader: u32, min_writer: u32) -> Vec<u8> {
 }
 
 fn stamped(body: serde_json::Value) -> Vec<u8> {
-    serde_json::to_vec(&StampedValue { format: 1, body }).expect("encode a stamped value")
+    serde_json::to_vec(&StampedValue {
+        format: NEWEST,
+        body,
+    })
+    .expect("encode a stamped value")
 }
 
 /// One object family under test: its service, a value key it keeps, a
@@ -192,10 +200,14 @@ async fn call(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_change() {
     let (server, ingress) = object_families().await;
-    let reads = VersionRange::exactly(1);
     for family in families() {
         let service = family.service;
         let component = family.component.to_owned();
+        let reads = lash_core_store::compat::DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.component.as_str() == component)
+            .map(|descriptor| descriptor.reads)
+            .expect("the family declares a descriptor");
         let (exclusive, exclusive_body) = &family.exclusive;
 
         // A fresh object: the first exclusive handler stamps `_compat` at
@@ -206,7 +218,7 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
             .unwrap_or_else(|error| panic!("{service}/{exclusive} on a fresh object: {error}"));
         assert_eq!(
             server.object_state(service, &fresh).get(COMPAT_KEY),
-            Some(&compat_bytes(1, 1, 1)),
+            Some(&compat_bytes(NEWEST, NEWEST, NEWEST)),
             "{service}: a fresh object is stamped by its first exclusive handler"
         );
 
@@ -217,7 +229,10 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
             service,
             &raised,
             [
-                (COMPAT_KEY.to_owned(), compat_bytes(2, 2, 2)),
+                (
+                    COMPAT_KEY.to_owned(),
+                    compat_bytes(NEWEST + 1, NEWEST + 1, NEWEST + 1),
+                ),
                 (
                     family.value_key.to_owned(),
                     stamped(serde_json::json!(true)),
@@ -235,8 +250,8 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
             RestateCompatError::Incompatible {
                 refusal: CompatRefusal::ReaderFloorAbove {
                     component: component.clone(),
-                    found: 2,
-                    min_reader: 2,
+                    found: NEWEST + 1,
+                    min_reader: NEWEST + 1,
                     reads,
                     writing_release: None,
                 },
@@ -269,9 +284,12 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
         server.set_object_state(
             service,
             &upgraded,
-            [(COMPAT_KEY.to_owned(), compat_bytes(1, 1, 2))]
-                .into_iter()
-                .collect(),
+            [(
+                COMPAT_KEY.to_owned(),
+                compat_bytes(NEWEST, NEWEST, NEWEST + 1),
+            )]
+            .into_iter()
+            .collect(),
         );
         let before = server.object_state(service, &upgraded);
         if let Some((shared, shared_body)) = &family.shared {
@@ -289,8 +307,8 @@ async fn each_family_refuses_a_compat_record_above_this_build_with_zero_state_ch
             RestateCompatError::Incompatible {
                 refusal: CompatRefusal::WriterFloorAbove {
                     component: component.clone(),
-                    found: 1,
-                    min_writer: 2,
+                    found: NEWEST,
+                    min_writer: NEWEST + 1,
                     writes: reads,
                 },
             },
@@ -352,7 +370,7 @@ async fn clearing_an_object_keeps_its_compat_record() {
         .expect("delete the bytes");
     assert_eq!(
         server.object_state("EffectGroupPayload", "cleared"),
-        [(COMPAT_KEY.to_owned(), compat_bytes(1, 1, 1))]
+        [(COMPAT_KEY.to_owned(), compat_bytes(NEWEST, NEWEST, NEWEST))]
             .into_iter()
             .collect(),
         "only the record survives the clear"
@@ -387,7 +405,7 @@ async fn clearing_an_object_keeps_its_compat_record() {
     let state = server.object_state("LashDurableWaitIndex", "revoked");
     assert_eq!(
         state.get(COMPAT_KEY),
-        Some(&compat_bytes(1, 1, 1)),
+        Some(&compat_bytes(NEWEST, NEWEST, NEWEST)),
         "the revocation's clear kept the record: {state:?}"
     );
     assert!(
@@ -728,7 +746,7 @@ async fn a_shared_read_never_refuses_an_index_its_writer_stamps_concurrently() {
     let state = server.object_state("LashDurableWaitIndex", &object);
     assert_eq!(
         state.get(COMPAT_KEY),
-        Some(&compat_bytes(1, 1, 1)),
+        Some(&compat_bytes(NEWEST, NEWEST, NEWEST)),
         "the register stamped the index it populated: {state:?}"
     );
     assert!(state.keys().any(|key| key != COMPAT_KEY), "{state:?}");

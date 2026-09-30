@@ -17,7 +17,13 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 3;
 /// sessions are refused at lease admission and recovery, before any turn,
 /// model, tool or provider effect; the refusal names the found generation so
 /// a later migration or drain can identify them.
+#[cfg(not(feature = "synthetic-next"))]
 pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 3's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const CURRENT_SESSION_STATE_VERSION: u32 = 4;
 
 /// Successful drive-fenced admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]

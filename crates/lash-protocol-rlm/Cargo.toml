@@ -19,6 +19,10 @@ doctest = false
 [features]
 default = []
 testing = ["lashlang/testing", "lash-core/testing"]
+# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
+# constants it moves, and the store's lift and pin tables they rely on. Only
+# lash-upgrade-harness enables it; no production build does.
+synthetic-next = ["lash-core/synthetic-next", "lashlang/synthetic-next"]
 
 [lints]
 workspace = true
@@ -50,6 +54,8 @@ lash-restate-test = { workspace = true }
 lash-conformance = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
+# The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
+lash-core-store = { workspace = true, features = ["testing"] }
 lash-plugin-process-controls = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }

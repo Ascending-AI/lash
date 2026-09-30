@@ -103,6 +103,7 @@ synthetic-next = [
     "lash-sqlite-store?/synthetic-next",
     "lash-restate?/synthetic-next",
     "lashlang?/synthetic-next",
+    "lash-protocol-rlm?/synthetic-next",
 ]
 
 [dev-dependencies]

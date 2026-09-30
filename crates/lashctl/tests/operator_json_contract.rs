@@ -106,6 +106,61 @@ fn operator_json_contract() {
         assert_eq!(usage["error"]["code"], "usage", "{args:?}");
     }
 
+    // The object commands read the engine, not the store: they name the
+    // engine, a sweep names where it calls each object's `upgrade`, and an
+    // engine that cannot be reached is a failure, not a verdict.
+    for args in [
+        vec!["objects-preflight", "--json"],
+        vec!["objects-sweep", "--restate-admin-url", "http://x", "--json"],
+        vec![
+            "objects-preflight",
+            "--restate-admin-url",
+            "http://x",
+            "--restate-ingress-url",
+            "http://x",
+            "--json",
+        ],
+        vec![
+            "objects-preflight",
+            "--restate-admin-url",
+            "http://x",
+            "--restate-admin-url",
+            "http://y",
+            "--json",
+        ],
+    ] {
+        let (code, usage) = run(&args, None);
+        assert_eq!(code, 2, "{args:?}");
+        assert_eq!(usage["error"]["code"], "usage", "{args:?}");
+    }
+    for (name, args) in [
+        (
+            "objects-preflight",
+            vec![
+                "objects-preflight",
+                "--restate-admin-url",
+                "http://127.0.0.1:1",
+                "--json",
+            ],
+        ),
+        (
+            "objects-sweep",
+            vec![
+                "objects-sweep",
+                "--restate-admin-url",
+                "http://127.0.0.1:1",
+                "--restate-ingress-url",
+                "http://127.0.0.1:1",
+                "--json",
+            ],
+        ),
+    ] {
+        let (code, failed) = run(&args, None);
+        assert_eq!(code, 1, "{name}");
+        assert_envelope(&failed, name, false, true);
+        assert_eq!(failed["error"]["code"], "unexpected_failure", "{name}");
+    }
+
     let (code, failed) = run(&["migrate", "--dry-run", "--json"], Some("invalid-url"));
     assert_eq!(code, 1);
     assert_envelope(&failed, "migrate", false, true);

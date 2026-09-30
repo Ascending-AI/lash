@@ -1255,6 +1255,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
     )
 }
 
+// The corpus is N's journals; the synthetic N+1's journal logic epoch moves
+// its generation, so its sentinel parks them as foreign by design.
+#[cfg(not(feature = "synthetic-next"))]
 #[tokio::test]
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {

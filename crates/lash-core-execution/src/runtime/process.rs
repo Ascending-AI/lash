@@ -5,6 +5,8 @@ mod definition_store;
 mod effect_summary;
 mod engine;
 mod events;
+#[cfg(test)]
+mod guarded_surface_tests;
 pub(crate) mod identity_projection;
 mod materialization;
 pub(crate) mod model;

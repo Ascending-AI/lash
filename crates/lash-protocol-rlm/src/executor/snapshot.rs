@@ -65,7 +65,14 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
+#[cfg(not(feature = "synthetic-next"))]
 pub const RLM_SNAPSHOT_VERSION: u32 = 26;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 26's shape; its `Lift::Decoder` row admits N's
+/// roots, which the canonical decoder reads natively.
+#[cfg(feature = "synthetic-next")]
+pub const RLM_SNAPSHOT_VERSION: u32 = 27;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

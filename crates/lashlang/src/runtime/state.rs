@@ -60,7 +60,15 @@ pub use canonical_messagepack::{
 // v14 writes a binding cell as a `cell` heap object (FIG-3707): a closure's
 // captures may reference one. A v13 reader meets an unknown kind, so the bump
 // is what makes its refusal a version boundary.
+#[cfg(not(feature = "synthetic-next"))]
 pub const LASHLANG_SNAPSHOT_VERSION: u32 = 14;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the snapshot one version on
+/// with version 14's shape. Its registered `Lift::Decoder` row admits N's
+/// snapshots, and the canonical decoder reads them natively: the fixed point
+/// re-encodes at the recorded version, so N's bytes stay N's.
+#[cfg(feature = "synthetic-next")]
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 15;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;
@@ -530,13 +538,12 @@ impl Snapshot {
         Self::from_canonical_bytes_for_fleet(bytes, lash_core_execution::FleetFormat::current())
     }
 
-    /// The fleet leg of [`Self::from_canonical_bytes`]: the read admits the
-    /// pair `{fleet's writer version, this build's newest}` — ADR 0106 §2's
-    /// `[N-1, N]` window (FIG-3796). A snapshot at the fleet's older recorded
-    /// version would climb to the newest through a surface-owned lift step
-    /// before it decodes; this canonical form has no lift step yet, so an
-    /// admitted older version is refused closed rather than decoded on shape
-    /// alone.
+    /// The fleet leg of [`Self::from_canonical_bytes`]: the read admits every
+    /// version of the snapshot surface's read window (FIG-3796, FIG-3802) —
+    /// the newest, and each older version a `Lift::Decoder` row registers,
+    /// which this canonical form reads natively. The fixed point re-encodes
+    /// at the recorded version, so an older snapshot's bytes, and every hash
+    /// over them, stay exactly as stored.
     pub(crate) fn from_canonical_bytes_for_fleet(
         bytes: &[u8],
         fleet_format: lash_core_execution::FleetFormat,
@@ -546,7 +553,7 @@ impl Snapshot {
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
         let recorded_version = wire.version;
         let window = fleet_format.read_window(surface_format!(LASHLANG_SNAPSHOT_VERSION));
-        if recorded_version != window.newest() {
+        if !window.admits(recorded_version) {
             return Err(SnapshotDecodeError::VersionMismatch {
                 expected: window.newest(),
                 found: recorded_version,
@@ -1686,6 +1693,9 @@ use canonical_wire::*;
 #[cfg(test)]
 #[path = "state/fixes3_tests.rs"]
 mod fixes3_tests;
+
+#[cfg(test)]
+mod guarded_surface_tests;
 
 #[cfg(test)]
 mod tests;

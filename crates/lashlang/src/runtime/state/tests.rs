@@ -415,6 +415,8 @@ fn canonical_decode_rejects_a_depth_bomb_before_deserializing() {
     );
 }
 
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     let image = ImageValue::new(
@@ -659,6 +661,8 @@ fn canonical_runtime_value_validator_covers_every_canonical_value_variant() {
     }
 }
 
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn canonical_empty_heap_has_exact_golden_bytes() {
     let bytes = Snapshot::default()
@@ -719,7 +723,7 @@ fn canonical_decode_accepts_every_max_depth_encode_shape() {
     ));
 }
 
-fn canonical_heap_with(
+pub(super) fn canonical_heap_with(
     roots: Vec<CanonicalBinding>,
     objects: Vec<CanonicalHeapEntry>,
     next_id: u64,
@@ -743,7 +747,7 @@ fn canonical_heap_with(
     }
 }
 
-fn named_bytes(wire: &CanonicalSnapshot) -> Vec<u8> {
+pub(super) fn named_bytes(wire: &CanonicalSnapshot) -> Vec<u8> {
     rmp_serde::to_vec_named(wire).expect("encode test wire")
 }
 
@@ -754,6 +758,8 @@ fn named_bytes(wire: &CanonicalSnapshot) -> Vec<u8> {
 /// that straddles a bump — so the case worth pinning is `current - 1`, on a
 /// wire that is otherwise entirely valid and decodes cleanly at the current
 /// version.
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn a_snapshot_one_version_behind_is_refused_by_the_fence() {
     let mut globals = Record::new();

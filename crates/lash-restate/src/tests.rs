@@ -270,6 +270,7 @@ mod endpoint_protocol;
 mod folded_generation_sentinel_on_the_double;
 mod generation_drain_on_the_double;
 mod generation_sentinel_on_the_double;
+mod guarded_surface_tests;
 mod journal_cut_runner;
 mod layered_effect_host_on_the_double;
 mod live_turn_probe;

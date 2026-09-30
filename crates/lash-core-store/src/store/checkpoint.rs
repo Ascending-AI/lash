@@ -24,10 +24,22 @@ mod arc_serde_bytes {
 /// Version 4 (FIG-1961) retypes `PersistedTurnState.last_prompt_usage` to the
 /// checked `TokenUsage` shape; v3 roots carrying the retired `PromptUsage`
 /// snapshot fields are refused rather than remapped.
+#[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
 
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 4's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
+
 /// Encoding implemented for checkpoint-component logical bytes in this build.
+#[cfg(not(feature = "synthetic-next"))]
 pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 2;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 2's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 3;
 /// Well-known component key used by the runtime's tool registry snapshot.
 pub const TOOL_STATE_CHECKPOINT_COMPONENT: &str = "tool_state";
 /// Well-known component key used by the runtime's plugin-session snapshot.

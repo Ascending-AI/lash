@@ -316,13 +316,14 @@ fn repair_with_raw_step_id_is_skipped_only_when_valid() {
     );
     let mut payload = envelope_payload(&repair);
     payload["step_id"] = "execution".into();
-    for version in [1, 2] {
+    let current = crate::native::transport::NATIVE_TRANSPORT_VERSION;
+    for version in [current, current + 1] {
         let mut payload = payload.clone();
         payload["schema_version"] = version.into();
         let mut events = vec![native_envelope(payload)];
         events.extend(execution.clone());
         let messages = render(&events);
-        if version == 1 {
+        if version == current {
             // The later successful trajectory scrubs the earlier repair pair.
             assert_eq!(ids(&messages).0, ["execution"]);
         } else {

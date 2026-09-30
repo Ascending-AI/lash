@@ -71,7 +71,8 @@ pub enum Command {
     Register(RegisterArgs),
     /// Call one of lash's own handlers directly.
     Call(CallArgs),
-    /// Upgrade every effect group still at format 1 (the synthetic sweep).
+    /// Upgrade every object still at an older family format (lash's object
+    /// sweep).
     Sweep(SweepArgs),
     /// Serve one remote-protocol connection on stdin and stdout.
     RemoteHost(RemoteHostArgs),

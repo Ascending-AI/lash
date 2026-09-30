@@ -12,7 +12,13 @@ use super::events::ProcessEventAppendRequest;
 /// cap and the failure-code mappings a recorded outcome carries. Changing any
 /// of them changes what a redrive re-derives for an already-written record, so
 /// it takes a new version.
+#[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 1's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 2;
 
 /// Runtime-owned event recording one effect occurrence of one runtime node.
 ///

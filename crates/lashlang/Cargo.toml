@@ -30,9 +30,9 @@ doctest = false
 # executable contract.
 testing = []
 # Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
-# constants it moves. Only lash-upgrade-harness enables it; no production
-# build does.
-synthetic-next = []
+# constants it moves, and the store's lift and pin tables they rely on. Only
+# lash-upgrade-harness enables it; no production build does.
+synthetic-next = ["lash-core-execution/synthetic-next"]
 
 [lints]
 workspace = true
@@ -66,6 +66,8 @@ url = { workspace = true }
 # resolve on the index). Path-only dev-deps are stripped when packaging.
 lash-typescript = { package = "lash-internal-typescript", path = "../lash-typescript" }
 criterion = { version = "0.5", features = ["async_tokio"] }
+# The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
+lash-core-store = { workspace = true, features = ["testing"] }
 futures = "0.3"
 insta = "1"
 jsonschema = { workspace = true, default-features = false }

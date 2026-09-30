@@ -62,6 +62,8 @@ lash-restate-test = { workspace = true }
 # dev-dependency cycle as the double's, and version-less for the same reason.
 lash-core-worker = { package = "lash-internal-core-worker", path = "../lash-core-worker" }
 lash-conformance = { workspace = true }
+# The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
+lash-core-store = { workspace = true, features = ["testing"] }
 insta = "1"
 # ADR 0102: the crate's tests that need a concrete store or effect host run in
 # `tests/store_backed` over a SQLite memory backend. The store depends on this

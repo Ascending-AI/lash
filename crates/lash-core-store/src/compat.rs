@@ -115,29 +115,29 @@ pub const DESCRIPTORS: &[CompatDescriptor] = &[
     },
     CompatDescriptor {
         component: ComponentId::RESTATE_EFFECT_GROUP_STATE,
-        reads: RESTATE_EFFECT_GROUP_STATE_FORMATS,
-        writes: RESTATE_EFFECT_GROUP_STATE_FORMATS,
+        reads: RESTATE_OBJECT_FAMILY_FORMATS,
+        writes: RESTATE_OBJECT_FAMILY_FORMATS,
     },
     CompatDescriptor {
         component: ComponentId::RESTATE_EFFECT_GROUP_PAYLOAD,
-        reads: VersionRange::exactly(1),
-        writes: VersionRange::exactly(1),
+        reads: RESTATE_OBJECT_FAMILY_FORMATS,
+        writes: RESTATE_OBJECT_FAMILY_FORMATS,
     },
     CompatDescriptor {
         component: ComponentId::RESTATE_DURABLE_WAIT_REGISTRY,
-        reads: VersionRange::exactly(1),
-        writes: VersionRange::exactly(1),
+        reads: RESTATE_OBJECT_FAMILY_FORMATS,
+        writes: RESTATE_OBJECT_FAMILY_FORMATS,
     },
 ];
 
-/// The effect-group index family formats this build reads and writes.
+/// The formats this build reads and writes for every Restate object family.
 #[cfg(not(feature = "synthetic-next"))]
-const RESTATE_EFFECT_GROUP_STATE_FORMATS: VersionRange = VersionRange::exactly(1);
+const RESTATE_OBJECT_FAMILY_FORMATS: VersionRange = VersionRange::exactly(1);
 
-/// Phase A's synthetic N+1 (ADR 0115 §6) moves the effect-group index family
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves every Restate object family
 /// to format 2 and keeps reading and writing format 1.
 #[cfg(feature = "synthetic-next")]
-const RESTATE_EFFECT_GROUP_STATE_FORMATS: VersionRange = VersionRange::between(1, 2);
+const RESTATE_OBJECT_FAMILY_FORMATS: VersionRange = VersionRange::between(1, 2);
 
 /// The descriptor this build declares for `component`.
 pub fn descriptor(component: ComponentId) -> Option<&'static CompatDescriptor> {
@@ -542,9 +542,9 @@ mod tests {
 
     #[test]
     fn every_component_declares_its_generation_policy() {
-        let native = VersionRange::exactly(1);
         #[cfg(not(feature = "synthetic-next"))]
-        let (expanded_reads, database_writes) = (native, native);
+        let (expanded_reads, database_writes) =
+            (VersionRange::exactly(1), VersionRange::exactly(1));
         #[cfg(feature = "synthetic-next")]
         let (expanded_reads, database_writes) =
             (VersionRange::between(1, 2), VersionRange::exactly(2));
@@ -567,8 +567,16 @@ mod tests {
                 ("sqlite-registry", expanded_reads, database_writes),
                 ("sqlite-triggers", expanded_reads, database_writes),
                 ("restate-effect-group-state", expanded_reads, expanded_reads),
-                ("restate-effect-group-payload", native, native),
-                ("restate-durable-wait-registry", native, native),
+                (
+                    "restate-effect-group-payload",
+                    expanded_reads,
+                    expanded_reads
+                ),
+                (
+                    "restate-durable-wait-registry",
+                    expanded_reads,
+                    expanded_reads
+                ),
             ]
         );
     }

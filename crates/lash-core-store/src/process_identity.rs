@@ -563,7 +563,13 @@ impl WakeDeliveryState {
 /// Version 3 carries full admitted effect addresses and complete trigger causes
 /// in the invocation delivered with a process wake. Version 4 drops the
 /// process incarnation: a minted process id names one process (ADR 0107).
+#[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 4's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProcessWakeDelivery {

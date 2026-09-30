@@ -6,25 +6,27 @@
 //! every `LashTurn` outcome, is at N's format: the fleet epoch pins N+1's
 //! writer to it. After a rollback N's handlers read every one.
 //!
-//! Then the fleet drains N's generation and finalizes (the synthetic
-//! finalize moves the recorded epoch; `lashctl finalize` is FIG-3800 B's).
-//! N+1, restarted to read the new epoch, sweeps: its `upgrade` handler
-//! rewrites each group at format 2 and raises its `_compat`. The sweep and
-//! N+1's deployment are killed mid-sweep; the synthetic preflight lists the
-//! groups still at format 1, N+1 comes back at the crashed deployment's
-//! URI, and a second sweep finishes exactly the groups the preflight
-//! listed. Finally an operator keeps an N deployment by registering it: its
-//! handlers are refused by every swept group's `_compat`, typed, with no
-//! state changed.
+//! Before finalize, `lashctl objects-sweep` is refused `not_finalized` by
+//! N+1's `upgrade` handlers, with nothing rewritten. Then the fleet drains
+//! N's generation and finalizes with `lashctl finalize`. N+1, restarted to
+//! read the new epoch, sweeps with lash's object sweep (FIG-4041): every
+//! family's `upgrade` handler rewrites each object at format 2 and raises its
+//! `_compat`. The sweep and N+1's deployment are killed mid-sweep; `lashctl
+//! objects-preflight` lists the objects still at format 1, N+1 comes back at
+//! the crashed deployment's URI, and `lashctl objects-sweep` finishes exactly
+//! the objects the preflight listed. Finally an operator keeps an N
+//! deployment by registering it: its handlers are refused by every swept
+//! group's `_compat`, typed, with no state changed.
 
 use anyhow::{Context, Result, ensure};
 use lash_core_store::compat::CompatRefusal;
+use lash_restate::ObjectUpgradeResponse;
 use lash_restate::{COMPAT_KEY, LASH_TURN_OUTCOME_FORMAT_VERSION, ObjectCompat, VersionRange};
 use lash_upgrade_harness::harness::{
     CallSpec, Case, LASHCTL_N_ENV, LASHCTL_NEXT_ENV, NodeBinary, Operator, ServeOptions, block_on,
 };
 use lash_upgrade_harness::identity::BuildLabel;
-use lash_upgrade_harness::node::objects::{CallOutcome, HandlerRefusal};
+use lash_upgrade_harness::node::objects::HandlerRefusal;
 use lash_upgrade_harness::node::served_by;
 use lash_upgrade_harness::restate_view::RestateView;
 
@@ -62,6 +64,21 @@ fn open_groups(
             Ok(key)
         })
         .collect()
+}
+
+/// The keys `lashctl objects-preflight`'s `--json` body lists for
+/// `service`, sorted.
+fn preflight_keys(body: &serde_json::Value, service: &str) -> Vec<String> {
+    let mut keys = body["result"]["families"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|family| family["service"] == service)
+        .flat_map(|family| family["pending"].as_array().cloned().unwrap_or_default())
+        .filter_map(|pending| pending["key"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys
 }
 
 /// A group's `_compat` and the format its record is stamped with.
@@ -201,8 +218,18 @@ fn object_sweep_crash_resume() -> Result<()> {
         },
     )?;
 
-    // Roll forward, drain N's generation, and finalize.
+    // Roll forward. Before finalize the sweep is refused at its first
+    // object by N+1's `upgrade`, and nothing is rewritten.
     let next_rolled = next.serve(&case)?;
+    let (code, refused_sweep) = operator_next.answer_args(&case.objects_sweep_args())?;
+    record(&leg, "sweep-before-finalize.json", &refused_sweep)?;
+    ensure!(
+        code == 3 && refused_sweep["error"]["refusal"]["refusal"] == "not_finalized",
+        "the sweep before finalize answered {code} {refused_sweep}"
+    );
+    all_at(&view, &groups, 1).context("after the refused sweep")?;
+
+    // Drain N's generation, and finalize.
     operator_next.run("drain", Some(&n_generation))?;
     n_first.stop()?;
     n_back.stop()?;
@@ -219,14 +246,25 @@ fn object_sweep_crash_resume() -> Result<()> {
     next_first.stop()?;
     let next_final = next.serve(&case)?;
 
-    // Preflight: every group is still at format 1.
+    // Preflight: every group is still at format 1, and `lashctl
+    // objects-preflight` lists them, with the other families' objects.
     let mut pending = block_on(view.objects_at_format(GROUP, 1))?;
     pending.sort();
     let mut expected = groups.clone();
     expected.sort();
     ensure!(
         pending == expected,
-        "preflight listed {pending:?}, not {expected:?}"
+        "the state lists {pending:?}, not {expected:?}"
+    );
+    let (code, preflight) = operator_next.answer_args(&case.objects_preflight_args())?;
+    record(&leg, "preflight-before-sweep.json", &preflight)?;
+    ensure!(
+        code == 5 && preflight["result"]["upgraded"] == false,
+        "the preflight answered {code} {preflight}"
+    );
+    ensure!(
+        preflight_keys(&preflight, GROUP) == expected,
+        "the preflight listed {preflight}, not {expected:?}"
     );
 
     // Sweep, and crash the sweep and N+1 mid-sweep.
@@ -234,34 +272,42 @@ fn object_sweep_crash_resume() -> Result<()> {
     let mut swept = Vec::new();
     for _ in 0..SWEPT_BEFORE_CRASH {
         let line = sweeper.next_object()?.context("the sweep ended early")?;
-        match &line.outcome {
-            CallOutcome::Replied { wire: 2, body }
-                if body["upgrade"] == "upgraded" && body["from"] == 1 && body["format"] == 2 => {}
-            other => anyhow::bail!("the sweep answered {} with {other:?}", line.key),
-        }
+        ensure!(
+            line.service == GROUP
+                && line.outcome == ObjectUpgradeResponse::Upgraded { from: 1, format: 2 },
+            "the sweep answered {line:?}"
+        );
         swept.push(line.key);
     }
     let bind = next_final.bind()?;
     next_final.stop()?;
     sweeper.crash()?;
 
-    // Preflight lists what is left; the swept groups are at format 2.
+    // The preflight lists what is left; the swept groups are at format 2.
     let left = block_on(view.objects_at_format(GROUP, 1))?;
     ensure!(
         swept.iter().all(|key| !left.contains(key)),
-        "preflight lists a swept group: {left:?}"
+        "the state lists a swept group: {left:?}"
     );
     ensure!(
         left.len() >= groups.len() - SWEPT_BEFORE_CRASH - 1
             && left.len() <= groups.len() - SWEPT_BEFORE_CRASH,
-        "preflight lists {} groups after {SWEPT_BEFORE_CRASH} of {} were swept: {left:?}",
+        "{} groups are left after {SWEPT_BEFORE_CRASH} of {} were swept: {left:?}",
         left.len(),
         groups.len()
     );
+    let (code, preflight) = operator_next.answer_args(&case.objects_preflight_args())?;
+    record(&leg, "preflight-after-crash.json", &preflight)?;
+    let mut left_sorted = left.clone();
+    left_sorted.sort();
+    ensure!(
+        code == 5 && preflight_keys(&preflight, GROUP) == left_sorted,
+        "the preflight after the crash answered {code} {preflight}, not {left_sorted:?}"
+    );
     all_at(&view, &swept, 2).context("the groups swept before the crash")?;
 
-    // N+1 comes back at the crashed deployment's URI, and a second sweep
-    // finishes the rest.
+    // N+1 comes back at the crashed deployment's URI, and `lashctl
+    // objects-sweep` finishes the rest.
     let next_back = next.serve_with(
         &case,
         &ServeOptions {
@@ -269,21 +315,32 @@ fn object_sweep_crash_resume() -> Result<()> {
             ..ServeOptions::default()
         },
     )?;
-    let resumed = next.spawn_sweep(&case)?.finish()?;
+    let resumed = operator_next.run_args(&case.objects_sweep_args())?;
     record(&leg, "sweep-resumed.json", &resumed)?;
-    for line in &resumed {
-        match &line.outcome {
-            CallOutcome::Replied { wire: 2, body }
-                if body["upgrade"] == "upgraded" || body["upgrade"] == "current" => {}
-            other => anyhow::bail!("the resumed sweep answered {} with {other:?}", line.key),
-        }
+    let resumed_lines = resumed["swept"]
+        .as_array()
+        .context("the sweep lists what it swept")?;
+    for line in resumed_lines {
+        ensure!(
+            line["outcome"]["upgrade"] == "upgraded" || line["outcome"]["upgrade"] == "current",
+            "the resumed sweep answered {line}"
+        );
+        ensure!(
+            line["service"] != GROUP || !swept.iter().any(|key| line["key"] == key.as_str()),
+            "the resumed sweep visited a group swept before the crash: {line}"
+        );
     }
     ensure!(
-        resumed.iter().all(|line| !swept.contains(&line.key)),
-        "the resumed sweep visited a group swept before the crash"
+        resumed["remaining"].as_array().is_some_and(Vec::is_empty),
+        "the resumed sweep left {resumed}"
     );
     let left = block_on(view.objects_at_format(GROUP, 1))?;
-    ensure!(left.is_empty(), "preflight still lists {left:?}");
+    ensure!(left.is_empty(), "the state still lists {left:?}");
+    let preflight = operator_next.run_args(&case.objects_preflight_args())?;
+    ensure!(
+        preflight["upgraded"] == true,
+        "the preflight after the sweep lists {preflight}"
+    );
     all_at(&view, &groups, 2).context("after the sweep")?;
     for key in &groups {
         let probe = next.call(&case, &CallSpec::object(GROUP, key, "probe"))?;

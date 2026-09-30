@@ -14,12 +14,13 @@ use lash_restate::VersionRange;
 use serde::de::DeserializeOwned;
 
 use crate::identity::BuildLabel;
-use crate::node::objects::{CallReport, SweepLine, TargetKind};
+use crate::node::objects::{CallReport, TargetKind};
 use crate::node::process::{HarnessOpReport, ProcessStatusReport};
 use crate::node::provider::{self, EffectRecord};
 use crate::node::remote::ClientReport;
 use crate::node::{ProbeReport, RegisterReport, ServeReady, StoreSpec, TurnReport};
 use crate::restate_view::RestateView;
+use lash_restate::SweptObject;
 
 /// The N build's `lash-upgrade-node`.
 pub const NODE_N_ENV: &str = "LASH_UPGRADE_NODE_N";
@@ -567,7 +568,7 @@ impl NodeBinary {
         report(&self.path, "process-status", output)
     }
 
-    /// Start this build's synthetic sweep in the background.
+    /// Start this build's object sweep in the background.
     pub fn spawn_sweep(&self, case: &Case) -> Result<Sweeper> {
         let mut child = Command::new(&self.path)
             .arg("sweep")
@@ -649,7 +650,7 @@ impl PendingSignal {
     }
 }
 
-/// A running synthetic sweep, read one object at a time.
+/// A running object sweep, read one object at a time.
 pub struct Sweeper {
     child: Child,
     lines: std::io::Lines<std::io::BufReader<std::process::ChildStdout>>,
@@ -657,7 +658,7 @@ pub struct Sweeper {
 
 impl Sweeper {
     /// The next object the sweep finished, or `None` once it ended.
-    pub fn next_object(&mut self) -> Result<Option<SweepLine>> {
+    pub fn next_object(&mut self) -> Result<Option<SweptObject>> {
         match self.lines.next() {
             Some(line) => {
                 let line = line.context("read the sweep")?;
@@ -677,7 +678,7 @@ impl Sweeper {
     }
 
     /// Read the rest of the sweep and confirm it ended cleanly.
-    pub fn finish(mut self) -> Result<Vec<SweepLine>> {
+    pub fn finish(mut self) -> Result<Vec<SweptObject>> {
         let mut done = Vec::new();
         while let Some(line) = self.next_object()? {
             done.push(line);
@@ -1099,6 +1100,30 @@ impl Case {
             generation,
             "--restate-admin-url",
             self.services.admin_url.as_str(),
+        ]
+    }
+
+    /// `lashctl objects-preflight`'s arguments over this case's namespace.
+    pub fn objects_preflight_args(&self) -> [&str; 5] {
+        [
+            "objects-preflight",
+            "--restate-admin-url",
+            self.services.admin_url.as_str(),
+            "--namespace",
+            self.namespace.as_str(),
+        ]
+    }
+
+    /// `lashctl objects-sweep`'s arguments over this case's namespace.
+    pub fn objects_sweep_args(&self) -> [&str; 7] {
+        [
+            "objects-sweep",
+            "--restate-admin-url",
+            self.services.admin_url.as_str(),
+            "--restate-ingress-url",
+            self.services.ingress_url.as_str(),
+            "--namespace",
+            self.namespace.as_str(),
         ]
     }
 

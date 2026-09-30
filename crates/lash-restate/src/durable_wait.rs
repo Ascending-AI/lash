@@ -43,7 +43,9 @@ mod root_retirement;
 use self::root_retirement::closed_root_cancel_prefix;
 use crate::compat::{Call, Reply};
 use crate::ingress::RestateAuthorityId;
-use crate::object_state::{self, FleetView, ObjectFamily, StoredValueFormats, StoredValueWriter};
+use crate::object_state::{
+    self, FleetView, ObjectFamily, ObjectUpgradeResponse, StoredValueFormats, StoredValueWriter,
+};
 
 pub(crate) const LASH_REPLAY_KEY_HEADER: &str = "x-lash-replay-key";
 
@@ -138,16 +140,19 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// metadata, wait, resolution, marker, and membership rows alike. It is also
 /// the family format of every `LashDurableWaitIndex` object's `_compat`
 /// record (ADR 0115 §3.2). Bump it when a stored shape under those keys
-/// changes; the previous format reads through the N-1 upcaster slot in
-/// [`DURABLE_WAIT_REGISTRY_FORMATS`].
+/// changes, and register the previous format's lift in
+/// `lash_core::store::RECORD_UPCASTERS`.
+#[cfg(not(feature = "synthetic-next"))]
 pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 1;
-/// The wait registry's stored-format table: the family's registered surface
-/// and descriptor, plus the N-1 upcaster hooks (empty while the first
-/// stamped layout is the baseline).
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2 with
+/// format 1's shape; its `upgrade` handler rewrites each object after
+/// finalize.
+#[cfg(feature = "synthetic-next")]
+pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 2;
+/// The wait registry's stored-format table: the family's registered surface.
 pub(crate) const DURABLE_WAIT_REGISTRY_FORMATS: StoredValueFormats = StoredValueFormats {
     what: "durable-wait registry",
     surface: lash_core::surface_format!(DURABLE_WAIT_REGISTRY_FORMAT_VERSION),
-    upcast_n1: &[],
 };
 
 /// The object family whose `_compat` record every handler admits first
@@ -710,6 +715,10 @@ pub trait LashDurableWaitRegistry {
     async fn release_closure_participant(
         call: Call<RestateTurnCancelClosureParticipantRequest>,
     ) -> HandlerResult<Reply<()>>;
+    /// Rewrite the index at the newest family format once finalize has
+    /// moved the fleet to it, and raise its `_compat` (ADR 0115 §3.2,
+    /// FIG-4041): the object sweep's step.
+    async fn upgrade(call: Call<()>) -> HandlerResult<Reply<ObjectUpgradeResponse>>;
 }
 
 /// [`LashDurableWaitRegistry`] in one deployment's namespace (FIG-3898).
@@ -1104,6 +1113,21 @@ pub(crate) fn split_cancellable_waits(
         .partition(|key| !key.wait.is_turn_control())
 }
 impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
+    async fn upgrade(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<()>,
+    ) -> HandlerResult<Reply<ObjectUpgradeResponse>> {
+        let (wire, ()) = call.open()?;
+        let response = object_state::upgrade_object(
+            &ctx,
+            &DURABLE_WAIT_REGISTRY_FAMILY,
+            self.fleet.fleet_format(),
+        )
+        .await?;
+        Ok(Reply::at(wire, response))
+    }
+
     async fn retire_root(
         &self,
         ctx: ObjectContext<'_>,

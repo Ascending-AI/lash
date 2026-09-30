@@ -16,8 +16,8 @@ use lash_core_execution::store::fleet_finalize::{
     RetainedDeployment,
 };
 use lash_core_execution::{
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatStore, SessionId, SessionMeta, SessionRelation,
-    StoreError, StoreSet, TriggerStore as _,
+    FleetFormat, FleetFormatStore, SessionId, SessionMeta, SessionRelation, StoreError, StoreSet,
+    TriggerStore as _,
 };
 use rusqlite::Connection;
 
@@ -432,14 +432,16 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
 async fn sqlite_fence_observes_a_writable_move_of_f() {
     let root = tempfile::tempdir().expect("store root");
     let path = root.path().join(crate::DURABLE_CORE_DB_FILE);
-    let next = FLEET_FORMAT_VERSION + 1;
-    let store = crate::SqliteStore::open_with_fleet_writable_range_for_testing(
-        &path,
-        VersionRange::new(FLEET_FORMAT_VERSION, next).expect("writable range"),
-    )
-    .await
-    .expect("open under a two-epoch writable range");
-    assert_eq!(store.fleet_format().version(), FLEET_FORMAT_VERSION);
+    let next = FleetFormat::writable().max() + 1;
+    let writable = VersionRange::new(FleetFormat::writable().min(), next).expect("writable range");
+    let store = crate::SqliteStore::open_with_fleet_writable_range_for_testing(&path, writable)
+        .await
+        .expect("open under a two-epoch writable range");
+    // A fresh store is seeded at the epoch the widened range names.
+    assert_eq!(
+        store.fleet_format().version(),
+        FleetFormat::seed(writable).version()
+    );
     Connection::open(&path)
         .expect("raw connection")
         .execute(

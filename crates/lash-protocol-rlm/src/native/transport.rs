@@ -8,13 +8,20 @@ use std::collections::HashMap;
 
 /// Schema version of the native RLM provider-call and repair envelopes
 /// recorded in session history.
+#[cfg(not(feature = "synthetic-next"))]
 pub const NATIVE_TRANSPORT_VERSION: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 1's shape; its `Lift::Decoder` row admits N's
+/// envelopes, which decode natively.
+#[cfg(feature = "synthetic-next")]
+pub const NATIVE_TRANSPORT_VERSION: u32 = 2;
 
 const PHASE: &str = "native_transport";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum Transport {
+pub(crate) enum Transport {
     Execution {
         step_id: String,
         parts: Vec<Part>,
@@ -28,9 +35,13 @@ enum Transport {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum DecodeError {
+pub(crate) enum DecodeError {
     #[error("native transport version {found} is newer than supported version {supported}")]
     NewerVersion { found: u32, supported: u32 },
+    #[error(
+        "native transport version {found} is older than any version this build reads (newest {supported})"
+    )]
+    OlderVersion { found: u32, supported: u32 },
     #[error("malformed native transport envelope: {0}")]
     Malformed(#[from] serde_json::Error),
 }
@@ -60,7 +71,7 @@ fn event(transport: Transport, schema_version: u32) -> SessionHistoryRecord {
     ))
 }
 
-pub(super) fn execution_event(
+pub(crate) fn execution_event(
     step_id: String,
     parts: Vec<Part>,
     schema_version: u32,
@@ -96,7 +107,7 @@ fn decode(event: &lash_core::ProtocolEvent) -> Result<Option<Transport>, DecodeE
     decode_payload(diagnostic.payload).map(Some)
 }
 
-fn decode_payload(payload: serde_json::Value) -> Result<Transport, DecodeError> {
+pub(crate) fn decode_payload(payload: serde_json::Value) -> Result<Transport, DecodeError> {
     #[cfg(test)]
     work::decoded();
     #[derive(serde::Deserialize)]
@@ -107,6 +118,21 @@ fn decode_payload(payload: serde_json::Value) -> Result<Transport, DecodeError> 
     let version: Version = serde_json::from_value(payload.clone())?;
     if version.schema_version > NATIVE_TRANSPORT_VERSION {
         return Err(DecodeError::NewerVersion {
+            found: version.schema_version,
+            supported: NATIVE_TRANSPORT_VERSION,
+        });
+    }
+    // History reads every version the surface's `Lift::Decoder` rows admit
+    // (FIG-3802): an envelope keeps its shape across them. An envelope with
+    // no stamp predates it, keeps the same shape, and stays readable.
+    if version.schema_version != 0
+        && !lash_core::store::upcast_chain_covers(
+            lash_core::surface_format!(NATIVE_TRANSPORT_VERSION),
+            version.schema_version,
+            NATIVE_TRANSPORT_VERSION,
+        )
+    {
+        return Err(DecodeError::OlderVersion {
             found: version.schema_version,
             supported: NATIVE_TRANSPORT_VERSION,
         });
@@ -271,15 +297,16 @@ mod tests {
         else {
             panic!()
         };
-        assert_eq!(d.payload["schema_version"], 1);
+        assert_eq!(d.payload["schema_version"], NATIVE_TRANSPORT_VERSION);
         assert_eq!(d.payload["kind"], "execution");
         assert!(decode(&event).unwrap().is_some());
+        let newer = NATIVE_TRANSPORT_VERSION + 1;
         assert!(matches!(
-            decode(&recorded(serde_json::json!({"schema_version":2}))),
+            decode(&recorded(serde_json::json!({"schema_version":newer}))),
             Err(DecodeError::NewerVersion {
-                found: 2,
-                supported: 1
-            })
+                found,
+                supported: NATIVE_TRANSPORT_VERSION
+            }) if found == newer
         ));
         assert!(matches!(
             decode(&recorded(serde_json::json!("malformed bytes"))),

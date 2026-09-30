@@ -1,5 +1,4 @@
 use super::*;
-use crate::ExecutionHostError;
 
 /// Serde supplies its complete accepted variant vocabulary to deserialize_enum.
 /// Keep this independent pin: a new error can reach a suspended finally's origin
@@ -200,9 +199,11 @@ fn awaited_settled_value_survives_a_finally_origin_wire_roundtrip() {
     assert_eq!(decoded.finally_stack, continuation.finally_stack);
 }
 
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
-    let source = ExecutionHostError::from_tool_failure(
+    let source = crate::ExecutionHostError::from_tool_failure(
         &lash_sansio::ToolFailure {
             class: lash_sansio::ToolFailureClass::PermissionDenied,
             code: "approval_denied".to_string(),

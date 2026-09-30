@@ -980,13 +980,11 @@ impl RlmExecutionState {
 
     /// Restores a persisted execution-state snapshot.
     ///
-    /// `fleet_format` is the `F` the bound store recorded: the read admits the
-    /// pair `{fleet's writer version, this build's newest}` — ADR 0106 §2's
-    /// `[N-1, N]` window (FIG-3796). A payload at the fleet's older recorded
-    /// version would climb to the newest through a surface-owned lift step
-    /// before it decodes; this canonical binary root has no lift step yet, so
-    /// an admitted older version is refused closed rather than decoded on
-    /// shape alone.
+    /// `fleet_format` is the `F` the bound store recorded: the read admits
+    /// every version of the snapshot surface's read window (FIG-3796,
+    /// FIG-3802) — the newest, and each older version a `Lift::Decoder` row
+    /// registers, which this canonical binary root reads natively. The root's
+    /// bytes and its leaves' identities are read as stored.
     pub fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
@@ -1007,7 +1005,7 @@ impl RlmExecutionState {
             }
         })?;
 
-        if parsed.version != window.newest() {
+        if !window.admits(parsed.version) {
             return Err(RlmSnapshotError::VersionMismatch {
                 expected: window.newest(),
                 found: parsed.version,
@@ -1151,6 +1149,9 @@ impl RlmExecutionState {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod guarded_surface_tests;
 
 #[cfg(test)]
 mod authority_split_tests;

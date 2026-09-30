@@ -2,10 +2,10 @@
 //!
 //! `call` sends one [`Call`] through ingress with this build's wire range
 //! (or a range the leg names, to play a caller no build is) and reports the
-//! [`Reply`] or the typed refusal the handler answered. `sweep` is the
-//! synthetic N+1's object sweep (ADR 0115 §3.2, §6): it lists the effect
-//! groups whose `_compat` still names format 1 and calls each one's
-//! `upgrade`, one report line per object, so a leg can crash it mid-sweep.
+//! [`Reply`] or the typed refusal the handler answered. `sweep` runs lash's
+//! own object sweep (ADR 0115 §3.2, FIG-4041) over every object family,
+//! printing one report line per object as its `upgrade` answers, so a leg
+//! can crash it mid-sweep.
 
 use std::io::Write as _;
 
@@ -13,17 +13,13 @@ use anyhow::{Result, anyhow, bail};
 use clap::{Args, ValueEnum};
 use lash_core_store::compat::CompatRefusal;
 use lash_restate::{
-    Call, RESTATE_WIRE, RestateConnection, RestateHttpError, RestateIngressClient,
-    RestateNamespace, VersionRange,
+    Call, RESTATE_WIRE, RestateAdminClient, RestateConnection, RestateHttpError,
+    RestateIngressClient, RestateNamespace, RestateObjectUpgradeTarget, SweepReport, VersionRange,
 };
 use serde::{Deserialize, Serialize};
 
 use super::RestateArgs;
 use crate::identity::BuildLabel;
-use crate::restate_view::RestateView;
-
-/// The object family the synthetic sweep converts.
-pub const SWEPT_SERVICE: &str = "EffectGroupIndex";
 
 /// Whether the target is a virtual object or a workflow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -126,13 +122,6 @@ pub struct CallReport {
     pub outcome: CallOutcome,
 }
 
-/// One object the sweep visited.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SweepLine {
-    pub key: String,
-    pub outcome: CallOutcome,
-}
-
 fn ingress(restate: &RestateArgs) -> RestateIngressClient {
     RestateIngressClient::new(RestateConnection::new(restate.ingress_url.clone()))
 }
@@ -219,35 +208,31 @@ pub(super) async fn call(args: CallArgs) -> Result<CallReport> {
     })
 }
 
-/// List the groups still at format 1 and upgrade each, printing one
-/// [`SweepLine`] per object as it is done.
-pub(super) async fn sweep(args: SweepArgs) -> Result<Vec<SweepLine>> {
-    let view = RestateView::new(&args.restate.admin_url, &args.restate.namespace)?;
-    let pending = view.objects_at_format(SWEPT_SERVICE, 1).await?;
-    let client = ingress(&args.restate);
-    let service = namespace(&args.restate)?.service_name(SWEPT_SERVICE);
-    let mut lines = Vec::with_capacity(pending.len());
-    for key in pending {
-        let outcome = call_handler(
-            &client,
-            &service,
-            TargetKind::Object,
-            &key,
-            "upgrade",
-            &Call::new(serde_json::Value::Null),
-        )
-        .await;
-        if let CallOutcome::Failed { message } = &outcome {
-            bail!("upgrading {key} failed: {message}");
-        }
-        let line = SweepLine { key, outcome };
+/// Run lash's object sweep, printing one [`SweptObject`] per object as its
+/// `upgrade` answers.
+pub(super) async fn sweep(args: SweepArgs) -> Result<SweepReport> {
+    let target = RestateObjectUpgradeTarget::new(
+        RestateAdminClient::new(RestateConnection::new(args.restate.admin_url.clone())),
+        ingress(&args.restate),
+        namespace(&args.restate)?,
+    );
+    let mut failed = None;
+    let report = lash_restate::sweep_objects(&target, |object| {
         let mut stdout = std::io::stdout().lock();
-        serde_json::to_writer(&mut stdout, &line)?;
-        stdout.write_all(b"\n")?;
-        stdout.flush()?;
-        lines.push(line);
+        let written = serde_json::to_writer(&mut stdout, object)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| stdout.write_all(b"\n").map_err(anyhow::Error::from))
+            .and_then(|()| stdout.flush().map_err(anyhow::Error::from));
+        if let Err(error) = written {
+            failed.get_or_insert(error);
+        }
+    })
+    .await
+    .map_err(|error| anyhow!("the object sweep: {error}"))?;
+    if let Some(error) = failed {
+        bail!("printing the sweep: {error}");
     }
-    Ok(lines)
+    Ok(report)
 }
 
 #[cfg(test)]

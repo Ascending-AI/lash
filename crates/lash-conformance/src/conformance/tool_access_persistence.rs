@@ -121,7 +121,14 @@ pub async fn session_tool_access_durable_recovery(
         "restricted-empty-after-recovery",
     );
 
-    let predecessor = crate::store::SESSION_HEAD_META_SCHEMA_VERSION - 1;
+    // The version below everything this build reads: the successor of a
+    // release reads its predecessor's heads through the registered lift.
+    let predecessor = crate::FleetFormat::current()
+        .read_window(lash_core::surface_format!(
+            crate::store::SESSION_HEAD_META_SCHEMA_VERSION
+        ))
+        .oldest()
+        - 1;
     factory
         .rewrite_session_tool_access_for_testing(
             &session_id,

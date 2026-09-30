@@ -1091,3 +1091,46 @@ successor reuses them unchanged. The decisions the lane took:
   databases under `BEGIN EXCLUSIVE`, completing a partial set forward. It
   has no hold, because no fleet-wide automatic finalize reaches a SQLite
   store.
+
+## Amendment (FIG-3802 and FIG-4041, 2026-09-30)
+
+The same ruling moves FIG-3802 and the second half of FIG-4041 before the
+cut. The version freeze still holds, so each is proved against Phase A's
+synthetic successor, whose tables live in
+`crates/lash-core-store/src/store/synthetic_next.rs`. The decisions the lane
+took:
+
+- **One registry of guarded surfaces.** `GUARDED_SURFACES` in
+  `fleet_format.rs` names each guarded surface, the crate that owns its
+  decoders, and how its records live. **History** is immutable: its window
+  reaches down to a floor that `F` never moves. **Mutable** state is rows
+  and Restate objects that a later release rewrites; `F` does not narrow its
+  window either, so N+1 still reads N's mutable records after finalize,
+  until a backfill or sweep moves them. **Derived** projections admit only
+  their newest version and regenerate from their source, so the
+  workflow-graph schema is Derived and the type facet is not guarded. Every
+  `upgrade = "migrate"` surface in `scripts/versioned-surfaces.toml` is
+  either a row or states `unguarded` with a reason.
+  `scripts/check_format_registry.py` also requires each owner crate to run
+  the three guarded-surface laws under its own name.
+- **One lift table, both kinds.** `RECORD_UPCASTERS` holds every lift. A
+  row is either a tree lift over the record's JSON or a `Decoder` marker,
+  where the surface's own decoder reads the older version natively. The
+  Restate object families lift through the same table, and the separate
+  object upcast table is gone. A window's oldest version is the lowest,
+  at or above the floor, from which the chain reaches the newest. A version
+  outside the window is refused typed, and nothing is written.
+- **Three surfaces stay at N in the synthetic successor.** The heap size
+  schedule is stamped when a heap is born, without consulting `F`. The
+  protocol turn-options stamp is part of the request identity and
+  intent-hash preimages, so bumping it would change identities rather than
+  formats. Derived workflow projections regenerate. Each is named in the
+  module doc of `synthetic_next.rs`.
+- **Objects upgrade through their own handler.** Each object family binds
+  an `upgrade` handler in every build. It is a no-op before finalize, which
+  answers `not_finalized`. After finalize it lifts every value, rewrites it,
+  and raises `_compat`, all in one exclusive invocation. The LashTurn
+  outcome is history and is never swept. `lashctl objects-preflight` and
+  `lashctl objects-sweep` read `_compat` through Restate SQL and call
+  `upgrade` through ingress. The object state is the only cursor, so an
+  interrupted sweep resumes by being run again.

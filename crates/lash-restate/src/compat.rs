@@ -173,7 +173,10 @@ mod tests {
 
     #[test]
     fn restate_call_and_reply_json_is_frozen() {
-        let call = Call::new(serde_json::json!({"session_id": "s"}));
+        let call = Call {
+            wire: VersionRange::exactly(1),
+            body: serde_json::json!({"session_id": "s"}),
+        };
         let json = serde_json::to_string(&call).expect("encode");
         assert_eq!(
             json,
@@ -220,14 +223,14 @@ mod tests {
 
     #[test]
     fn a_call_selects_the_highest_common_wire() {
-        assert_eq!(Call::new(()).select(), Some(1));
+        assert_eq!(Call::new(()).select(), Some(RESTATE_WIRE.max()));
         let newer = Call {
             wire: VersionRange::new(1, 2).expect("range"),
             body: (),
         };
         assert_eq!(newer.select(), Some(RESTATE_WIRE.max()));
         let disjoint = Call {
-            wire: VersionRange::new(2, 3).expect("range"),
+            wire: VersionRange::exactly(RESTATE_WIRE.max() + 1),
             body: (),
         };
         assert_eq!(disjoint.select(), None);

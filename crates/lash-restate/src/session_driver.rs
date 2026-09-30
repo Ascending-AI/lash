@@ -151,16 +151,22 @@ const TURN_OUTCOME_STATE: &str = "outcome";
 
 /// The stored format of the root outcome `LashTurn` records under its
 /// `outcome` state, in the stamped `{format, body}` envelope (ADR 0115
-/// §3.4). Bump it when [`RootOutcome`]'s stored shape changes; the previous
-/// format reads through the N-1 upcaster slot in [`TURN_OUTCOME_FORMATS`].
+/// §3.4). Bump it when [`RootOutcome`]'s stored shape changes, and register
+/// the previous format's lift in `lash_core::store::RECORD_UPCASTERS`. The
+/// outcome is history: a finished workflow's state is never rewritten, so
+/// every lift from its floor is permanent (FIG-3802).
+#[cfg(not(feature = "synthetic-next"))]
 pub const LASH_TURN_OUTCOME_FORMAT_VERSION: u32 = 1;
 
-/// The recorded outcome's stored-format table: the registered surface, plus
-/// the N-1 upcaster hooks (none at the 1.0 baseline).
-const TURN_OUTCOME_FORMATS: StoredValueFormats = StoredValueFormats {
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the outcome to format 2 with
+/// format 1's shape, and reads format 1 forever through its lift.
+#[cfg(feature = "synthetic-next")]
+pub const LASH_TURN_OUTCOME_FORMAT_VERSION: u32 = 2;
+
+/// The recorded outcome's stored-format table: the registered surface.
+pub(crate) const TURN_OUTCOME_FORMATS: StoredValueFormats = StoredValueFormats {
     what: "LashTurn outcome",
     surface: lash_core::surface_format!(LASH_TURN_OUTCOME_FORMAT_VERSION),
-    upcast_n1: &[],
 };
 
 /// The request `LashSession/{session}/drive` runs: one drive of the session.

@@ -40,6 +40,8 @@ mod structural_validation;
 /// `< SOME_FLOOR` or `!= 0` would wave through. Both the structural
 /// validator and the wire decoder are checked; `resume_from` restates the
 /// same comparison a third time.
+// Pins N's version and bytes; the synthetic N+1 moves them.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn a_continuation_one_format_version_behind_is_refused() {
     let previous = VM_CONTINUATION_FORMAT_VERSION - 1;

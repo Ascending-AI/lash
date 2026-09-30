@@ -225,20 +225,20 @@ mod tests {
     fn a_disjoint_call_is_refused_before_its_body_decodes() {
         // A newer caller's body this build cannot type: the range refuses
         // first, and the refusal carries both ranges.
-        let mut bytes = Bytes::from_static(br#"{"wire":{"min":2,"max":3},"body":{"shape":"new"}}"#);
+        let mut bytes = Bytes::from_static(br#"{"wire":{"min":3,"max":4},"body":{"shape":"new"}}"#);
         let error = Call::<u64>::deserialize(&mut bytes).expect_err("a disjoint range refuses");
         let message = format!("Cannot decode input payload: {error:?}");
         assert_eq!(
             restate_compat_error_in(&message),
             Some(RestateCompatError::WireUnsupported {
                 local: RESTATE_WIRE,
-                peer: VersionRange::new(2, 3).expect("range"),
+                peer: VersionRange::new(3, 4).expect("range"),
             })
         );
 
         let mut bytes = Bytes::from_static(br#"{"wire":{"min":1,"max":2},"body":7}"#);
         let call = Call::<u64>::deserialize(&mut bytes).expect("an overlapping range decodes");
-        assert_eq!(call.open().expect("selected"), (1, 7));
+        assert_eq!(call.open().expect("selected"), (RESTATE_WIRE.max(), 7));
     }
 
     #[test]

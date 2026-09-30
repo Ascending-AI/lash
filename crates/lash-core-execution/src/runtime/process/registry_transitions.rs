@@ -37,7 +37,7 @@ struct ProcessWakeDeliveryFormatVersionProbe {
 /// §2's `[N-1, N]` window (FIG-3796). An admitted older payload climbs to the
 /// newest through the surface's `RecordUpcaster` hooks; anything else is
 /// refused as unsupported.
-fn decode_process_wake_delivery(
+pub(super) fn decode_process_wake_delivery(
     delivery_json: &str,
     fleet_format: crate::FleetFormat,
 ) -> Result<ProcessWakeDelivery, PluginError> {

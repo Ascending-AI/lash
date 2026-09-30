@@ -39,6 +39,8 @@ mod physical_turn;
 mod preflight;
 pub mod queued_work;
 mod record_schema_version;
+#[cfg(feature = "synthetic-next")]
+mod synthetic_next;
 pub use physical_turn::PhysicalTurn;
 mod control_intent;
 mod drive_fence;
@@ -112,12 +114,12 @@ pub use fencing::{
     wake_delivery_claim_verdict,
 };
 pub use fleet_format::{
-    FLEET_FORMAT_VERSION, FLEET_WRITABLE_RANGE, FleetFormat, FleetFormatState, HISTORY_FLOORS,
-    HistoryFloor, RECORD_UPCASTERS, ReadWindow, RecordUpcaster, SurfaceFormat, WriterPin,
-    decode_versioned_json_record, decode_versioned_json_record_for_fleet,
+    FLEET_FORMAT_VERSION, FLEET_WRITABLE_RANGE, FleetFormat, FleetFormatState, GUARDED_SURFACES,
+    GuardedSurface, Lift, RECORD_UPCASTERS, ReadWindow, RecordUpcaster, SurfaceFormat,
+    SurfaceReads, WriterPin, decode_versioned_json_record, decode_versioned_json_record_for_fleet,
     decode_versioned_msgpack_record_for_fleet, ensure_supported_record_schema_version_for_fleet,
-    ensure_supported_schema_version_for_fleet, history_floor, upcast_chain_covers,
-    upcast_json_record,
+    ensure_supported_schema_version_for_fleet, guarded_surface, upcast_chain_covers,
+    upcast_json_record, upcaster,
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use history::{
@@ -215,11 +217,19 @@ fn default_root_session_id() -> SessionId {
 /// Version 11 nests restricted resident-tool definitions under `manifest` and
 /// `contract` fields (FIG-1210); a version 10 head carrying the flattened
 /// encoding is refused rather than reinterpreted field-by-field.
+#[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 11;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 11's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 12;
 
 #[cfg(test)]
 mod prompt_persistence_compat_tests;
 
+#[cfg(test)]
+mod guarded_surface_tests;
 #[cfg(test)]
 mod persisted_state_tests;
 

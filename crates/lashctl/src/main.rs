@@ -27,7 +27,7 @@ const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | preflight | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -141,8 +141,22 @@ enum Command {
         mode: FinalizeMode,
     },
     FinalizeHold(HoldAction),
+    ObjectsPreflight {
+        restate: RestateTarget,
+    },
+    ObjectsSweep {
+        restate: RestateTarget,
+    },
     Preflight,
     Version,
+}
+
+/// The Restate server an object command reads, and calls through for a
+/// sweep, in one namespace.
+struct RestateTarget {
+    admin_url: String,
+    ingress_url: Option<String>,
+    namespace: lash_restate::RestateNamespace,
 }
 
 enum HoldAction {
@@ -160,6 +174,8 @@ impl Command {
             Self::EndDrain { .. } => "end-drain",
             Self::Finalize { .. } => "finalize",
             Self::FinalizeHold(_) => "finalize-hold",
+            Self::ObjectsPreflight { .. } => "objects-preflight",
+            Self::ObjectsSweep { .. } => "objects-sweep",
             Self::Preflight => "preflight",
             Self::Version => "version",
         }
@@ -262,11 +278,131 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             }
             _ => return Err(CliError::new(Exit::Usage, USAGE)),
         },
+        "objects-preflight" | "objects-sweep" => {
+            let restate = parse_restate_target(rest, verb == "objects-sweep")?;
+            if verb == "objects-sweep" {
+                Command::ObjectsSweep { restate }
+            } else {
+                Command::ObjectsPreflight { restate }
+            }
+        }
         "preflight" if rest.is_empty() => Command::Preflight,
         "version" if rest.is_empty() => Command::Version,
         _ => return Err(CliError::new(Exit::Usage, USAGE)),
     };
     Ok(Invocation { command, json })
+}
+
+/// `--restate-admin-url <url> [--restate-ingress-url <url>] [--namespace <ns>]`;
+/// a sweep calls `upgrade` through ingress, so it needs the ingress URL.
+fn parse_restate_target(rest: &[String], sweep: bool) -> Result<RestateTarget, CliError> {
+    let mut admin_url = None;
+    let mut ingress_url = None;
+    let mut namespace = None;
+    let mut index = 0;
+    while index + 1 < rest.len() {
+        let value = rest[index + 1].clone();
+        let slot = match rest[index].as_str() {
+            "--restate-admin-url" => &mut admin_url,
+            "--restate-ingress-url" if sweep => &mut ingress_url,
+            "--namespace" => &mut namespace,
+            _ => return Err(CliError::new(Exit::Usage, USAGE)),
+        };
+        if slot.replace(value).is_some() {
+            return Err(CliError::new(Exit::Usage, USAGE));
+        }
+        index += 2;
+    }
+    if index != rest.len() {
+        return Err(CliError::new(Exit::Usage, USAGE));
+    }
+    let admin_url = admin_url.ok_or_else(|| {
+        CliError::new(
+            Exit::Usage,
+            "object commands need --restate-admin-url: objects are read from the engine's state",
+        )
+    })?;
+    if sweep && ingress_url.is_none() {
+        return Err(CliError::new(
+            Exit::Usage,
+            "objects-sweep needs --restate-ingress-url: each object's `upgrade` handler is called there",
+        ));
+    }
+    let namespace = lash_restate::RestateNamespace::new(namespace.unwrap_or_default())
+        .map_err(|error| CliError::new(Exit::Usage, format!("--namespace: {error}")))?;
+    Ok(RestateTarget {
+        admin_url,
+        ingress_url,
+        namespace,
+    })
+}
+
+impl RestateTarget {
+    fn target(&self) -> lash_restate::RestateObjectUpgradeTarget {
+        let admin = lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
+            self.admin_url.clone(),
+        ));
+        match &self.ingress_url {
+            Some(ingress_url) => lash_restate::RestateObjectUpgradeTarget::new(
+                admin,
+                lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::new(
+                    ingress_url.clone(),
+                )),
+                self.namespace.clone(),
+            ),
+            None => {
+                lash_restate::RestateObjectUpgradeTarget::read_only(admin, self.namespace.clone())
+            }
+        }
+    }
+}
+
+impl CliError {
+    /// Before finalize the sweep is a refused precondition, exit 3; an
+    /// object whose `_compat` refuses this build is an incompatible store,
+    /// exit 4; an engine that cannot be read or called fails, exit 1.
+    fn objects(error: lash_restate::ObjectUpgradeError) -> Self {
+        let exit = match &error {
+            lash_restate::ObjectUpgradeError::NotFinalized { .. } => Exit::Refused,
+            lash_restate::ObjectUpgradeError::Incompatible { .. } => Exit::Incompatible,
+            lash_restate::ObjectUpgradeError::Engine { .. } => Exit::Unexpected,
+        };
+        match &error {
+            lash_restate::ObjectUpgradeError::Engine { .. } => Self::new(exit, error.to_string()),
+            _ => Self::refused(exit, error.to_string(), &error),
+        }
+    }
+}
+
+fn objects_preflight_result(preflight: &lash_restate::ObjectPreflight) -> Value {
+    json!({
+        "upgraded": preflight.upgraded(),
+        "families": preflight.families.iter().map(|family| json!({
+            "service": family.service,
+            "component": family.component,
+            "newest": family.newest,
+            "objects": family.objects,
+            "pending": family.pending.iter().map(|pending| json!({
+                "key": pending.key,
+                "format": pending.format,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn objects_sweep_result(report: &lash_restate::SweepReport) -> Value {
+    json!({
+        "swept": report.swept.iter().map(|object| json!({
+            "service": object.service,
+            "key": object.key,
+            "outcome": object.outcome,
+        })).collect::<Vec<_>>(),
+        "remaining": report.remaining.iter().map(|pending| json!({
+            "service": pending.service,
+            "key": pending.key,
+            "format": pending.format,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 #[derive(Serialize)]
@@ -424,16 +560,38 @@ fn database_url() -> Result<String, CliError> {
 }
 
 async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
-    let url = database_url()?;
     let outcome = match command {
+        Command::ObjectsPreflight { restate } => {
+            let preflight = lash_restate::preflight_objects(&restate.target())
+                .await
+                .map_err(CliError::objects)?;
+            let exit = if preflight.upgraded() {
+                Exit::Done
+            } else {
+                Exit::NotYet
+            };
+            (objects_preflight_result(&preflight), exit)
+        }
+        Command::ObjectsSweep { restate } => {
+            let report = lash_restate::sweep_objects(&restate.target(), |_| {})
+                .await
+                .map_err(CliError::objects)?;
+            let exit = if report.remaining.is_empty() {
+                Exit::Done
+            } else {
+                Exit::NotYet
+            };
+            (objects_sweep_result(&report), exit)
+        }
         Command::Version => {
-            let storage = PostgresStorage::connect(&url)
+            let storage = PostgresStorage::connect(&database_url()?)
                 .await
                 .map_err(CliError::store)?;
             let generations = storage.fleet_generations().await.map_err(CliError::store)?;
             (version_result(&generations), Exit::Done)
         }
         Command::Migrate { phase, dry_run } => {
+            let url = database_url()?;
             let report = if *dry_run {
                 PostgresStorage::plan_migrations(&url, *phase).await
             } else {
@@ -447,7 +605,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             restate_admin_url,
             mode,
         } => {
-            let storage = PostgresStorage::connect(&url)
+            let storage = PostgresStorage::connect(&database_url()?)
                 .await
                 .map_err(CliError::store)?;
             let registry = lash_restate::RestateDeploymentRegistry::new(
@@ -467,7 +625,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             (finalize_result(&report), Exit::Done)
         }
         Command::FinalizeHold(action) => {
-            let storage = PostgresStorage::connect(&url)
+            let storage = PostgresStorage::connect(&database_url()?)
                 .await
                 .map_err(CliError::store)?;
             let result = match action {
@@ -497,6 +655,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             (result, Exit::Done)
         }
         Command::Preflight => {
+            let url = database_url()?;
             let probe = PostgresStorePreflight::for_database_url(&url).map_err(CliError::store)?;
             let status = probe.schema_status().await.map_err(CliError::store);
             probe.close().await;
@@ -549,7 +708,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
         Command::Drain { generation }
         | Command::EndDrain { generation }
         | Command::DrainStatus { generation } => {
-            let storage = PostgresStorage::connect(&url)
+            let storage = PostgresStorage::connect(&database_url()?)
                 .await
                 .map_err(CliError::store)?;
             let drain = storage.generation_drain();
@@ -673,9 +832,15 @@ async fn main() -> std::process::ExitCode {
                 Ok((result, status)) => {
                     let status_error = match status {
                         Exit::Done => None,
-                        Exit::NotYet => {
-                            Some(CliError::new(status, "the generation is not yet drained"))
-                        }
+                        Exit::NotYet => Some(CliError::new(
+                            status,
+                            match invocation.command {
+                                Command::ObjectsPreflight { .. } | Command::ObjectsSweep { .. } => {
+                                    "objects remain at an older family format"
+                                }
+                                _ => "the generation is not yet drained",
+                            },
+                        )),
                         Exit::Incompatible => Some(CliError::new(
                             status,
                             "the store schema is incompatible with this build",

@@ -166,7 +166,7 @@ fn endpoint(sessions: Arc<dyn DeploymentStore>, executors: Arc<CountingExecutors
 #[tokio::test]
 async fn a_pre_cutover_sessions_group_child_is_refused_before_its_tool_is_dispatched() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let previous = lash_core::store::CURRENT_SESSION_STATE_VERSION - 1;
+    let previous = lash_core::OLDEST_SUPPORTED_SESSION_STATE_VERSION - 1;
     let sessions = session_catalog(dir.path(), Some(previous)).await;
     // Precondition: the store really holds a generation this build refuses.
     assert!(
@@ -322,7 +322,7 @@ async fn a_refused_redrive_parks_only_a_turn_in_flight() {
         )
         .await
         .expect("record the accepted input");
-    let previous = lash_core::store::CURRENT_SESSION_STATE_VERSION - 1;
+    let previous = lash_core::OLDEST_SUPPORTED_SESSION_STATE_VERSION - 1;
     store
         .stamp_session_state_version_for_testing(&session_id, previous)
         .await

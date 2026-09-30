@@ -9,17 +9,22 @@ const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 /// The stored format the payload object stamps into its `effect-group/v1/`
 /// values (FIG-3814), the payload bytes and the retirement fence, and the
 /// family format of every `EffectGroupPayload` object's `_compat` record
-/// (ADR 0115 §3.2). Bump it when a stored shape under those keys changes;
-/// the previous format reads through the N-1 upcaster slot in
-/// [`EFFECT_GROUP_PAYLOAD_FORMATS`].
+/// (ADR 0115 §3.2). Bump it when a stored shape under those keys changes,
+/// and register the previous format's lift in
+/// `lash_core::store::RECORD_UPCASTERS`.
+#[cfg(not(feature = "synthetic-next"))]
 pub const EFFECT_GROUP_PAYLOAD_FORMAT_VERSION: u16 = 1;
-/// The payload object's stored-format table: the family's registered surface
-/// and descriptor, plus the N-1 upcaster hooks (empty while the first
-/// stamped layout is the baseline).
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2 with
+/// format 1's shape; its `upgrade` handler rewrites each object after
+/// finalize.
+#[cfg(feature = "synthetic-next")]
+pub const EFFECT_GROUP_PAYLOAD_FORMAT_VERSION: u16 = 2;
+
+/// The payload object's stored-format table: the family's registered surface.
 pub(crate) const EFFECT_GROUP_PAYLOAD_FORMATS: StoredValueFormats = StoredValueFormats {
     what: "effect-group payload",
     surface: lash_core::surface_format!(EFFECT_GROUP_PAYLOAD_FORMAT_VERSION),
-    upcast_n1: &[],
 };
 
 /// The object family whose `_compat` record every handler admits first
@@ -64,6 +69,10 @@ pub(crate) trait EffectGroupPayload {
     async fn get(call: Call<()>) -> HandlerResult<Reply<EffectGroupPayloadGetResponse>>;
     async fn retire(call: Call<()>) -> HandlerResult<Reply<()>>;
     async fn delete_bytes(call: Call<()>) -> HandlerResult<Reply<()>>;
+    /// Rewrite the payload at the newest family format once finalize has
+    /// moved the fleet to it, and raise its `_compat` (ADR 0115 §3.2,
+    /// FIG-4041): the object sweep's step.
+    async fn upgrade(call: Call<()>) -> HandlerResult<Reply<ObjectUpgradeResponse>>;
 }
 
 /// The [`EffectGroupPayload`] handlers: they call no other service, so
@@ -178,5 +187,20 @@ impl EffectGroupPayload for EffectGroupPayloadImpl {
         .await?;
         ctx.clear(PAYLOAD_STATE_KEY);
         Ok(Reply::at(wire, ()))
+    }
+
+    async fn upgrade(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<()>,
+    ) -> HandlerResult<Reply<ObjectUpgradeResponse>> {
+        let (wire, ()) = call.open()?;
+        let response = object_state::upgrade_object(
+            &ctx,
+            &EFFECT_GROUP_PAYLOAD_FAMILY,
+            self.fleet.fleet_format(),
+        )
+        .await?;
+        Ok(Reply::at(wire, response))
     }
 }

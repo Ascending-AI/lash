@@ -38,7 +38,9 @@ use crate::durable_wait::{
     RestateDurableWaitGroupChildRequest, RestateDurableWaitResolveRequest,
     durable_wait_index_key_for_scope, durable_wait_index_object_key, restate_await_event_key,
 };
-use crate::object_state::{self, FleetView, ObjectFamily, StoredValueFormats};
+use crate::object_state::{
+    self, FleetView, ObjectFamily, ObjectUpgradeResponse, StoredValueFormats,
+};
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
 /// The group's accepted membership, apart from the index record every
@@ -231,92 +233,67 @@ fn store_membership(
     object_state::set_stamped(ctx, MEMBERSHIP_STATE_KEY, writer, membership);
 }
 
-/// Declares [`EffectGroupState`] with every handler all builds serve, plus
-/// the handlers `$synthetic` adds: Phase A's synthetic N+1 appends its
-/// `upgrade` handler (ADR 0115 §6), which no production build binds.
-macro_rules! effect_group_state {
-    ($($synthetic:tt)*) => {
-        /// An effect group's lifecycle and settlement rank, one object per group.
-        /// Every handler takes a [`Call`] and answers a [`Reply`], and reads the
-        /// object's `_compat` record before any other state (ADR 0115 §3).
-        // The registered service keeps its `EffectGroupIndex` name (FIG-3814).
-        #[restate_sdk::object]
-        #[name = "EffectGroupIndex"]
-        pub(crate) trait EffectGroupState {
-            #[shared]
-            async fn probe(call: Call<()>) -> HandlerResult<Reply<EffectGroupProbeResponse>>;
-            #[shared]
-            async fn unsettled_children(call: Call<()>) -> HandlerResult<Reply<usize>>;
-            async fn open(
-                call: Call<EffectGroupOpenRequest>,
-            ) -> HandlerResult<Reply<EffectGroupOpenResponse>>;
-            async fn probe_and_adopt(
-                call: Call<EffectGroupAdoptRequest>,
-            ) -> HandlerResult<Reply<EffectGroupProbeAdoptResponse>>;
-            async fn record_dispatch(
-                call: Call<EffectGroupRecordDispatchRequest>,
-            ) -> HandlerResult<Reply<EffectGroupRecordDispatchResponse>>;
-            async fn register_children(
-                call: Call<EffectGroupRegisterRequest>,
-            ) -> HandlerResult<Reply<EffectGroupRegisterResponse>>;
-            async fn register_refusal(
-                call: Call<EffectGroupRefusalRequest>,
-            ) -> HandlerResult<Reply<EffectGroupRegisterRefusalResponse>>;
-            async fn admit_child(
-                call: Call<EffectGroupAdmissionRequest>,
-            ) -> HandlerResult<Reply<EffectGroupAdmissionResponse>>;
-            async fn commit_child(
-                call: Call<EffectGroupCommitChildRequest>,
-            ) -> HandlerResult<Reply<EffectGroupCommitChildResponse>>;
-            async fn admit_semantic(
-                call: Call<EffectGroupAdmitSemanticRequest>,
-            ) -> HandlerResult<Reply<EffectGroupAdmitSemanticResponse>>;
-            #[shared]
-            async fn drain_blockers(
-                call: Call<EffectGroupDrainBlockersRequest>,
-            ) -> HandlerResult<Reply<EffectGroupDrainBlockersResponse>>;
-            async fn record_settlement(
-                call: Call<EffectGroupRecordSettlementRequest>,
-            ) -> HandlerResult<Reply<EffectGroupRecordSettlementResponse>>;
-            #[shared]
-            async fn read_rank(
-                call: Call<EffectGroupReadRankRequest>,
-            ) -> HandlerResult<Reply<EffectGroupReadRankResponse>>;
-            async fn close(
-                call: Call<EffectGroupCloseRequest>,
-            ) -> HandlerResult<Reply<EffectGroupCloseResponse>>;
-            async fn retire(call: Call<()>) -> HandlerResult<Reply<EffectGroupRetireResponse>>;
-            async fn finish_retirement(
-                call: Call<()>,
-            ) -> HandlerResult<Reply<EffectGroupFinishRetirementResponse>>;
-            async fn retirement_cancel(
-                call: Call<()>,
-            ) -> HandlerResult<Reply<EffectGroupRetirementCancelResponse>>;
-            $($synthetic)*
-        }
-    };
+/// An effect group's lifecycle and settlement rank, one object per group.
+/// Every handler takes a [`Call`] and answers a [`Reply`], and reads the
+/// object's `_compat` record before any other state (ADR 0115 §3).
+// The registered service keeps its `EffectGroupIndex` name (FIG-3814).
+#[restate_sdk::object]
+#[name = "EffectGroupIndex"]
+pub(crate) trait EffectGroupState {
+    #[shared]
+    async fn probe(call: Call<()>) -> HandlerResult<Reply<EffectGroupProbeResponse>>;
+    #[shared]
+    async fn unsettled_children(call: Call<()>) -> HandlerResult<Reply<usize>>;
+    async fn open(
+        call: Call<EffectGroupOpenRequest>,
+    ) -> HandlerResult<Reply<EffectGroupOpenResponse>>;
+    async fn probe_and_adopt(
+        call: Call<EffectGroupAdoptRequest>,
+    ) -> HandlerResult<Reply<EffectGroupProbeAdoptResponse>>;
+    async fn record_dispatch(
+        call: Call<EffectGroupRecordDispatchRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRecordDispatchResponse>>;
+    async fn register_children(
+        call: Call<EffectGroupRegisterRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterResponse>>;
+    async fn register_refusal(
+        call: Call<EffectGroupRefusalRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRegisterRefusalResponse>>;
+    async fn admit_child(
+        call: Call<EffectGroupAdmissionRequest>,
+    ) -> HandlerResult<Reply<EffectGroupAdmissionResponse>>;
+    async fn commit_child(
+        call: Call<EffectGroupCommitChildRequest>,
+    ) -> HandlerResult<Reply<EffectGroupCommitChildResponse>>;
+    async fn admit_semantic(
+        call: Call<EffectGroupAdmitSemanticRequest>,
+    ) -> HandlerResult<Reply<EffectGroupAdmitSemanticResponse>>;
+    #[shared]
+    async fn drain_blockers(
+        call: Call<EffectGroupDrainBlockersRequest>,
+    ) -> HandlerResult<Reply<EffectGroupDrainBlockersResponse>>;
+    async fn record_settlement(
+        call: Call<EffectGroupRecordSettlementRequest>,
+    ) -> HandlerResult<Reply<EffectGroupRecordSettlementResponse>>;
+    #[shared]
+    async fn read_rank(
+        call: Call<EffectGroupReadRankRequest>,
+    ) -> HandlerResult<Reply<EffectGroupReadRankResponse>>;
+    async fn close(
+        call: Call<EffectGroupCloseRequest>,
+    ) -> HandlerResult<Reply<EffectGroupCloseResponse>>;
+    async fn retire(call: Call<()>) -> HandlerResult<Reply<EffectGroupRetireResponse>>;
+    async fn finish_retirement(
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupFinishRetirementResponse>>;
+    async fn retirement_cancel(
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupRetirementCancelResponse>>;
+    /// Rewrite the group at the newest family format once finalize
+    /// has moved the fleet to it, and raise its `_compat` (ADR 0115
+    /// §3.2, FIG-4041): the object sweep's step.
+    async fn upgrade(call: Call<()>) -> HandlerResult<Reply<ObjectUpgradeResponse>>;
 }
-
-#[cfg(not(feature = "synthetic-next"))]
-effect_group_state!();
-
-#[cfg(feature = "synthetic-next")]
-#[allow(
-    dead_code,
-    reason = "the synthetic sweep reaches `upgrade` through ingress, never through the \
-              generated client"
-)]
-mod synthetic_next {
-    use super::*;
-
-    effect_group_state!(
-        async fn upgrade(
-            call: Call<()>,
-        ) -> HandlerResult<Reply<protocol::EffectGroupUpgradeResponse>>;
-    );
-}
-#[cfg(feature = "synthetic-next")]
-pub(crate) use synthetic_next::*;
 
 /// [`EffectGroupState`] in one deployment's namespace: the durable-wait
 /// index a group's waits and scope records live in is its namespace's
@@ -344,15 +321,18 @@ impl EffectGroupStateImpl {
 }
 
 impl EffectGroupState for EffectGroupStateImpl {
-    /// The synthetic N+1's sweep step (ADR 0115 §3.2, §6).
-    #[cfg(feature = "synthetic-next")]
     async fn upgrade(
         &self,
         ctx: ObjectContext<'_>,
         call: Call<()>,
-    ) -> HandlerResult<Reply<protocol::EffectGroupUpgradeResponse>> {
+    ) -> HandlerResult<Reply<ObjectUpgradeResponse>> {
         let (wire, ()) = call.open()?;
-        let response = protocol::upgrade(&ctx, self.fleet.fleet_format()).await?;
+        let response = object_state::upgrade_object(
+            &ctx,
+            &EFFECT_GROUP_STATE_FAMILY,
+            self.fleet.fleet_format(),
+        )
+        .await?;
         Ok(Reply::at(wire, response))
     }
 
@@ -1549,11 +1529,14 @@ pub(crate) use child_cancel::{GroupChildCancel, group_child_cancel_verdict};
 pub(crate) use dispatch::EffectGroupChildRequest;
 pub use dispatch::EffectGroupDispatchRequest;
 pub(crate) use dispatch::{EffectGroupDispatch, EffectGroupDispatchImpl};
+pub(crate) use payload::{
+    EFFECT_GROUP_PAYLOAD_FAMILY, EffectGroupPayload, EffectGroupPayloadClient,
+    EffectGroupPayloadImpl,
+};
 pub use payload::{
     EFFECT_GROUP_PAYLOAD_FORMAT_VERSION, EffectGroupPayloadGetResponse,
     EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
 };
-pub(crate) use payload::{EffectGroupPayload, EffectGroupPayloadClient, EffectGroupPayloadImpl};
 pub(crate) fn payload_key(group_key: &str, position: usize) -> String {
     let digest = Sha256::digest(group_key.as_bytes());
     format!("{:x}:{position}", digest)

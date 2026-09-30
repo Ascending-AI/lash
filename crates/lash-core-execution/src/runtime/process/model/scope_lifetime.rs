@@ -442,7 +442,13 @@ pub mod lifetime {
 /// ADR 0094's parent scope until FIG-3607 changed it in place under the
 /// pre-1.0 version freeze (FIG-3846); such a payload's scope is not a
 /// [`ScopeId`], so it is refused as malformed.
+#[cfg(not(feature = "synthetic-next"))]
 pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 2's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 3;
 
 /// The versioned typed scope persisted beside the index projection.
 #[derive(Serialize, Deserialize)]

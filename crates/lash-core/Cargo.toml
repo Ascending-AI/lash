@@ -28,7 +28,7 @@ perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "las
 testing = ["lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-execution/testing"]
 # Phase A's synthetic N+1 build (ADR 0115 §6), forwarded to the store
 # crate whose constants it moves. No production build enables it.
-synthetic-next = ["lash-core-store/synthetic-next"]
+synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]
 
 [lints]
 workspace = true

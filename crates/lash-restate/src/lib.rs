@@ -90,6 +90,7 @@ mod engine;
 mod formats;
 mod ingress;
 mod object_state;
+mod object_upgrade;
 mod process;
 mod process_attach;
 mod process_stop;
@@ -147,6 +148,12 @@ pub use ingress::{
     DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
     RestateConnectionConfig, RestateHttpError, RestateIngressClient, RestateInvocationId,
     RestateInvocationLifecycle, RestateInvocationStatus, RestatePausedInvocation,
+};
+pub use object_state::ObjectUpgradeResponse;
+pub use object_upgrade::{
+    FamilyPreflight, ObjectPreflight, ObjectUpgradeError, ObjectUpgradeTarget, PendingObject,
+    RestateObjectUpgradeTarget, SweepReport, SweptObject, UPGRADABLE_OBJECT_FAMILIES,
+    UpgradableFamily, preflight_objects, sweep_objects,
 };
 pub use process::{
     JOURNAL_LOGIC_EPOCH, PROCESS_HANDLER_MAX_ATTEMPTS, ProcessParkReconcileReport,

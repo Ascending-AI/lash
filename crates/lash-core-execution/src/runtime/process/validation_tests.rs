@@ -40,6 +40,7 @@ fn producer_cannot_override_runtime_lifecycle_event_types() {
     );
 }
 
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn process_event_vocabulary_version_is_pinned() {
     assert_eq!(PROCESS_EVENT_VOCABULARY_VERSION, 1);
@@ -80,9 +81,10 @@ fn effect_summary_refuses_predecessor_vocabulary() {
     )
     .expect_err("a predecessor effect-summary payload must be refused");
     assert!(
-        error
-            .to_string()
-            .contains("effect summary vocabulary version 0 is unsupported; expected 1"),
+        error.to_string().contains(&format!(
+            "effect summary vocabulary version 0 is unsupported; expected \
+                 {PROCESS_EVENT_VOCABULARY_VERSION}"
+        )),
         "{error}"
     );
 }

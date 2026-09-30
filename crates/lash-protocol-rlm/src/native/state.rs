@@ -11,7 +11,7 @@ pub(super) struct RlmReasoningPart {
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-pub(super) struct RlmDriverState {
+pub(crate) struct RlmDriverState {
     #[serde(default)]
     pub(super) reasoning: Vec<RlmReasoningPart>,
     pub(super) assistant_parts: Vec<lash_core::Part>,
@@ -33,7 +33,13 @@ pub(super) struct RlmDriverState {
 
 /// Schema version of the native RLM driver state parked in the protocol
 /// driver-state slot; a decode refuses any other version.
+#[cfg(not(feature = "synthetic-next"))]
 pub const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 2's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const NATIVE_DRIVER_STATE_VERSION: u32 = 3;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Envelope {
@@ -45,7 +51,7 @@ struct Envelope {
     clippy::expect_used,
     reason = "the envelope carries a u32 schema version and crate-owned driver state, so serde_json encoding cannot fail"
 )]
-pub(super) fn rlm_driver_state(
+pub(crate) fn rlm_driver_state(
     state: RlmDriverState,
     schema_version: u32,
 ) -> lash_core::ProtocolDriverState {
@@ -61,11 +67,11 @@ pub(super) fn rlm_driver_state(
 
 /// `fleet_recorded_version` is the version the fleet's writers emit for this
 /// surface — `F`'s recorded version, which the driver's `WriterFormats` table
-/// reports (FIG-3796). The decode admits the pair `{fleet_recorded_version,
-/// NATIVE_DRIVER_STATE_VERSION}` — ADR 0106 §2's `[N-1, N]` window — and an
-/// admitted older payload climbs to the newest through the surface's
-/// `RecordUpcaster` hooks; anything else is refused as unsupported.
-pub(super) fn decode_rlm_driver_state(
+/// reports (FIG-3796). The decode admits that version and every version the
+/// surface's `RecordUpcaster` chain lifts to the newest (FIG-3802); an
+/// admitted older payload climbs to the newest through the chain, and
+/// anything else is refused as unsupported.
+pub(crate) fn decode_rlm_driver_state(
     state: lash_core::ProtocolDriverState,
     fleet_recorded_version: u32,
 ) -> Result<RlmDriverState, String> {
@@ -82,7 +88,10 @@ pub(super) fn decode_rlm_driver_state(
         .and_then(serde_json::Value::as_u64)
         .and_then(|version| u32::try_from(version).ok())
         .ok_or_else(|| "native driver state carries no u32 schema_version".to_string())?;
-    if actual != NATIVE_DRIVER_STATE_VERSION && actual != fleet_recorded_version {
+    let surface = lash_core::surface_format!(NATIVE_DRIVER_STATE_VERSION);
+    if actual != fleet_recorded_version
+        && !lash_core::store::upcast_chain_covers(surface, actual, NATIVE_DRIVER_STATE_VERSION)
+    {
         return Err(format!(
             "unsupported native driver state version {actual}, expected {NATIVE_DRIVER_STATE_VERSION}"
         ));
@@ -90,7 +99,7 @@ pub(super) fn decode_rlm_driver_state(
     if actual != NATIVE_DRIVER_STATE_VERSION {
         lash_core::store::upcast_json_record(
             "native driver state",
-            lash_core::surface_format!(NATIVE_DRIVER_STATE_VERSION),
+            surface,
             actual,
             NATIVE_DRIVER_STATE_VERSION,
             &mut payload,
@@ -152,7 +161,11 @@ mod tests {
     #[test]
     fn native_state_version_is_pinned_and_predecessors_are_refused() {
         let mut encoded = rlm_driver_state(RlmDriverState::default(), NATIVE_DRIVER_STATE_VERSION);
-        assert_eq!(encoded.payload["schema_version"], 2);
+        assert_eq!(
+            encoded.payload["schema_version"],
+            NATIVE_DRIVER_STATE_VERSION
+        );
+        // Version 1 was never lifted: it stays refused in every build.
         encoded.payload["schema_version"] = serde_json::json!(1);
         assert!(decode_rlm_driver_state(encoded, NATIVE_DRIVER_STATE_VERSION).is_err());
         let unversioned = lash_core::ProtocolDriverState::new(

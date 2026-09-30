@@ -917,7 +917,13 @@ pub struct RuntimeCommitReceipt {
 /// Version 2 (FIG-3542) replaces the frame-handoff `enqueued_queue_batches`
 /// with the `pending_follow_on` the commit left on the head. A version-1
 /// receipt is refused, not converted.
+#[cfg(not(feature = "synthetic-next"))]
 pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 2;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
+/// with version 2's shape; its registered lift reads what N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 3;
 
 /// Stable record-kind label the receipt's decode refusals carry.
 pub const RUNTIME_COMMIT_RECEIPT_RECORD_KIND: &str = "RuntimeCommitReceipt";

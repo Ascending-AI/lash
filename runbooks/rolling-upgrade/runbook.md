@@ -132,6 +132,8 @@ set to the PostgreSQL test database. Every command uses the Bazel-built
 | `lashctl finalize-hold` | set before finalize to prove the hold, then cleared | no SQLite hold | `lashctl finalize-hold set --reason <text> --json`, `lashctl finalize-hold clear --json` |
 | `lashctl end-drain` | clear forward drain after finalize | node uses the SQLite generation drain API | `lashctl end-drain "$OLD_GENERATION" --json` |
 | `lashctl migrate` | contract: refused before finalize, runs after the backfills | no separate contract; whole-set migration on open | `lashctl migrate --phase contract --json` |
+| `lashctl objects-sweep` | `object_sweep_crash_resume` leg: refused `not_finalized` before finalize, then resumes the sweep a crash interrupted | not run over SQLite; the sweep reads the engine, not the store | `lashctl objects-sweep --restate-admin-url "$RESTATE_ADMIN_URL" --restate-ingress-url "$RESTATE_INGRESS_URL" --namespace "$LASH_NAMESPACE" --json` |
+| `lashctl objects-preflight` | `object_sweep_crash_resume` leg: lists the objects the crash left at format 1, then none | not run over SQLite; the sweep reads the engine, not the store | `lashctl objects-preflight --restate-admin-url "$RESTATE_ADMIN_URL" --namespace "$LASH_NAMESPACE" --json` |
 
 The N+1 operator binary runs N+1's migrate, preflight, version and drain
 commands. `OLD_GENERATION` and `NEW_GENERATION` are the node ready-file values.

@@ -23,7 +23,7 @@ perf-witness = ["lash-core-execution/perf-witness", "rusqlite/trace"]
 testing = ["lash-core-execution/testing"]
 # Phase A's synthetic successor (ADR 0115 §6): the SQLite components'
 # descriptors move with the migration catalog that reaches them.
-synthetic-next = ["lash-core-store/synthetic-next"]
+synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]
 
 [lints]
 workspace = true
@@ -48,6 +48,8 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 lash-conformance = { workspace = true, features = ["lashlang"] }
 lash-core = { workspace = true, features = ["testing"] }
+# The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
+lash-core-store = { workspace = true, features = ["testing"] }
 lash-restate-test = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }

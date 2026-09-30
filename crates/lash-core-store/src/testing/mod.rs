@@ -14,6 +14,7 @@
 // submodule's own intra-doc links — would resolve it against *this* module's
 // scope, where none of the linked items exist.
 pub mod graph_integrity;
+pub mod guarded_surfaces;
 pub mod lineage;
 pub mod store_fixtures;
 

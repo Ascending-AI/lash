@@ -891,6 +891,8 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// without a version bump. These bytes are that pin. If this test fails, the
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
+// The golden pins N's encoding; the synthetic N+1 moves the root's stamps.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn version_26_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(

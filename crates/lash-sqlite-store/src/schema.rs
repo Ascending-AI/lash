@@ -1717,11 +1717,14 @@ fn apply_versioned_schema_tx_with_writable(
         }
         Ok(())
     };
-    let (admission, fleet) = crate::compat::admit(tx, database, writable)?;
+    let (admission, mut fleet) = crate::compat::admit(tx, database, writable)?;
     match admission {
         lash_core_execution::compat::CompatAdmission::Provision => {
             apply_schema(tx)?;
             crate::compat::provision(tx, database, writable)?;
+            // The handle answers the epoch the row was just seeded at, not
+            // this build's newest: a synthetic N+1 seeds a fresh store at N.
+            fleet = lash_core_execution::FleetFormat::seed(writable);
         }
         lash_core_execution::compat::CompatAdmission::Native => {
             crate::compat::refuse_unmigrated(tx, database)?;

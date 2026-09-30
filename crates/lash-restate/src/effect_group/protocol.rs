@@ -23,8 +23,8 @@ pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 /// The stored format the group index's retained record stamps into its
 /// object-state envelope, and the family format of every `EffectGroupIndex`
 /// object's `_compat` record (ADR 0115 §3.2). Bump it when the record's
-/// stored shape changes; the previous format reads through the N-1 upcaster
-/// slot in [`EFFECT_GROUP_STATE_FORMATS`].
+/// stored shape changes, and register the previous format's lift in
+/// `lash_core::store::RECORD_UPCASTERS`.
 ///
 /// 1 is the 1.0 baseline: the record carries `dispatch_route`, the service
 /// name the group's dispatch was sent under (FIG-3795 S10). It was reset in
@@ -34,109 +34,18 @@ pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2. Its
-/// record keeps format 1's shape, so the N-1 upcaster lifts a format-1 body
-/// as it is; the stamp is what moves. Until finalize the fleet's writer pin
-/// holds its writes at format 1, and after it the synthetic `upgrade`
-/// handler rewrites each object.
+/// record keeps format 1's shape, so the registered lift keeps a format-1
+/// body as it is; the stamp is what moves. Until finalize the fleet's writer
+/// pin holds its writes at format 1, and after it the `upgrade` handler
+/// rewrites each object.
 #[cfg(feature = "synthetic-next")]
 pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 2;
 
-/// The group index's stored-format table: the family's registered surface
-/// and descriptor, plus the N-1 upcaster hooks (none at the baseline).
+/// The group index's stored-format table: the family's registered surface.
 pub(crate) const EFFECT_GROUP_STATE_FORMATS: StoredValueFormats = StoredValueFormats {
     what: "effect group",
     surface: lash_core::surface_format!(EFFECT_GROUP_STATE_FORMAT_VERSION),
-    upcast_n1: EFFECT_GROUP_STATE_UPCASTS,
 };
-
-#[cfg(not(feature = "synthetic-next"))]
-const EFFECT_GROUP_STATE_UPCASTS: &crate::object_state::UpcastTable = &[];
-
-#[cfg(feature = "synthetic-next")]
-const EFFECT_GROUP_STATE_UPCASTS: &crate::object_state::UpcastTable = &[(1, upcast_format_1)];
-
-/// The synthetic N+1's N-1 upcaster: format 1's record body is format 2's.
-#[cfg(feature = "synthetic-next")]
-fn upcast_format_1(body: serde_json::Value) -> Result<serde_json::Value, TerminalError> {
-    Ok(body)
-}
-
-/// What the synthetic N+1's `upgrade` handler did to one group (ADR 0115
-/// §3.2, §6). JSON is tagged by `upgrade`.
-#[cfg(feature = "synthetic-next")]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "upgrade", rename_all = "snake_case")]
-pub(crate) enum EffectGroupUpgradeResponse {
-    /// The object holds no state: nothing to convert, and nothing written.
-    Absent,
-    /// The fleet still writes format `writes`: finalize has not moved `F`,
-    /// so nothing is rewritten while rollback is still promised.
-    NotFinalized { writes: u32 },
-    /// The object's `_compat` already names the newest format.
-    Current { format: u32 },
-    /// Every value was rewritten at `format` and `_compat` raised to it, in
-    /// this one exclusive invocation.
-    Upgraded { from: u32, format: u32 },
-}
-
-/// The synthetic `upgrade` handler of `EffectGroupIndex` (ADR 0115 §3.2):
-/// once finalize has moved the fleet to write the newest format, rewrite
-/// the group's record at it and raise all three `_compat` fields, so a
-/// leftover N handler is refused by the record. An object already current,
-/// or a fleet not yet finalized, is answered with nothing changed.
-#[cfg(feature = "synthetic-next")]
-pub(super) async fn upgrade(
-    ctx: &ObjectContext<'_>,
-    fleet: lash_core::FleetFormat,
-) -> Result<EffectGroupUpgradeResponse, TerminalError> {
-    use crate::compat::{COMPAT_KEY, ObjectCompat};
-    use restate_sdk::context::{ContextReadState as _, ContextWriteState as _};
-
-    let keys = ctx.get_keys().await?;
-    if keys.is_empty() {
-        return Ok(EffectGroupUpgradeResponse::Absent);
-    }
-    let object = object_state::admit_exclusive(ctx, &EFFECT_GROUP_STATE_FAMILY, fleet).await?;
-    let newest = EFFECT_GROUP_STATE_FORMATS.newest();
-    let writes = fleet.writer_version(EFFECT_GROUP_STATE_FORMATS.surface);
-    if writes != newest {
-        return Ok(EffectGroupUpgradeResponse::NotFinalized { writes });
-    }
-    let Some(Json(compat)) = ctx.get::<Json<ObjectCompat>>(COMPAT_KEY).await? else {
-        return Err(TerminalError::new(format!(
-            "effect group {} was admitted without a `{COMPAT_KEY}` record",
-            ctx.key()
-        )));
-    };
-    if compat == ObjectCompat::fresh(newest) {
-        return Ok(EffectGroupUpgradeResponse::Current { format: newest });
-    }
-    if let Some(unknown) = keys.iter().find(|key| {
-        object_state::is_value_key(key) && *key != INDEX_STATE_KEY && *key != MEMBERSHIP_STATE_KEY
-    }) {
-        return Err(TerminalError::new(format!(
-            "effect group {} holds `{unknown}`, which the upgrade does not convert",
-            ctx.key()
-        )));
-    }
-    if let Some(record) = load_index(ctx).await? {
-        super::store_index(ctx, object.writer, record);
-    }
-    if let Some(membership) = object_state::get_stamped::<EffectGroupMembership>(
-        ctx,
-        MEMBERSHIP_STATE_KEY,
-        &EFFECT_GROUP_STATE_FORMATS,
-    )
-    .await?
-    {
-        super::store_membership(ctx, object.writer, membership);
-    }
-    ctx.set(COMPAT_KEY, Json(ObjectCompat::fresh(newest)));
-    Ok(EffectGroupUpgradeResponse::Upgraded {
-        from: compat.format,
-        format: newest,
-    })
-}
 
 /// The object family whose `_compat` record every handler admits first
 /// (ADR 0115 §3.2).
@@ -231,9 +140,14 @@ mod tests {
 
     #[test]
     fn index_state_of_another_or_no_format_is_refused_typed() {
+        // Below the family's supported range (format 0, or N's format in a
+        // build with no lift from it), above it, or unstamped.
+        let oldest = lash_core::FleetFormat::current()
+            .read_window(EFFECT_GROUP_STATE_FORMATS.surface)
+            .oldest();
         for stale in [
             record_state(None),
-            record_state(Some(EFFECT_GROUP_STATE_FORMAT_VERSION - 1)),
+            record_state(Some(u16::try_from(oldest - 1).expect("a u16 format"))),
             record_state(Some(EFFECT_GROUP_STATE_FORMAT_VERSION + 1)),
         ] {
             let refusal = decode_index_state("group", stale).expect_err("stale state is refused");

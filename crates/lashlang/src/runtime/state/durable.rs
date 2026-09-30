@@ -217,13 +217,10 @@ impl State {
     /// and the baseline the fragments stand for, so the next capture diffs
     /// against exactly what was read.
     ///
-    /// `fleet_format` is the `F` the bound store recorded: the read admits the
-    /// pair `{fleet's writer version, this build's newest}` — ADR 0106 §2's
-    /// `[N-1, N]` window (FIG-3796). A header at the fleet's older recorded
-    /// version would climb to the newest through a surface-owned lift step
-    /// before it decodes; this canonical form has no lift step yet, so an
-    /// admitted older version is refused closed rather than decoded on shape
-    /// alone.
+    /// `fleet_format` is the `F` the bound store recorded: the read admits
+    /// every version of the snapshot surface's read window (FIG-3796,
+    /// FIG-3802), each older one read natively by this canonical form, and
+    /// the fixed point re-encodes at the recorded version.
     pub(crate) fn from_durable_parts<'a>(
         header: &[u8],
         fragments: impl IntoIterator<Item = (&'a str, &'a [u8])>,
@@ -240,7 +237,7 @@ impl State {
             });
         }
         let decoded_header: CanonicalDurableHeader = decode_canonical(header, "snapshot header")?;
-        if decoded_header.version != window.newest() {
+        if !window.admits(decoded_header.version) {
             return Err(SnapshotDecodeError::VersionMismatch {
                 expected: window.newest(),
                 found: decoded_header.version,

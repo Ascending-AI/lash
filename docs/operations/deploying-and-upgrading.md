@@ -253,6 +253,30 @@ Before finalize it is refused `contract_before_finalize`; before its
 backfills are done, `contract_before_backfills`, naming each pending one.
 Both are exit 3, and the dry run refuses the same way the run does.
 
+### Upgrade the Restate objects
+
+Each Lash virtual object records its family format in its `_compat` state,
+and every family binds an `upgrade` handler. After finalize, `upgrade`
+rewrites the object's values in the newest format of its family and raises
+its `_compat` in one exclusive invocation. Before finalize it rewrites
+nothing, because rollback to N is still promised. List the objects still at
+an older format, then sweep them:
+
+```sh
+lashctl objects-preflight --restate-admin-url "$RESTATE_ADMIN_URL" --namespace "$LASH_NAMESPACE" --json
+lashctl objects-sweep --restate-admin-url "$RESTATE_ADMIN_URL" --restate-ingress-url "$RESTATE_INGRESS_URL" --namespace "$LASH_NAMESPACE" --json
+```
+
+Both commands read the engine, not the PostgreSQL store. The preflight lists
+each family's objects that are still at an older format and exits 0 when
+there are none, or 5 when some remain. The sweep calls `upgrade` on each
+listed object and exits 0 once none remain. Before finalize it is refused
+`not_finalized` (exit 3). An object whose `_compat` does not admit this build
+is refused `incompatible` (exit 4). The object state is the sweep's only
+cursor, so a sweep that is interrupted can be run again: the objects it
+already upgraded answer `current`, and it upgrades the rest. The LashTurn
+outcome is session history and is read in place; the sweep never rewrites it.
+
 A SQLite store is not reached by `lashctl`. The host that owns it finalizes
 with `SqliteStoreSet::finalize`, which applies the same drain and retirement
 checks, moves `F` in all three databases under exclusive locks, and completes
@@ -280,9 +304,8 @@ version or route before resuming.
 
 Rollback is safe until finalize, and only until then. Finalize moves `F`
 only after N has drained and its deployments are removed, and that move
-fences N's writers; recovery then rolls forward. Restate object upgrade
-handlers and their sweep arrive with the first release that changes an
-object format; they also run after finalize.
+fences N's writers; recovery then rolls forward. The Restate object sweep
+also runs only after finalize.
 
 ## Client and server version skew
 

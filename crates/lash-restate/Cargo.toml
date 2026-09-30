@@ -51,6 +51,8 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+# The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
+lash-core-store = { workspace = true, features = ["testing"] }
 lash-conformance.workspace = true
 # The in-process Restate server double the effect-group suites run on. Only
 # its server (endpoint-agnostic) is used here, so the second copy of this
