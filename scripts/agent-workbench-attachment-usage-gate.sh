@@ -20,7 +20,8 @@ fi
 
 printf '[attachment-usage-gate] Restate engine over the SQLite store set pass\n'
 kiln test --test_timeout=300 --test_output=all \
-  --test_arg=attachment_usage_gate --test_arg=--exact \
+  --test_arg=tests::attachments_usage_tests::attachment_usage_gate \
+  --test_arg=--exact \
   --test_arg=--nocapture --test_arg=--test-threads=1 \
   //examples/agent-workbench:agent-workbench__unit_test
 

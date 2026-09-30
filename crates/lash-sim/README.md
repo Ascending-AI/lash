@@ -267,8 +267,10 @@ it owns. The binary is `dev-deferred`: the Buck2 tail runs it on main's
 full-profile dispatch.
 
 ```sh
-kiln run //crates/lash-sim:crash_point_matrix__test -- --nocapture
-kiln run //crates/lash-sim:crash_point_matrix__test -- --include-ignored parent_end
+kiln test --test_output=all --test_arg=--nocapture \
+  //crates/lash-sim:crash_point_matrix__test
+kiln test --test_output=all --test_arg=--include-ignored \
+  --test_arg=parent_end //crates/lash-sim:crash_point_matrix__test
 ```
 
 The same cells run against a live `restate-server` (FIG-3872):
@@ -339,10 +341,16 @@ the entry to `chaos_soak::findings::FIXED` and makes its regression test
 live, so its replay keeps passing.
 
 ```sh
-kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_smoke --nocapture
+kiln test --test_output=all --test_arg=chaos_soak_smoke \
+  --test_arg=--exact --test_arg=--nocapture //crates/lash-sim:chaos_soak__test
 LASH_CHAOS_SOAK_SEED=0x1001 LASH_CHAOS_SOAK_EPOCHS=1 \
-  kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_smoke --nocapture
+  kiln test --test_env=LASH_CHAOS_SOAK_SEED \
+    --test_env=LASH_CHAOS_SOAK_EPOCHS --test_output=all \
+    --test_arg=chaos_soak_smoke --test_arg=--exact --test_arg=--nocapture \
+    //crates/lash-sim:chaos_soak__test
 just chaos-soak 30m
+# Admit the full local 90-minute execution through Kiln's gate scheduler.
+kiln gate lash <fork> -- just chaos-soak
 ```
 
 ## Search fleet

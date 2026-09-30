@@ -111,8 +111,10 @@ a deterministic instruction budget. The ratchet has three layers:
 To re-record after a deliberate change, run:
 
 ```sh
-TEST262_BLESS=1 TEST262_EVIDENCE=/tmp/test262-evidence.tsv \
-  kiln run //crates/lash-typescript:test262_full__test
+. ./env.sh
+BUILD_WORKSPACE_DIRECTORY="$PWD" TEST262_BLESS=1 \
+  TEST262_EVIDENCE=/tmp/test262-evidence.tsv \
+  cargo test -p lash-internal-typescript --locked --test test262_full
 ```
 
 This rewrites every `outcomes/**/*.tsv` shard from a full run and prints

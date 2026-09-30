@@ -299,9 +299,7 @@ fn fixture_root() -> PathBuf {
     crate_dir().join("testdata/replay-corpus")
 }
 
-/// The crate's source directory: the checkout's own under `kiln run`, whose
-/// working directory is the runfiles tree, and the manifest directory
-/// otherwise.
+/// The crate's source directory in a Buck2 test workspace or Cargo checkout.
 fn crate_dir() -> PathBuf {
     std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
         || Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf(),

@@ -18,8 +18,9 @@ rather than serializing anything new:
 - ``tool-intent-journals``: the checked-in Restate tool-intent journal corpus;
 - ``replay-corpus``: the deterministic ``RecordedRuntimeEffect`` journals.
 
-``--regenerate`` first re-runs the committed generators (the ignored Rust
-capture tests) so the sources are fresh. The durable-read trees are not checked
+``--regenerate`` first re-runs the committed generators through Cargo after
+the caller sources ``./env.sh``. The ignored Rust capture tests then refresh
+the sources. The durable-read trees are not checked
 in -- each backend's round-trip law proves the tagged build reads what it
 writes -- so a real capture needs ``--regenerate`` to produce them; without it
 the tool snapshots whatever trees are present and refuses a missing one. A real
@@ -52,30 +53,33 @@ REGENERATE_DURABLE_READ = {"LASH_REGENERATE_DURABLE_READ_FIXTURES": "1"}
 SQLITE_REGENERATE = (
     REGENERATE_DURABLE_READ,
     [
-        "kiln", "run", "//crates/lash-sqlite-store:durable_read_fixture__test", "--",
-        "regenerate_sqlite_durable_fixture", "--ignored", "--exact",
+        "cargo", "test", "-p", "lash-internal-sqlite-store", "--locked",
+        "--test", "durable_read_fixture",
+        "regenerate_sqlite_durable_fixture", "--", "--ignored", "--exact",
     ],
 )
 POSTGRES_REGENERATE = (
     REGENERATE_DURABLE_READ,
     [
-        "kiln", "run", "//crates/lash-postgres-store:durable_read_fixture__test", "--",
-        "regenerate_postgres_durable_fixture", "--ignored", "--exact",
+        "cargo", "test", "-p", "lash-internal-postgres-store", "--locked",
+        "--test", "durable_read_fixture",
+        "regenerate_postgres_durable_fixture", "--", "--ignored", "--exact",
     ],
 )
 REPLAY_CORPUS_REGENERATE = (
     {"LASH_REGENERATE_REPLAY_CORPUS": "1"},
     [
-        "kiln", "run", "//crates/lash-restate:lash-restate__unit_test", "--",
-        "tests::replay_corpus::regenerate_replay_corpus_fixtures", "--ignored", "--exact",
+        "cargo", "test", "-p", "lash-internal-restate", "--locked", "--lib",
+        "tests::replay_corpus::regenerate_replay_corpus_fixtures", "--",
+        "--ignored", "--exact",
     ],
 )
 TOOL_INTENT_CAPTURE = (
     {},
     [
-        "kiln", "run", "//crates/lash-restate:lash-restate__unit_test", "--",
+        "cargo", "test", "-p", "lash-internal-restate", "--locked", "--lib",
         "tests::recording_context::capture_tool_intent_journal_corpus_from_real_endpoint_interruptions",
-        "--ignored", "--exact",
+        "--", "--ignored", "--exact",
     ],
 )
 

@@ -1074,13 +1074,23 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("--test_timeout=1200", just_cross_backend)
 
     def test_active_test_callers_use_the_test_interface(self) -> None:
-        sources = {"justfile": JUSTFILE.read_text(encoding="utf-8")}
-        sources.update(
-            {
-                str(path.relative_to(ROOT)): path.read_text(encoding="utf-8")
-                for path in (ROOT / "scripts").rglob("*.sh")
-            }
-        )
+        tracked = subprocess.check_output(
+            ["git", "ls-files", "-z"], cwd=ROOT
+        ).decode().split("\0")
+        guidance = [
+            ROOT / relative
+            for relative in tracked
+            if relative
+            and (
+                relative in {"justfile", ".gitignore"}
+                or pathlib.PurePosixPath(relative).suffix
+                in {".md", ".py", ".rs", ".sh"}
+            )
+        ]
+        sources = {
+            str(path.relative_to(ROOT)): path.read_text(encoding="utf-8")
+            for path in guidance
+        }
         for path, source in sources.items():
             with self.subTest(path=path):
                 self.assertIsNone(
@@ -1092,10 +1102,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         chaos = justfile.split("chaos-soak duration='90m' seed='':", 1)[1].split(
             "# Opt-in three-backend", 1
         )[0]
-        self.assertIn("kiln test --test_timeout=6000 --test_output=all", chaos)
+        self.assertIn("kiln test --local-test-execution --no-test-cache", chaos)
+        self.assertIn('test_timeout="$(python3 scripts/chaos_soak_timeout.py', chaos)
+        self.assertIn('--test_timeout="$test_timeout"', chaos)
         for value in (
             "LASH_CHAOS_SOAK_DURATION={{duration}}",
             "LASH_CHAOS_SOAK_SEED={{seed}}",
+            "LASH_CHAOS_SOAK_EPOCHS",
+            "LASH_CHAOS_SOAK_STEPS",
             "--test_arg=chaos_soak_release",
             "--test_arg=--exact",
             "--test_arg=--ignored",
@@ -1103,8 +1117,37 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn(value, chaos)
         attachment = sources["scripts/agent-workbench-attachment-usage-gate.sh"]
         self.assertIn("kiln test --test_timeout=300 --test_output=all", attachment)
-        self.assertIn("--test_arg=attachment_usage_gate", attachment)
+        self.assertIn(
+            "--test_arg=tests::attachments_usage_tests::attachment_usage_gate",
+            attachment,
+        )
         self.assertIn("--test_arg=--exact", attachment)
+
+    def test_chaos_soak_timeout_uses_the_runtime_duration_grammar(self) -> None:
+        parser = ROOT / "scripts" / "chaos_soak_timeout.py"
+        for value, expected in (
+            ("2h", "7800"),
+            ("90m", "6000"),
+            ("120s", "720"),
+            ("45", "645"),
+            (" 2m ", "720"),
+        ):
+            with self.subTest(value=value):
+                result = subprocess.run(
+                    [sys.executable, str(parser), value],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+        for value in ("", "m", "2d", "-1m", "1.5h"):
+            with self.subTest(value=value):
+                result = subprocess.run(
+                    [sys.executable, str(parser), value],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 2)
 
     def test_soak_callers_forward_only_declared_runtime_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1124,6 +1167,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             environment["KILN_STUB_LOG"] = str(calls)
             environment.pop("LASH_POSTGRES_DATABASE_URL", None)
             environment.pop("LASH_REQUIRE_POSTGRES", None)
+            for name in (
+                "LASH_STORE_CONTRACT_PROPTEST_SEED",
+                "LASH_SESSION_GRAPH_PROPTEST_SEED",
+                "LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED",
+                "LASH_CHAOS_SOAK_EPOCHS",
+                "LASH_CHAOS_SOAK_STEPS",
+            ):
+                environment.pop(name, None)
 
             def run(
                 *arguments: str, **extra: str
@@ -1147,7 +1198,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 )
                 return result, rows
 
-            result, rows = run("store-contract-soak", "7")
+            result, rows = run(
+                "store-contract-soak",
+                "7",
+                LASH_STORE_CONTRACT_PROPTEST_SEED="store-secret-seed",
+                LASH_SESSION_GRAPH_PROPTEST_SEED="session-secret-seed",
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(len(rows), 6)
             for arguments in rows:
@@ -1157,9 +1213,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertIn("--test_arg=--nocapture", arguments)
                 self.assertNotIn("--local-test-execution", arguments)
                 self.assertNotIn("--no-test-cache", arguments)
+                self.assertNotIn("store-secret-seed", arguments)
+                self.assertNotIn("session-secret-seed", arguments)
             self.assertEqual(
                 sum(
                     "--test_env=LASH_STORE_CONTRACT_PROPTEST_CASES=7" in row
+                    for row in rows
+                ),
+                3,
+            )
+            self.assertEqual(
+                sum(
+                    "--test_env=LASH_STORE_CONTRACT_PROPTEST_SEED" in row
+                    for row in rows
+                ),
+                3,
+            )
+            self.assertEqual(
+                sum(
+                    "--test_env=LASH_SESSION_GRAPH_PROPTEST_SEED" in row
                     for row in rows
                 ),
                 3,
@@ -1172,11 +1244,28 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 3,
             )
 
+            result, rows = run(
+                "runtime-persistence-soak",
+                "8",
+                LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED="runtime-secret-seed",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(rows), 3)
+            for arguments in rows:
+                self.assertIn(
+                    "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED",
+                    arguments,
+                )
+                self.assertNotIn("runtime-secret-seed", arguments)
+                self.assertNotIn("--local-test-execution", arguments)
+                self.assertNotIn("--no-test-cache", arguments)
+
             database = "postgres://fixture.invalid/database"
             result, rows = run(
                 "runtime-persistence-soak",
                 "9",
                 LASH_POSTGRES_DATABASE_URL=database,
+                LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED="runtime-secret-seed",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(len(rows), 3)
@@ -1187,9 +1276,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     "--test_env=LASH_POSTGRES_DATABASE_URL",
                     "--test_env=LASH_REQUIRE_POSTGRES=1",
                     "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES=9",
+                    "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED",
                 ):
                     self.assertIn(argument, arguments)
                 self.assertNotIn(database, arguments)
+                self.assertNotIn("runtime-secret-seed", arguments)
 
             result, rows = run("cross-backend-store-soak", "5", "17")
             self.assertNotEqual(result.returncode, 0)
@@ -1214,19 +1305,47 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertIn(argument, rows[0])
             self.assertNotIn(database, rows[0])
 
-            result, rows = run("chaos-soak", "2m", "42")
+            result, rows = run("chaos-soak", "2m")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(len(rows), 1)
             for argument in (
-                "--test_timeout=6000",
-                "--test_output=all",
+                "--local-test-execution",
+                "--no-test-cache",
+                "--test_timeout=720",
                 "--test_env=LASH_CHAOS_SOAK_DURATION=2m",
+                "--test_env=LASH_CHAOS_SOAK_SEED=",
+            ):
+                self.assertIn(argument, rows[0])
+
+            result, rows = run(
+                "chaos-soak",
+                "2h",
+                "42",
+                LASH_CHAOS_SOAK_EPOCHS="epoch-secret-value",
+                LASH_CHAOS_SOAK_STEPS="step-secret-value",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(rows), 1)
+            for argument in (
+                "--local-test-execution",
+                "--no-test-cache",
+                "--test_timeout=7800",
+                "--test_output=all",
+                "--test_env=LASH_CHAOS_SOAK_DURATION=2h",
                 "--test_env=LASH_CHAOS_SOAK_SEED=42",
+                "--test_env=LASH_CHAOS_SOAK_EPOCHS",
+                "--test_env=LASH_CHAOS_SOAK_STEPS",
                 "--test_arg=chaos_soak_release",
                 "--test_arg=--exact",
                 "--test_arg=--ignored",
             ):
                 self.assertIn(argument, rows[0])
+            self.assertNotIn("epoch-secret-value", rows[0])
+            self.assertNotIn("step-secret-value", rows[0])
+
+            result, rows = run("chaos-soak", "not-a-duration", "42")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(rows, [])
 
             calls.unlink(missing_ok=True)
             result = subprocess.run(
@@ -1246,7 +1365,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             for argument in (
                 "--test_timeout=300",
                 "--test_output=all",
-                "--test_arg=attachment_usage_gate",
+                "--test_arg=tests::attachments_usage_tests::attachment_usage_gate",
                 "--test_arg=--exact",
                 "--test_arg=--test-threads=1",
             ):

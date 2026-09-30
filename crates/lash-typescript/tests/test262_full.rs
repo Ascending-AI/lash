@@ -1,6 +1,6 @@
 //! Test262 conformance, full selection (FIG-3646): every vendored test keeps
-//! its recorded outcome. `TEST262_BLESS=1 kiln run` rewrites the record from
-//! the run instead (see README.md).
+//! its recorded outcome. The documented `TEST262_BLESS=1 cargo test` recipe
+//! rewrites the record from the run instead (see README.md).
 #![expect(
     clippy::expect_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the helpers around them in this target are test code too"

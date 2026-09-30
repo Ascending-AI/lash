@@ -8,8 +8,10 @@
 //! byte-identical step that asks the pinned Node live:
 //!
 //! ```console
-//! kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
-//!     --ignored --exact testing::cell_conformance::node_oracle::generated::write_the_generated_corpus
+//! . ./env.sh
+//! cargo test -p lash-internal-protocol-rlm --locked --lib \
+//!     testing::cell_conformance::node_oracle::generated::write_the_generated_corpus \
+//!     -- --ignored --exact
 //! ```
 //!
 //! The cacheable test partition regenerates every session from its seed,
@@ -35,8 +37,8 @@ use super::{Observation, PINNED_NODE, run_session};
 /// every drift failure names it. The generator draws its rejected cells from
 /// the census's probe list, so a census change can change what a seed draws:
 /// regenerate after one.
-const REGENERATE: &str = "kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
-     --ignored --exact testing::cell_conformance::node_oracle::generated::write_the_generated_corpus";
+const REGENERATE: &str = ". ./env.sh && cargo test -p lash-internal-protocol-rlm --locked --lib \
+     testing::cell_conformance::node_oracle::generated::write_the_generated_corpus -- --ignored --exact";
 
 const README: &str = include_str!("../../../../../lash-typescript/README.md");
 
@@ -269,7 +271,7 @@ pub(super) fn node_answers(
 /// `round-trip/<name>.json` per round-trip row, each with the pinned Node's
 /// answer. Deliberate, like `generate.mjs`, and byte-identical run to run.
 #[test]
-#[ignore = "asks the pinned Node live and writes the generated corpus; run through `kiln run`"]
+#[ignore = "asks the pinned Node live and writes the generated corpus; run the documented Cargo recipe"]
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the live Node oracle is a test host capability.
 fn write_the_generated_corpus() {
     fn write_shard(path: &std::path::Path, value: &impl Serialize) {
