@@ -3,6 +3,31 @@ use lash_core::SessionCommitStore;
 use lash_core::runtime::RuntimeSessionState;
 use lash_sansio::SessionId;
 
+#[test]
+fn in_flight_store_calls_are_published_only_with_their_latency() {
+    let metrics = RuntimePerfStoreMetrics::default();
+    let observation = metrics.observe_call("load_session_head_meta");
+    let snapshot = metrics.snapshot();
+    let counters = snapshot.counters;
+    let samples = snapshot.latency_samples;
+    assert_eq!(counters["store_calls.total"], 0);
+    assert!(samples.is_empty());
+
+    drop(observation);
+    let snapshot = metrics.snapshot();
+    let counters = snapshot.counters;
+    let samples = snapshot.latency_samples;
+    assert_eq!(counters["store_calls.load_session_head_meta"], 1);
+    assert_eq!(
+        counters["store.op.load_session_head_meta.observed_micros.count"],
+        1
+    );
+    assert_eq!(
+        samples["store.op.load_session_head_meta.observed_micros"].len(),
+        1
+    );
+}
+
 fn test_state(session_id: &SessionId) -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: session_id.clone(),

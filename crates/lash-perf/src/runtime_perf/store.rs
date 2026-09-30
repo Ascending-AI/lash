@@ -5,6 +5,9 @@
 //! that future returns, including errors. The bracket therefore includes any
 //! pool or connection acquisition, backend I/O, and thread dispatch performed
 //! by the inner implementation; it does not isolate any of those components.
+//! Counts and samples publish together when the observation ends. A snapshot
+//! includes completed observations under one lock, so background calls still in
+//! flight cannot leave a count without a sample or cross the report's reads.
 //! Decorator-side commit sizing and node bookkeeping sit outside the bracket.
 //! Queue-driver wake dispatch does not pass through this decorator at all and
 //! remains owned by the existing `wait.*` phase metrics.
@@ -49,7 +52,7 @@ pub(crate) struct RuntimePerfCommitMeasurement {
 
 #[derive(Default)]
 pub(crate) struct RuntimePerfStoreMetrics {
-    operations: Mutex<BTreeMap<String, RuntimePerfStoreOperationMeasurement>>,
+    operations: Mutex<BTreeMap<&'static str, Vec<u64>>>,
     commits: Mutex<Vec<RuntimePerfCommitMeasurement>>,
     timings: Mutex<BTreeMap<String, RuntimePerfStoreTiming>>,
     pool_checkout_wait_nanos: Mutex<Vec<u64>>,
@@ -61,10 +64,9 @@ pub(crate) struct RuntimePerfStoreTiming {
     pub(crate) total_micros: u64,
 }
 
-#[derive(Default)]
-struct RuntimePerfStoreOperationMeasurement {
-    calls: u64,
-    observed_nanos: Vec<u64>,
+pub(crate) struct RuntimePerfStoreSnapshot {
+    pub(crate) counters: BTreeMap<String, u64>,
+    pub(crate) latency_samples: BTreeMap<String, Vec<f64>>,
 }
 
 struct RuntimePerfStoreCallObservation<'a> {
@@ -79,20 +81,14 @@ impl Drop for RuntimePerfStoreCallObservation<'_> {
         self.metrics
             .operations
             .lock_recover()
-            .entry(self.operation.to_string())
+            .entry(self.operation)
             .or_default()
-            .observed_nanos
             .push(elapsed_nanos);
     }
 }
 
 impl RuntimePerfStoreMetrics {
     fn observe_call(&self, operation: &'static str) -> RuntimePerfStoreCallObservation<'_> {
-        self.operations
-            .lock_recover()
-            .entry(operation.to_string())
-            .or_default()
-            .calls += 1;
         RuntimePerfStoreCallObservation {
             metrics: self,
             operation,
@@ -124,45 +120,34 @@ impl RuntimePerfStoreMetrics {
             });
     }
 
-    pub(crate) fn call_counters(&self) -> BTreeMap<String, u64> {
+    pub(crate) fn snapshot(&self) -> RuntimePerfStoreSnapshot {
         let operations = self.operations.lock_recover();
-        let mut counters = operations
-            .iter()
-            .map(|(operation, measurement)| (format!("store_calls.{operation}"), measurement.calls))
-            .collect::<BTreeMap<_, _>>();
-        counters.insert(
-            "store_calls.total".to_string(),
-            operations
-                .values()
-                .map(|measurement| measurement.calls)
-                .sum(),
-        );
-        for (operation, measurement) in operations.iter() {
+        let mut counters = BTreeMap::new();
+        let mut latency_samples = BTreeMap::new();
+        let mut total_calls = 0;
+        for (operation, observed_nanos) in operations.iter() {
+            let calls = observed_nanos.len() as u64;
+            total_calls += calls;
+            counters.insert(format!("store_calls.{operation}"), calls);
             let family = format!("store.op.{operation}.observed_micros");
-            counters.insert(format!("{family}.count"), measurement.calls);
+            counters.insert(format!("{family}.count"), calls);
             counters.insert(
                 format!("{family}.total"),
-                measurement.observed_nanos.iter().sum::<u64>() / 1_000,
+                observed_nanos.iter().sum::<u64>() / 1_000,
+            );
+            latency_samples.insert(
+                family,
+                observed_nanos
+                    .iter()
+                    .map(|nanos| *nanos as f64 / 1_000.0)
+                    .collect(),
             );
         }
-        counters
-    }
-
-    pub(crate) fn observed_latency_samples(&self) -> BTreeMap<String, Vec<f64>> {
-        self.operations
-            .lock_recover()
-            .iter()
-            .map(|(operation, measurement)| {
-                (
-                    format!("store.op.{operation}.observed_micros"),
-                    measurement
-                        .observed_nanos
-                        .iter()
-                        .map(|nanos| *nanos as f64 / 1_000.0)
-                        .collect(),
-                )
-            })
-            .collect()
+        counters.insert("store_calls.total".to_string(), total_calls);
+        RuntimePerfStoreSnapshot {
+            counters,
+            latency_samples,
+        }
     }
 
     pub(crate) fn record_pool_checkout_waits(&self, samples: Vec<u64>) {

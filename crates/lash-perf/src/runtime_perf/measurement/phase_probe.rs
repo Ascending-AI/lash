@@ -829,10 +829,9 @@ async fn run_once_inner(
                 .insert(format!("runtime_work.sql_statements.{verb}"), count);
         }
     }
-    extra_counters
-        .lock_recover()
-        .extend(store_metrics.call_counters());
-    let metric_samples = store_metrics.observed_latency_samples();
+    let snapshot = store_metrics.snapshot();
+    extra_counters.lock_recover().extend(snapshot.counters);
+    let metric_samples = snapshot.latency_samples;
     let mut metric_samples_ms = BTreeMap::new();
     let pool_checkout_wait_ms = store_metrics.pool_checkout_wait_samples_ms();
     if !pool_checkout_wait_ms.is_empty() {

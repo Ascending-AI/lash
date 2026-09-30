@@ -362,7 +362,7 @@ async fn run_high_traffic_step(
     let mut runtime = build_runtime_with_sqlite_store(scenario, sqlite_root.clone()).await?;
     let core = runtime.core();
     let metrics = runtime.store_metrics();
-    let calls_before = metrics.call_counters();
+    let calls_before = metrics.snapshot().counters;
     let timings_before = metrics.timing_snapshot();
     let sessions = take_population_sessions(&mut runtime, scenario, population).await?;
     let allocation_before = allocator_stats();
@@ -424,7 +424,7 @@ async fn run_high_traffic_step(
     operations.sort_by_key(|operation| operation.ordinal);
     let rss_kb = process_memory_sample().rss_kb;
     let allocations = alloc_delta(allocation_before, allocator_stats());
-    let calls_after = metrics.call_counters();
+    let calls_after = metrics.snapshot().counters;
     let timings_after = metrics.timing_snapshot();
     let commits = counter_delta(
         &calls_before,
