@@ -2186,11 +2186,16 @@ async fn runners_for_case_with_clock(
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
     std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential root");
-    let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open_with_clock(&sqlite_case_root, Arc::clone(&clock))
-            .await
-            .expect("open SQLite differential store"),
+    let sqlite_backend = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
+            &sqlite_case_root,
+            lash_sqlite_store::SqliteStoreSetOptions::default(),
+            Arc::clone(&clock),
+        )
+        .await
+        .expect("open the complete SQLite differential store set"),
     );
+    let sqlite_factory = sqlite_backend.session_store_factory();
     let sqlite_path =
         sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
     let sqlite_store = admit_test_session(sqlite_factory.clone(), &create_request)
@@ -2220,15 +2225,7 @@ async fn runners_for_case_with_clock(
         lash_conformance::recording_backend_over(memory_backend.clone()),
     );
     let sqlite_lifecycle: lash::Backend =
-        held_work_lifecycle_backend(lash_conformance::recording_backend_over(Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
-                &sqlite_case_root,
-                lash_sqlite_store::SqliteStoreSetOptions::default(),
-                Arc::clone(&clock),
-            )
-            .await
-            .expect("open the SQLite lifecycle store set"),
-        )));
+        held_work_lifecycle_backend(lash_conformance::recording_backend_over(sqlite_backend));
     // PostgreSQL is storage only (ADR 0104): the lifecycle runs over its
     // store set, and the session delete it drives needs some effect-host
     // authority to retire scopes against — a recording host is enough; the
