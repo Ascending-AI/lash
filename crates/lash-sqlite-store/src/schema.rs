@@ -471,6 +471,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     merge_key         TEXT,
     enqueued_at_ms    INTEGER NOT NULL,
     submission_digest TEXT NOT NULL, -- Written once at admission (ADR 0101 §8).
+    settled_operation_key TEXT, -- The original applying commit receipt; no separate completion marker.
     admitted_root     TEXT, -- The root whose fenced admission holds the batch; NULL while open.
     admitted_by       TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     terminal_cause    TEXT, -- NULL while open or admitted; the tombstone's cause after.
@@ -487,7 +488,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
-    CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled') AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL)),
+    CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );

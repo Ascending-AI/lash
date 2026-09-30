@@ -1231,6 +1231,8 @@ struct RuntimeCommitIntent<'a> {
     failure_evidence: &'a [crate::TurnFailureEvidence],
     #[serde(skip_serializing_if = "Option::is_none")]
     outcome: Option<&'a super::TurnCommitOutcome>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    command_outcomes: &'a std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     /// Admitted input a commit hands back or drops (FIG-3531, FIG-3927):
@@ -1277,6 +1279,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             failure_evidence: &commit.failure_evidence,
             outcome: commit.outcome.as_ref(),
+            command_outcomes: &commit.command_outcomes,
             completed_queue_batches: commit
                 .ingress
                 .iter()

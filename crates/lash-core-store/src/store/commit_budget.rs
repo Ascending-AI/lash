@@ -334,7 +334,13 @@ impl RuntimeCommit {
             .map(|frame_node_id| measure_json(serde_json::to_vec(frame_node_id)))
             .transpose()?
             .unwrap_or_default();
-        let turn_result_bytes = measure_json(serde_json::to_vec(&self.turn_commit))?;
+        let command_outcome_bytes = if self.command_outcomes.is_empty() {
+            0
+        } else {
+            measure_json(serde_json::to_vec(&self.command_outcomes))?
+        };
+        let turn_result_bytes = measure_json(serde_json::to_vec(&self.turn_commit))?
+            .saturating_add(command_outcome_bytes);
         let total_bytes = session_config_bytes
             .saturating_add(graph_delta_bytes)
             .saturating_add(checkpoint_bytes)

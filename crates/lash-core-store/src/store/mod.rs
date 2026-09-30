@@ -597,7 +597,7 @@ impl RuntimeCommit {
             turn_commit: _,
             ingress,
             applied_commands,
-            command_outcome,
+            command_outcomes,
             // Carried unchanged from the head; the store refuses a change.
             pending_follow_on: _,
             interrupted_turn_input_turn_id,
@@ -610,7 +610,7 @@ impl RuntimeCommit {
         debug_assert!(
             ingress.is_none()
                 && applied_commands.is_none()
-                && command_outcome.is_none()
+                && command_outcomes.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
                 && interrupted_turn_cancel_intent.is_none()
@@ -686,9 +686,14 @@ impl RuntimeCommit {
                 .applied_commands
                 .as_ref()
                 .is_some_and(|commands| !commands.batch_ids.is_empty());
-        if self.command_outcome.is_some() && self.applied_commands.is_none() {
+        if self.command_outcomes.keys().any(|batch_id| {
+            !self
+                .applied_commands
+                .as_ref()
+                .is_some_and(|commands| commands.batch_ids.contains(batch_id))
+        }) {
             return Err(StoreError::Backend(
-                "a commit carrying a session command's outcome must apply its command".to_string(),
+                "command outcomes must name batches settled by the same commit".to_string(),
             ));
         }
         if settles_rows && self.drive_fence.is_none() {
@@ -767,7 +772,7 @@ impl RuntimeCommit {
             turn_commit: RuntimeTurnCommitStamp::new(operation),
             ingress: None,
             applied_commands: None,
-            command_outcome: None,
+            command_outcomes: Default::default(),
             pending_follow_on: state.pending_follow_on.as_deref().cloned(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -1539,13 +1544,11 @@ pub trait QueuedWorkStore: Send + Sync {
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
 
     /// The receipt of the session-command head commit that completed
-    /// `batch_id`, read from the completion marker that commit wrote
-    /// atomically; `None` when no commit completed it. Cancellation removes
-    /// the queued row without writing this marker, so an accepted batch that
-    /// has vanished can be classified without mistaking cancellation for
-    /// completion. The receipt carries what the command settled as, such as
-    /// an administrative compaction's
-    /// [`command_outcome`](RuntimeCommitReceipt::command_outcome)
+    /// `batch_id`, read through its terminal row's applying operation key.
+    /// The terminal row and the original commit receipt are written atomically.
+    /// `None` while open, cancelled, or vacuumed. The receipt carries what
+    /// the command settled as, such as an administrative compaction's
+    /// [`command_outcomes`](RuntimeCommitReceipt::command_outcomes)
     /// (FIG-4201).
     async fn queued_work_batch_completion(
         &self,

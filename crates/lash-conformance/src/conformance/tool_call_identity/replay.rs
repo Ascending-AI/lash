@@ -212,7 +212,7 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
                 .queued_work_batch_completion(&world.session_id, batch.batch_id.as_str())
                 .await
                 .expect("read the compaction's completion")
-                .and_then(|completion| completion.command_outcome),
+                .and_then(|completion| completion.command_outcomes.get(&batch.batch_id).cloned()),
             Some(crate::SessionCommandOutcome::CompactContext {
                 outcome: crate::CompactContextOutcome::Opened { .. },
             })

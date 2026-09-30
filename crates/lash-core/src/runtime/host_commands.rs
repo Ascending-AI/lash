@@ -670,7 +670,12 @@ impl LashRuntime {
         }
         commit.drive_fence = Some(Box::new(drive_fence.clone()));
         commit.applied_commands = Some(completion.clone());
-        commit.command_outcome = Some(outcome(&self.state, &persisted_node_ids));
+        let outcome = outcome(&self.state, &persisted_node_ids);
+        for batch_id in &completion.batch_ids {
+            commit
+                .command_outcomes
+                .insert(batch_id.clone(), outcome.clone());
+        }
         drop(RuntimeNamedPhase::begin(
             self.turn_phase_probe.clone(),
             SESSION_COMMAND_STAGED_PHASE,

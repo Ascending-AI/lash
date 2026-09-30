@@ -1141,3 +1141,6 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
         "a route refused at apply leaves the session on its provider"
     );
 }
+
+mod command_settlement;
+pub use command_settlement::*;

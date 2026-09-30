@@ -1046,28 +1046,6 @@ impl PostgresStore {
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
-            for batch_id in commit
-                .applied_commands
-                .iter()
-                .flat_map(|completion| &completion.batch_ids)
-            {
-                let marker =
-                    lash_core_execution::store_backend_support::session_command_batch_completion_key(
-                        &commit.session_id,
-                        batch_id,
-                    )?;
-                sqlx::query(session_sql().turn_commits.insert_marker.sql())
-                    .bind(commit.session_id.as_str())
-                    .bind(marker)
-                    .bind(receipt.turn_commit_hash)
-                    .bind(&result_json)
-                    .bind(None::<&str>)
-                    .bind(now as i64)
-                    .bind(false)
-                    .execute(&mut **tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
-            }
         }
         if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
             let closure = settlement.authorization();

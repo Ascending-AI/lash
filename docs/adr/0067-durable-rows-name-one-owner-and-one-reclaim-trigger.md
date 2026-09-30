@@ -99,6 +99,7 @@ silently become a whole-catalog blob sweep.
 | Process definition artifact | Its exact referrers | Cleanup after the last referrer edge is severed. Host names and versions belong in host storage. |
 | Session subscription | Registering session | The deleted-session frontier and zero remaining deliveries. A tombstone remains a `Revive` fence while that session can still speak. |
 | Host or platform subscription tombstone | Host or platform namespace | Permanent name fence; the namespace has no deleted-session frontier or purge lever. |
+| Session ingress tombstone | Its session | Host vacuum after its terminal transition, or session deletion. A command retains its first receipt and applying operation key until vacuum. |
 | Session mutation receipt | Registering session's replay eligibility | Host-selected retention, including after session deletion. |
 | Host or platform mutation receipt | Namespace replay eligibility | Explicit host retention through the trigger-store primitive. |
 | Fired occurrence | Committed delivery fan-out | Transactional reconciliation after zero delivery rows remain. |

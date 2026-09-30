@@ -340,6 +340,7 @@ table lash_queued_work_batches
   column obligation_stall_reason text nullable
   column obligation_state text nullable
   column session_id text not-null
+  column settled_operation_key text nullable
   column source_key text nullable
   column submission_digest text not-null
   column terminal_at_ms bigint nullable

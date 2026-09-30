@@ -140,14 +140,15 @@ that cannot settle is one whose bare settlement exceeds the budget, on a head a
 host lowered the budget below (ADR 0058): its drive stops at the typed
 refusal, and the command settles once the host raises the budget.
 
-Every command settles as a typed `SessionCommandOutcome` carried by its
-commit's receipt, so a submitter on any runtime reads
-`SessionCommandSettlement::Applied { receipt, outcome }`. A host submits with a
-stable idempotency key and gets a durable receipt
-(`SessionCommandAdmin::submit`); a resubmission under the key while the command
-is open names the same command. `settle` answers `Applied`, `Cancelled`, or
-`Pending` with the receipt when the drive has not applied the command by the
-deadline, and a host reattaches by the receipt. The convenience calls
+Head-writing host commands return their typed `SessionCommandOutcome` through
+`SessionCommandSettlement::Applied { receipt, outcome }`. Config transactions
+carry their typed applied, stale or refused result as described in §12;
+a catalog refresh answers `Durable`. A host submits with a stable idempotency
+key and gets a durable receipt (`SessionCommandAdmin::submit`). A resubmission
+with equal key and content returns the first receipt while the command is open
+or retained as a tombstone. `settle` answers the recorded result, `Cancelled`,
+or `Pending` with the receipt when the drive has not applied the command by
+the deadline, and a host reattaches by the receipt. The convenience calls
 (`append_messages`, `append_session_nodes`, `open_agent_frame`, the plugin
 operations, `compact_context`) submit and await. Dropping an await does not
 withdraw the command; `withdraw` does, transactionally, and answers
@@ -279,7 +280,8 @@ key, sequence, submitted delivery, digest, terminal cause, and terminal time,
 with no admission binding. A queued-work tombstone records `terminal_cause`
 and `terminal_at_ms`; an input's terminal state names its cause and it records
 `terminal_at_ms`. Cancelled items cannot reopen on retry. Terminal causes
-distinguish delivered input or wake, applied command, and cancellation.
+distinguish delivered input or wake, applied command, stale config revision,
+and cancellation.
 Open-row selection excludes tombstones. Host vacuum removes queued-work
 tombstones and withdrawn input; an input a root took keeps its tombstone
 beside that root's terminal evidence until session deletion.
@@ -336,8 +338,14 @@ transaction advances `config_revision` by one; other commits preserve it. A
 transaction whose expected revision the config has moved past publishes no
 config and settles with the typed `Stale { expected, actual }` outcome for its
 submitter. Its resolution is recorded before publication, so a redrive
-replays it. Command tombstones follow ordinary vacuum; replay after vacuum
-meets the revision check and cannot reapply the transaction. There is no
+replays it. The applying commit records each batch's outcome in
+`RuntimeCommitReceipt::command_outcomes`. A terminal command retains its first
+receipt identity, submission digest, terminal cause and time, with
+`settled_operation_key` linking to that original commit receipt. Reattachment
+and equal-key resubmission read its recorded outcome after later commits
+advance the head. The head revision compare-and-set, terminal rows and receipt
+commit atomically. Command tombstones follow ordinary vacuum; replay after
+vacuum meets the revision check and cannot reapply the transaction. There is no
 separate session-command completion marker. `RefreshToolCatalog` recomputes
 live sources.
 

@@ -50,7 +50,7 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         ingress: None::<IngressSettlement>,
         applied_commands: None,
-        command_outcome: None,
+        command_outcomes: Default::default(),
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,

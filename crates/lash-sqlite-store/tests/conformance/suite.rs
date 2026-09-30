@@ -1255,3 +1255,22 @@ lash_conformance::usage_ledger_store_tests!({
     };
     (backend, fixture)
 });
+mod session_commands {
+    use super::*;
+    lash_conformance::session_command_replay_tests!({
+        let backend = TestBackend::open(SUBSTRATE).await;
+        let stores = backend.as_stores();
+        let double_stores = Arc::clone(&stores);
+        let double = lash_restate_test::backend_with(
+            4357,
+            lash_restate_test::ServerConfig::default(),
+            move |_| Arc::clone(&double_stores),
+        )
+        .await
+        .expect("boot the command law's handler");
+        let host = double.restate().restate_effect_host();
+        let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+            as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+        ((backend, double), "sqlite-commands", host, stores, runner)
+    });
+}

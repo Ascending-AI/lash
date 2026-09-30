@@ -260,13 +260,13 @@ pub async fn raising_the_budget_settles_a_stranded_command(
         .expect("the recovered command wrote its settlement");
     assert!(
         matches!(
-            completion.command_outcome,
+            completion.command_outcomes.get(&stranded),
             Some(crate::SessionCommandOutcome::AppendSessionNodes {
                 outcome: crate::AppendSessionNodesOutcome::Appended { .. },
             })
         ),
         "the recovered append lands: {:?}",
-        completion.command_outcome
+        completion.command_outcomes.get(&stranded)
     );
     let head = crate::conformance::helpers::load_window_state(&parts.store, &parts.session_id)
         .await

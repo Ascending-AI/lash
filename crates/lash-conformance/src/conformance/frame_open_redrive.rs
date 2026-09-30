@@ -1112,7 +1112,9 @@ impl LawSession {
             .expect("read the command's completion")
             .map(|completion| {
                 completion
-                    .command_outcome
+                    .command_outcomes
+                    .get(&receipt.batch_id)
+                    .cloned()
                     .expect("a settled host command carries its outcome")
             })
     }
