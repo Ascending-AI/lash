@@ -138,8 +138,8 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             "Turn {} in extended JSONL trace benchmark mode. Run the Lashlang block and finish exactly: runtime perf benchmark ok",
             turn_index + 1
         ),
-        RuntimePerfScenario::QueuedWorkClaimStress => format!(
-            "Turn {} in queued-work claim stress benchmark mode. Claim, renew, complete, and verify queued work.",
+        RuntimePerfScenario::QueuedWorkAdmissionStress => format!(
+            "Turn {} in queued-work admission stress benchmark mode. Admit, renew, complete, and verify queued work.",
             turn_index + 1
         ),
         RuntimePerfScenario::TurnInputIngressInterrupt => format!(
@@ -158,7 +158,7 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             "Turn {} in the cancellation round-trip benchmark. Wait for the exact-turn cancellation request.",
             turn_index + 1
         ),
-        RuntimePerfScenario::IngressClaimProjection => format!(
+        RuntimePerfScenario::IngressAdmissionProjection => format!(
             "Turn {} in the active-ingress projection benchmark. Continue after the checkpoint and incorporate the injected marker.",
             turn_index + 1
         ),

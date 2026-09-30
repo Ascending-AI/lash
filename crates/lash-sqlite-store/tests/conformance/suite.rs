@@ -140,10 +140,10 @@ async fn promise_authority() -> (
     (backend, host)
 }
 
+#[path = "admission_atomicity.rs"]
+mod admission_atomicity;
 #[path = "attachment_store.rs"]
 mod attachment_store;
-#[path = "claim_atomicity.rs"]
-mod claim_atomicity;
 #[path = "generation_drain.rs"]
 mod generation_drain;
 #[path = "lineage.rs"]

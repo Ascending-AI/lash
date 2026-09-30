@@ -699,7 +699,7 @@ impl Driver {
         Ok(admission)
     }
 
-    /// Register a child under the root that actually claimed `input`.
+    /// Register a child under the root that actually admitted `input`.
     pub(super) async fn register_held_child(
         &mut self,
         session: &SessionId,

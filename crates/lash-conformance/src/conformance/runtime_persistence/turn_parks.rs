@@ -1,7 +1,7 @@
 //! A parked turn's record (FIG-3586, FIG-3600, FIG-3587, FIG-3659), at the
 //! store seam.
 //!
-//! A turn parks when it aborts on a replay refusal: it keeps every claim it
+//! A turn parks when it aborts on a replay refusal: it keeps every admission it
 //! holds, and the store records why, one record per session. The record lives
 //! exactly while its turn does — a cancel that withdraws the parked turn's
 //! held input clears it, as does any commit of the session. The first park

@@ -97,7 +97,7 @@ pub(super) fn mini_runtime_queued_input_hidden(events: &[DeliveredBoundary]) -> 
         OracleVerdict::failed(
             SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE,
             format!(
-                "queued input `{}` leaked into a provider turn before explicit claim",
+                "queued input `{}` leaked into a provider turn before explicit admission",
                 queued.boundary_id
             ),
         )
@@ -109,7 +109,7 @@ pub(super) fn mini_runtime_queued_input_hidden(events: &[DeliveredBoundary]) -> 
     }
 }
 
-pub(super) fn mini_runtime_cancellation_prevents_idle_claim(
+pub(super) fn mini_runtime_cancellation_prevents_idle_admission(
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
     let queued = events
@@ -156,7 +156,7 @@ pub(super) fn mini_runtime_cancellation_prevents_idle_claim(
     if queued.contains(target) {
         OracleVerdict::passed(
             SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE,
-            "cancelled queued input targets a generated queued boundary and prevents later idle claim",
+            "cancelled queued input targets a generated queued boundary and prevents later idle admission",
         )
     } else {
         OracleVerdict::failed(

@@ -180,7 +180,7 @@ in its doc and takes no session.
 `DriveEpochStore` (`crates/lash-core-store/src/store/drive_fence.rs:249`) and
 `QueuedWorkStore` (`crates/lash-core-store/src/store/mod.rs:1781`) keep their
 signatures verbatim, with one exception: `QueuedWorkStore` gains
-`has_claimable_queued_work` (below). `AttachmentManifest`'s four
+`has_admissible_queued_work` (below). `AttachmentManifest`'s four
 session-free reads (`list_uncommitted`, `forget_aged_uncommitted_intents`,
 `has_live_ref_for_id`, `list_all_refs`) are catalog-wide by their existing
 contract. `RootStore` (`crates/lash-core-store/src/store/root.rs:328`) keeps
@@ -386,7 +386,7 @@ async fn pending_turn_cancel_closure_pins(
 ) -> Result<Vec<TurnCancelClosureAuthorization>, StoreError>;
 
 // QueuedWorkStore: added. Replaces the factory's `Option<bool>` probe.
-async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
+async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
 
 // StoreMaintenance: replaces `vacuum(&self)`.
 #[async_trait::async_trait]
@@ -403,7 +403,7 @@ pub trait StoreMaintenance: Send + Sync {
 `turn_is_committed`, `record_turn_cancel_request`, `turn_cancel_request`,
 `turn_cancel_request_intent`, `reconcile_turn_cancel_winner`, `load_run_spec`,
 `list_turn_input_applications`, `orphaned_active_turn_ids` and
-`repair_orphaned_active_turn_inputs`. `has_claimable_queued_work` answers
+`repair_orphaned_active_turn_inputs`. `has_admissible_queued_work` answers
 `true` when the session has a pending queued batch or a deferred next-turn
 input. A store can always answer that, so today's "unknown" arm goes away
 (`crates/lash-core-execution/src/runtime/vocabulary.rs:651-676`).
@@ -475,7 +475,7 @@ means corrupt admission state, not a binding.
 | `delete_session` `:691` | `SessionCatalogStore::delete_session` |
 | `root_terminal` `:549` | `RootStore::root_terminal` (it already exists there) |
 | `pending_turn_cancel_closure_pins` `:621` | `TurnInputStore::pending_turn_cancel_closure_pins(session_id)` |
-| `has_claimable_queued_work` `:651` | `QueuedWorkStore::has_claimable_queued_work` |
+| `has_admissible_queued_work` `:651` | `QueuedWorkStore::has_admissible_queued_work` |
 | the deployment operations below | `DeploymentStore` |
 
 ```rust

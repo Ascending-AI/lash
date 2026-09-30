@@ -28114,9 +28114,9 @@
     },
     {
       "status": "passed",
-      "oracle_id": "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1",
+      "oracle_id": "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1",
       "observation_class": "model_property",
-      "message": "cancelled queued input targets a generated queued boundary and prevents later idle claim"
+      "message": "cancelled queued input targets a generated queued boundary and prevents later idle admission"
     },
     {
       "status": "passed",
@@ -28182,19 +28182,19 @@
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_command_only_queue_drain_completes_without_turn_work",
       "observation_class": "model_property",
-      "message": "runtime contract `runtime_scenario_command_only_queue_drain_completes_without_turn_work` passed semantic `runtime.command_only_queue_drain`: Command-only queued work claims no turn work and explicitly commits.. Evidence: queued_ingress, cancellation; adapter: command queue source keys drained"
+      "message": "runtime contract `runtime_scenario_command_only_queue_drain_completes_without_turn_work` passed semantic `runtime.command_only_queue_drain`: Command-only queued work admits no turn work and explicitly commits.. Evidence: queued_ingress, cancellation; adapter: command queue source keys drained"
     },
     {
       "status": "passed",
-      "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_queued_work_claim_keeps_pending_next_turn_input",
+      "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_queued_work_admission_keeps_pending_next_turn_input",
       "observation_class": "model_property",
-      "message": "runtime contract `runtime_scenario_queued_work_claim_keeps_pending_next_turn_input` passed semantic `runtime.queued_work_keeps_pending_input`: Queued turn work does not consume pending next-turn input.. Evidence: queued_ingress, cancellation; adapter: queued ingress kept a stable source key while live provider turns continued"
+      "message": "runtime contract `runtime_scenario_queued_work_admission_keeps_pending_next_turn_input` passed semantic `runtime.queued_work_keeps_pending_input`: Queued turn work does not consume pending next-turn input.. Evidence: queued_ingress, cancellation; adapter: queued ingress kept a stable source key while live provider turns continued"
     },
     {
       "status": "passed",
-      "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_claims_queued_turn_input_and_completes_it",
+      "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_admits_queued_turn_input_and_completes_it",
       "observation_class": "model_property",
-      "message": "runtime contract `runtime_scenario_claims_queued_turn_input_and_completes_it` passed semantic `runtime.queued_turn_input_completion`: Next-turn pending inputs are claimed, visible as held while live, and completed by commit.. Evidence: queued_ingress, cancellation; adapter: a queued turn input source key was followed by a completed subsequent turn"
+      "message": "runtime contract `runtime_scenario_admits_queued_turn_input_and_completes_it` passed semantic `runtime.queued_turn_input_completion`: Next-turn pending inputs are admitted, visible as held while live, and completed by commit.. Evidence: queued_ingress, cancellation; adapter: a queued turn input source key was followed by a completed subsequent turn"
     },
     {
       "status": "passed",
@@ -28206,7 +28206,7 @@
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel",
       "observation_class": "model_property",
-      "message": "runtime contract `runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel` passed semantic `runtime.checkpoint_redrive_cancel`: Active-turn input deferral, cancellation after deferral, and no later idle claim.. Evidence: queued_ingress, cancellation; adapter: queued input cancellation targeted a source key and observers converged"
+      "message": "runtime contract `runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel` passed semantic `runtime.checkpoint_redrive_cancel`: Active-turn input deferral, cancellation after deferral, and no later idle admission.. Evidence: queued_ingress, cancellation; adapter: queued input cancellation targeted a source key and observers converged"
     },
     {
       "status": "passed",

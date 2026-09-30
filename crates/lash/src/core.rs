@@ -192,7 +192,7 @@ impl LashCore {
     /// shutdown, or retirement.
     ///
     /// Turns are counted as well as processes (FIG-3586): a parked turn, or a
-    /// turn whose claims a crashed driver still holds, is unfinished work, so
+    /// turn whose admission a crashed driver still holds, is unfinished work, so
     /// the deployment is not drained until none remains. A store that cannot
     /// count its turns refuses rather than report zero.
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {

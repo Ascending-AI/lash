@@ -468,7 +468,7 @@ impl BenchmarkRuntime {
         turn.await.map(|turn| (turn, round_trip_started.elapsed()))
     }
 
-    pub(crate) async fn run_ingress_claim_projection(
+    pub(crate) async fn run_ingress_admission_projection(
         &self,
         input: lash::TurnInput,
         turn_id: &TurnId,

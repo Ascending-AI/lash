@@ -9,7 +9,7 @@
 //! for undriven input.
 //!
 //! The engine accepting the ask does not deliver the obligation: the drive's
-//! claim of the row — its admission — does, in the claim's own transaction.
+//! admission of the row does, in the admission's own transaction.
 //! The relay's claim covers only the ask and the admission after it. A claim
 //! that lapses because nothing admitted the row (the engine lost the drive)
 //! is retaken and asked again under its next attempt,

@@ -1,4 +1,4 @@
-//! Per-attempt usage ledgering tests, extracted from `lease_and_claims.rs` —
+//! Per-attempt usage ledgering tests, extracted from `lease_and_admissions.rs` —
 //! the parent sits on the 2500-line test budget
 //! `scripts/check-production-file-size.py` enforces. A real module rather
 //! than an `include!`, so `cargo fmt` keeps walking it.

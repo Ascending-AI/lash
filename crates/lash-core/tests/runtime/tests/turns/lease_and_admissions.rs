@@ -2,9 +2,9 @@ use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::testing::TestTurnDrive as _;
 
-#[path = "lease_and_claims/acceptance_window.rs"]
+#[path = "lease_and_admissions/acceptance_window.rs"]
 mod acceptance_window;
-#[path = "lease_and_claims/attempt_usage.rs"]
+#[path = "lease_and_admissions/attempt_usage.rs"]
 mod attempt_usage;
 use acceptance_window::{AcceptanceWindowJournalController, LATE_TAB_INPUT};
 
@@ -668,7 +668,7 @@ fn single_answer_provider(text: &str) -> TestProvider {
 pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_the_next_turn() {
     let double = kernel_double(0xa778, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let turn_id = &TurnId::from("claim-window-worker-replacement");
+    let turn_id = &TurnId::from("admission-window-worker-replacement");
     let store = double_unbound_recording_store(&double).await;
     let controller = Arc::new(AcceptanceWindowJournalController::new(Arc::clone(&store)));
     let shared: Arc<dyn lash_core::testing::EffectLayer> = controller.clone();
@@ -737,7 +737,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         ),
     )
     .await
-    .expect("the replacement must replay the journaled message block, not a re-claimed one");
+    .expect("the replacement must replay the journaled message block, not a re-admitted one");
     handler
         .close()
         .await
@@ -774,7 +774,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             "root",
-            "claim-window-late-input-drain",
+            "admission-window-late-input-drain",
         ))
         .await
         .expect("open the late-input handler");
@@ -794,7 +794,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
     handler.close().await.expect("close the late-input handler");
     assert!(
         drained.is_some(),
-        "the late input must be claimable by the next turn, not stranded"
+        "the late input must be admissible to the next turn, not stranded"
     );
 
     let settled = lash_core::store::TurnInputStore::list_turn_input_applications(

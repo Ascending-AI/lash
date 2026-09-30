@@ -3,7 +3,7 @@
 //! second input once.
 //!
 //! Two inputs are accepted before any drive runs, and each is its own root
-//! (the turn-input claim bound is one). The first drive commits the first
+//! (the turn-input admission bound is one). The first drive commits the first
 //! root and its worker dies before the drive ended. The tier redrives it,
 //! and the redrive replays its journal against a store that has moved on:
 //! the first input is consumed and the second is the queue's head. A redrive

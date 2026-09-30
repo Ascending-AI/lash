@@ -22,14 +22,14 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_command_only_queue_drain_completes_without_turn_work",
-        owned_invariant: "Command-only queued work claims no turn work and explicitly commits.",
+        owned_invariant: "Command-only queued work admits no turn work and explicitly commits.",
         semantic_oracle: "runtime.command_only_queue_drain",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
         oracle_id: "sim.oracle.scenario.runtime-contract.v1",
     },
     ScenarioContractSpec {
         suite: "runtime",
-        test_name: "runtime_scenario_queued_work_claim_keeps_pending_next_turn_input",
+        test_name: "runtime_scenario_queued_work_admission_keeps_pending_next_turn_input",
         owned_invariant: "Queued turn work does not consume pending next-turn input.",
         semantic_oracle: "runtime.queued_work_keeps_pending_input",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -37,8 +37,8 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     },
     ScenarioContractSpec {
         suite: "runtime",
-        test_name: "runtime_scenario_claims_queued_turn_input_and_completes_it",
-        owned_invariant: "Next-turn pending inputs are claimed, visible as held while live, and completed by commit.",
+        test_name: "runtime_scenario_admits_queued_turn_input_and_completes_it",
+        owned_invariant: "Next-turn pending inputs are admitted, visible as held while live, and completed by commit.",
         semantic_oracle: "runtime.queued_turn_input_completion",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
         oracle_id: "sim.oracle.scenario.runtime-contract.v1",
@@ -54,7 +54,7 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel",
-        owned_invariant: "Active-turn input deferral, cancellation after deferral, and no later idle claim.",
+        owned_invariant: "Active-turn input deferral, cancellation after deferral, and no later idle admission.",
         semantic_oracle: "runtime.checkpoint_redrive_cancel",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
         oracle_id: "sim.oracle.scenario.runtime-contract.v1",

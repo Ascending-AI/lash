@@ -141,7 +141,7 @@ impl LashRuntime {
     ///
     /// It runs under the drain's own identity, or, for an anonymous drain, a
     /// drain identity named after the follow-on. The drive answers the
-    /// follow-on and nothing else; the next drain claims what is queued.
+    /// follow-on and nothing else; the next drain admits what is queued.
     async fn drive_recovered_follow_on(
         &mut self,
         recovery: crate::store::FollowOnRecovery,

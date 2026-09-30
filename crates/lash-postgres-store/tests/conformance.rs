@@ -77,6 +77,8 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
     })
 }
 
+#[path = "conformance/admission_atomicity.rs"]
+mod admission_atomicity;
 #[path = "conformance/artifact_races.rs"]
 mod artifact_races;
 #[path = "conformance/attachment_catalog.rs"]
@@ -85,8 +87,6 @@ mod attachment_catalog;
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]
 mod attachment_recovery;
-#[path = "conformance/claim_atomicity.rs"]
-mod claim_atomicity;
 #[path = "conformance/generation_drain.rs"]
 mod generation_drain;
 #[path = "conformance/obligation_relay.rs"]

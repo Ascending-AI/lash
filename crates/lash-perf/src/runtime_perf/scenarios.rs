@@ -102,12 +102,12 @@ pub(crate) enum RuntimePerfScenario {
     LiveReplayPressure,
     TraceJsonlStandard,
     TraceJsonlExtended,
-    QueuedWorkClaimStress,
+    QueuedWorkAdmissionStress,
     TurnInputIngressInterrupt,
     DeepTurnComposition,
     TurnStartGate,
     TurnCancelRoundTrip,
-    IngressClaimProjection,
+    IngressAdmissionProjection,
     StoreHardeningHotPaths,
     DurableStandardToolTurnSqlite,
     DurableRlmCheckpointTurnSqlite,
@@ -605,12 +605,12 @@ impl RuntimePerfScenario {
             "Measures RLM protocol trace JSONL output for protocol-level turns."
         ),
         runtime_perf_metadata!(
-            QueuedWorkClaimStress,
-            "queued_work_claim_stress",
+            QueuedWorkAdmissionStress,
+            "queued_work_admission_stress",
             Standard,
             RuntimeScenario,
-            "Measures core queued-work claim/renew/complete invariants below protocol and facade ownership.",
-            ["runtime_scenario_queued_work_claim_keeps_pending_next_turn_input"]
+            "Measures core queued-work admission/renew/complete invariants below protocol and facade ownership.",
+            ["runtime_scenario_queued_work_admission_keeps_pending_next_turn_input"]
         ),
         runtime_perf_metadata!(
             TurnInputIngressInterrupt,
@@ -645,11 +645,11 @@ impl RuntimePerfScenario {
             "Measures request-to-token-to-terminal-seal cancellation below protocol and facade ownership."
         ),
         runtime_perf_metadata!(
-            IngressClaimProjection,
-            "ingress_claim_projection",
+            IngressAdmissionProjection,
+            "ingress_admission_projection",
             Rlm,
             RlmProtocolScenario,
-            "Measures active-turn input enqueue, checkpoint claim, and next-request RLM projection."
+            "Measures active-turn input enqueue, checkpoint admission, and next-request RLM projection."
         ),
         runtime_perf_metadata!(
             StoreHardeningHotPaths,

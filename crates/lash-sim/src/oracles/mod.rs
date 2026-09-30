@@ -63,7 +63,7 @@ pub const SCENARIO_STANDARD_CONTRACT_ORACLE: &str = "sim.oracle.scenario.standar
 pub const SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE: &str =
     "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1";
 pub const SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE: &str =
-    "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1";
+    "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1";
 pub const SCENARIO_MINI_STANDARD_STREAM_FINALIZE_ORACLE: &str =
     "sim.oracle.scenario-mini.standard.streamed-text-finalizes-once.v1";
 pub const SCENARIO_MINI_STANDARD_PROVIDER_ERROR_ORACLE: &str =
@@ -88,8 +88,8 @@ pub const GENERATED_SUSPEND_RESUME_ORACLE: &str = "sim.oracle.generated-suspend-
 pub const GENERATED_FINAL_VALUE_ORACLE: &str =
     "sim.oracle.generated-final-value-semantic-channel.v1";
 pub const FRAME_SWITCH_SEED_ORACLE: &str = "sim.oracle.frame-switch-seed.v1";
-pub const LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE: &str =
-    "sim.oracle.logical-turn-claim-exactly-once.v1";
+pub const LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE: &str =
+    "sim.oracle.logical-turn-admission-exactly-once.v1";
 pub const FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE: &str =
     "sim.oracle.frame-switch-follow-on-atomicity.v1";
 pub const FRAME_SWITCH_ORDERING_ORACLE: &str = "sim.oracle.frame-switch-ordering.v1";
@@ -104,7 +104,7 @@ pub struct FrameSwitchSeedObservation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameSwitchCommitObservation {
     pub turn_id: TurnId,
-    pub inbound_claim_completed: bool,
+    pub inbound_admission_completed: bool,
     /// Whether the head owed the follow-on once the switch commit was visible.
     pub follow_on_owed: bool,
 }
@@ -131,7 +131,7 @@ use frame_switch::*;
 pub use frame_switch::{
     frame_switch_follow_on_is_atomic, frame_switch_follow_on_precedes_pending, frame_switch_seeds,
     generated_final_value_semantic_channel, generated_suspend_resume,
-    logical_turn_claims_settle_exactly_once,
+    logical_turn_admissions_settle_exactly_once,
 };
 pub use live_provider::{
     GENERATED_WORKLOAD_BATTERY_ORACLE, LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,
@@ -381,7 +381,7 @@ pub fn walk_generated_trace_oracles<S, V>(
     );
     battery!(
         SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE,
-        mini_runtime_cancellation_prevents_idle_claim(events)
+        mini_runtime_cancellation_prevents_idle_admission(events)
     );
     battery!(
         SCENARIO_MINI_STANDARD_STREAM_FINALIZE_ORACLE,

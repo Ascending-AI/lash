@@ -923,7 +923,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
         self.list_open_queued_work_sqlite(session_id).await
     }
 
-    async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+    async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         self.read_connection()
@@ -931,7 +931,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
                 conn.query_row(
                     crate::turn_ingress::turn_ingress_sql()
                         .family
-                        .has_claimable_work
+                        .has_admissible_work
                         .sql(),
                     params![session_id.as_str()],
                     |row| row.get(0),

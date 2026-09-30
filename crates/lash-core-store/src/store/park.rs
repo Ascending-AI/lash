@@ -1012,9 +1012,9 @@ impl TurnPark {
 pub struct UnsettledTurnCounts {
     /// Sessions whose turn is parked ([`TurnPark`]).
     pub parked_turns: usize,
-    /// Sessions with a turn in flight: a pending queued run, a claimed turn
+    /// Sessions with a turn in flight: a pending queued run, an admitted turn
     /// input that is not settled, or a parked turn. Parked turns are
-    /// in-flight turns too — they hold their claims — so this is never less
+    /// in-flight turns too — they hold their admissions — so this is never less
     /// than [`parked_turns`](Self::parked_turns).
     pub in_flight_turns: usize,
     /// Sessions whose unparked turn in flight their stalled close holds: the

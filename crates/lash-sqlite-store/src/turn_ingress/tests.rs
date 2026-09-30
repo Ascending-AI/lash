@@ -70,7 +70,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
     let conn = catalog();
     let sql = turn_ingress_sql();
     for statement in [
-        sql.family.has_claimable_work.sql(),
+        sql.family.has_admissible_work.sql(),
         sql.family.pending_session_work_ordering.sql(),
         sql.family_sqlite.checkpoint_work_pending_after_work.sql(),
         sql.family_sqlite
@@ -200,7 +200,7 @@ fn every_open_input_read_seeks_the_state_index() {
     for statement in [
         &sql.pending_inputs.list_undelivered,
         &sql.pending_inputs.earliest_next_turn_candidate_seq,
-        &sql.family.has_claimable_work,
+        &sql.family.has_admissible_work,
         &sql.family.pending_session_work_ordering,
         &sql.family_sqlite.checkpoint_work_pending_after_work,
         &sql.family_sqlite.checkpoint_work_pending_before_completion,
@@ -348,7 +348,7 @@ mod byte_identity {
             "the undelivered list no longer spells the generated undelivered set",
         );
         assert!(
-            sql.family.has_claimable_work.sql().contains(
+            sql.family.has_admissible_work.sql().contains(
                 &vocabulary::deferred_next_turn_turn_input_state_predicate_sql("pti.state")
             ),
             "the open-work probe no longer spells the generated deferred state",

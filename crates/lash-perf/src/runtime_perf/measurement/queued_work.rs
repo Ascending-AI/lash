@@ -8,10 +8,10 @@ const TURN_INPUT_INGRESS_ACTIVE_PER_TURN: usize = 32;
 const TURN_INPUT_INGRESS_ACCEPTED_PER_TURN: usize = 16;
 const TURN_INPUT_INGRESS_NEXT_PER_TURN: usize = 8;
 
-pub(super) async fn run_once_queued_work_claim_stress(
+pub(super) async fn run_once_queued_work_admission_stress(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
-    let scenario = RuntimePerfScenario::QueuedWorkClaimStress;
+    let scenario = RuntimePerfScenario::QueuedWorkAdmissionStress;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-queued-work-other";
     let mut run = RunRecorder::start(scenario, chat_turns);
@@ -547,7 +547,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
 
-                let (active_claim, phase) = measure_runtime_perf_async_phase(
+                let (active_admission, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.resume_active_admission",
                     async {
                         admit_perf_checkpoint(store.as_ref(), &fence, &turn_id, &active_step)
@@ -559,17 +559,17 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
                 resumed_admissions += 1;
-                if active_claim.input_ids() != active.input_ids() {
+                if active_admission.input_ids() != active.input_ids() {
                     anyhow::bail!("turn-input ingress resume returned different active inputs");
                 }
-                if active_claim.inputs.len() != TURN_INPUT_INGRESS_ACCEPTED_PER_TURN {
+                if active_admission.inputs.len() != TURN_INPUT_INGRESS_ACCEPTED_PER_TURN {
                     anyhow::bail!(
                         "turn-input ingress expected {} active inputs, got {}",
                         TURN_INPUT_INGRESS_ACCEPTED_PER_TURN,
-                        active_claim.inputs.len()
+                        active_admission.inputs.len()
                     );
                 }
-                let active_turn_input = active_claim.materialize_turn_input();
+                let active_turn_input = active_admission.materialize_turn_input();
                 // Position-independent on purpose: an admission aggregates many inputs and
                 // only the first carries the attachment, so the attachment is not the
                 // last item. Assert survival, not placement.
@@ -590,7 +590,9 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 let mut completing = RuntimeCommit::persisted_state_for_test(&commit_state, &[])
                     .deferring_interrupted_turn_inputs(turn_id.clone(), None);
                 let mut settlement = lash_core::store::IngressSettlement::new(turn_id.clone());
-                settlement.completed_inputs.push(active_claim.completion());
+                settlement
+                    .completed_inputs
+                    .push(active_admission.completion());
                 completing.ingress = Some(settlement);
                 let deferral =
                     lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
@@ -680,11 +682,11 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 if next_admission.input_ids() != next.input_ids() {
                     anyhow::bail!("turn-input ingress resume returned different next-turn inputs");
                 }
-                let next_claim = next_admission
+                let next_admitted = next_admission
                     .inputs
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("expected admitted next-turn inputs"))?;
-                let next_turn_input = next_claim.materialize_turn_input();
+                let next_turn_input = next_admitted.materialize_turn_input();
                 // Position-independent: see the active-admission assertion above.
                 if !next_turn_input.items.iter().any(|item| {
                     matches!(
@@ -716,7 +718,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                completed_inputs += next_claim.inputs.len();
+                completed_inputs += next_admitted.inputs.len();
 
                 let (pending, phase) =
                     measure_runtime_perf_async_phase("turn_input_ingress.list_pending", async {
@@ -888,7 +890,7 @@ mod tests {
 
     #[tokio::test]
     async fn queued_work_admission_stress_advances_its_commit_cursor() {
-        Box::pin(run_once_queued_work_claim_stress(1))
+        Box::pin(run_once_queued_work_admission_stress(1))
             .await
             .expect("queued-work stress scenario");
     }

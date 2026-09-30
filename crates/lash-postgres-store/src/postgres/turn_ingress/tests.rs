@@ -103,7 +103,7 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
             vec![PlanParam::Text("history")],
         ),
         (
-            &sql.family.has_claimable_work,
+            &sql.family.has_admissible_work,
             vec![PlanParam::Text("history")],
         ),
         (

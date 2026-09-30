@@ -101,9 +101,9 @@ where
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
     turn_cancel::turn_cancel_undelivered_crash_matrix(make()).await;
-    session_store_factory_claimable_queued_work_peek(make()).await;
-    config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
-    config_commands::session_store_factory_bounds_config_command_claims(make()).await;
+    session_store_factory_admissible_queued_work_peek(make()).await;
+    config_commands::session_store_factory_coalesces_config_command_runs(make()).await;
+    config_commands::session_store_factory_bounds_config_command_runs(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     let (factory, attachments) = make_attached();
@@ -329,26 +329,26 @@ where
     );
 }
 
-/// The notification fast path reads durable claimable work without creating a
+/// The notification fast path reads durable admissible work without creating a
 /// session or hydrating runtime state. Future-only and empty queues are idle.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_store_factory_claimable_queued_work_peek(
+async fn session_store_factory_admissible_queued_work_peek(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
-        &SessionId::from("claimable-queued-work-peek"),
-        "claimable-queued-work-model",
+        &SessionId::from("admissible-queued-work-peek"),
+        "admissible-queued-work-model",
         crate::SessionRelation::Root,
     );
     assert!(
         !factory
-            .has_claimable_queued_work(&request.session_id)
+            .has_admissible_queued_work(&request.session_id)
             .await
             .expect("peek a missing session"),
-        "a missing session must not report claimable queued work"
+        "a missing session must not report admissible queued work"
     );
     let store = factory
         .admit_view(&request)
@@ -356,10 +356,10 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("create peek conformance store");
     assert!(
         !factory
-            .has_claimable_queued_work(&request.session_id)
+            .has_admissible_queued_work(&request.session_id)
             .await
             .expect("peek an empty queue"),
-        "an empty queue must not report claimable queued work"
+        "an empty queue must not report admissible queued work"
     );
 
     let ready = store
@@ -374,7 +374,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("enqueue queued work");
     assert!(
         factory
-            .has_claimable_queued_work(&request.session_id)
+            .has_admissible_queued_work(&request.session_id)
             .await
             .expect("peek a populated queue"),
         "queued work must be visible through the factory peek"
@@ -386,7 +386,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("batch remains cancellable");
     assert!(
         !factory
-            .has_claimable_queued_work(&request.session_id)
+            .has_admissible_queued_work(&request.session_id)
             .await
             .expect("peek after cancelling the only batch"),
         "the queue must report empty again after its batch is removed"
@@ -396,45 +396,45 @@ async fn session_store_factory_claimable_queued_work_peek(
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &request.session_id,
             crate::TurnInputIngress::NextTurn,
-            crate::TurnInput::text("claimable next-turn input"),
+            crate::TurnInput::text("admissible next-turn input"),
         ))
         .await
-        .expect("enqueue claimable next-turn input");
+        .expect("enqueue admissible next-turn input");
     assert!(
         factory
-            .has_claimable_queued_work(&request.session_id)
+            .has_admissible_queued_work(&request.session_id)
             .await
-            .expect("peek a claimable next-turn input"),
+            .expect("peek an admissible next-turn input"),
         "deferred next-turn input must be visible through the factory peek"
     );
 
     let fenced_request = session_store_request(
-        &SessionId::from("claimable-queued-work-fences"),
-        "claimable-queued-work-model",
+        &SessionId::from("admissible-queued-work-fences"),
+        "admissible-queued-work-model",
         crate::SessionRelation::Root,
     );
     let fenced_store = factory
         .admit_view(&fenced_request)
         .await
-        .expect("create claim-fence conformance store");
+        .expect("create admission-fence conformance store");
     fenced_store
         .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
             &fenced_request.session_id,
-            "claim-fence",
+            "admission-fence",
             1,
-            "claim fence",
+            "admission fence",
             crate::DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
-        .expect("enqueue claim-fenced queued work");
+        .expect("enqueue admission-fenced queued work");
     fenced_store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &fenced_request.session_id,
             crate::TurnInputIngress::NextTurn,
-            crate::TurnInput::text("claim-fenced next-turn input"),
+            crate::TurnInput::text("admission-fenced next-turn input"),
         ))
         .await
-        .expect("enqueue claim-fenced next-turn input");
+        .expect("enqueue admission-fenced next-turn input");
     let first_lease = crate::testing::store_fixtures::seal_drive_fence_for_test(
         fenced_store.store(),
         &fenced_request.session_id,
@@ -449,14 +449,14 @@ async fn session_store_factory_claimable_queued_work_peek(
     let admission = crate::conformance::admitted_root(
         fenced_store.store(),
         &first_lease,
-        "claimable-peek-root",
+        "admissible-peek-root",
         crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
     )
     .await;
     assert_eq!(admission.batch_ids(), vec![wake.batch_id.clone()]);
     assert!(
         factory
-            .has_claimable_queued_work(&fenced_request.session_id)
+            .has_admissible_queued_work(&fenced_request.session_id)
             .await
             .expect("conservatively peek admitted rows"),
         "an unfinished root's rows must keep bounded recovery armed rather than create a false negative"
@@ -469,7 +469,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("supersede the first drive deterministically");
     assert!(
         factory
-            .has_claimable_queued_work(&fenced_request.session_id)
+            .has_admissible_queued_work(&fenced_request.session_id)
             .await
             .expect("peek after the drive is superseded"),
         "an unfinished root's rows stay visible to the conservative recovery peek"
@@ -487,7 +487,7 @@ async fn session_store_factory_claimable_queued_work_peek(
     let resumed = crate::conformance::admitted_root(
         fenced_store.store(),
         &successor_lease,
-        "claimable-peek-root",
+        "admissible-peek-root",
         crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
     )
     .await;

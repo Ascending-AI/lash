@@ -48,7 +48,7 @@ impl RuntimeScenarioContext {
         for alias in &phase.cancel_after_deferral {
             self.cancel_turn_input(alias, "deferred").await;
         }
-        if phase.no_next_turn_input_claim_after_cancellations {
+        if phase.no_next_turn_input_admission_after_cancellations {
             assert!(
                 self.next_turn_input_head().await.is_none(),
                 "{} should not admit cancelled next-turn inputs",

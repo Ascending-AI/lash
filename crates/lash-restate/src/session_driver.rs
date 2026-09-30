@@ -29,9 +29,9 @@
 //!   rather than after it (FIG-4035).
 //!
 //! The kernel owns what a drive admits and how a root runs; these handlers
-//! only give each step its journal. The root's claim step repairs orphaned
-//! inputs and records its claim. Its `InspectAdmittedHead` step records the
-//! store-backed decision about the claimed head. On replay both steps return
+//! only give each step its journal. The root's admission step repairs orphaned
+//! inputs and records its admission. Its `InspectAdmittedHead` step records the
+//! store-backed decision about the admitted head. On replay both steps return
 //! their recorded outcomes: the inspection's live check runs only when its
 //! step is the attempt's live frontier, and a replay honours its recorded
 //! verdict (FIG-3824, FIG-4058, ADR 0105 §2). Rule 6 of `scripts/check-substrate-boundary.sh` pins direct
@@ -178,7 +178,7 @@ pub struct RestateTurnDriveRequest {
     #[serde(default)]
     pub sender_generation: Option<BuildGeneration>,
     /// The recorded admission the root runs under. The root runs on the head
-    /// its recorded claim was admitted on, and a replay reads that claim back;
+    /// its recorded admission named, and a replay reads that admission back;
     /// adopting that head still reads live store state (FIG-3824).
     pub admitted: Admitted,
 }

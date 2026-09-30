@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::TestBackend;
-#[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
+#[path = "../../../lash-core/tests/support/queued_admission_atomicity.rs"]
 mod law;
 
 #[tokio::test]

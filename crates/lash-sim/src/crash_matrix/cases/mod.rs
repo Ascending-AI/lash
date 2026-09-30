@@ -46,7 +46,7 @@ pub(crate) struct Staged {
 /// The one scripted model every case's deployments share: stateless, it
 /// answers the latest user message with `answer:<root>;` for every
 /// `input:<root>;` it carries, so a call a crash re-executes answers the
-/// same, and inputs a claim batched into one message are each answered once.
+/// same, and inputs an admission batched into one message are each answered once.
 /// A message naming a `held-` root is never answered: the call counts itself
 /// in `held` and waits forever, holding its root live.
 fn scripted_provider(held: Arc<AtomicUsize>) -> lash_core::facade_support::ProviderHandle {

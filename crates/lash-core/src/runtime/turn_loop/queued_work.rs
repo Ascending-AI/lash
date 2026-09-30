@@ -16,7 +16,7 @@ pub enum EmptyQueuedDrainReason {
     ExecutionLaneBusy,
     /// The session has no durable store, so no queue exists to drain.
     NoDurableQueue,
-    /// The queue was reachable and the claim state machine refused it.
+    /// The queue was reachable and the admission state machine refused it.
     AdmissionRefused(crate::AdmissionRefusal),
 }
 
@@ -185,7 +185,7 @@ impl LashRuntime {
     }
 
     /// Why an idle drive ran nothing: no work at all, or work that appeared
-    /// after admission read the queue and is therefore another claim's to
+    /// after admission read the queue and is therefore another admission's to
     /// take.
     async fn idle_drain_refusal(&self) -> Result<crate::AdmissionRefusal, RuntimeError> {
         let Some(store) = self

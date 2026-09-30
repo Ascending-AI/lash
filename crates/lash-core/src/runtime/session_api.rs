@@ -1451,7 +1451,7 @@ impl LashRuntime {
             };
             let Some(commands) = run.session_commands() else {
                 return Err(RuntimeError::new(
-                    crate::RuntimeErrorCode::SessionCommandClaim,
+                    crate::RuntimeErrorCode::SessionCommandRun,
                     format!(
                         "session command run {:?} did not contain only single-command control \
                          batches",

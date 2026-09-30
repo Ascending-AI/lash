@@ -1,6 +1,6 @@
 //! The session ingress's store laws (ADR 0101 §5 and ADR 0105 §2, as
 //! amended): the one per-session sequence both admission tables draw from,
-//! and the drive-epoch seal that fences every drive's claims and commits.
+//! and the drive-epoch seal that fences every drive's admissions and commits.
 
 use std::sync::Arc;
 

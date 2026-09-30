@@ -435,9 +435,9 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
     assert_eq!(admitted.len(), 1);
     // A normal user message that records which turn absorbed it, not a plugin or
     // process injection (FIG-972). The turn that absorbs it is the follow-on
-    // physical turn (FIG-3157): the input was claimed at the terminal
+    // physical turn (FIG-3157): the input was admitted at the terminal
     // checkpoint of `queued-checkpoint-turn`, which finished on its own
-    // committed answer, so the claim drives the next turn of the same run.
+    // committed answer, so the admission drives the next turn of the same run.
     assert!(matches!(
         admitted[0].origin.as_ref(),
         Some(lash_core::MessageOrigin::TurnInput { turn_id, input_id })
@@ -746,7 +746,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         .expect("list pending input after rejected checkpoint")
         .iter()
         .any(|input| input.input.input_id == admitted.input_id),
-        "a rejected checkpoint input must remain claimable"
+        "a rejected checkpoint input must remain admissible"
     );
     assert!(
         active_conversation_messages(&turn.state)
@@ -915,7 +915,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         .expect("list pending input after attachment failure")
         .iter()
         .any(|input| input.input.input_id == admitted.input_id),
-        "an attachment-failed checkpoint input must remain claimable"
+        "an attachment-failed checkpoint input must remain admissible"
     );
     assert!(
         active_conversation_messages(&turn.state)
@@ -1048,7 +1048,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
     else {
         panic!("injected input must use the normal user-message representation");
     };
-    // FIG-3157: claimed at the terminal checkpoint, absorbed by the follow-on
+    // FIG-3157: admitted at the terminal checkpoint, absorbed by the follow-on
     // physical turn rather than by the turn that had already finished.
     assert_eq!(turn_id, "injection-accepted-turn:agent-frame:1");
     let input_id = input_id
@@ -1619,7 +1619,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
 // its provider-visible turn, while the selected-batch invariant remains in
 // runtime persistence conformance.
 #[tokio::test]
-pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
+pub(super) async fn next_turn_input_turn_admits_process_wake_at_active_checkpoint() {
     let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
@@ -1735,7 +1735,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         .await
         .expect("queued work after pending input drain")
         .is_empty(),
-        "process wake `{}` should be claimed at the user-input turn checkpoint",
+        "process wake `{}` should be admitted at the user-input turn checkpoint",
         wake.wake_id
     );
 
@@ -1748,14 +1748,14 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
 }
 
 #[tokio::test]
-pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_turn() {
+pub(super) async fn wake_admitted_at_a_terminal_checkpoint_drives_a_follow_on_turn() {
     let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
-    // FIG-3157: a terminal finish ends the turn. A wake claimed at the
+    // FIG-3157: a terminal finish ends the turn. A wake admitted at the
     // `BeforeCompletion` checkpoint never extends it — the committed answer
-    // stays the turn's answer, and the claim is carried into a follow-on
+    // stays the turn's answer, and the admission is carried into a follow-on
     // physical turn of the same logical run: no idle gap, no wait for the
     // user, and the session execution lease held across the seam so the
-    // claim stays generation-valid (ADR 0029).
+    // admission stays generation-valid (ADR 0029).
     const SESSION_ID: &str = "terminal-checkpoint-follow-on";
 
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -2230,7 +2230,7 @@ pub(super) async fn a_withheld_commit_whose_delivery_fails_leaves_no_withheld_ro
 }
 
 #[tokio::test]
-pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled() {
+pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled() {
     let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
     // Keep this cancellation rendezvous out of the shared `root` lane so unrelated libtest
     // cases cannot make its final commit contend with their turn.
@@ -2329,7 +2329,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             SessionId::from(SESSION_ID),
-            "cancel-claimed-wake-drain",
+            "cancel-admitted-wake-drain",
         ))
         .await
         .expect("open the drain's handler");
@@ -2368,13 +2368,13 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         .await
         .expect("queued work after cancellation")
         .is_empty(),
-        "claimed wake `{}` should be completed by the cancelled turn",
+        "admitted wake `{}` should be completed by the cancelled turn",
         wake.wake_id
     );
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             SessionId::from(SESSION_ID),
-            "after-cancel-claimed-wake-drain",
+            "after-cancel-admitted-wake-drain",
         ))
         .await
         .expect("open the drain's handler");
@@ -2388,7 +2388,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
             .expect("post-cancel drain should succeed")
             .ran()
             .is_none(),
-        "neither the cancelled input nor the claimed wake should replay"
+        "neither the cancelled input nor the admitted wake should replay"
     );
     handler.close().await.expect("close the drain's handler");
     let requests = requests.lock_recover().clone();
@@ -2421,7 +2421,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
 // `admit_at_checkpoint` under the *same* live fence, which can never
 // self-steal its own rows. At finalization the root still holds its rows and
 // the commit succeeds. Before generation fencing this failed with
-// `QueuedWorkClaimExpired` because the claim expired under the stalled owner.
+// a binding-expiry refusal because the binding expired under the stalled owner.
 //
 // This test must FAIL if anyone reintroduces time- or renewal-based binding
 // invalidation. The turn is driven with an in-process `TurnInput` (not an

@@ -250,7 +250,7 @@ impl RecordedTurnAssembly {
                 had_tool_calls: !self.tool_calls.is_empty(),
                 had_code_execution: self.had_code_execution,
                 // Timing is stamped by the turn loop, which owns the
-                // claim → final-commit measurement window.
+                // admission → final-commit measurement window.
                 started_at_ms: 0,
                 duration_ms: 0,
             },

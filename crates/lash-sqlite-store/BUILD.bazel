@@ -109,7 +109,7 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "conformance", "//crates/lash-sqlite-store:conformance__test"),
     extra_compile_data = [
-        "//crates/lash-core:queued_claim_atomicity",
+        "//crates/lash-core:queued_admission_atomicity",
     ],
     library = ":lash-sqlite-store",
     library_crate_name = "lash_sqlite_store",
@@ -135,7 +135,7 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "conformance_memory", "//crates/lash-sqlite-store:conformance_memory__test"),
     extra_compile_data = [
-        "//crates/lash-core:queued_claim_atomicity",
+        "//crates/lash-core:queued_admission_atomicity",
     ],
     library = ":lash-sqlite-store",
     library_crate_name = "lash_sqlite_store",
@@ -270,7 +270,7 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "conformance", "//crates/lash-sqlite-store:conformance__test__fv_4a8da3b9"),
     extra_compile_data = [
-        "//crates/lash-core:queued_claim_atomicity",
+        "//crates/lash-core:queued_admission_atomicity",
     ],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_ffe87e2b",
     library_crate_name = "lash_sqlite_store",
@@ -299,7 +299,7 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "conformance", "//crates/lash-sqlite-store:conformance__test__fv_b6013de9"),
     extra_compile_data = [
-        "//crates/lash-core:queued_claim_atomicity",
+        "//crates/lash-core:queued_admission_atomicity",
     ],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
     library_crate_name = "lash_sqlite_store",
@@ -329,7 +329,7 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "conformance_memory", "//crates/lash-sqlite-store:conformance_memory__test__fv_4a8da3b9"),
     extra_compile_data = [
-        "//crates/lash-core:queued_claim_atomicity",
+        "//crates/lash-core:queued_admission_atomicity",
     ],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_ffe87e2b",
     library_crate_name = "lash_sqlite_store",
@@ -358,7 +358,7 @@ lash_rust_feature_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "conformance_memory", "//crates/lash-sqlite-store:conformance_memory__test__fv_b6013de9"),
     extra_compile_data = [
-        "//crates/lash-core:queued_claim_atomicity",
+        "//crates/lash-core:queued_admission_atomicity",
     ],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
     library_crate_name = "lash_sqlite_store",

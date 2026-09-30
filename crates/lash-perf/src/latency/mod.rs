@@ -8,8 +8,8 @@
 //! p99 < 250 ms on the same-process fast fixture.
 //!
 //! Every sample records the five spans the ticket names: request to durable
-//! acceptance, acceptance to drive claim, drive claim to first visible
-//! delta, drive claim to root settlement, and root settlement to
+//! acceptance, acceptance to drive admission, drive admission to first visible
+//! delta, drive admission to root settlement, and root settlement to
 //! host-visible completion. Failures land in the same ledger. The
 //! `poll` and `grace` cases isolate the send follower's two tail
 //! behaviours — the 25 ms..1 s polling backoff and the 5 s live-report
@@ -290,9 +290,18 @@ fn print_summary(report: &runner::LatencyReport) {
         };
         let phases = &case.phases_ms;
         row("request→accept ms", &phases.request_to_accept);
-        row("accept→drive claim ms", &phases.accept_to_drive_claim);
-        row("claim→first delta ms", &phases.drive_claim_to_first_delta);
-        row("claim→root settled ms", &phases.drive_claim_to_root_settled);
+        row(
+            "accept→drive admission ms",
+            &phases.accept_to_drive_admission,
+        );
+        row(
+            "admission→first delta ms",
+            &phases.drive_admission_to_first_delta,
+        );
+        row(
+            "admission→root settled ms",
+            &phases.drive_admission_to_root_settled,
+        );
         row("settled→completion ms", &phases.root_settled_to_completion);
         row("send→completion ms", &phases.send_to_completion);
         row("provider ms", &phases.provider);

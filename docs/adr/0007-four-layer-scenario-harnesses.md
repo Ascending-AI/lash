@@ -21,7 +21,7 @@ The runtime must protect durable session, effect, queue, lease, checkpoint, and 
 
 ## Harness Homes
 
-- Runtime Scenarios use `crates/lash-core/tests/runtime/tests/runtime_scenarios.rs` as the module root, with cases in `runtime_scenarios/cases.rs` and private support modules under `runtime_scenarios/support/`. They are named ingress, checkpoint, claim, lease, fault, and commit phases. Run with `kiln test //crates/lash-core:runtime_scenarios__test`.
+- Runtime Scenarios use `crates/lash-core/tests/runtime/tests/runtime_scenarios.rs` as the module root, with cases in `runtime_scenarios/cases.rs` and private support modules under `runtime_scenarios/support/`. They are named ingress, checkpoint, admission, lease, fault, and commit phases. Run with `kiln test //crates/lash-core:runtime_scenarios__test`.
 - Standard Protocol Scenarios live in `crates/lash-protocol-standard/tests/protocol_scenarios.rs`. Run with `kiln test //crates/lash-protocol-standard:protocol_scenarios__test`.
 - RLM Protocol Scenarios live under `crates/lash-protocol-rlm/tests/protocol_drivers/`, with the `protocol_drivers.rs` test root declaring `support`, `scenarios`, `prompt_history`, and `driver_mechanics` as sibling modules. Run with `kiln test //crates/lash-protocol-rlm:protocol_drivers__test`.
 - Agent Scenarios live in `crates/lash/src/tests/agent_scenarios/`. Run with `kiln test //crates/lash:lash__unit_test --test_arg=agent_scenarios`; that target already builds with the `rlm` and `testing` features.
@@ -97,7 +97,7 @@ The original `lash_e2e_*` cases seeded the Agent Scenario Harness and now use `a
 ## Focused Tests That Stay Focused
 
 - `lash-core` persistence conformance tests keep backend trait guarantees such as source-key idempotence, cross-session isolation, and backend-specific fence behavior. Runtime Scenarios cover cross-cutting host/runtime invariants, not every backend permutation.
-- Pending-input cancellation is intentionally covered at both levels with different ownership: Runtime Scenarios assert host-level redrive/cancel behavior such as active input deferral and later idle-claim suppression, while persistence conformance keeps storage-level permutations such as source-key replay, cross-session isolation, claim expiry, and backend fence semantics.
+- Pending-input cancellation is intentionally covered at both levels with different ownership: Runtime Scenarios assert host-level redrive/cancel behavior such as active input deferral and later idle-admission suppression, while persistence conformance keeps storage-level permutations such as source-key replay, cross-session isolation, claim expiry, and backend fence semantics.
 - `lash-core` small runtime tests keep narrow turn-loop, projection, tracing, and assembler assertions when a scenario would obscure the single invariant being tested.
 - `lash-protocol-rlm` direct `TurnMachine` tests stay for malformed turn options, checkpoint restore, and driver-state ownership mutation because those tests intentionally inspect or corrupt white-box state.
 - `lash-protocol-standard` focused native-tool and builder tests stay outside Standard Protocol Scenarios when they validate a single helper or internal projection rule rather than an end-to-end protocol loop.

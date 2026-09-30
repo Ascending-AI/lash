@@ -240,7 +240,7 @@ impl ApplyConfigPatch {
         ));
         if !window.admits(self.schema_version) {
             return Err(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::SessionCommandClaim,
+                crate::RuntimeErrorCode::SessionCommandRun,
                 format!(
                     "unsupported config patch schema version {}; expected {}",
                     self.schema_version,

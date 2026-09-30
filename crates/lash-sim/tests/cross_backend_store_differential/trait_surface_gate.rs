@@ -114,7 +114,7 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
         "bounded failure history; owned by the session_history conformance suite",
     ),
     (
-        "has_claimable_queued_work",
+        "has_admissible_queued_work",
         "claimability predicate; owned by the queued_work conformance suite",
     ),
     (

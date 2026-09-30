@@ -13,7 +13,7 @@ async fn core_reads_are_gone(core: lash::LashCore) {
 
 // `await_queued_work_batch` is gone from the Durable Session too: it polled
 // `queued_work()` — which hosts already have — and answered "no longer
-// pending", which a claim makes true before the work ran. The Session
+// pending", which an admission makes true before the work ran. The Session
 // Observation stream carries the outcome instead.
 async fn queued_work_wait_is_gone(durable: lash::DurableSession) {
     let _ = durable

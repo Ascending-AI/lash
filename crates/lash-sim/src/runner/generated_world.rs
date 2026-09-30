@@ -496,7 +496,7 @@ impl GeneratedRuntimeWorld {
         scheduler: &mut BoundaryScheduler,
         queued_next_turn_boundaries: &[String],
     ) -> Result<(), FixedScriptRunnerError> {
-        let expected_claims = queued_next_turn_boundaries
+        let expected_admissions = queued_next_turn_boundaries
             .iter()
             .map(|boundary| {
                 self.queued_inputs.get(boundary).cloned().ok_or_else(|| {
@@ -592,10 +592,10 @@ impl GeneratedRuntimeWorld {
                 // boundary is delivered during this wait and the first wire
                 // gate is closed, so these rows cannot have been cancelled or
                 // completed. An empty admission needs no store read.
-                while !expected_claims.is_empty() {
+                while !expected_admissions.is_empty() {
                     let pending = runtime_session.session.durable().pending_turn_inputs().await
                         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-                    if expected_claims.iter().all(|input_id| {
+                    if expected_admissions.iter().all(|input_id| {
                         pending.iter().any(|read| {
                             &read.input.input_id == input_id
                                 && matches!(read.status, lash::PendingTurnInputReadStatus::Admitted { .. })

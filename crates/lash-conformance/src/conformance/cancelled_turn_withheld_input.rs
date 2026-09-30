@@ -1,11 +1,11 @@
 //! A cancelled turn never completes work it withheld from its terminal
 //! checkpoint (FIG-3531, FIG-3543).
 //!
-//! Input claimed at `BeforeCompletion` is withheld from that checkpoint's
+//! Input admitted at `BeforeCompletion` is withheld from that checkpoint's
 //! delivery for a follow-on turn (FIG-3157). An Immediate cancel means that
 //! follow-on never runs and the model never saw the input, so the cancelled
 //! turn settles it through the cancellation's undelivered disposition exactly
-//! as it settles an unclaimed active-turn row: deferred by default, dropped
+//! as it settles an unadmitted active-turn row: deferred by default, dropped
 //! when the host asks, with the same `TurnCancelAffectedInput` record in
 //! enqueue order, and — when deferred — delivered once by the next turn.
 //!
@@ -45,21 +45,21 @@ enum Stop {
 /// Stops the running turn the moment its terminal checkpoint has admitted
 /// active-turn input: the admission is taken and withheld, and the Stop lands
 /// before the turn commits.
-struct StopAfterTerminalClaim {
+struct StopAfterTerminalAdmission {
     inner: Arc<dyn crate::RuntimeStore>,
     effect_host: Arc<dyn crate::EffectHost>,
     armed: Mutex<Option<Stop>>,
     withheld_inputs: Mutex<Vec<crate::InputId>>,
     withheld_batches: Mutex<Vec<crate::BatchId>>,
     /// A wake to accept just before the running turn's terminal checkpoint
-    /// claims: accepted after the turn's input, so the turn lane admits the
+    /// admits: accepted after the turn's input, so the turn lane admits the
     /// input first (ADR 0101 §5) and the wake reaches the turn only there.
     arriving_wake: Mutex<Option<crate::QueuedWorkBatchDraft>>,
     arrived_wake: Mutex<Option<crate::QueuedWorkBatch>>,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for StopAfterTerminalClaim {
+impl crate::store::RuntimeStoreDecorator for StopAfterTerminalAdmission {
     type Inner = dyn crate::RuntimeStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -86,23 +86,23 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalClaim {
                 *self.arrived_wake.lock().expect("arrived wake") = Some(batch);
             }
         }
-        let claims = self.inner.admit_at_checkpoint(request).await?;
-        let claimed = claims
+        let admission = self.inner.admit_at_checkpoint(request).await?;
+        let admitted = admission
             .inputs
             .as_ref()
-            .map(|claim| {
-                claim
+            .map(|inputs| {
+                inputs
                     .inputs
                     .iter()
                     .map(|input| input.input_id.clone())
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let claimed_batches = claims
+        let admitted_batches = admission
             .queued
             .as_ref()
-            .map(|claim| {
-                claim
+            .map(|queued| {
+                queued
                     .batches
                     .iter()
                     .map(|batch| batch.batch_id.clone())
@@ -110,16 +110,16 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalClaim {
             })
             .unwrap_or_default();
         if matches!(checkpoint, crate::CheckpointKind::BeforeCompletion)
-            && (!claimed.is_empty() || !claimed_batches.is_empty())
+            && (!admitted.is_empty() || !admitted_batches.is_empty())
         {
             self.withheld_inputs
                 .lock()
                 .expect("withheld log")
-                .extend(claimed);
+                .extend(admitted);
             self.withheld_batches
                 .lock()
                 .expect("withheld log")
-                .extend(claimed_batches);
+                .extend(admitted_batches);
             let stop = self.armed.lock().expect("stop slot").take();
             match stop {
                 // A token-fired stop reaches the turn's cancellation gate
@@ -159,13 +159,13 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalClaim {
                 None => {}
             }
         }
-        Ok(claims)
+        Ok(admission)
     }
 }
 
 struct Harness {
     store: Arc<dyn crate::RuntimeStore>,
-    decorated: Arc<StopAfterTerminalClaim>,
+    decorated: Arc<StopAfterTerminalAdmission>,
     effect_host: Arc<dyn crate::EffectHost>,
     runtime: crate::LashRuntime,
     requests: Arc<Mutex<Vec<crate::LlmRequest>>>,
@@ -246,7 +246,7 @@ async fn withheld_cancel_case(
     let next_turn_id = TurnId::from(format!("{case}-next"));
 
     // Inject-now input sent while the turn runs: the terminal checkpoint
-    // claims and withholds it for a follow-on turn.
+    // admits and withholds it for a follow-on turn.
     let mut input_ids = Vec::new();
     for text in texts {
         let accepted = harness
@@ -295,7 +295,7 @@ async fn withheld_cancel_case(
             .lock()
             .expect("withheld log"),
         input_ids,
-        "{case}: the terminal checkpoint must claim and withhold the inject-now input"
+        "{case}: the terminal checkpoint must admit and withhold the inject-now input"
     );
     let outcomes = run
         .turns
@@ -353,7 +353,7 @@ async fn withheld_cancel_case(
     };
     assert_eq!(pending, expected_pending, "{case}: rows after the cancel");
 
-    // The same record an unclaimed row gets, in enqueue order, on the turn
+    // The same record an unadmitted row gets, in enqueue order, on the turn
     // result and on the durable cancellation.
     let expected = input_ids
         .iter()
@@ -434,7 +434,7 @@ async fn withheld_cancel_case(
 )]
 async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimeStore>) -> Harness {
     let effect_host = backend.effect_host();
-    let decorated = Arc::new(StopAfterTerminalClaim {
+    let decorated = Arc::new(StopAfterTerminalAdmission {
         inner: Arc::clone(&store),
         effect_host: Arc::clone(&effect_host),
         armed: Mutex::new(None),
@@ -477,10 +477,10 @@ async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimeStore>) -
     }
 }
 
-/// An Immediate cancel that lands after the terminal checkpoint claimed and
+/// An Immediate cancel that lands after the terminal checkpoint admitted and
 /// withheld inject-now input settles that input through the undelivered
 /// disposition — never as completed — in enqueue order, and records it on the
-/// cancellation exactly as it records an unclaimed row. Covers the default
+/// cancellation exactly as it records an unadmitted row. Covers the default
 /// `Defer` for one and for two inputs, and a host-selected `Drop`.
 pub async fn immediate_cancel_defers_withheld_inject_now_input(
     prefix: &str,
@@ -559,7 +559,7 @@ async fn withheld_wake_case(
     let next_turn_id = TurnId::from(format!("{case}-next"));
 
     // A wake that arrives while the turn runs: accepted after the turn's
-    // input, its terminal checkpoint claims and withholds it for a follow-on
+    // input, its terminal checkpoint admits and withholds it for a follow-on
     // turn (FIG-3157).
     let wake = wake_delivery(&format!("{case}-process"), sequence, text);
     *harness
@@ -597,7 +597,7 @@ async fn withheld_wake_case(
         .lock()
         .expect("arrived wake")
         .take()
-        .expect("the wake arrived before the terminal checkpoint claimed");
+        .expect("the wake arrived before the terminal checkpoint admitted");
 
     assert_eq!(
         *harness
@@ -606,7 +606,7 @@ async fn withheld_wake_case(
             .lock()
             .expect("withheld log"),
         vec![batch.batch_id.clone()],
-        "{case}: the terminal checkpoint must claim and withhold the wake"
+        "{case}: the terminal checkpoint must admit and withhold the wake"
     );
     let outcomes = run
         .turns
@@ -665,7 +665,7 @@ async fn withheld_wake_case(
 
     // Deferred whatever the host's disposition, which governs host-authored
     // items only: never completed, never dropped. The row stays queued at
-    // its own position, unclaimed.
+    // its own position, unadmitted.
     let queued = harness
         .store
         .list_queued_work(&session_id)
@@ -713,10 +713,10 @@ async fn withheld_wake_case(
     );
 }
 
-/// An Immediate cancel that lands after the terminal checkpoint claimed and
+/// An Immediate cancel that lands after the terminal checkpoint admitted and
 /// withheld a process wake never settles that wake as completed and never
 /// drops it: whatever the host's undelivered disposition, a held wake is
-/// deferred — its claim released in the cancel commit, its position kept,
+/// deferred — its admission released in the cancel commit, its position kept,
 /// its redelivery floor untouched — recorded on the cancellation, and
 /// delivered exactly once by the next turn (FIG-3543, ADR 0101 §10). Covers
 /// the default `Defer` and a host-selected `Drop`.

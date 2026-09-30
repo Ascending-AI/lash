@@ -701,13 +701,13 @@ impl RuntimeSessionServices {
     /// * Observed while the turn runs, the supplied token is the turn's own
     ///   cancellation token, so the turn settles `Cancelled` through the same
     ///   path as every other cancelled turn: the cancelled turn commits, the
-    ///   accepted turn-input row is settled, and nothing remains claimable.
+    ///   accepted turn-input row is settled, and nothing remains admissible.
     ///   The child session stays durable and reusable; lash never deletes a
     ///   session because a process was cancelled.
     ///
     /// Settlement is the fence around process terminalization: a cancelled
     /// outcome is only ever returned once this turn's accepted child input is
-    /// terminal and unclaimed. A reconciliation or commit failure surfaces as
+    /// terminal and unadmitted. A reconciliation or commit failure surfaces as
     /// a retryable init error so the substrate keeps the process recoverable
     /// instead of writing a `Cancelled` terminal over an unsettled child.
     pub(in crate::runtime::session_manager) async fn initialize_session_and_run_turn(
@@ -867,7 +867,7 @@ impl RuntimeSessionServices {
     /// any session the catalog attributes to this process, covering an id a
     /// crashed attempt minted but never recorded) and cancelling every open
     /// row scoped to `turn_id` leaves terminal receipts behind and nothing
-    /// claimable — the precondition for the caller to write a `Cancelled`
+    /// admissible — the precondition for the caller to write a `Cancelled`
     /// process terminal.
     ///
     /// A row still held under a live session-execution-lease claim refuses
@@ -921,7 +921,7 @@ impl RuntimeSessionServices {
     ) -> Result<(), crate::PluginError> {
         let store = match crate::runtime::live_session_view(factory, session_id).await {
             Ok(store) => store,
-            // A catalog without the by-id seam can hold no claimable input
+            // A catalog without the by-id seam can hold no admissible input
             // this reconcile could reach — the same toleration
             // `list_sessions` got above (FIG-3487).
             Err(crate::StoreError::UnsupportedStoreOperation { .. }) => return Ok(()),
@@ -1081,7 +1081,7 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
     CancelledBeforeCreate,
     /// Cancellation was observed in the window between the create commit and
     /// turn admission (or after the turn settled). The session is committed
-    /// and retained; nothing this turn accepted remains claimable.
+    /// and retained; nothing this turn accepted remains admissible.
     CancelledAfterCreate { session_id: SessionId },
     /// Session initialization failed.
     ///
@@ -1119,8 +1119,8 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
     },
     /// Cancellation was observed but reconciling the retained child's durable
     /// input failed, so this turn's accepted input may still be open. The
-    /// process must stay recoverable: terminalizing it now would strand a
-    /// claimable input inside the retained session.
+    /// process must stay recoverable: terminalizing it now would strand an
+    /// admissible input inside the retained session.
     Reconcile {
         session_id: Option<SessionId>,
         source: Box<crate::PluginError>,

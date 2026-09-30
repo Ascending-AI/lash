@@ -232,7 +232,7 @@ async fn assert_settled_once(make: impl Fn(&str) -> Arc<dyn RuntimeStore>, sessi
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_survives_before_claim_settlement<F>(
+pub async fn checkpoint_survives_before_admission_settlement<F>(
     make: &F,
     prefix: &str,
     lease_timing: &StoreRecoveryLeaseTiming,

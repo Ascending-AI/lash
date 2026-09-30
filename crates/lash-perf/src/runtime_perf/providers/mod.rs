@@ -134,7 +134,7 @@ pub(crate) fn benchmark_provider_with_control(
 ) -> (TestProvider, Option<Arc<BenchmarkProviderControl>>) {
     let control = matches!(
         scenario,
-        RuntimePerfScenario::TurnCancelRoundTrip | RuntimePerfScenario::IngressClaimProjection
+        RuntimePerfScenario::TurnCancelRoundTrip | RuntimePerfScenario::IngressAdmissionProjection
     )
     .then(|| Arc::new(BenchmarkProviderControl::new()))
     .or_else(|| {
@@ -162,7 +162,7 @@ pub(crate) fn benchmark_provider_with_control(
                         .notify_one();
                     return std::future::pending().await;
                 }
-                if matches!(scenario, RuntimePerfScenario::IngressClaimProjection)
+                if matches!(scenario, RuntimePerfScenario::IngressAdmissionProjection)
                     && !latest_request_item_contains(&req, "ingress projection marker")
                 {
                     let control = completion_control

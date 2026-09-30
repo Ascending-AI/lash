@@ -2,7 +2,7 @@
 //!
 //! One *sample* is a send→outcome round trip on a live Restate server. The
 //! host measures the wall spans it can see; a per-sample store poller reads
-//! durable evidence so the claim, application and settlement instants do
+//! durable evidence so the admission, application and settlement instants do
 //! not ride the follower's own wake schedule. Every read is keyed — the
 //! input's open-set row, the input's root binding, the root's terminal —
 //! and all of them run on the lane's one observer connection, so a poll
@@ -11,7 +11,7 @@
 //! and restarts at the floor the moment a mark lands, so clustered marks
 //! keep tick-fine precision while a quiet wait stays cheap:
 //!
-//! * `claim` — the input's pending row first reports `Admitted` (a root took
+//! * `admission` — the input's pending row first reports `Admitted` (a root took
 //!   it), or leaves the open set.
 //! * `applied` — the input's durable binding names the root that took it.
 //! * `settled` — the root's terminal evidence is readable.
@@ -43,7 +43,7 @@ use crate::perf_support::time::round3;
 use crate::runtime_perf::openai_compat::OpenAiCompatBenchServer;
 use crate::runtime_perf::providers::BenchmarkStreamProfile;
 
-/// The store poller's interval bounds. A fresh send's claim is imminent, so
+/// The store poller's interval bounds. A fresh send's admission is imminent, so
 /// the interval starts at the floor and a tick that lands a mark or first
 /// sees the open row restarts it there; a tick that observes nothing
 /// doubles it up to the ceiling, keeping an idle wait's reads sparse enough
@@ -137,10 +137,10 @@ pub(crate) struct Sample {
     pub(crate) cold: bool,
     pub(crate) status: String,
     pub(crate) request_to_accept_ms: f64,
-    pub(crate) accept_to_claim_ms: Option<f64>,
+    pub(crate) accept_to_admission_ms: Option<f64>,
     pub(crate) accept_to_applied_ms: Option<f64>,
-    pub(crate) claim_to_first_delta_ms: Option<f64>,
-    pub(crate) claim_to_settled_ms: Option<f64>,
+    pub(crate) admission_to_first_delta_ms: Option<f64>,
+    pub(crate) admission_to_settled_ms: Option<f64>,
     pub(crate) settled_to_complete_ms: Option<f64>,
     pub(crate) send_to_completion_ms: f64,
     pub(crate) provider_ms: Option<f64>,
@@ -165,7 +165,7 @@ pub(crate) struct Sample {
 /// The durable markers the per-sample store poller collects.
 #[derive(Default)]
 struct PollMarks {
-    claim_ms: Option<f64>,
+    admission_ms: Option<f64>,
     applied_ms: Option<f64>,
     settled_ms: Option<f64>,
     timed_out: bool,
@@ -658,18 +658,20 @@ async fn measure_send(
         cold: index == 0,
         status,
         request_to_accept_ms,
-        accept_to_claim_ms: marks.claim_ms.map(|claim| claim - request_to_accept_ms),
+        accept_to_admission_ms: marks
+            .admission_ms
+            .map(|admission| admission - request_to_accept_ms),
         accept_to_applied_ms: marks
             .applied_ms
             .map(|applied| applied - request_to_accept_ms),
-        claim_to_first_delta_ms: marks
-            .claim_ms
+        admission_to_first_delta_ms: marks
+            .admission_ms
             .zip(first_delta_ms)
-            .map(|(claim, delta)| delta - claim),
-        claim_to_settled_ms: marks
-            .claim_ms
+            .map(|(admission, delta)| delta - admission),
+        admission_to_settled_ms: marks
+            .admission_ms
             .zip(marks.settled_ms)
-            .map(|(claim, settled)| settled - claim),
+            .map(|(admission, settled)| settled - admission),
         settled_to_complete_ms: marks
             .settled_ms
             .map(|settled| send_to_completion_ms - settled),
@@ -697,15 +699,15 @@ fn status_name(status: &lash::TurnStatus) -> String {
     }
 }
 
-/// The durable-evidence poller for one send: claim, application and
+/// The durable-evidence poller for one send: admission, application and
 /// settlement instants read from the store itself, not the follower's wake
 /// schedule. Every read is keyed — the input's open-set row, the input's
 /// root binding, the root's terminal — on `store`'s one connection
-/// (FIG-3974, FIG-4061): `pending_turn_input` is the claim read the open-set
+/// (FIG-3974, FIG-4061): `pending_turn_input` is the admission read the open-set
 /// listing used to answer, narrowed to the one tracked row, so a poll never
 /// rescans the session's pending inputs or decodes its commit history.
 ///
-/// The interval starts at `STORE_POLL_FLOOR` — a fresh send's claim is
+/// The interval starts at `STORE_POLL_FLOOR` — a fresh send's admission is
 /// imminent — and doubles each tick that observes nothing, up to
 /// `STORE_POLL_CEILING`. A tick that lands a mark or first sees the row
 /// restarts it at the floor: admission binds the row and names its root in
@@ -725,7 +727,7 @@ async fn poll_marks(
     loop {
         let now = elapsed_ms(t_request);
         let mut changed = false;
-        if marks.claim_ms.is_none()
+        if marks.admission_ms.is_none()
             && let Ok(row) = store.pending_turn_input(&session_id, &input_id).await
         {
             match row {
@@ -736,13 +738,13 @@ async fn poll_marks(
                         row.status,
                         lash::PendingTurnInputReadStatus::Admitted { .. }
                     ) {
-                        marks.claim_ms = Some(now);
+                        marks.admission_ms = Some(now);
                         changed = true;
                     }
                 }
                 // The row left the open set: the drive consumed it.
                 None if row_seen => {
-                    marks.claim_ms = Some(now);
+                    marks.admission_ms = Some(now);
                     changed = true;
                 }
                 None => {}
@@ -763,7 +765,7 @@ async fn poll_marks(
                 marks.settled_ms = Some(now);
                 break;
             }
-        } else if marks.claim_ms.is_some() && marks.applied_ms.is_some() {
+        } else if marks.admission_ms.is_some() && marks.applied_ms.is_some() {
             // Nothing left to learn without a root.
             break;
         }
@@ -891,10 +893,10 @@ fn summarize(values: impl Iterator<Item = f64>) -> Option<LatencySummary> {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct PhaseSummaries {
     pub(crate) request_to_accept: Option<LatencySummary>,
-    pub(crate) accept_to_drive_claim: Option<LatencySummary>,
+    pub(crate) accept_to_drive_admission: Option<LatencySummary>,
     pub(crate) accept_to_applied: Option<LatencySummary>,
-    pub(crate) drive_claim_to_first_delta: Option<LatencySummary>,
-    pub(crate) drive_claim_to_root_settled: Option<LatencySummary>,
+    pub(crate) drive_admission_to_first_delta: Option<LatencySummary>,
+    pub(crate) drive_admission_to_root_settled: Option<LatencySummary>,
     pub(crate) root_settled_to_completion: Option<LatencySummary>,
     pub(crate) send_to_completion: Option<LatencySummary>,
     pub(crate) provider: Option<LatencySummary>,
@@ -909,10 +911,10 @@ fn phases_of(samples: &[&Sample]) -> PhaseSummaries {
     };
     PhaseSummaries {
         request_to_accept: column(&|sample| Some(sample.request_to_accept_ms)),
-        accept_to_drive_claim: column(&|sample| sample.accept_to_claim_ms),
+        accept_to_drive_admission: column(&|sample| sample.accept_to_admission_ms),
         accept_to_applied: column(&|sample| sample.accept_to_applied_ms),
-        drive_claim_to_first_delta: column(&|sample| sample.claim_to_first_delta_ms),
-        drive_claim_to_root_settled: column(&|sample| sample.claim_to_settled_ms),
+        drive_admission_to_first_delta: column(&|sample| sample.admission_to_first_delta_ms),
+        drive_admission_to_root_settled: column(&|sample| sample.admission_to_settled_ms),
         root_settled_to_completion: column(&|sample| sample.settled_to_complete_ms),
         send_to_completion: column(&|sample| Some(sample.send_to_completion_ms)),
         provider: column(&|sample| sample.provider_ms),
@@ -1067,7 +1069,7 @@ mod tests {
     use super::*;
 
     /// The store half of `poll_marks`' keyed-read contract (FIG-3974,
-    /// FIG-4061): the claim, applied and settled marks come from point
+    /// FIG-4061): the admission, applied and settled marks come from point
     /// reads — the pending row, the input's root binding, the root's
     /// terminal — on the one store the lane's pollers share.
     /// `list_pending_turn_inputs` and `list_turn_input_applications`, the
@@ -1169,7 +1171,7 @@ mod tests {
             panic!("the store poller must never rescan turn-input applications");
         }
 
-        /// The input's root binding: absent until the claim transaction
+        /// The input's root binding: absent until the admission transaction
         /// records it, keyed on `input` only.
         async fn root_of_input(
             &self,
@@ -1193,7 +1195,7 @@ mod tests {
         }
     }
 
-    /// The poller's marks land in claim, applied, settled order — each from
+    /// The poller's marks land in admission, applied, settled order — each from
     /// a point read on the probe — and the applications scan never runs.
     #[tokio::test]
     async fn the_store_poller_marks_keyed_reads_without_an_applications_scan() {
@@ -1222,12 +1224,12 @@ mod tests {
         let marks = poll_marks(store, session_id, input_id, Instant::now()).await;
 
         assert!(!marks.timed_out, "the probe answers every mark");
-        let claim = marks.claim_ms.expect("the held row's claim mark");
+        let admission = marks.admission_ms.expect("the held row's admission mark");
         let applied = marks.applied_ms.expect("the binding's applied mark");
         let settled = marks.settled_ms.expect("the terminal's settled mark");
         assert!(
-            claim < applied && applied < settled,
-            "claim {claim}, applied {applied}, settled {settled}"
+            admission < applied && applied < settled,
+            "admission {admission}, applied {applied}, settled {settled}"
         );
         assert_eq!(probe.applications_calls.load(Ordering::SeqCst), 0);
         assert_eq!(probe.pending_input_calls.load(Ordering::SeqCst), 2);

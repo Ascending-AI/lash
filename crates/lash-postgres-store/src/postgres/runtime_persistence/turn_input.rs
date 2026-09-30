@@ -925,12 +925,12 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         self.list_open_queued_work_pg(session_id).await
     }
-    async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+    async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
         sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .family
-                .has_claimable_work
+                .has_admissible_work
                 .sql(),
         )
         .bind(session_id.as_str())

@@ -46,7 +46,7 @@ pub enum TurnFailureCause {
     /// (FIG-3586): its commands no longer match the recorded ones, or the
     /// journal predates this build's key grammar. Nothing was dispatched and
     /// nothing is recorded as the turn's outcome. The invocation aborts with
-    /// `Err` exactly as a live fault does — claims held, receipt returned —
+    /// `Err` exactly as a live fault does — admission held, receipt returned —
     /// and the park is recorded, but a queued run spends no retry budget on
     /// it: every redrive by this build refuses again with zero dispatch, and
     /// what serves the turn is an operator redeploying the build that wrote
@@ -366,7 +366,7 @@ impl RuntimeErrorCode {
             // durable state is corrupt or a counter is exhausted.
             Self::RuntimeStoreCorrupt => Terminal,
             // the session command claim is refused.
-            Self::SessionCommandClaim => Terminal,
+            Self::SessionCommandRun => Terminal,
             // the idempotency key is bound to a different command.
             Self::SessionCommandIdempotencyKey => Terminal,
             // the post-drive refresh read failed; a retry reads again.

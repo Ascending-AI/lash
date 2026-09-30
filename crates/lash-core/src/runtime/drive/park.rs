@@ -5,7 +5,7 @@
 //! A park names the **logical root**, never a physical turn: a frame switch's
 //! follow-on, an S4 follow-on and a redrive all run under the root, and the
 //! operator verbs (redrive, cancel, fork) act on it. Parked is durable and
-//! non-terminal: the root writes no terminal evidence, keeps its claims and
+//! non-terminal: the root writes no terminal evidence, keeps its admission and
 //! keeps `Turn(root)` open, and admission answers `Parked` while the row
 //! exists.
 //!
@@ -38,13 +38,13 @@ impl LashRuntime {
     /// Record `root`'s park when its abort is a refusal that parks it
     /// (FIG-3586, FIG-3600).
     ///
-    /// A parked root keeps every claim it holds, exactly as any live-fault
+    /// A parked root keeps every admission it holds, exactly as any live-fault
     /// abort does, so each redrive under the same build refuses again with
     /// nothing dispatched; the park is the typed, queryable record of why it
     /// stopped, which `drain_status` counts. Best effort, like every
     /// abort-path repair: the root is already aborting and this must not
     /// replace its error. A park the store cannot write leaves the root
-    /// exactly as the abort left it — its held claims still keep the
+    /// exactly as the abort left it — its held admission still keeps the
     /// deployment from reporting drained.
     pub(in crate::runtime) async fn record_turn_park_after_abort(
         &self,
@@ -121,7 +121,7 @@ impl LashRuntime {
                 root = %root,
                 error = %error,
                 event = "turn.park_record_failed",
-                "failed to record the root's park; its held claims still keep the deployment \
+                "failed to record the root's park; its held admission still keeps the deployment \
                  from draining"
             ),
         }

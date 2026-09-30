@@ -1283,8 +1283,8 @@ mod tests {
                 "turn_cancel.request_to_token_to_seal",
             ),
             (
-                RuntimePerfScenario::IngressClaimProjection,
-                "turn_input_ingress.enqueue_to_claim_to_projection",
+                RuntimePerfScenario::IngressAdmissionProjection,
+                "turn_input_ingress.enqueue_to_admission_to_projection",
             ),
         ] {
             assert!(required_phases(scenario).contains(&phase));

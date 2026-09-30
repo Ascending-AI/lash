@@ -409,7 +409,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_rows() {
             .await
             .expect("read retained child inputs")
             .is_empty(),
-        "the retained child has no claimable input"
+        "the retained child has no admissible input"
     );
     assert!(
         lash_core::runtime::live_session_view(&factory, &child)

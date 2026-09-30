@@ -1,6 +1,6 @@
 use lash_core_execution::{RuntimeStore, SessionCatalogStore as _};
 use std::sync::Arc;
-#[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
+#[path = "../../../lash-core/tests/support/queued_admission_atomicity.rs"]
 mod law;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -18,7 +18,7 @@ async fn postgres_a_partial_admission_rolls_back_through_both_entry_points() {
                 ),
             )
             .await
-            .expect("admit queued-claim root");
+            .expect("admit queued-admission root");
         let case = law::prepare(Arc::new(storage.store()) as Arc<dyn RuntimeStore>, entry).await;
         sqlx::query("CREATE OR REPLACE FUNCTION lose_second_bind() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END; $$").execute(storage.pool()).await.unwrap();
         let second = case.ids[1].replace('\'', "''");
@@ -65,7 +65,7 @@ async fn postgres_an_admission_holds_its_rows_across_a_displaced_fence() {
             ),
         )
         .await
-        .expect("admit queued-claim root");
+        .expect("admit queued-admission root");
     law::an_admission_holds_its_rows_across_a_displaced_fence(
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
         "postgres",

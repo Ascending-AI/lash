@@ -239,16 +239,16 @@ pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     // (`crates/lash-core-store/src/queued_work_vocabulary.rs:69-72`). The
     // admission shapes this law actually establishes are recorded instead.
     lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
-        "checkpoint": "queued_work_claims_join_by_policy_and_merge_key",
-        "first_claim_batch_count": first_root.batch_ids().len(),
-        "first_claim_delivery_policy": DeliveryPolicy::EarliestSafeBoundary.as_str(),
-        "first_claim_merge_key": "a",
-        "second_claim_batch_count": second_root.batch_ids().len(),
-        "second_claim_merge_key": "b",
-        "second_claim_split_reason": "merge_key",
-        "third_claim_batch_count": third_root.batch_ids().len(),
-        "third_claim_delivery_policy": DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
-        "third_claim_split_reason": "delivery_policy",
+        "checkpoint": "queued_work_admissions_join_by_policy_and_merge_key",
+        "first_admission_batch_count": first_root.batch_ids().len(),
+        "first_admission_delivery_policy": DeliveryPolicy::EarliestSafeBoundary.as_str(),
+        "first_admission_merge_key": "a",
+        "second_admission_batch_count": second_root.batch_ids().len(),
+        "second_admission_merge_key": "b",
+        "second_admission_split_reason": "merge_key",
+        "third_admission_batch_count": third_root.batch_ids().len(),
+        "third_admission_delivery_policy": DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
+        "third_admission_split_reason": "delivery_policy",
     }));
 }
 

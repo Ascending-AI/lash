@@ -218,7 +218,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
         )
         .await
         .expect("enqueue suffix anchor");
-    let active_claimed = store
+    let active_admitted = store
         .enqueue_pending_turn_input(
             pending_active_turn_input_draft(
                 &SessionId::from("pending-bulk-cancel"),
@@ -226,10 +226,10 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
                 crate::TurnInputCheckpointBoundary::AfterWork,
                 "suffix accepted active",
             )
-            .with_source_key("suffix:claimed"),
+            .with_source_key("suffix:admitted"),
         )
         .await
-        .expect("enqueue suffix claimed input");
+        .expect("enqueue suffix admitted input");
     let suffix_later = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("pending-bulk-cancel"), "suffix later")
@@ -261,7 +261,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
             .as_ref()
             .map(|inputs| inputs.input_ids())
             .unwrap_or_default(),
-        vec![active_claimed.input_id.clone()]
+        vec![active_admitted.input_id.clone()]
     );
 
     let suffix = store
@@ -278,7 +278,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     expect_cancelled_pending_input(outcomes[0].clone(), &suffix_anchor.input_id);
     match &outcomes[1] {
         crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { input, root } => {
-            assert_eq!(input.input_id, active_claimed.input_id);
+            assert_eq!(input.input_id, active_admitted.input_id);
             assert_eq!(root.as_str(), "suffix-active-turn");
         }
         other => panic!("expected already-admitted suffix outcome, got {other:?}"),
@@ -336,7 +336,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
             .collect::<Vec<_>>(),
         // The input the checkpoint accepted stays listed, bound to its root,
         // until that root settles or releases it (FIG-4044).
-        vec![second.input_id.as_str(), active_claimed.input_id.as_str()]
+        vec![second.input_id.as_str(), active_admitted.input_id.as_str()]
     );
 }
 
@@ -717,7 +717,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     let next_cancel = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
             &SessionId::from("root"),
-            "next cancelled before claim",
+            "next cancelled before admission",
         ))
         .await
         .expect("enqueue next input to cancel");
@@ -857,12 +857,12 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 
     let lease =
         seal_drive_fence_for_test(&store, &SessionId::from("root"), "active-input-owner").await;
-    let claim_turn_id = crate::TurnId::from(turn_id);
+    let admission_turn_id = crate::TurnId::from(turn_id);
     let admitted = admit_at_checkpoint_for_test(
         &store,
         &lease,
-        &claim_turn_id,
-        &claim_turn_id,
+        &admission_turn_id,
+        &admission_turn_id,
         crate::CheckpointKind::AfterWork,
         "active-turn-1:step",
         1,
@@ -870,9 +870,9 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     )
     .await
     .expect("admit active inputs");
-    let claim = admitted.inputs.expect("active input admission");
+    let admitted_inputs = admitted.inputs.expect("active input admission");
     assert_eq!(
-        claim
+        admitted_inputs
             .inputs
             .iter()
             .map(|input| input.input_id.as_str())
@@ -881,7 +881,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         "AfterWork admissions must include matching active inputs admitted at that boundary in order"
     );
     assert!(matches!(
-        claim.inputs[0].input.items.last(),
+        admitted_inputs.inputs[0].input.items.last(),
         Some(crate::InputItem::Attachment {
             source: crate::AttachmentSource::Inline { bytes, .. }
         }) if bytes == &[9, 8, 7]
@@ -901,8 +901,10 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
                     RuntimeCommit::persisted_state_for_test(&state, &[]),
                     &lease,
                     {
-                        let mut settlement = IngressSettlement::new(claim_turn_id.clone());
-                        settlement.completed_inputs.push(claim.completion());
+                        let mut settlement = IngressSettlement::new(admission_turn_id.clone());
+                        settlement
+                            .completed_inputs
+                            .push(admitted_inputs.completion());
                         settlement
                     },
                 )
@@ -955,7 +957,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         "inputs for other active turns must not be deferred by this interrupt"
     );
 
-    let next_claim = admitted_root(
+    let next_admission = admitted_root(
         &store,
         &lease,
         "deferred-root",
@@ -963,7 +965,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     )
     .await;
     assert_eq!(
-        next_claim.input_ids(),
+        next_admission.input_ids(),
         vec![
             unaccepted.input_id.clone(),
             before_completion.input_id.clone()
@@ -972,7 +974,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     end_root(
         &store,
         &lease,
-        completing_admission("deferred-root", &next_claim),
+        completing_admission("deferred-root", &next_admission),
     )
     .await;
     assert!(

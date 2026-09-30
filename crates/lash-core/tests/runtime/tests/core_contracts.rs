@@ -99,15 +99,15 @@ fn runtime_named_phase_closes_the_named_probe_scope_on_drop() {
     let probe_dyn: Arc<dyn RuntimeTurnPhaseProbe> = probe.clone();
 
     {
-        let _phase = RuntimeNamedPhase::begin(Some(probe_dyn), "queued_work.claim");
-        assert_eq!(probe.events(), vec!["begin_named:queued_work.claim"]);
+        let _phase = RuntimeNamedPhase::begin(Some(probe_dyn), "queued_work.admission");
+        assert_eq!(probe.events(), vec!["begin_named:queued_work.admission"]);
     }
 
     assert_eq!(
         probe.events(),
         vec![
-            "begin_named:queued_work.claim",
-            "end_named:queued_work.claim"
+            "begin_named:queued_work.admission",
+            "end_named:queued_work.admission"
         ]
     );
 

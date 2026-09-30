@@ -279,12 +279,12 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
+pub(super) async fn admitted_normalization_failure_commits_and_settles_input() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
     #[derive(Debug)]
-    struct DenyClaimedAttachments;
+    struct DenyAdmittedAttachments;
 
-    impl lash_core::testing::runtime_internals::AttachmentSourcePolicy for DenyClaimedAttachments {
+    impl lash_core::testing::runtime_internals::AttachmentSourcePolicy for DenyAdmittedAttachments {
         fn authorize(
             &self,
             producer: &lash_core::testing::runtime_internals::AttachmentProducer,
@@ -292,7 +292,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
         ) -> Result<(), lash_core::test_support::AttachmentSourcePolicyError> {
             Err(lash_core::test_support::AttachmentSourcePolicyError {
                 producer: producer.clone(),
-                reason: "claimed attachment denied for test".to_string(),
+                reason: "admitted attachment denied for test".to_string(),
             })
         }
     }
@@ -300,7 +300,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     let (mut runtime, store) =
         standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
             .await;
-    runtime.host.core.attachment_source_policy = Arc::new(DenyClaimedAttachments);
+    runtime.host.core.attachment_source_policy = Arc::new(DenyAdmittedAttachments);
     let inbound = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
         store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
@@ -319,7 +319,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             SessionId::from("root").clone(),
-            TurnId::from("invalid-claimed-input").clone(),
+            TurnId::from("invalid-admitted-input").clone(),
         ))
         .await
         .expect("open the scope's handler");
@@ -351,7 +351,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
+pub(super) async fn admitted_plugin_abort_commits_and_settles_input() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let plugin = Arc::new(RuntimeTestPluginFactory {
@@ -363,7 +363,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
                             lash_core::facade_support::TurnPluginDirective::AbortTurn(
                                 lash_core::facade_support::AbortTurnDirective {
                                     code: "blocked".to_string(),
-                                    message: "plugin stopped claimed turn".to_string(),
+                                    message: "plugin stopped admitted turn".to_string(),
                                 },
                             ),
                         ])
@@ -391,7 +391,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
     let handler = double
         .open_handler(AdmittedScope::queue_drain(
             SessionId::from("root").clone(),
-            TurnId::from("claimed-plugin-abort").clone(),
+            TurnId::from("admitted-plugin-abort").clone(),
         ))
         .await
         .expect("open the scope's handler");
@@ -597,7 +597,7 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
+pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_admission() {
     let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let switch_count = lash_core::runtime::logical_turn::MAX_AGENT_FRAME_SWITCHES;
@@ -698,7 +698,7 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning_diagnostic()
+pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_admission_before_returning_diagnostic()
  {
     let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -1037,7 +1037,7 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
     );
 }
 
-// Boundary: Runtime Scenarios own the idle queue claim and completion
+// Boundary: Runtime Scenarios own the idle queue admission and completion
 // invariant. This full runtime test stays here because it verifies the
 // app-facing queued-work turn event, prompt projection, and blank-history
 // suppression produced by `drive_next_queued_root`.
@@ -1144,7 +1144,10 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
             )
         })
         .expect("queued work started event");
-    assert_eq!(queued_started, 1, "claim facts must follow turn identity");
+    assert_eq!(
+        queued_started, 1,
+        "admission facts must follow turn identity"
+    );
     let model_started = events
         .iter()
         .position(|activity| {

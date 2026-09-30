@@ -35,13 +35,13 @@ async fn open_drain(
     open_admitted(double, AdmittedScope::queue_drain(session, drain)).await
 }
 
-struct OneHeldClaimStore {
+struct OneHeldAdmissionStore {
     inner: Arc<RecordingStore>,
     held_once: AtomicBool,
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for OneHeldClaimStore {
+impl lash_core::store::RuntimeStoreDecorator for OneHeldAdmissionStore {
     type Inner = dyn lash_core::RuntimeStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -60,11 +60,11 @@ impl lash_core::store::RuntimeStoreDecorator for OneHeldClaimStore {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_claim() {
+pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_admission() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
-    let wrapped: Arc<dyn lash_core::RuntimeStore> = Arc::new(OneHeldClaimStore {
+    let wrapped: Arc<dyn lash_core::RuntimeStore> = Arc::new(OneHeldAdmissionStore {
         inner: Arc::clone(&store),
         held_once: AtomicBool::new(false),
     });
@@ -88,8 +88,8 @@ pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_claim() 
     .await;
     let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
     let session = sid("root");
-    enqueue_idle_turn_input(store.as_ref(), &session, "wait for claim").await;
-    // The held claim raises a retryable, uncommitted error, so the invocation
+    enqueue_idle_turn_input(store.as_ref(), &session, "wait for admission").await;
+    // The held admission raises a retryable, uncommitted error, so the invocation
     // suspends mid-drain and retries its attempt rather than answering the
     // drain; `run_in_handler`'s attempt factory is what re-enters the handler.
     type DrainSlot =
@@ -121,7 +121,7 @@ pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_claim() 
             attempt,
         )
         .await
-        .expect("the held claim's invocation retries until the claim releases");
+        .expect("the held admission's invocation retries until the admission releases");
     assert_eq!(
         attempts.load(Ordering::SeqCst),
         2,
@@ -1384,7 +1384,7 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
 }
 
 /// The drive path's test entry (FIG-3600): an idle session answers an empty
-/// claim, a drain runs one root whose claim takes the claimable input prefix,
+/// claim, a drain runs one root whose admission takes the admissible input prefix,
 /// and a drain re-run under the same identity replays its recorded drive
 /// instead of admitting anything new.
 #[tokio::test(flavor = "multi_thread")]
@@ -1438,7 +1438,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     // On the double a repeated drain replays at invocation replay, not on a
     // fresh sequential call: the first attempt drains and journals the root,
     // the crash fails that attempt, and the redrive decodes its recorded
-    // verdict instead of claiming the next input.
+    // verdict instead of admitting the next input.
     type DriveDrainSlot =
         Result<lash_core::facade_support::QueuedTurnDrain<AssembledTurn>, lash_core::RuntimeError>;
     let drains: Arc<Mutex<Vec<DriveDrainSlot>>> = Arc::new(Mutex::new(Vec::new()));
@@ -1502,7 +1502,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     handler.close().await.expect("close the scope's handler");
     assert!(
         after.ran().is_none(),
-        "the first root's claim took both inputs, so a later drain has nothing to run"
+        "the first root's admission took both inputs, so a later drain has nothing to run"
     );
     assert_eq!(
         lash_core::store::TurnInputStore::list_turn_input_applications(store.as_ref(), &session)

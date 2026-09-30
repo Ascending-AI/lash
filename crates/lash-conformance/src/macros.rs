@@ -167,7 +167,7 @@ macro_rules! runtime_persistence_tests {
             (a_checkpoint_applied_input_resolves_to_its_root_by_point_read, "checkpoint-applied-binding"),
             (checkpoint_admission_is_idempotent_by_root_and_step, "checkpoint-step-idempotence"),
             (checkpoint_budget_refusal_preserves_active_turn_input, "checkpoint-budget-atomicity"),
-            (checkpoint_claims_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),
+            (checkpoint_admissions_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),
             (a_checkpoint_refuses_a_stale_fence_whatever_its_caps, "checkpoint-stale-fence-caps"),
             (a_checkpoint_admitted_input_is_listed_admitted_to_its_root, "checkpoint-admitted-listing"),
             (queued_work_cancel_removes_only_open_batches, "queued-work-cancel"),
@@ -178,7 +178,7 @@ macro_rules! runtime_persistence_tests {
             (a_resumed_root_drives_exactly_its_recorded_admission, "resumed-root-admission"),
             (process_wakes_batch_by_default, "wake-default-batch"),
             (queued_work_completion_is_fenced_and_root_keyed, "queued-completion-fence"),
-            (queued_wake_delivery_is_source_key_idempotent_and_claimed_once, "root"),
+            (queued_wake_delivery_is_source_key_idempotent_and_admitted_once, "root"),
             (host_cancelled_wake_is_not_redelivered, "root"),
             (queue_completion_and_turn_commit_stamp_are_atomic, "root"),
             (delete_then_enqueue_never_reuses_ingress_sequences, "root"),
@@ -186,7 +186,7 @@ macro_rules! runtime_persistence_tests {
             (pending_turn_input_duplicate_input_id, "root"),
             (changed_retry_is_typed_conflict, "root"),
             (run_specs_join_the_submission_digest_and_intern_once, "run-specs"),
-            (a_next_turn_admission_never_mixes_run_specs, "run-spec-claims"),
+            (a_next_turn_admission_never_mixes_run_specs, "run-spec-admissions"),
             (a_steering_spec_that_differs_from_its_running_turn_is_refused, "run-spec-steering"),
             (a_turn_input_batch_enqueues_new_ids_contiguously_in_request_order, "turn-input-batches"),
             (a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest, "turn-input-batch-retries"),
@@ -412,7 +412,7 @@ macro_rules! store_recovery_tests {
     ($fixture:block) => {
         $crate::store_recovery_tests!(@catalogue $fixture;
             timed [
-                (checkpoint_survives_before_claim_settlement, "store-recovery-checkpoint"),
+                (checkpoint_survives_before_admission_settlement, "store-recovery-checkpoint"),
             ]
             plain [
                 (store_recovery_fresh_instances, "store-recovery-fresh-instance-probe"),

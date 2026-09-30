@@ -151,7 +151,7 @@ fn streamed_paired_lashlang_profile_splits_tags_and_trailing_suffix() {
 }
 
 #[test]
-fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
+fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
     let mut unmarked_request = empty_request();
     unmarked_request
         .messages
@@ -161,7 +161,7 @@ fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
         "synthetic current iteration suffix",
     ));
     let unmarked_profile = benchmark_stream_profile_for_request(
-        RuntimePerfScenario::IngressClaimProjection,
+        RuntimePerfScenario::IngressAdmissionProjection,
         &unmarked_request,
     );
     assert_eq!(
@@ -178,7 +178,7 @@ fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
         "synthetic current iteration suffix",
     ));
     let marked_profile = benchmark_stream_profile_for_request(
-        RuntimePerfScenario::IngressClaimProjection,
+        RuntimePerfScenario::IngressAdmissionProjection,
         &marked_request,
     );
     assert_eq!(
@@ -195,7 +195,7 @@ fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
         "synthetic current iteration suffix",
     ));
     let historical_marker_profile = benchmark_stream_profile_for_request(
-        RuntimePerfScenario::IngressClaimProjection,
+        RuntimePerfScenario::IngressAdmissionProjection,
         &historical_marker_request,
     );
     assert_eq!(

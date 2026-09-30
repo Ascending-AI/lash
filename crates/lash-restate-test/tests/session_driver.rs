@@ -71,7 +71,7 @@ enum RootScript {
     /// superseded and nothing runs, which is what the kernel answers a root
     /// whose drive lost the seal race.
     Supersede,
-    /// A queued run that finds nothing it can claim: it cedes, the item
+    /// A queued run that finds nothing admissible: it cedes, the item
     /// stays due, and admission mints a fresh root for it every time.
     Cede,
     /// The run's first execution ends `DriveAbort::Refused` carrying a

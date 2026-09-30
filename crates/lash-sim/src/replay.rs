@@ -457,7 +457,7 @@ mod tests {
         }));
         assert!(trace.oracles.iter().any(|verdict| {
             verdict.oracle_id
-                == "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1"
+                == "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1"
                 && verdict.is_passed()
         }));
         assert!(

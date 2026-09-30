@@ -166,7 +166,7 @@ async fn transcript(session: &lash::LashSession) -> String {
 /// An input accepted on an idle session is admitted by the drive its
 /// acceptance scheduled, at once: one root, answered and committed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn idle_send_is_claimed_at_once() {
+async fn idle_send_is_admitted_at_once() {
     let world = world(0x5501).await;
     let session = created_session(&world.core, "idle-send")
         .await

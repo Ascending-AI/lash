@@ -11,7 +11,7 @@
 //! This file is the whole fence: [`current`] is the one place the stamp is
 //! read from the build, and [`admit`] the one place it is checked. Each
 //! admission site calls them with one line: a drive root's recorded input
-//! claim (`runtime::drive::root`) and a queue drain's run admission; S5a-q3
+//! admission (`runtime::drive::root`) and a queue drain's run admission; S5a-q3
 //! moves the second onto the drive's admission too.
 //!
 //! [`CodeExecutorPlugin::executable_generation`]: crate::plugin::CodeExecutorPlugin::executable_generation

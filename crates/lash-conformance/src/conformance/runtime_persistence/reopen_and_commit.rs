@@ -414,15 +414,15 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
             lash_core::store::AdmittedHead::Input(head.input_id),
         )
         .await;
-        let mut claim = *admission.inputs.expect("the root admits its input");
-        claim.record_initial_turn_application(
+        let mut admitted = *admission.inputs.expect("the root admits its input");
+        admitted.record_initial_turn_application(
             &crate::TurnId::from(turn_id),
             &format!("reopen-application-message-{turn_index}"),
         );
-        expected_applications.extend(claim.applications.clone());
+        expected_applications.extend(admitted.applications.clone());
 
         let mut settlement = lash_core::store::IngressSettlement::new(TurnId::from(turn_id));
-        settlement.completed_inputs.push(claim.completion());
+        settlement.completed_inputs.push(admitted.completion());
         let mut commit = final_commit(
             RuntimeCommit::persisted_state_for_test(&state, &[]),
             &application_lease,
@@ -526,7 +526,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
+pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
     store: Arc<dyn RuntimeStore>,
 ) {
     let wake = root_process_wake(7);
@@ -575,11 +575,11 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
         lash_core::store::AdmittedHead::Batch(first.batch_id.clone()),
     )
     .await;
-    let claim = admission.queued.as_ref().expect("the root admits the wake");
-    assert_eq!(claim.batches.len(), 1);
-    assert_eq!(claim.batches[0].items.len(), 1);
+    let admitted = admission.queued.as_ref().expect("the root admits the wake");
+    assert_eq!(admitted.batches.len(), 1);
+    assert_eq!(admitted.batches[0].items.len(), 1);
     assert!(matches!(
-        claim.batches[0].items[0].payload,
+        admitted.batches[0].items[0].payload,
         QueuedWorkPayload::ProcessWake { .. }
     ));
     end_root(
@@ -645,7 +645,7 @@ fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
 /// A host cancel is a terminal transition of a wake, so it raises the
 /// session's redelivery floor in the same transaction that removes the row
 /// (FIG-3545). A redelivery of the withdrawn `(process, seq)` — after a
-/// producer crash, a failed terminal mark or a lost claim — is refused with
+/// producer crash, a failed terminal mark or a lost admission — is refused with
 /// the typed rewind outcome instead of resurrecting the wake; a later
 /// sequence from the same process is still admitted.
 #[expect(
@@ -662,7 +662,7 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>
         .cancel_queued_work_batch(&session_id, &queued.batch_id)
         .await
         .expect("host cancel of the queued wake")
-        .expect("an unclaimed wake is cancelled");
+        .expect("an unadmitted wake is cancelled");
 
     let redelivery = store
         .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(7)))

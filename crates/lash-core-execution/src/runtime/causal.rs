@@ -73,9 +73,9 @@ pub fn turn_acceptance_effect_invocation(
 /// Invocation for the journaled initial drive set of an accepted turn input
 /// (ADR 0069 §6).
 ///
-/// The drive is a child of the acceptance it claims: same execution scope and
+/// The drive is a child of the acceptance's admission: same execution scope and
 /// attribution, a replay key derived from the acceptance's, and a causal edge
-/// back to it. Nothing about the lease that performs the claim enters the
+/// back to it. Nothing about the lease that performs the admission enters the
 /// identity, so every lease generation replays the same entry.
 pub fn turn_input_drive_effect_invocation(
     acceptance: &RuntimeEffectInvocation,

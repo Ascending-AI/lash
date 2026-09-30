@@ -5,8 +5,8 @@ use pretty_assertions::assert_eq;
 /// already wore (FIG-3632).
 ///
 /// `enqueue_seq` is each ingress family's durable identity and order, and
-/// claim ids are derived from it, so a reused sequence aliases a deleted or
-/// settled item's claim evidence, dedup keys and observation cursors. The law
+/// admission ids are derived from it, so a reused sequence aliases a deleted or
+/// settled item's admission evidence, dedup keys and observation cursors. The law
 /// runs the delete/enqueue cycle twenty times per family: deleting the newest
 /// row and enqueuing again is the exact shape under which a store that
 /// recycles its maximum sequence repeats an id on every round.
@@ -39,7 +39,7 @@ pub async fn delete_then_enqueue_never_reuses_ingress_sequences(store: Arc<dyn R
             .cancel_queued_work_batch(&session, &batch.batch_id)
             .await
             .expect("cancel queued batch")
-            .expect("unclaimed batch is cancelled");
+            .expect("unadmitted batch is cancelled");
         assert_eq!(cancelled.batch_id, batch.batch_id);
         assert!(
             store

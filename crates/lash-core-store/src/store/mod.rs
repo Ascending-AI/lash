@@ -1629,7 +1629,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// the session has an open queued batch or a deferred next-turn input.
     /// It never creates a session; a session the catalog does not hold
     /// answers `false`.
-    async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
+    async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
 }
 
 /// Host-scheduled retention and garbage-collection capability over settled

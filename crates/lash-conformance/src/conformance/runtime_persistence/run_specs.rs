@@ -2,7 +2,7 @@
 //!
 //! A non-default spec is interned once per session and hash in the
 //! transaction that admits its input, and its hash is part of the input's
-//! submission digest. A next-turn claim never mixes specs: its prefix stops,
+//! submission digest. A next-turn admission never mixes specs: its prefix stops,
 //! never skips, at the first input whose spec differs from its head's. An
 //! input addressed to a running turn joins that turn's shape, so a differing
 //! explicit spec is refused before anything is stored.
@@ -137,7 +137,7 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeStore>) {
-    let session_id = SessionId::from("run-spec-claims");
+    let session_id = SessionId::from("run-spec-admissions");
     let a = spec_with_prompt("shape a");
     let mut enqueued = Vec::new();
     for (text, spec) in [
@@ -156,7 +156,7 @@ pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeS
                 .input_id,
         );
     }
-    let fence = seal_drive_fence_for_test(&store, &session_id, "run-spec-claim-owner").await;
+    let fence = seal_drive_fence_for_test(&store, &session_id, "run-spec-admission-owner").await;
     let mut compositions = Vec::new();
     for ordinal in 0.. {
         // Each root is headed by the earliest open input and, once it ends,

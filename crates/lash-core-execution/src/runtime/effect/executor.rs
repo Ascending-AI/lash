@@ -940,8 +940,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// An engine that serves this effect's recorded outcome never asks. An
     /// engine about to run this executor live — its journal holds no outcome
     /// for the effect's replay key — asks first, and on `Some` returns that
-    /// refusal instead, running nothing and recording nothing: neither a
-    /// claim, nor a failure row, nor a run result. Asking trips the command's
+    /// refusal instead, running nothing and recording nothing: neither an
+    /// admission, nor a failure row, nor a run result. Asking trips the command's
     /// guard, so the run stops on the refusal however the effect's caller
     /// shapes the error. `None` means the effect may run live.
     pub fn served_only_refusal(&self) -> Option<RuntimeEffectControllerError> {
@@ -1049,7 +1049,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 ))
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
-                // A store-backed replay driver hands every claimed command to
+                // A store-backed replay driver hands every opened command to
                 // `execute`; a trigger command runs on its own target.
                 let RuntimeEffectCommand::Trigger { command } = envelope.command else {
                     return Err(RuntimeEffectControllerError::new(

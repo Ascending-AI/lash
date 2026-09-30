@@ -17,7 +17,7 @@ impl RuntimeScenarioContext {
         let admission = self
             .admission
             .as_ref()
-            .expect("stale queue-completion fault requires a prior TurnWorkClaim phase");
+            .expect("stale queue-completion fault requires a prior TurnWorkAdmission phase");
         let mut foreign =
             lash_core::store::IngressSettlement::new(TurnId::from("runtime-scenario-foreign-root"));
         foreign

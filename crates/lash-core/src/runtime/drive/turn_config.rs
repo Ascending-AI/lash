@@ -2,11 +2,11 @@
 //!
 //! A root resolves its shape once, as a recorded step at the top of the
 //! logical-turn funnel: after the boundary's command drain and the root's
-//! claim, before the first physical turn's first effect. Its first execution
-//! resolves the root's [`RunSpec`](crate::RunSpec) (the spec its claimed inputs
+//! admission, before the first physical turn's first effect. Its first execution
+//! resolves the root's [`RunSpec`](crate::RunSpec) (the spec its admitted inputs
 //! share; the default spec for a root of wakes or a follow-on) against the
 //! root's snapshot, the resident config, which is the durable head's, adopted
-//! head-authoritatively under the root's lease one step earlier (the claim's
+//! head-authoritatively under the root's lease one step earlier (the admission's
 //! refresh for an input root, the drain's commit for a queued one), and
 //! records the result as the root's [`ResolvedRun`](crate::ResolvedRun). Every
 //! replay decodes that record instead of reading any live config or spec. So a
@@ -52,7 +52,7 @@ fn turn_config_replay_key(root: &TurnId) -> String {
 impl LashRuntime {
     /// Resolve the shape `root`'s logical turn runs under, as one recorded
     /// step on `controller`, and adopt it as the execution view. `spec` is
-    /// the interned spec the root's claimed inputs share, `None` for the
+    /// the interned spec the root's admitted inputs share, `None` for the
     /// default spec. `inherited` is the shape a recovered follow-on's parent
     /// root recorded at the switch (FIG-3877): the first execution re-records
     /// it under this admission's root verbatim, so the follow-on runs under

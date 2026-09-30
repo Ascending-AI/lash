@@ -263,7 +263,7 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.ingress-session-opened.v1"
         | "sim.oracle.live-provider-failure-coverage.v1"
         | "sim.oracle.live-provider-failure-terminalizes.v1"
-        | "sim.oracle.logical-turn-claim-exactly-once.v1"
+        | "sim.oracle.logical-turn-admission-exactly-once.v1"
         | "sim.oracle.observer-reconnect.v1"
         | "sim.oracle.pending-tool-completion-through-turn.v1"
         | "sim.oracle.provider-mutation-rejected.v1"

@@ -16,7 +16,7 @@ use lash_core::{
 use lash_sim::oracles::{
     FrameSwitchCommitObservation, FrameSwitchSeedObservation, frame_switch_follow_on_is_atomic,
     frame_switch_follow_on_precedes_pending, frame_switch_seeds,
-    logical_turn_claims_settle_exactly_once,
+    logical_turn_admissions_settle_exactly_once,
 };
 use serde_json::{Value, json};
 
@@ -288,7 +288,7 @@ fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> V
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
+async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
     let expected_seed_nodes = vec![
         json!({"kind": "plugin", "plugin_type": "sim.seed.alpha", "body": {"value": 1}}),
         json!({"kind": "plugin", "plugin_type": "sim.seed.beta", "body": {"value": 2}}),
@@ -426,7 +426,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     assert!(
         frame_switch_follow_on_is_atomic(&[FrameSwitchCommitObservation {
             turn_id: TurnId::from("first"),
-            inbound_claim_completed: inbound_completed,
+            inbound_admission_completed: inbound_completed,
             follow_on_owed,
         }])
         .is_passed()
@@ -483,10 +483,10 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         )
         .is_passed()
     );
-    let claim_verdict = logical_turn_claims_settle_exactly_once(&trace.snapshot());
+    let admission_verdict = logical_turn_admissions_settle_exactly_once(&trace.snapshot());
     assert!(
-        claim_verdict.is_passed(),
-        "all input and handoff claims must settle once: {claim_verdict:?}"
+        admission_verdict.is_passed(),
+        "all input and handoff admissions must settle once: {admission_verdict:?}"
     );
     assert!(
         session
@@ -504,7 +504,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             .expect("final queue")
             .is_empty()
     );
-    assert_global_invariants(&engine, "claimed-switch").await;
+    assert_global_invariants(&engine, "admitted-switch").await;
 }
 
 struct BoundedSwitchTools {
@@ -565,7 +565,7 @@ impl ToolProvider for BoundedSwitchTools {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
+async fn admissions_settle_for_finish_cancel_error_and_chain_bound() {
     let finish_trace = Arc::new(RecordingTraceSink::default());
     let finish_provider = lash_core::testing::TestProvider::builder()
         .kind("logical-turn-finish")
@@ -580,13 +580,13 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("open finish session");
     finish_session
-        .send(TurnInput::text("finish claimed input"))
+        .send(TurnInput::text("finish admitted input"))
         .output()
         .await
         .expect("finish input runs");
-    assert_global_invariants(&finish_engine, "claims-settle-finish").await;
+    assert_global_invariants(&finish_engine, "admissions-settle-finish").await;
     drop(finish_engine);
-    let finish_verdict = logical_turn_claims_settle_exactly_once(&finish_trace.snapshot());
+    let finish_verdict = logical_turn_admissions_settle_exactly_once(&finish_trace.snapshot());
     assert!(finish_verdict.is_passed(), "{finish_verdict:?}");
 
     let cancel_trace = Arc::new(RecordingTraceSink::default());
@@ -625,7 +625,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("open cancel session");
     let cancelled = cancel_session
-        .send(TurnInput::text("cancel claimed input"))
+        .send(TurnInput::text("cancel admitted input"))
         .await
         .expect("send cancel input");
     provider_started_rx.await.expect("cancel provider started");
@@ -634,13 +634,13 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("cancel the running input's root");
     let cancelled = cancelled.output().await.expect("cancel input runs");
-    assert_global_invariants(&cancel_engine, "claims-settle-cancel").await;
+    assert_global_invariants(&cancel_engine, "admissions-settle-cancel").await;
     drop(cancel_engine);
     assert!(matches!(
         cancelled.result.outcome,
         lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
-    let cancel_verdict = logical_turn_claims_settle_exactly_once(&cancel_trace.snapshot());
+    let cancel_verdict = logical_turn_admissions_settle_exactly_once(&cancel_trace.snapshot());
     assert!(cancel_verdict.is_passed(), "{cancel_verdict:?}");
 
     let error_trace = Arc::new(RecordingTraceSink::default());
@@ -673,13 +673,13 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .output()
         .await
         .expect("invalid input terminalizes");
-    assert_global_invariants(&error_engine, "claims-settle-error").await;
+    assert_global_invariants(&error_engine, "admissions-settle-error").await;
     drop(error_engine);
     assert!(matches!(
         invalid.result.outcome,
         lash_core::facade_support::TurnOutcome::Stopped(TurnStop::InvalidInput)
     ));
-    let error_verdict = logical_turn_claims_settle_exactly_once(&error_trace.snapshot());
+    let error_verdict = logical_turn_admissions_settle_exactly_once(&error_trace.snapshot());
     assert!(error_verdict.is_passed(), "{error_verdict:?}");
 
     const SWITCH_BOUND: usize = 16;
@@ -726,7 +726,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .output()
         .await
         .expect("bounded chain terminalizes");
-    assert_global_invariants(&bound_engine, "claims-settle-bound").await;
+    assert_global_invariants(&bound_engine, "admissions-settle-bound").await;
     drop(bound_engine);
     assert!(matches!(
         bounded.result.outcome,
@@ -756,7 +756,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
             .expect("bounded inputs")
             .is_empty()
     );
-    let bound_verdict = logical_turn_claims_settle_exactly_once(&bound_trace.snapshot());
+    let bound_verdict = logical_turn_admissions_settle_exactly_once(&bound_trace.snapshot());
     assert!(bound_verdict.is_passed(), "{bound_verdict:?}");
 }
 
@@ -860,8 +860,8 @@ finish({ baton: baton });
         }])
         .is_passed()
     );
-    let claim_verdict = logical_turn_claims_settle_exactly_once(&trace.snapshot());
-    assert!(claim_verdict.is_passed(), "{claim_verdict:?}");
+    let admission_verdict = logical_turn_admissions_settle_exactly_once(&trace.snapshot());
+    assert!(admission_verdict.is_passed(), "{admission_verdict:?}");
     assert_eq!(call_index.load(Ordering::SeqCst), 2);
     assert_global_invariants(&engine, "rlm-continue-as").await;
 }
@@ -1013,7 +1013,7 @@ fn withheld_wake(session_id: &SessionId) -> lash_core::runtime::QueuedWorkBatchD
 }
 
 #[tokio::test]
-async fn terminal_checkpoint_withheld_claim_is_traced_once() {
+async fn terminal_checkpoint_withheld_admission_is_traced_once() {
     let engine = sim_engine().await;
     let backend = engine.backend();
     let factory: Arc<dyn lash_core::DeploymentStore> =
@@ -1071,9 +1071,9 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
         2,
         "withheld work ran in its own physical turn"
     );
-    let verdict = logical_turn_claims_settle_exactly_once(&trace.snapshot());
+    let verdict = logical_turn_admissions_settle_exactly_once(&trace.snapshot());
     assert!(verdict.is_passed(), "{verdict:?}");
-    assert_global_invariants(&engine, "withheld-claim").await;
+    assert_global_invariants(&engine, "withheld-admission").await;
 }
 
 /// This test crate's one path to a session that may not exist yet

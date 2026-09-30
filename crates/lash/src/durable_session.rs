@@ -275,7 +275,7 @@ impl DurableSession {
         crate::CancelBuilder::new(crate::send::SendTarget::Durable(self.clone()), target)
     }
 
-    /// A held input reports the sealed drive epoch under which its claim was
+    /// A held input reports the sealed drive epoch under which its admission was
     /// taken. That status does not prove the holder is alive; resubmitting
     /// while it is held creates another admission unless the host reuses the
     /// same source key.
@@ -330,7 +330,7 @@ impl DurableSession {
     ///
     /// This is the app reconciliation path for explicit selections such as
     /// "remove these pending drafts". Returned outcomes distinguish newly
-    /// cancelled input from input that was already claimed, completed,
+    /// cancelled input from input that was already admitted, completed,
     /// cancelled, or missing.
     pub async fn cancel_pending_turn_inputs(
         &self,

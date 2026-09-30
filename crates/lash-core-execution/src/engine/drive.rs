@@ -135,7 +135,7 @@ pub enum RootOutcome {
     /// nothing ran.
     Refused { root: TurnId, verdict: SealVerdict },
     /// The work admission named was answered by another driver or withdrawn
-    /// before the root claimed it, so nothing ran.
+    /// before the root took it, so nothing ran.
     Ceded { root: TurnId },
     /// The engine released the root's execution for good (an operator's
     /// cancel or fork killed it, or it ended terminally without a lash

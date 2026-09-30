@@ -4,20 +4,20 @@ use crate::CheckpointKind;
 use crate::SessionId;
 pub use lash_core_store::turn_input_vocabulary::*;
 
-/// Generates the checkpoint enumeration a claim can name, from one variant list.
+/// Generates the checkpoint enumeration an admission can name, from one variant list.
 ///
 /// The generated match is exhaustive, so a new [`CheckpointKind`] variant fails to compile until it
-/// is added here, which keeps `CLAIM_CHECKPOINTS` complete for the tests that sweep every
+/// is added here, which keeps `ADMISSION_CHECKPOINTS` complete for the tests that sweep every
 /// checkpoint.
-macro_rules! turn_input_claim_checkpoints {
+macro_rules! turn_input_admission_checkpoints {
     ($($variant:ident),+ $(,)?) => {
         #[cfg(test)]
-        pub(crate) const CLAIM_CHECKPOINTS: &[CheckpointKind] = &[$(CheckpointKind::$variant),+];
+        pub(crate) const ADMISSION_CHECKPOINTS: &[CheckpointKind] = &[$(CheckpointKind::$variant),+];
 
         /// Compile-time guard only: the exhaustive match below is what fails on a new variant.
         #[cfg(test)]
         #[allow(dead_code)]
-        fn assert_claim_checkpoints_are_exhaustive(checkpoint: CheckpointKind) {
+        fn assert_admission_checkpoints_are_exhaustive(checkpoint: CheckpointKind) {
             match checkpoint {
                 $(CheckpointKind::$variant => ()),+
             }
@@ -25,7 +25,7 @@ macro_rules! turn_input_claim_checkpoints {
     };
 }
 
-turn_input_claim_checkpoints!(AfterWork, BeforeCompletion);
+turn_input_admission_checkpoints!(AfterWork, BeforeCompletion);
 
 #[cfg(test)]
 mod tests {
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn every_checkpoint_admits_at_least_the_default_boundary() {
-        for checkpoint in CLAIM_CHECKPOINTS.iter().copied() {
+        for checkpoint in ADMISSION_CHECKPOINTS.iter().copied() {
             let admitted = TurnInputCheckpointBoundary::ALL
                 .iter()
                 .filter(|boundary| boundary.admits(checkpoint))

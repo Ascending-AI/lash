@@ -530,8 +530,8 @@ impl Journal {
         }
     }
 
-    /// Bound every claim this journal's runtimes take to `max_inputs` rows.
-    fn with_turn_input_claim(mut self, max_inputs: usize) -> Self {
+    /// Bound every admission this journal's runtimes take to `max_inputs` rows.
+    fn with_turn_input_admission(mut self, max_inputs: usize) -> Self {
         self.batching = self.batching.with_max_turn_input_admission(max_inputs);
         self
     }
@@ -625,7 +625,7 @@ impl Journal {
 
 /// A worker that dies after its drive and before its commit: its turn stops
 /// in the prepare phase and never returns, and [`crash_turn`] drops it there.
-/// No abort path runs, so the claim stays pinned to a lease generation that no
+/// No abort path runs, so the admission stays pinned to a lease generation that no
 /// longer holds the lane — the state a killed worker leaves behind.
 pub(super) fn crash_before_commit_plugin(
     died: Arc<tokio::sync::Notify>,
@@ -985,13 +985,13 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
 
 /// A first execution that died after its drive and before its commit is
 /// redriven after a new input was admitted. The redrive drives the journaled
-/// set, not a live claim: the committed turn holds only the first execution's
+/// set, not a live admission: the committed turn holds only the first execution's
 /// rows, and the new input waits for the next turn.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
+pub async fn uncommitted_redrive_drives_journaled_set_not_live_admission(
     prefix: &str,
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
@@ -1004,7 +1004,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
         .await;
     let journaled = match journal.controller.journaled_drive() {
         Some(crate::store::RootAdmissionAnswer::Admitted { admission }) => admission,
-        other => panic!("the first execution claimed its accepted row: {other:?}"),
+        other => panic!("the first execution admitted its accepted row: {other:?}"),
     };
     let late = enqueue_next_turn(&store, "admitted after the crash").await;
 
@@ -1017,7 +1017,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
     assert_eq!(
         reads.load(Ordering::SeqCst),
         0,
-        "the redrive drives the journaled set and never claims or reads a pending row"
+        "the redrive drives the journaled set and never admits or reads a pending row"
     );
 
     let requests = requests.lock().expect("request lock").clone();
@@ -1069,7 +1069,7 @@ pub async fn drive_effect_refusal_is_journaled(
 
     // The acceptance mints its id inside the effect, so the withdrawal targets
     // the only open row in the session, which is the accepted one.
-    let withdrawing: Arc<dyn crate::RuntimeStore> = Arc::new(WithdrawBeforeClaim {
+    let withdrawing: Arc<dyn crate::RuntimeStore> = Arc::new(WithdrawBeforeAdmission {
         inner: Arc::clone(&store),
     });
     let refused = journal
@@ -1109,19 +1109,19 @@ pub async fn drive_effect_refusal_is_journaled(
     assert_eq!(
         reads.load(Ordering::SeqCst),
         0,
-        "a replayed drive never claims or reads a pending row"
+        "a replayed drive never admits or reads a pending row"
     );
     assert!(requests.lock().expect("request lock").is_empty());
     assert!(pending_input_ids(&store).await.is_empty());
 }
 
-/// Withdraws the session's open next-turn row right before the first claim.
-struct WithdrawBeforeClaim {
+/// Withdraws the session's open next-turn row right before the first admission.
+struct WithdrawBeforeAdmission {
     inner: Arc<dyn crate::RuntimeStore>,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for WithdrawBeforeClaim {
+impl crate::store::RuntimeStoreDecorator for WithdrawBeforeAdmission {
     type Inner = dyn crate::RuntimeStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -1147,7 +1147,7 @@ impl crate::store::RuntimeStoreDecorator for WithdrawBeforeClaim {
 
 /// A direct turn whose accepted input sits behind earlier admissions is driven
 /// after them (FIG-3600): the drive admits each earlier root first, in arrival
-/// order, every root's claim takes the claimable prefix up to the claim bound,
+/// order, every root's admission takes the admissible prefix up to the admission bound,
 /// and the call returns the run of the root that drove its input. Every input
 /// is answered once, nothing is dropped, and nothing waits for a later drain.
 #[expect(
@@ -1162,7 +1162,7 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
     let turn_id = TurnId::from(format!("{prefix}-queued-direct-turn"));
     let first = enqueue_next_turn(&store, "earliest admission").await;
     let second = enqueue_next_turn(&store, "second admission").await;
-    let journal = Journal::new(&backend).with_turn_input_claim(2);
+    let journal = Journal::new(&backend).with_turn_input_admission(2);
     let (provider, requests) = recording_provider("answered in order");
 
     let turn = journal
@@ -1204,7 +1204,7 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
     assert_eq!(
         requests.len(),
         2,
-        "one root for the two earlier inputs under the claim bound, then the direct one"
+        "one root for the two earlier inputs under the admission bound, then the direct one"
     );
     assert!(
         requests
@@ -1243,7 +1243,7 @@ pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
 
     // The lost-outcome error returns with the crashed worker's lane still
     // held: only the dropped guard's spawned best-effort release frees it, so
-    // the redrive's admission claim can observe the abandoned lease and refuse
+    // the redrive's admission can observe the abandoned lease and refuse
     // with `SessionExecutionLaneBusy`. Expire it first.
 
     let redriven = journal

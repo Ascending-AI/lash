@@ -324,7 +324,7 @@ pub fn head_input(open: &[crate::PendingTurnInputRead]) -> Option<&crate::Pendin
 }
 
 /// The root the head input `head` runs under, given the root its store
-/// binding names (`bound`): that root (the root whose claim took it, or the
+/// binding names (`bound`): that root (the root whose admission took it, or the
 /// new root a fork bound it to, FIG-3600 S7), else [`input_root`].
 #[must_use]
 pub fn head_input_root(

@@ -333,8 +333,8 @@ async fn run_once_inner(
             })?;
             return run_once_store_hardening_hot_paths(chat_turns, &postgres_database_url).await;
         }
-        RuntimePerfScenario::QueuedWorkClaimStress => {
-            return Box::pin(run_once_queued_work_claim_stress(chat_turns)).await;
+        RuntimePerfScenario::QueuedWorkAdmissionStress => {
+            return Box::pin(run_once_queued_work_admission_stress(chat_turns)).await;
         }
         RuntimePerfScenario::TurnInputIngressInterrupt => {
             return run_once_turn_input_ingress_interrupt(chat_turns).await;
@@ -368,7 +368,7 @@ async fn run_once_inner(
         | RuntimePerfScenario::DeepTurnComposition
         | RuntimePerfScenario::TurnStartGate
         | RuntimePerfScenario::TurnCancelRoundTrip
-        | RuntimePerfScenario::IngressClaimProjection
+        | RuntimePerfScenario::IngressAdmissionProjection
         | RuntimePerfScenario::DurableStandardToolTurnSqlite
         | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
         | RuntimePerfScenario::DurableAgentChildTurnSqlite => {
@@ -636,7 +636,7 @@ async fn run_once_inner(
                         },
                     );
                     Ok(turn)
-                } else if matches!(scenario, RuntimePerfScenario::IngressClaimProjection) {
+                } else if matches!(scenario, RuntimePerfScenario::IngressAdmissionProjection) {
                     let turn_id = TurnId::from(format!(
                         "runtime-perf-ingress-projection-{}",
                         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
@@ -646,7 +646,7 @@ async fn run_once_inner(
                         turn_index,
                         "run_turn",
                         Some(cancel.clone()),
-                        runtime.run_ingress_claim_projection(
+                        runtime.run_ingress_admission_projection(
                             turn_input,
                             &turn_id,
                             cancel,
@@ -655,7 +655,7 @@ async fn run_once_inner(
                     ))
                     .await?;
                     extra_phase_profile.insert(
-                        "turn_input_ingress.enqueue_to_claim_to_projection".to_string(),
+                        "turn_input_ingress.enqueue_to_admission_to_projection".to_string(),
                         RuntimePerfPhaseRunResult {
                             samples: 1,
                             duration_ms: round3(duration.as_secs_f64() * 1000.0),

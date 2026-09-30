@@ -213,7 +213,7 @@ impl AdmitDriveRunner {
     /// The work this admission drives next, and the root it runs under.
     ///
     /// A follow-on the head owes comes first (ADR 0101 §3, FIG-3542): while
-    /// it is owed every other claim is blocked, so it is recovered before
+    /// it is owed every other admission is blocked, so it is recovered before
     /// anything else is admitted. It always belongs to the unfinished root (a
     /// frame switch's commit ends no root), and its recovery's final commit
     /// ends that root. Then the session's unfinished root, which owns the

@@ -106,7 +106,7 @@ crate::statements! {
         /// One question, so one statement: asking it as two would let a
         /// session go from empty to non-empty between them and report a
         /// bound-worthy session as idle.
-        has_claimable_work = "SELECT EXISTS(
+        has_admissible_work = "SELECT EXISTS(
                 SELECT 1 FROM session_roots
                 WHERE session_id = ?1
                   AND admission_json IS NOT NULL

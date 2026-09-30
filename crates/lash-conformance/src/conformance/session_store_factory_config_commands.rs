@@ -63,7 +63,7 @@ impl crate::store::RuntimeStoreDecorator for PausedConfigSettlementStore {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn session_store_factory_coalesces_config_command_claims(
+pub(super) async fn session_store_factory_coalesces_config_command_runs(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
@@ -111,16 +111,16 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         .expect("claim config-command session lease")
         .acquired()
         .expect("config-command session lease");
-    let claim = store
+    let run = store
         .open_session_command_run(&lease)
         .await
-        .expect("claim leading config commands");
+        .expect("open leading config commands");
 
-    assert_eq!(claim.len(), 3);
+    assert_eq!(run.len(), 3);
     assert_eq!(
         crate::AdmittedQueuedWork {
             session_id: request.session_id.clone(),
-            batches: claim.clone(),
+            batches: run.clone(),
         }
         .session_commands()
         .expect("the run contains only config commands")
@@ -128,11 +128,11 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         3,
         "all adjacent config commands must share one command run"
     );
-    let completed_batch_ids = claim
+    let completed_batch_ids = run
         .iter()
         .map(|batch| batch.batch_id.clone())
         .collect::<Vec<_>>();
-    commit_session_command_claim(store.store(), &request, &lease, claim).await;
+    commit_session_command_run(store.store(), &request, &lease, run).await;
     for batch_id in completed_batch_ids {
         assert!(
             store
@@ -148,11 +148,11 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn session_store_factory_bounds_config_command_claims(
+pub(super) async fn session_store_factory_bounds_config_command_runs(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
-        &SessionId::from("config-command-claim-bound"),
+        &SessionId::from("config-command-run-bound"),
         "config-command-base-model",
         crate::SessionRelation::Root,
     );
@@ -182,15 +182,15 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
             .expect("enqueue bounded config command");
     }
     let owner = crate::LeaseOwnerIdentity::opaque(
-        "config-command-claim-bound",
-        "config-command-claim-bound:incarnation",
+        "config-command-run-bound",
+        "config-command-run-bound:incarnation",
     );
     let lease = store
         .store()
         .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
-            "config-command-claim-bound-executor",
+            "config-command-run-bound-executor",
             60_000,
         )
         .await
@@ -200,19 +200,19 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
     let first = store
         .open_session_command_run(&lease)
         .await
-        .expect("claim first bounded command prefix");
+        .expect("open first bounded command prefix");
     assert_eq!(
         first.len(),
         crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN
     );
-    commit_session_command_claim(store.store(), &request, &lease, first).await;
+    commit_session_command_run(store.store(), &request, &lease, first).await;
 
     let second = store
         .open_session_command_run(&lease)
         .await
-        .expect("claim remaining bounded command prefix");
+        .expect("open remaining bounded command prefix");
     assert_eq!(second.len(), 3);
-    commit_session_command_claim(store.store(), &request, &lease, second).await;
+    commit_session_command_run(store.store(), &request, &lease, second).await;
 
     assert!(
         store
@@ -224,22 +224,22 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
     );
 }
 
-async fn commit_session_command_claim(
+async fn commit_session_command_run(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
     fence: &crate::store::DriveFence,
     run: Vec<crate::QueuedWorkBatch>,
 ) {
-    commit_session_command_claim_with(store, request, fence, run, |_| {}).await;
+    commit_session_command_run_with(store, request, fence, run, |_| {}).await;
 }
 
-/// [`commit_session_command_claim`], with `adjust` applied to the state the
+/// [`commit_session_command_run`], with `adjust` applied to the state the
 /// settling commit writes.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn commit_session_command_claim_with(
+async fn commit_session_command_run_with(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
     fence: &crate::store::DriveFence,
@@ -277,7 +277,7 @@ async fn commit_session_command_claim_with(
     store
         .commit_runtime_state(commit)
         .await
-        .expect("commit config-command claim");
+        .expect("commit config-command run");
 }
 
 tokio::task_local! {
@@ -607,7 +607,7 @@ where
         .cancel_queued_work_batch(&request.session_id, &command_batch.batch_id)
         .await
         .expect("cancel queued config command")
-        .expect("config command cancellation wins before claim");
+        .expect("config command cancellation wins before admission");
     assert_eq!(cancelled.batch_id, command_batch.batch_id);
     assert!(
         !store
@@ -697,13 +697,12 @@ where
     };
 
     // The second writer drains the facade writer's command...
-    let claim = store
+    let run = store
         .open_session_command_run(&lease)
         .await
-        .expect("claim facade config command");
+        .expect("open facade config command");
     assert!(
-        claim
-            .iter()
+        run.iter()
             .any(|batch| batch.batch_id == command_batch.batch_id),
         "the superseding writer drains the facade writer's command"
     );
@@ -716,7 +715,7 @@ where
         .build()
         .expect("superseding model");
     let newer_model = superseding_model.clone();
-    commit_session_command_claim_with(&store, &request, &lease, claim, move |state| {
+    commit_session_command_run_with(&store, &request, &lease, run, move |state| {
         state.policy.model = newer_model;
     })
     .await;

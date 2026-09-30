@@ -4,7 +4,7 @@
 //! Restate stops polling a handler that suspends, so an attempt of a root
 //! ends where it awaited. Whoever locks the resident runtime next, a host's
 //! read as much as the engine's next attempt, must find it as a redrive in a
-//! fresh process would: no sealed root, no journaled claims, no admitted turn
+//! fresh process would: no sealed root, no journaled admissions, no admitted turn
 //! index, no attempt flag, and a resident session that reloads from the
 //! durable session instead of serving what the dropped attempt did to it.
 

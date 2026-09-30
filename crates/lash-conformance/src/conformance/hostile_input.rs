@@ -94,7 +94,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
         );
         assert!(
             factory
-                .has_claimable_queued_work(&request.session_id)
+                .has_admissible_queued_work(&request.session_id)
                 .await
                 .is_err(),
             "malformed session id must not reach queued-work lookup"

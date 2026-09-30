@@ -212,10 +212,10 @@ changes a hidden operation into an untyped failure, or suppresses host signal/ca
 persistence contract with a fresh store for each vector.
 
 **Action.** Enqueue two adjacent turn-work rows without merge keys, then enqueue two adjacent
-process wakes carrying `PROCESS_WAKE_MERGE_KEY`. Claim ready work at the idle boundary.
+process wakes carrying `PROCESS_WAKE_MERGE_KEY`. Admit ready work at the idle boundary.
 
-**Expected observable evidence.** The absent-key rows yield two distinct single-batch claims.
-The wakes yield one claim containing both receiver batches, and settling it removes both.
+**Expected observable evidence.** The absent-key rows yield two distinct single-batch admissions.
+The wakes yield one admission containing both receiver batches, and settling it removes both.
 
 **Judgment — FAIL if:** absent keys collapse turns, compatible default-key wakes create two
 turns, batching crosses a delivery boundary/key/authority gate, or settlement leaves one member
@@ -290,7 +290,7 @@ a match on the gate's own output; require that too.
 | Typed discard + redrive | exact `TargetGone`/`Expired`; named block clears | | `01-wake-delivery.log` |
 | Retarget | old pending `Retargeted`; audit; next wake reaches new target | | `02-retarget.jsonl` |
 | Visibility lens | model narrowed; host list/signal/cancel complete | | `03-tool-visibility.log` |
-| Wake-turn policy | two absent-key rows yield two distinct single-batch claims; two default-key wakes yield one claim holding both batches | | `04-wake-turn-policy.log` |
+| Wake-turn policy | two absent-key rows yield two distinct single-batch admissions; two default-key wakes yield one admission holding both batches | | `04-wake-turn-policy.log` |
 | Worker crash recovery | kill at named seam; one receiver turn after restart | | `05-crash-*.jsonl`, `05-killed-exit-code.txt` |
 | Process-id reuse | fresh monotone sequence delivered; rewind typed and non-blocking | | `01-wake-delivery.log` |
 | Retention | receipts retained; delivery reconciliation; guard blocks compaction | | `07-retention.log` |

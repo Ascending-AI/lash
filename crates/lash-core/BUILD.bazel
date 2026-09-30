@@ -425,9 +425,9 @@ filegroup(
 )
 
 filegroup(
-    name = "queued_claim_atomicity",
+    name = "queued_admission_atomicity",
     srcs = [
-        "tests/support/queued_claim_atomicity.rs",
+        "tests/support/queued_admission_atomicity.rs",
     ],
 )
 

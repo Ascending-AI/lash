@@ -242,7 +242,7 @@ impl EmbedError {
 
     /// The session-state generations the generation gate refused, when this
     /// is its refusal (FIG-3571, FIG-3619): at a session's open, at a turn's
-    /// claim, or at a store call.
+    /// admission, or at a store call.
     ///
     /// A durable engine's turn handler that meets it on a redrive of a turn
     /// still in flight parks the turn rather than ending the invocation

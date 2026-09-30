@@ -43,7 +43,7 @@ pub fn frame_switch_seeds(observations: &[FrameSwitchSeedObservation]) -> Oracle
 /// row (FIG-3927), and require every admitted row to be admitted once and
 /// settled once under the root that admitted it: completed as delivered, or
 /// handed back open or dropped by that root's commit.
-pub fn logical_turn_claims_settle_exactly_once(
+pub fn logical_turn_admissions_settle_exactly_once(
     records: &[lash_core::facade_support::TraceRecord],
 ) -> OracleVerdict {
     type RowKey = (String, String);
@@ -72,7 +72,7 @@ pub fn logical_turn_claims_settle_exactly_once(
         };
         let Some(root) = payload.get("root").and_then(Value::as_str) else {
             return OracleVerdict::failed(
-                LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
+                LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
                 format!("{name} trace omitted root"),
             );
         };
@@ -82,7 +82,7 @@ pub fn logical_turn_claims_settle_exactly_once(
     }
     if admitted.is_empty() {
         return OracleVerdict::failed(
-            LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
+            LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
             "no admitted ingress was observed",
         );
     }
@@ -90,7 +90,7 @@ pub fn logical_turn_claims_settle_exactly_once(
         let settlement_count = settled.get(row).copied().unwrap_or_default();
         if *admission_count != 1 || settlement_count != 1 {
             return OracleVerdict::failed(
-                LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
+                LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
                 format!(
                     "row `{}` of root `{}` was admitted {admission_count} times and settled \
                      {settlement_count} times",
@@ -104,7 +104,7 @@ pub fn logical_turn_claims_settle_exactly_once(
         .find(|(row, count)| !admitted.contains_key(*row) || **count != 1)
     {
         return OracleVerdict::failed(
-            LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
+            LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
             format!(
                 "row `{}` of root `{}` had {count} settlements without one matching admission",
                 row.1, row.0
@@ -112,7 +112,7 @@ pub fn logical_turn_claims_settle_exactly_once(
         );
     }
     OracleVerdict::passed(
-        LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
+        LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
         format!("{} admitted rows settled exactly once", admitted.len()),
     )
 }
@@ -123,19 +123,19 @@ pub fn frame_switch_follow_on_is_atomic(
     if observations.is_empty() {
         return OracleVerdict::failed(
             FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE,
-            "no claimed frame-switch commit was observed",
+            "no admitted frame-switch commit was observed",
         );
     }
     if let Some(observation) = observations
         .iter()
-        .find(|observation| !observation.inbound_claim_completed || !observation.follow_on_owed)
+        .find(|observation| !observation.inbound_admission_completed || !observation.follow_on_owed)
     {
         return OracleVerdict::failed(
             FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE,
             format!(
                 "switch commit `{}` exposed inbound_completed={} follow_on_owed={}",
                 observation.turn_id,
-                observation.inbound_claim_completed,
+                observation.inbound_admission_completed,
                 observation.follow_on_owed
             ),
         );
@@ -143,7 +143,7 @@ pub fn frame_switch_follow_on_is_atomic(
     OracleVerdict::passed(
         FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE,
         format!(
-            "{} switch commits exposed claim completion and the owed follow-on together",
+            "{} switch commits exposed admission completion and the owed follow-on together",
             observations.len()
         ),
     )
@@ -417,7 +417,7 @@ mod admission_identity_tests {
             "ingress.settled",
             serde_json::json!({"root": "root-b", "released": ["qwb:b"]}),
         ));
-        let verdict = logical_turn_claims_settle_exactly_once(&records);
+        let verdict = logical_turn_admissions_settle_exactly_once(&records);
         assert!(verdict.is_passed(), "{verdict:?}");
     }
 
@@ -430,7 +430,7 @@ mod admission_identity_tests {
             admit_and_settle("root-a", "qwb:a"),
         ]
         .concat();
-        let verdict = logical_turn_claims_settle_exactly_once(&records);
+        let verdict = logical_turn_admissions_settle_exactly_once(&records);
         assert!(!verdict.is_passed(), "{verdict:?}");
     }
 }

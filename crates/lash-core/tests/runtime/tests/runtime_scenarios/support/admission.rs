@@ -34,9 +34,9 @@ impl RuntimeScenarioContext {
             .unwrap_or_else(|err| panic!("{} failed to admit its root: {err}", self.name))
     }
 
-    pub(super) async fn leading_command_claim(&mut self, phase: RuntimeLeadingCommandClaimPhase) {
+    pub(super) async fn leading_command_run(&mut self, phase: RuntimeLeadingCommandRunPhase) {
         self.ensure_lease().await;
-        if let Some(expected) = phase.turn_claim_blocked_by_command {
+        if let Some(expected) = phase.turn_admission_blocked_by_command {
             let head = self
                 .turn_lane_head()
                 .await
@@ -65,7 +65,7 @@ impl RuntimeScenarioContext {
         self.commands = commands;
     }
 
-    pub(super) async fn turn_work_claim(&mut self, phase: RuntimeTurnWorkClaimPhase) {
+    pub(super) async fn turn_work_admission(&mut self, phase: RuntimeTurnWorkAdmissionPhase) {
         self.ensure_lease().await;
         let batches = match phase.boundary {
             AdmissionBoundary::Idle => match self.turn_lane_head().await {
@@ -113,19 +113,19 @@ impl RuntimeScenarioContext {
             "{} admitted turn-work count changed",
             self.name
         );
-        if !phase.pending_turn_inputs_after_queue_claim.is_empty() {
+        if !phase.pending_turn_inputs_after_queue_admission.is_empty() {
             assert_pending_turn_inputs(
                 self.name,
                 self.store(),
                 &self.session_id,
                 &self.enqueued_turn_inputs,
-                &phase.pending_turn_inputs_after_queue_claim,
+                &phase.pending_turn_inputs_after_queue_admission,
             )
             .await;
         }
     }
 
-    pub(super) async fn next_turn_input_claim(
+    pub(super) async fn next_turn_input_admission(
         &mut self,
         phase: RuntimeNextTurnInputAdmissionPhase,
     ) {
@@ -189,7 +189,7 @@ impl RuntimeScenarioContext {
             "{} admitted next-turn input payloads changed",
             self.name
         );
-        if phase.verify_pending_turn_inputs_held_after_claim {
+        if phase.verify_pending_turn_inputs_held_after_admission {
             let reads = self
                 .store()
                 .list_pending_turn_inputs(&self.session_id)

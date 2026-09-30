@@ -17,7 +17,7 @@ macro_rules! direct_turn_acceptance_tests {
             (vacuum_then_redrive_replays_receipt_single_row, "direct-turn-vacuum-redrive-single"),
             (vacuum_then_redrive_replays_receipt_absorbed_rows, "direct-turn-vacuum-redrive-absorbed"),
             (cancelled_vacuumed_acceptance_is_not_resurrected, "direct-turn-cancelled-vacuumed"),
-            (uncommitted_redrive_drives_journaled_set_not_live_claim, "direct-turn-uncommitted-redrive"),
+            (uncommitted_redrive_drives_journaled_set_not_live_admission, "direct-turn-uncommitted-redrive"),
             (drive_effect_refusal_is_journaled, "direct-turn-refused-drive"),
             (direct_turn_behind_earlier_admissions_runs_after_them, "direct-turn-queued-input"),
             (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),

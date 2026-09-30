@@ -7,22 +7,22 @@
 //! session's drive epoch for that admission, and the root's turns run to
 //! their terminal commit. It stops when admission answers anything but an
 //! admitted root. What the drive decides is recorded: a redrive replays the
-//! admission and the seal, and the root replays its recorded claim and the
-//! head that claim was admitted on (FIG-3682).
+//! admission and the seal, and the root replays its recorded admission and the
+//! head that admission ran on (FIG-3682).
 //!
-//! The root's claim body repairs orphaned inputs before it claims the admitted
+//! The root's admission body repairs orphaned inputs before it binds the admitted
 //! head. A separate `InspectAdmittedHead` step records whether that head is
 //! ready, overtaken, or divergent. A redrive reads both outcomes from its journal
 //! and issues no second repair. The inspection's body is the drive's one live
 //! head check, and it runs only when that step is the attempt's live
 //! frontier; a redrive honours the recorded verdict at every position
 //! (FIG-4058), and the turn's fenced commit meets a head that moved since as
-//! a typed refusal. The check cannot select new work or change the claim's
+//! a typed refusal. The check cannot select new work or change the admission's
 //! recorded base (ADR 0105 §2).
 //! Rule 6 of the substrate lint pins direct store calls and the orphan-repair
 //! helper in the drive.
 //!
-//! The drive epoch fences admission and repairs claims left by older epochs.
+//! The drive epoch fences admission and repairs admissions left by older epochs.
 //! Commit CAS still protects the session head from stale writes.
 //!
 //! The drive names no engine. An engine that runs drives in process hands
@@ -537,7 +537,7 @@ pub fn discard_root_residue(runtime: &mut LashRuntime) {
 
 /// What one admitted root's run left behind in this process: how it ended,
 /// the physical turns it assembled when they ran here, and the accepted
-/// inputs its recorded claim drove.
+/// inputs its recorded admission drove.
 ///
 /// The facade's settled-root mailbox is filled from it (FIG-3600 S5b): a
 /// handle waiting on one of `driven_inputs` answers with the turn as it ran,
@@ -807,7 +807,7 @@ impl LashRuntime {
         // anything is admitted (FIG-3619): the recorded step's first read is
         // that same gate, so no unrecorded read precedes it here. The body
         // records the resident head as the admission's view of the session;
-        // the root's recorded claim, taken under the lease on a head
+        // the root's recorded admission, taken under the lease on a head
         // refreshed there, is the head the root runs on (FIG-3682). The
         // session's own retirement is not refused here either: the journaled
         // step below is the durable answer a redrive replays, and

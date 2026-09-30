@@ -7,7 +7,7 @@ The columns below name the statement and the file containing its query text.
 | Table and scan | Query text |
 | --- | --- |
 | Inputs: `list_undelivered`, `earliest_next_turn_candidate_seq` | `crates/lash-store-sql/src/turn_ingress/pending_inputs.rs` |
-| Inputs: `has_claimable_work`, `pending_session_work_ordering` | `crates/lash-store-sql/src/turn_ingress.rs` |
+| Inputs: `has_admissible_work`, `pending_session_work_ordering` | `crates/lash-store-sql/src/turn_ingress.rs` |
 | Inputs: `select_pending_active`, `admission_candidates_next_turn`, `admission_candidates_active_turn_after_work`, `admission_candidates_active_turn_before_completion` | `crates/lash-sqlite-store/src/turn_ingress/pending_inputs.rs`; `crates/lash-postgres-store/src/postgres/turn_ingress/pending_inputs.rs` |
 | Inputs at checkpoints: `checkpoint_work_pending_after_work`, `checkpoint_work_pending_before_completion` | `crates/lash-sqlite-store/src/turn_ingress/family.rs`; `crates/lash-postgres-store/src/postgres/turn_ingress/family.rs` |
 | Queued work: `list_open` | `crates/lash-store-sql/src/turn_ingress/queued_batches.rs` |

@@ -42,13 +42,13 @@ pub const OPEN: &[Finding] = &[];
 /// The defects the soak found that `main` has fixed: each replay must pass.
 pub const FIXED: &[Finding] = &[
     // FIG-3892: a session command enqueued between an input root's
-    // admission and its claim held the claim back, so the root retried a
-    // claim race forever and the command never drained behind it.
+    // admission and its run held the admission back, so the root retried an
+    // admission race forever and the command never drained behind it.
     Finding {
         id: "FIG-3873 S1",
         summary: "a session with a queued command wedges: its admitted head root \
-                  fails every claim as `session_execution_lane_busy: missed its head \
-                  on a claim race`, parks EngineRetryExhausted after 8 attempts, \
+                  fails every admission as `session_execution_lane_busy: missed its head \
+                  on an admission race`, parks EngineRetryExhausted after 8 attempts, \
                   and every later input queues behind it uncommitted",
         exposed_by: &["command"],
         seed: 0x4299_608a_2be8_dd17,

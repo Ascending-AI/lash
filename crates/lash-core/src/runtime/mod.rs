@@ -521,8 +521,8 @@ pub struct LashRuntime {
     /// ledger's unreported rows; this is the attribution a later
     /// [`LashRuntime::reconcile_unreported_usage`] needs.
     pub unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
-    /// Claim ids of the journaled initial drive set the running direct turn
-    /// replays (ADR 0069 §6). A superseded one cedes the turn at commit under
+    /// Whether the running direct turn replays the journaled initial drive
+    /// set (ADR 0069 §6). A superseded one cedes the turn at commit under
     /// any generation: if its rows were reclaimed while the turn was down,
     /// another driver answered them, so committing would answer them twice.
     /// Set while an engine runs one admitted root as an attempt of its own

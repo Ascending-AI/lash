@@ -116,7 +116,7 @@ macro_rules! runtime_store_operations {
                 [session] fn pending_session_work_ordering(&self, session_id: &SessionId) -> Result<PendingSessionWorkOrdering, StoreError>;
                 [session] fn list_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
                 [session] fn list_open_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
-                [session] fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
+                [session] fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError>;
             }
             DriveEpochStore {
                 [session] fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64, root_start: &RootStartNonce) -> Result<DriveEpochSeal, StoreError>;

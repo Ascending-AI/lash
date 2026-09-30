@@ -215,7 +215,7 @@ impl DurableSessionOps {
         Ok(enqueued)
     }
 
-    /// Every open turn input with its factual read-time claim status; a held
+    /// Every open turn input with its factual read-time admission status; a held
     /// input is still reported, held.
     pub async fn pending_turn_inputs(
         &self,

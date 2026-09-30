@@ -13,7 +13,7 @@ pub type SessionRef = usize;
 /// What a session is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lane {
-    /// Plain inputs, batches and commands. Inputs the engine claims together
+    /// Plain inputs, batches and commands. Inputs the engine admits together
     /// batch into one root, so every input is answered but not every input
     /// owns a root.
     Plain,

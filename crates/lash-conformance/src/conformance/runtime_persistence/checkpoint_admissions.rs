@@ -979,7 +979,7 @@ pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_root(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
+pub async fn checkpoint_admissions_honor_min_boundary_at_every_checkpoint(
     store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("checkpoint-min-boundary");

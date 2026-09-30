@@ -1,5 +1,5 @@
 //! The FIG-3078 acceptance-window controller double, extracted from
-//! `lease_and_claims.rs`.
+//! `lease_and_admissions.rs`.
 //!
 //! It lives here because the parent sits on the 2500-line test budget
 //! `scripts/check-production-file-size.py` enforces, and FIG-2266's explicit

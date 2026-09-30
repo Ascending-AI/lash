@@ -7,7 +7,7 @@
   "source": "Regenerated through lash-sim run and write_trace on 2026-09-28 with lash-sim.generated-workload.v11, every turn and effect boundary on the lash-restate-test server double.",
   "source_trace_sha256": "5aedcb9acef4f9747198875090d3285f1066c146d2151753a4d7fb42161fdf50",
   "historical_production_regression": false,
-  "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
+  "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle admission can surface it",
   "required_boundary_kinds": [
     "queued_ingress",
     "cancellation",
@@ -16,7 +16,7 @@
   "semantic_oracles": [
     "sim.oracle.state-machine-semantic-invariants.v1",
     "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1",
-    "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1"
+    "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1"
   ],
   "replay_backends": [
     "model"

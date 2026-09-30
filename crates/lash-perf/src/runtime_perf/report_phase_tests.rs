@@ -1104,7 +1104,7 @@ fn runtime_perf_direct_counterparts_link_to_correctness_coverage() {
         RuntimePerfScenario::RlmProcessAsyncToolCompletion,
         RuntimePerfScenario::RlmSubagentSpawn,
         RuntimePerfScenario::TurnCheckpoint,
-        RuntimePerfScenario::QueuedWorkClaimStress,
+        RuntimePerfScenario::QueuedWorkAdmissionStress,
         RuntimePerfScenario::TurnInputIngressInterrupt,
     ] {
         assert!(
@@ -1126,7 +1126,7 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
         RuntimePerfScenario::SqliteStoreReopen,
         RuntimePerfScenario::TurnCheckpoint,
         RuntimePerfScenario::LiveReplayPressure,
-        RuntimePerfScenario::QueuedWorkClaimStress,
+        RuntimePerfScenario::QueuedWorkAdmissionStress,
         RuntimePerfScenario::TurnInputIngressInterrupt,
         RuntimePerfScenario::StoreHardeningHotPaths,
         RuntimePerfScenario::DurableQueuedWorkContentionSqlite,

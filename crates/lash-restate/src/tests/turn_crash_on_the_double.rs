@@ -43,7 +43,7 @@ lash_conformance::turn_crash_level_1_tests!(parked: &[]; {
 lash_conformance::effect_layer_group_child_tests!({ turn_crash_runner_fixture().await });
 
 // A drain crashed after its final commit and redriven through the session
-// drive replays its recorded admission, seal and claim and reads the
+// drive replays its recorded admission and seal and reads the
 // committed root back (FIG-3748).
 lash_conformance::turn_crash_after_commit_redrive_tests!({ turn_crash_runner_fixture().await });
 

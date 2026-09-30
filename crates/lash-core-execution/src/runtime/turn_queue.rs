@@ -9,7 +9,7 @@ pub struct SessionCommandSettlementHandle {
     pub receipt: SessionCommandReceipt,
 }
 
-/// Host policy bounding one automatically selected queued-work claim.
+/// Host policy bounding one automatically selected queued-work admission.
 ///
 /// Row count and maximum pending age retain Lash defaults because a poor
 /// choice affects batching efficiency rather than context-window correctness.
@@ -18,7 +18,7 @@ pub struct SessionCommandSettlementHandle {
 /// plus a misconfiguration check, because no shipped drain mode does token
 /// arithmetic (see [`action_token_reserve`](Self::action_token_reserve)).
 ///
-/// How much of the legal, FIFO-ordered claimable prefix actually drains on one
+/// How much of the legal, FIFO-ordered admissible prefix actually drains on one
 /// wake is a separate, explicitly named host policy: the
 /// [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) selected by
 /// [`with_drain_mode`](Self::with_drain_mode) or
@@ -55,25 +55,25 @@ impl PartialEq for QueuedWorkBatchingConfig {
 }
 
 impl QueuedWorkBatchingConfig {
-    /// Default upper bound on rows coalesced into one fresh turn claim.
+    /// Default upper bound on rows coalesced into one fresh turn admission.
     ///
     /// Hosts may replace this efficiency bound with [`Self::with_max_rows`].
-    /// Interrupted-claim redrive preserves the predecessor composition even
-    /// when it contains more rows than this fresh-claim default.
+    /// Interrupted-admission redrive preserves the predecessor composition even
+    /// when it contains more rows than this fresh-admission default.
     pub const DEFAULT_MAX_ROWS: usize = 64;
-    /// Default age at which the oldest compatible row is claimed alone instead
+    /// Default age at which the oldest compatible row is admitted alone instead
     /// of being coalesced with later ready rows.
     ///
     /// Hosts may replace this latency bound with
     /// [`Self::with_max_pending_age`].
     pub const DEFAULT_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(30);
-    /// Default upper bound on pending next-turn inputs one idle claim absorbs
+    /// Default upper bound on pending next-turn inputs one idle admission absorbs
     /// into a single turn.
     ///
     /// Hosts may replace it with [`Self::with_max_turn_input_admission`].
     pub const DEFAULT_MAX_TURN_INPUT_CLAIM: usize = 64;
 
-    /// These bounds apply to fresh claims. Redriving an interrupted claim keeps
+    /// These bounds apply to fresh admissions. Redriving an interrupted admission keeps
     /// its already-journaled composition intact.
     ///
     /// # Panics
@@ -95,7 +95,7 @@ impl QueuedWorkBatchingConfig {
             max_turn_input_admission: std::num::NonZeroUsize::new(
                 Self::DEFAULT_MAX_TURN_INPUT_CLAIM,
             )
-            .expect("default turn-input claim bound is non-zero"),
+            .expect("default turn-input admission bound is non-zero"),
             max_follow_on_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             drain_policy: None,
         }
@@ -141,7 +141,7 @@ impl QueuedWorkBatchingConfig {
     }
 
     /// Sets the maximum number of compatible rows coalesced into one fresh
-    /// claim. Redriving an interrupted claim may exceed this bound to preserve
+    /// admission. Redriving an interrupted admission may exceed this bound to preserve
     /// its already-journaled composition.
     ///
     /// # Panics
@@ -155,7 +155,7 @@ impl QueuedWorkBatchingConfig {
         self
     }
 
-    /// Sets the age at which Lash claims the oldest compatible row alone
+    /// Sets the age at which Lash admits the oldest compatible row alone
     /// instead of coalescing it with later ready rows.
     ///
     /// # Panics
@@ -181,10 +181,10 @@ impl QueuedWorkBatchingConfig {
         self.action_token_reserve.get()
     }
 
-    /// Sets the maximum number of pending next-turn inputs one idle claim
+    /// Sets the maximum number of pending next-turn inputs one idle admission
     /// absorbs into a single turn.
     ///
-    /// Direct and drained ingress share the bound because they share the claim
+    /// Direct and drained ingress share the bound because they share the admission
     /// (ADR 0069): a direct turn takes the head of the same queue a drain does.
     /// A direct turn whose accepted input sits further back than this bound
     /// drives nothing and reports the input as queued; the drain answers it in
@@ -195,27 +195,27 @@ impl QueuedWorkBatchingConfig {
     /// Panics when `max_inputs` is zero.
     pub const fn with_max_turn_input_admission(mut self, max_inputs: usize) -> Self {
         let Some(max_inputs) = std::num::NonZeroUsize::new(max_inputs) else {
-            panic!("turn-input claim bound must be non-zero");
+            panic!("turn-input admission bound must be non-zero");
         };
         self.max_turn_input_admission = max_inputs;
         self
     }
 
-    /// Returns the maximum number of pending next-turn inputs one idle claim
+    /// Returns the maximum number of pending next-turn inputs one idle admission
     /// absorbs into a single turn.
     pub const fn max_turn_input_admission(&self) -> usize {
         self.max_turn_input_admission.get()
     }
 
-    /// Returns the maximum number of compatible rows in one fresh claim.
+    /// Returns the maximum number of compatible rows in one fresh admission.
     ///
-    /// This does not split an interrupted claim whose complete composition
+    /// This does not split an interrupted admission whose complete composition
     /// must be redriven atomically.
     pub const fn max_rows(&self) -> usize {
         self.max_rows.get()
     }
 
-    /// Returns the age at which the oldest compatible row is claimed alone.
+    /// Returns the age at which the oldest compatible row is admitted alone.
     ///
     /// This is a batching-latency bound, not a queue expiry: reaching it does
     /// not discard the row.

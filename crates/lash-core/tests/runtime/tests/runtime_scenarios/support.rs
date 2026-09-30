@@ -74,8 +74,8 @@ impl RuntimeScenario {
     }
 
     fn validate_phase_order(&self) {
-        let mut saw_live_lease_claim = false;
-        let mut saw_turn_work_claim = false;
+        let mut saw_lease_requiring_phase = false;
+        let mut saw_turn_work_admission = false;
         for (index, phase) in self.phases.iter().enumerate() {
             if RuntimeScenarioPhase::releases_session_lease(phase) && index + 1 != self.phases.len()
             {
@@ -85,29 +85,29 @@ impl RuntimeScenario {
                 );
             }
             if RuntimeScenarioPhase::requires_live_session_lease(phase) {
-                saw_live_lease_claim = true;
+                saw_lease_requiring_phase = true;
             }
             match phase {
                 RuntimeScenarioPhase::Lease(RuntimeLeasePhase::ExpireStaleHolder { .. })
-                    if saw_live_lease_claim =>
+                    if saw_lease_requiring_phase =>
                 {
                     panic!(
-                        "{} stale-holder expiry must be declared before lease-claiming phases",
+                        "{} stale-holder expiry must be declared before lease-requiring phases",
                         self.name
                     );
                 }
-                RuntimeScenarioPhase::TurnWorkClaim(_) => {
-                    saw_live_lease_claim = true;
-                    saw_turn_work_claim = true;
+                RuntimeScenarioPhase::TurnWorkAdmission(_) => {
+                    saw_lease_requiring_phase = true;
+                    saw_turn_work_admission = true;
                 }
                 RuntimeScenarioPhase::Lease(RuntimeLeasePhase::ExpireStaleHolder { .. }) => {
-                    saw_live_lease_claim = true;
+                    saw_lease_requiring_phase = true;
                 }
                 RuntimeScenarioPhase::Fault(RuntimeFaultPhase::StaleQueueCompletion)
-                    if !saw_turn_work_claim =>
+                    if !saw_turn_work_admission =>
                 {
                     panic!(
-                        "{} stale queue-completion fault requires a prior turn-work claim phase",
+                        "{} stale queue-completion fault requires a prior turn-work admission phase",
                         self.name
                     );
                 }
@@ -115,7 +115,7 @@ impl RuntimeScenario {
                     if phase.expected_aliases.len() != phase.expected_texts.len() =>
                 {
                     panic!(
-                        "{} next-turn input claim expected aliases and texts must align",
+                        "{} next-turn input admission expected aliases and texts must align",
                         self.name
                     );
                 }
@@ -215,12 +215,10 @@ impl RuntimeScenarioContext {
         match phase {
             RuntimeScenarioPhase::Ingress(phase) => self.ingress(phase).await,
             RuntimeScenarioPhase::Checkpoint(phase) => self.checkpoint(phase).await,
-            RuntimeScenarioPhase::LeadingCommandClaim(phase) => {
-                self.leading_command_claim(phase).await
-            }
-            RuntimeScenarioPhase::TurnWorkClaim(phase) => self.turn_work_claim(phase).await,
+            RuntimeScenarioPhase::LeadingCommandRun(phase) => self.leading_command_run(phase).await,
+            RuntimeScenarioPhase::TurnWorkAdmission(phase) => self.turn_work_admission(phase).await,
             RuntimeScenarioPhase::NextTurnInputAdmission(phase) => {
-                self.next_turn_input_claim(phase).await
+                self.next_turn_input_admission(phase).await
             }
             RuntimeScenarioPhase::Lease(phase) => self.lease_phase(phase).await,
             RuntimeScenarioPhase::Fault(phase) => self.fault(phase).await,
@@ -322,8 +320,8 @@ impl Default for RuntimeHostBehavior {
 pub(crate) enum RuntimeScenarioPhase {
     Ingress(RuntimeIngressPhase),
     Checkpoint(RuntimeCheckpointPhase),
-    LeadingCommandClaim(RuntimeLeadingCommandClaimPhase),
-    TurnWorkClaim(RuntimeTurnWorkClaimPhase),
+    LeadingCommandRun(RuntimeLeadingCommandRunPhase),
+    TurnWorkAdmission(RuntimeTurnWorkAdmissionPhase),
     NextTurnInputAdmission(RuntimeNextTurnInputAdmissionPhase),
     Lease(RuntimeLeasePhase),
     Fault(RuntimeFaultPhase),
@@ -335,8 +333,8 @@ impl RuntimeScenarioPhase {
         matches!(
             self,
             Self::Checkpoint(_)
-                | Self::LeadingCommandClaim(_)
-                | Self::TurnWorkClaim(_)
+                | Self::LeadingCommandRun(_)
+                | Self::TurnWorkAdmission(_)
                 | Self::NextTurnInputAdmission(_)
                 | Self::Fault(RuntimeFaultPhase::StaleQueueCompletion)
                 | Self::Commit(_)
@@ -397,7 +395,7 @@ pub(crate) struct RuntimeCheckpointPhase {
     pub(crate) defer_interrupted_turn_id: Option<&'static str>,
     pub(crate) cancel_after_deferral: Vec<&'static str>,
     pub(crate) pending_turn_inputs_after_deferral: Vec<RuntimePendingTurnInputExpectation>,
-    pub(crate) no_next_turn_input_claim_after_cancellations: bool,
+    pub(crate) no_next_turn_input_admission_after_cancellations: bool,
 }
 
 impl RuntimeCheckpointPhase {
@@ -428,8 +426,8 @@ impl RuntimeCheckpointPhase {
         self
     }
 
-    pub(crate) fn expect_no_next_turn_input_claim_after_cancellations(mut self) -> Self {
-        self.no_next_turn_input_claim_after_cancellations = true;
+    pub(crate) fn expect_no_next_turn_input_admission_after_cancellations(mut self) -> Self {
+        self.no_next_turn_input_admission_after_cancellations = true;
         self
     }
 }
@@ -441,12 +439,12 @@ impl From<RuntimeCheckpointPhase> for RuntimeScenarioPhase {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct RuntimeLeadingCommandClaimPhase {
+pub(crate) struct RuntimeLeadingCommandRunPhase {
     pub(crate) expected_count: usize,
-    pub(crate) turn_claim_blocked_by_command: Option<bool>,
+    pub(crate) turn_admission_blocked_by_command: Option<bool>,
 }
 
-impl RuntimeLeadingCommandClaimPhase {
+impl RuntimeLeadingCommandRunPhase {
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -457,30 +455,30 @@ impl RuntimeLeadingCommandClaimPhase {
     }
 
     pub(crate) fn expect_turn_work_blocked_before_command(mut self, blocked: bool) -> Self {
-        self.turn_claim_blocked_by_command = Some(blocked);
+        self.turn_admission_blocked_by_command = Some(blocked);
         self
     }
 }
 
-impl From<RuntimeLeadingCommandClaimPhase> for RuntimeScenarioPhase {
-    fn from(phase: RuntimeLeadingCommandClaimPhase) -> Self {
-        Self::LeadingCommandClaim(phase)
+impl From<RuntimeLeadingCommandRunPhase> for RuntimeScenarioPhase {
+    fn from(phase: RuntimeLeadingCommandRunPhase) -> Self {
+        Self::LeadingCommandRun(phase)
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct RuntimeTurnWorkClaimPhase {
+pub(crate) struct RuntimeTurnWorkAdmissionPhase {
     pub(crate) boundary: AdmissionBoundary,
     pub(crate) expected_count: usize,
-    pub(crate) pending_turn_inputs_after_queue_claim: Vec<RuntimePendingTurnInputExpectation>,
+    pub(crate) pending_turn_inputs_after_queue_admission: Vec<RuntimePendingTurnInputExpectation>,
 }
 
-impl RuntimeTurnWorkClaimPhase {
+impl RuntimeTurnWorkAdmissionPhase {
     pub(crate) fn at(boundary: AdmissionBoundary) -> Self {
         Self {
             boundary,
             expected_count: 0,
-            pending_turn_inputs_after_queue_claim: Vec::new(),
+            pending_turn_inputs_after_queue_admission: Vec::new(),
         }
     }
 
@@ -489,18 +487,18 @@ impl RuntimeTurnWorkClaimPhase {
         self
     }
 
-    pub(crate) fn expect_pending_turn_inputs_after_claim(
+    pub(crate) fn expect_pending_turn_inputs_after_admission(
         mut self,
         expectations: Vec<RuntimePendingTurnInputExpectation>,
     ) -> Self {
-        self.pending_turn_inputs_after_queue_claim = expectations;
+        self.pending_turn_inputs_after_queue_admission = expectations;
         self
     }
 }
 
-impl From<RuntimeTurnWorkClaimPhase> for RuntimeScenarioPhase {
-    fn from(phase: RuntimeTurnWorkClaimPhase) -> Self {
-        Self::TurnWorkClaim(phase)
+impl From<RuntimeTurnWorkAdmissionPhase> for RuntimeScenarioPhase {
+    fn from(phase: RuntimeTurnWorkAdmissionPhase) -> Self {
+        Self::TurnWorkAdmission(phase)
     }
 }
 
@@ -508,7 +506,7 @@ impl From<RuntimeTurnWorkClaimPhase> for RuntimeScenarioPhase {
 pub(crate) struct RuntimeNextTurnInputAdmissionPhase {
     pub(crate) expected_aliases: Vec<&'static str>,
     pub(crate) expected_texts: Vec<&'static str>,
-    pub(crate) verify_pending_turn_inputs_held_after_claim: bool,
+    pub(crate) verify_pending_turn_inputs_held_after_admission: bool,
 }
 
 impl RuntimeNextTurnInputAdmissionPhase {
@@ -526,8 +524,8 @@ impl RuntimeNextTurnInputAdmissionPhase {
         self
     }
 
-    pub(crate) fn expect_pending_held_after_claim(mut self) -> Self {
-        self.verify_pending_turn_inputs_held_after_claim = true;
+    pub(crate) fn expect_pending_held_after_admission(mut self) -> Self {
+        self.verify_pending_turn_inputs_held_after_admission = true;
         self
     }
 }

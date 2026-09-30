@@ -267,9 +267,9 @@ pub(super) fn write_generated_backend_regression_fixtures(
             semantic_oracles: &[
                 "sim.oracle.state-machine-semantic-invariants.v1",
                 "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1",
-                "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1",
+                "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1",
             ],
-            regression_contract: "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
+            regression_contract: "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle admission can surface it",
             predicate: trace_has_queued_cancel_race,
         },
         BackendRegressionSpec {

@@ -586,7 +586,7 @@
           "phases": {}
         }
       },
-      "ingress_claim_projection": {
+      "ingress_admission_projection": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
           "alloc_bytes_max": 225299000,
@@ -655,7 +655,7 @@
               "budget_ms": 1.852,
               "required": true
             },
-            "turn_input_ingress.enqueue_to_claim_to_projection": {
+            "turn_input_ingress.enqueue_to_admission_to_projection": {
               "budget_ms": 365.589,
               "required": true
             }
@@ -818,7 +818,7 @@
           }
         }
       },
-      "queued_work_claim_stress": {
+      "queued_work_admission_stress": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
           "alloc_bytes_max": 40675000,

@@ -83,8 +83,8 @@ impl RuntimeSessionServices {
                 match err {
                     // A cancelled output is only produced once the port has
                     // settled (or never accepted) this turn's child input, so
-                    // the substrate's cancelled terminal cannot strand a
-                    // claimable input inside the retained session.
+                    // the substrate's cancelled terminal cannot strand an
+                    // admissible input inside the retained session.
                     session_init::SessionTurnInitError::CancelledBeforeCreate
                     | session_init::SessionTurnInitError::CancelledAfterCreate { .. } => {
                         Ok(cancelled_session_turn_output())

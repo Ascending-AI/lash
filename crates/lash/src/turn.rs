@@ -316,8 +316,8 @@ impl TurnReport {
         self.outcome.cancellation()
     }
 
-    /// Wall-clock instant the runtime started this turn (claim of the
-    /// session-execution lease / queued-work claim), read from the runtime
+    /// Wall-clock instant the runtime started this turn (the
+    /// session-execution lease take / queued-work admission), read from the runtime
     /// clock. Backed by [`TurnExecutionMetrics::started_at_ms`] on
     /// [`execution`](Self::execution).
     pub fn started_at(&self) -> std::time::SystemTime {

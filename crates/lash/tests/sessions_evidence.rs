@@ -154,9 +154,9 @@ fn drain_area_witnesses() {
     let _ = lash::persistence::ChronologicalProjection::from_turn_view;
     // W0053: lash::persistence::ChronologicalProjection::into_entries [function]
     let _ = lash::persistence::ChronologicalProjection::into_entries;
-    // W0054: lash::persistence::DeploymentStore::has_claimable_queued_work [function]
+    // W0054: lash::persistence::DeploymentStore::has_admissible_queued_work [function]
     fn meth_0054<T: lash::persistence::DeploymentStore>(_: &T) {
-        let _ = T::has_claimable_queued_work;
+        let _ = T::has_admissible_queued_work;
     }
     // W0055: lash::plugins::AppendSessionNodesRequest [struct]
     type_witness::<lash::plugins::AppendSessionNodesRequest>();
@@ -588,9 +588,9 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::RuntimeEffectControllerTaskClosed
         )
     });
-    // W0174: lash::runtime::RuntimeErrorCode::SessionCommandClaim [variant]
+    // W0174: lash::runtime::RuntimeErrorCode::SessionCommandRun [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(value, lash::runtime::RuntimeErrorCode::SessionCommandClaim)
+        matches!(value, lash::runtime::RuntimeErrorCode::SessionCommandRun)
     });
     // W0175: lash::runtime::RuntimeErrorCode::SessionCommandIdempotencyKey [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {

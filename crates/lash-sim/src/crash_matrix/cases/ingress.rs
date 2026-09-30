@@ -17,7 +17,7 @@ use crate::crash_matrix::{CrashPoint, Seam};
 
 /// The journal commands of a text-only root's `LashTurn` invocation the
 /// mid-journal cut draws from: after the input command (0) come the root
-/// start, the seal, the claim, the head, the turn config, the start gate's
+/// start, the seal, the admission, the head, the turn config, the start gate's
 /// peek, the environment sync, the model call's two steps, the post-model
 /// gate's peek, the checkpoint, the gate's teardown peek and settlement, the
 /// terminal's one-way publication, the scope close, the state write and the

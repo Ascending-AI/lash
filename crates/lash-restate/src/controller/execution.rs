@@ -189,7 +189,7 @@ pub(crate) fn restate_effect_execution(
         // A drive's admission and its seal read and write the session's
         // store: a store that did not answer is this attempt's fault, so the
         // step runs again, and only a verdict is ever recorded (FIG-3600).
-        // A root's claim is the same: its re-admitted root would replay a
+        // A root's admission is the same: its re-admitted root would replay a
         // recorded store fault on every later drive. So is a root's scope
         // close: an owner that did not acknowledge it closes it again. So is
         // a session's close: a deletion past it only retries, and a retry

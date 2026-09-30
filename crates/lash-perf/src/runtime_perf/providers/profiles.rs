@@ -486,7 +486,7 @@ finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
         }
-        RuntimePerfScenario::IngressClaimProjection => {
+        RuntimePerfScenario::IngressAdmissionProjection => {
             if latest_request_item_contains(request, "ingress projection marker") {
                 text_profile(typescript_block(r#"finish("runtime perf benchmark ok");"#))
             } else {

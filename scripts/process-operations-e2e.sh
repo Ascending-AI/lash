@@ -197,8 +197,8 @@ LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   "$postgres_conformance_tests" queued_work_join_groups_by_delivery_policy_and_merge_key \
   2>&1 | tee "$artifact_dir/04-wake-turn-policy.log" | tee -a "$test_output"
 require_checkpoints "$artifact_dir/04-wake-turn-policy.log" \
-  queued_work_claims_join_by_policy_and_merge_key
-echo "scenario 4 evidence: EachWake produced separate claims and Coalesce produced one multi-batch claim on PostgreSQL" | tee -a "$test_output"
+  queued_work_admissions_join_by_policy_and_merge_key
+echo "scenario 4 evidence: EachWake produced separate admissions and Coalesce produced one multi-batch admission on PostgreSQL" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   run_postgres_conformance_test process_trigger_retention \
