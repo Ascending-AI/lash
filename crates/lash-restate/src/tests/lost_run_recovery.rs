@@ -390,9 +390,11 @@ async fn growing_law(
         let appended = appended.clone();
         let stores = stores.clone();
         tokio::spawn(async move {
-            for index in 129..129 + 2_000 {
+            let mut index = 129;
+            loop {
                 seed(stores.as_ref(), index, 1).await;
                 appended.fetch_add(1, Ordering::SeqCst);
+                index += 1;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
