@@ -24,9 +24,14 @@ tests are driven. It follows the recipe Restate's own SDK test suites use
   handler attempt on purpose still see the redelivery they exercise, short
   enough that a permanently failing invocation is killed in about half a
   minute.
-* Each test runs in its own process under a wall-clock bound, so a hung law
-  fails in minutes with its own output and the server's log, and one law's
-  process state cannot leak into the next law.
+* Each test runs in its own process, so one law's process state cannot leak
+  into the next law, and under a bound on how long it may go without
+  progress, so a hung law fails in minutes with its own output and the
+  server's log. A law that is silent has made no progress since it started;
+  a law made of many steps writes a `PROGRESS_MARKER` line as each step
+  completes, and its bound restarts at every one. The bound is then what a
+  hang is -- no step finishing -- and never how long a starved host takes to
+  run a law's whole workload.
 
 The suites themselves -- the Bazel label of the test binary, the filters and
 the endpoints each shard binds -- live in
@@ -545,6 +550,12 @@ def list_tests(binary: Path, cwd: Path, filters: Sequence[str], skips: Sequence[
 # ---------------------------------------------------------------------------
 # Running tests over shards.
 # ---------------------------------------------------------------------------
+# The line prefix a law writes as each of its steps completes. Only this
+# marker restarts a law's bound: other output, a retry loop's logging say, is
+# not progress.
+PROGRESS_MARKER = "[restate-suite progress] "
+
+
 @dataclass
 class Outcome:
     name: str
@@ -568,14 +579,27 @@ def run_one(
 ) -> tuple[str, float]:
     argv = [str(binary), name, "--exact", "--ignored", "--nocapture", "--test-threads=1"]
     started = time.monotonic()
-    with log_path.open("wb") as out:
+    with log_path.open("wb") as out, log_path.open("rb") as progress:
         process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-        try:
-            code = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
-            return "timeout", time.monotonic() - started
+        # The law is killed once `timeout` passes with no step completed: since
+        # it started, or since its last progress marker.
+        last_progress = started
+        pending = b""
+        marker = PROGRESS_MARKER.encode()
+        while True:
+            try:
+                code = process.wait(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            pending += progress.read()
+            *lines, pending = pending.split(b"\n")
+            if any(marker in line for line in lines):
+                last_progress = time.monotonic()
+            if time.monotonic() - last_progress > timeout:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+                return "timeout", time.monotonic() - started
     elapsed = time.monotonic() - started
     output = log_path.read_text(errors="replace")
     # A name that matched nothing exits 0; a law that ran says so.
@@ -640,7 +664,7 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     timeout = args.timeout or suite.timeout_seconds
     log(
         f"{suite.name} {leg}: {len(to_run)} tests over {len(shards)} server(s), "
-        f"{timeout:.0f}s bound each"
+        f"{timeout:.0f}s without progress bounds each"
     )
     for name in held:
         print(f"HELD under replay (expected to diverge): {name}\n    {divergent[name]}")
@@ -828,7 +852,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     suite.add_argument("--only", action="append", default=[], help="a test-name filter replacing the suite's")
     suite.add_argument("--shards", type=int, help="servers to shard over (default: the suite's)")
-    suite.add_argument("--timeout", type=float, help="per-test bound in seconds (default: the suite's)")
+    suite.add_argument(
+        "--timeout", type=float, help="per-test bound on time without progress, in seconds (default: the suite's)"
+    )
     suite.add_argument(
         "--include-divergent",
         action="store_true",

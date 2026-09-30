@@ -479,10 +479,11 @@ enum RendezvousEvent {
 struct RendezvousShared {
     started: Vec<String>,
     events: Vec<RendezvousEvent>,
-    /// Wall-clock stamps the law never reads. They exist for
-    /// [`measure_tool_batch`] (FIG-3398): the group window is first-start to
-    /// last-answer, and stamping them inside this same critical section keeps
-    /// the measurement as untearable as the log.
+    /// Wall-clock stamps the law never asserts on. They exist for
+    /// [`measure_tool_batch`] (FIG-3398), whose group window is first-start to
+    /// last-answer, and for each scenario's progress line (FIG-4309);
+    /// stamping them inside this same critical section keeps the measurement
+    /// as untearable as the log.
     started_at: Vec<Instant>,
     answered_at: Vec<Instant>,
     /// Set once the scenario's deadlock budget expired: the budget, and the
@@ -609,6 +610,17 @@ impl Rendezvous {
         let first = shared.started_at.iter().copied().min()?;
         let last = shared.answered_at.iter().copied().max()?;
         Some((first, last))
+    }
+
+    /// The first leaf start, the last leaf start and the last answer, for
+    /// the scenario's progress line; each `None` when no leaf got there.
+    fn phase_stamps(&self) -> (Option<Instant>, Option<Instant>, Option<Instant>) {
+        let shared = self.shared.lock_recover();
+        (
+            shared.started_at.iter().copied().min(),
+            shared.started_at.iter().copied().max(),
+            shared.answered_at.iter().copied().max(),
+        )
     }
 
     fn missing(&self, required: &[String]) -> Vec<String> {
@@ -955,6 +967,8 @@ async fn run_scenario(
     // of the attempt (every replay, on Restate) builds its runtime afresh,
     // but every one of them shares the scenario's one state: the leaves of
     // one group meet at one rendezvous whichever execution routed them.
+    let scenario = session_id.to_string();
+    let started = Instant::now();
     let admitted = admit(crate::ExecutionScope::turn(
         &session_id,
         tool_batch_turn_id(&session_id),
@@ -999,19 +1013,51 @@ async fn run_scenario(
     // A suspended handler runs no clock, so its activation budget also runs
     // here. Both layers use the same progress rule. After expiry, the released
     // members drain and the handler returns the missing-member observation.
-    tokio::pin!(turn);
-    if budget::run_with_activation_budget(&mut turn, &state.rendezvous, schedule.budget)
-        .await
-        .is_none()
-    {
-        (&mut turn).await;
-    }
+    budget::run_with_activation_budget(turn, &state.rendezvous, schedule.budget).await;
     let observed = observed_rx
         .recv()
         .await
         .expect("the tier's turn runner ran the scenario's turn");
+    let turn_settled = started.elapsed();
     runner.scenario_finished().await;
+    report_progress(&scenario, started, turn_settled, &state.rendezvous);
     observed
+}
+
+/// The line prefix the Restate suite runner reads as a completed step
+/// (`PROGRESS_MARKER` in `scripts/ci/restate_suite.py`): its bound on a law is
+/// time without progress, so a law of many scenarios is bounded per scenario
+/// rather than by its whole workload, which a starved host stretches past any
+/// fixed bound (FIG-4309).
+const PROGRESS_MARKER: &str = "[restate-suite progress] ";
+
+/// Writes one scenario's progress line: the runner's step marker, and where
+/// the scenario's time went. Activation runs from the scenario's start to the
+/// first and the last leaf start, the leaves answer, and the turn then settles
+/// the group and ends; a slow scenario says which of these it spent its time
+/// in.
+fn report_progress(
+    scenario: &str,
+    started: Instant,
+    turn_settled: Duration,
+    rendezvous: &Rendezvous,
+) {
+    let (first_start, last_start, last_answer) = rendezvous.phase_stamps();
+    let since = |at: Option<Instant>| {
+        at.map_or_else(
+            || "none".to_string(),
+            |at| format!("{:?}", at.duration_since(started)),
+        )
+    };
+    eprintln!(
+        "{PROGRESS_MARKER}barrier scenario {scenario}: first leaf started at {}, last leaf \
+         started at {}, last leaf answered at {}, turn settled at {turn_settled:?}, \
+         finished at {:?}",
+        since(first_start),
+        since(last_start),
+        since(last_answer),
+        started.elapsed(),
+    );
 }
 
 /// The `run_scenario` body with the session and turn controller chosen by the
@@ -1342,9 +1388,12 @@ async fn drive_turn(
     let mut input = crate::TurnInput::text("run the planned group");
     input.trace_turn_id = Some(turn_id);
     // Bound stalled activation, preserving a progressing or fully activated
-    // group even when its turn outlasts one budget. The suite runner owns the
-    // absolute process timeout.
-    let Some(turn) = budget::run_with_activation_budget(
+    // group even when its turn outlasts one budget. An expired budget releases
+    // the members and the turn still runs to its end, so its journaled path
+    // never depends on when the budget fired; the caller reads the expiry off
+    // the rendezvous. The suite runner owns the bound on a scenario making no
+    // progress.
+    let turn = budget::run_with_activation_budget(
         runtime.drive_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
@@ -1353,10 +1402,7 @@ async fn drive_turn(
         budget,
     )
     .await
-    else {
-        return ScenarioEnd::DeadlockBudgetExpired { budget };
-    };
-    let turn = turn.expect("run the tool-group parallelism conformance turn");
+    .expect("run the tool-group parallelism conformance turn");
     assert!(
         matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
         "the group turn must finish: {:?}; turn issues: {:?}",

@@ -170,8 +170,26 @@ fn next_attempt(key: &str) -> NextAttempt {
     }
 }
 
-/// The current attempt ended: the next execution runs the next one.
-fn finish_attempt(key: &str) {
+/// The current attempt ended as `end`. A crashed attempt, and an aborted one
+/// that does not repeat on retry, gives way: the next execution runs the
+/// law's next attempt.
+///
+/// A settled attempt stays queued until the runner sees its invocation
+/// complete and drops the turn. Its handler returned, but until the server
+/// holds the invocation's end Restate may run the handler again from the top
+/// (an execution the invoker gave up on through a host stall, a suspension on
+/// the replay leg), and that execution must replay the same turn to the same
+/// output. Given away, it would find nothing to run and fail every retry
+/// until the invocation paused, with the law waiting on it (FIG-4309).
+fn end_attempt(key: &str, end: &AttemptEnd, repeats_on_retry: bool) {
+    let stays = match end {
+        AttemptEnd::Settled => true,
+        AttemptEnd::Aborted => repeats_on_retry,
+        AttemptEnd::Crashed => false,
+    };
+    if stays {
+        return;
+    }
     if let Some(turn) = pending_turns()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -302,9 +320,7 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
                 .into());
             }
         };
-        if !(repeats_on_retry && matches!(end, AttemptEnd::Aborted)) {
-            finish_attempt(&key);
-        }
+        end_attempt(&key, &end, repeats_on_retry);
         let _ = ends.send(end);
         result
     }
@@ -1011,5 +1027,77 @@ impl lash_conformance::ToolCallIdentityRunner for LiveTurnRunner {
             repeats_on_retry: false,
         });
         self.run_attempts(admitted, attempts).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn queue(key: &str, repeats_on_retry: bool) {
+        let attempt: lash_conformance::ConformanceTurnAttempt =
+            Arc::new(|_scoped| Box::pin(async { lash_conformance::ConformanceTurnEnd::Settled }));
+        let (ends, _ended) = tokio::sync::mpsc::unbounded_channel();
+        pending_turns()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                key.to_string(),
+                PendingTurn {
+                    admitted: lash_core::AdmittedScope::turn("session", "turn"),
+                    attempts: VecDeque::from([QueuedAttempt {
+                        attempt,
+                        crashing: false,
+                        crash: None,
+                        repeats_on_retry,
+                    }]),
+                    ends,
+                    live: 0,
+                },
+            );
+    }
+
+    fn runs_again(key: &str) -> bool {
+        matches!(next_attempt(key), NextAttempt::Run { .. })
+    }
+
+    /// A handler that settled its turn can be run again before its
+    /// invocation completes; that execution must find the same attempt to
+    /// replay, never an empty queue (FIG-4309).
+    #[test]
+    fn a_settled_attempt_stays_queued_for_a_rerun_of_its_handler() {
+        let key = "fig-4309-settled";
+        queue(key, false);
+        end_attempt(key, &AttemptEnd::Settled, false);
+        assert!(
+            runs_again(key),
+            "a rerun of the settled handler found nothing to run"
+        );
+        pending_turns()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(key);
+    }
+
+    #[test]
+    fn a_crashed_or_aborted_attempt_gives_way_unless_it_repeats() {
+        for (end, repeats, stays) in [
+            (AttemptEnd::Crashed, false, false),
+            (AttemptEnd::Aborted, false, false),
+            (AttemptEnd::Aborted, true, true),
+        ] {
+            let key = format!("fig-4309-{end:?}-{repeats}");
+            queue(&key, repeats);
+            end_attempt(&key, &end, repeats);
+            assert_eq!(
+                runs_again(&key),
+                stays,
+                "{end:?} repeats_on_retry={repeats}"
+            );
+            pending_turns()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&key);
+        }
     }
 }

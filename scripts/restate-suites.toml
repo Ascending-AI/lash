@@ -24,6 +24,10 @@
 # A leg table may carry `report_only = "<reason>"`: its failures are printed
 # and annotated but do not fail the run, and the reason says why it does not
 # gate yet.
+#
+# `timeout_seconds` bounds how long a test may go without progress: since it
+# started, or since the last progress marker it wrote (the runner's
+# `PROGRESS_MARKER`). A test that writes none is bounded end to end.
 
 [suites.effect-group]
 label = "//crates/lash-restate:lash-restate__unit_test"
@@ -36,8 +40,11 @@ filters = [
 ]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 3
-# The barrier law drives width-64 tool groups (ADR 0116 §7.1) through five
-# producers; on the live leg it runs about 170 s.
+# The barrier laws drive width-64 tool groups (ADR 0116 §7.1) through five
+# producers, thirty scenarios on the live leg; each scenario writes a progress
+# marker, so this bounds one scenario, which takes seconds, and never the law's
+# whole workload, which on a CPU-starved host outlasts any fixed bound
+# (FIG-4309).
 timeout_seconds = 360
 
 [suites.effect-group.replay]
