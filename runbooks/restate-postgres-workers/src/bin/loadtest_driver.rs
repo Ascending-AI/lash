@@ -820,9 +820,7 @@ async fn main() -> Result<()> {
                 _ = tokio::time::sleep(Duration::from_secs(u64::from(scrape_s))) => {
                     let sample = match task_collector.sample().await {
                         Ok(sample) => sample,
-                        Err(error) => json!({"schema_version": 1, "record": "sample_error",
-                            "run": task_collector.run, "monotonic_ns": task_collector.started.elapsed().as_nanos(),
-                            "error": format!("{error:#}")}),
+                        Err(error) => task_collector.sample_error(&error, "periodic"),
                     };
                     lash_restate_postgres_workers_e2e::load::measurements::emit(&sample)?;
                 }
@@ -961,12 +959,10 @@ async fn main() -> Result<()> {
         let sample = match driver.collector.sample().await {
             Ok(sample) => sample,
             Err(error) => {
-                // Retain the gap and the independent witness. Measurement
-                // reconciliation rejects sample_error records.
-                lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
-                    "schema_version": 1, "record": "sample_error", "run": run,
-                    "monotonic_ns": driver.elapsed_ns(), "error": format!("{error:#}"),
-                }))?;
+                // A failed final census remains an unattributed gap.
+                lash_restate_postgres_workers_e2e::load::measurements::emit(
+                    &driver.collector.sample_error(&error, "final"),
+                )?;
                 break;
             }
         };

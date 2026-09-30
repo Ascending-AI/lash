@@ -321,8 +321,51 @@ def cancellation_census(samples, owned, disappeared):
             'unexplained_disappearance_ids': sorted(row['id'] for row in disappeared if row['id'] not in explained)}
 
 
+def collection_gaps(run, sample_errors, normalized_faults):
+    """Attribute only failed periodic observations definitely inside a matching fault."""
+    phases = defaultdict(dict)
+    for row in normalized_faults:
+        if row['kind'] != 'campaign':
+            phases[row['fault_id']][row['phase']] = row
+    windows = []
+    for fault_id, rows in phases.items():
+        if not {'injected', 'recovered'} <= rows.keys():
+            continue
+        injection, recovery = rows['injected'], rows['recovered']
+        # Use the inner bounds so clock uncertainty cannot excuse an outside gap.
+        start, end = injection['clock_bounds_ns'][1], recovery['clock_bounds_ns'][0]
+        component = {'worker-kill': 'worker', 'restate-restart': 'restate',
+                     'rolling-deploy': 'worker'}.get(injection['kind'])
+        targets = injection['detail'].get('collection_targets', [])
+        targets = [target for target in targets if target.get('component') == component]
+        if start <= end and component is not None:
+            windows.append(dict(fault_id=fault_id, window_ns=[start, end], targets=targets,
+                                anchor_ids=[injection['anchor_id'], recovery['anchor_id']]))
+    gaps = []
+    for row in sample_errors:
+        version(row)
+        require(row['run'] == run['run'], 'mixed sample error run identities')
+        require(type(row['monotonic_ns']) is int and row['monotonic_ns'] >= 0,
+                'invalid sample error timestamp')
+        matches = [window for window in windows
+                   if run.get('fault_campaign', False) and row.get('sample_kind') == 'periodic'
+                   and window['window_ns'][0] <= row['monotonic_ns'] <= window['window_ns'][1]
+                   and row.get('target') in window['targets']]
+        attribution = {'status': 'UNATTRIBUTED'}
+        if len(matches) == 1:
+            attribution = {key: value for key, value in matches[0].items() if key != 'targets'}
+            attribution['status'] = 'FAULT_ATTRIBUTED'
+        gaps.append({**row, 'attribution': attribution})
+    return gaps
+
+
+class CounterEpochGapError(ValueError):
+    def __init__(self, gaps):
+        super().__init__('counter epoch gap: incomplete measurement')
+        self.collection_gaps = gaps
+
+
 def summarize(run, operations, samples, witness, faults=(), sample_errors=(), witness_evidence=None, anchors=()):
-    require(not sample_errors, 'required collection intervals are missing')
     for row in [run, witness, *samples]:
         version(row)
         require(row['run'] == run['run'], 'mixed run identities')
@@ -373,6 +416,22 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
                            'backlog_peak': peak, 'backlog_at_end': backlog,
                            'latency_by_outcome_ns': {outcome: distribution([row['observed_ns'] - row['scheduled_ns'] for row in rows if row['outcome'] == outcome]) for outcome in population['outcomes']}})
     counters = defaultdict(CounterDeltas)
+    counter_gaps = []
+    observations = {}
+
+    def observe_counter(name, identity, epoch, value, observed_ns, target):
+        counter = counters[name]
+        previous_epoch = counter.epochs.get(identity)
+        if previous_epoch is not None and previous_epoch != epoch:
+            counter_gaps.append(dict(schema_version=1, record='counter_gap', run=run['run'],
+                                     sample_kind='periodic', monotonic_ns=observed_ns,
+                                     previous_observed_ns=observations[(name, identity)],
+                                     target=target, counter=name, identity=identity, complete=False,
+                                     before={'epoch': previous_epoch, 'value': counter.values[(identity, previous_epoch)]},
+                                     after={'epoch': epoch, 'value': value}, unobserved_delta=None))
+        counter.add(identity, epoch, value)
+        observations[(name, identity)] = observed_ns
+
     worker_peaks = {}
     memory_peaks = []
     journal_rows = []
@@ -398,13 +457,16 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
             worker_peaks[node] = max(worker_peaks.get(node, 0), resources['cgroup_peak_bytes'])
             epoch = next(row['epoch'] for row in resources['processes'] if row['parent_pid'] not in {proc['pid'] for proc in resources['processes']})
             for name in ('usage_usec', 'throttled_usec', 'nr_throttled'):
-                counters['worker_' + name].add(node, epoch, resources['cgroup_cpu'][name])
-            counters['worker_ooms'].add(node, epoch, resources['cgroup_events']['oom_kill'])
+                observe_counter('worker_' + name, node, epoch, resources['cgroup_cpu'][name],
+                                worker['observed_ns'], {'component': 'worker', 'endpoint': node})
+            observe_counter('worker_ooms', node, epoch, resources['cgroup_events']['oom_kill'],
+                            worker['observed_ns'], {'component': 'worker', 'endpoint': node})
         memory_peaks.append(deployment_memory(worker_resources))
         database = sample['postgres']
         for name in ('transactions', 'blocks_read', 'blocks_hit', 'read_ms', 'write_ms', 'wal_bytes', 'query_calls', 'query_ms'):
             reset = database['wal_reset'] if name == 'wal_bytes' else database['query_reset'] if name.startswith('query_') else database['stats_reset']
-            counters['postgres_' + name].add('postgres', (database['epoch'], reset), database[name])
+            observe_counter('postgres_' + name, 'postgres', (database['epoch'], reset), database[name],
+                            sample['collection_finished_ns'], {'component': 'postgres', 'endpoint': 'lash_database'})
         for invocation in sample['invocations']:
             key = invocation.get('target_service_key') or ''
             if invocation["id"] not in initial_invocations or f"load-{run['run']}-" in key or invocation.get('invoked_by_id') in owned_invocations:
@@ -451,7 +513,8 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
                         # A counter series absent from the initial scrape was
                         # zero. Preserve its first event instead of rebasing it.
                         counter.add(identity, node_epoch, 0)
-                    counter.add(identity, node_epoch, value)
+                    observe_counter(counter_name, identity, node_epoch, value, node['metrics_observed_ns'],
+                                    {'component': 'restate', 'endpoint': node['node']})
             snapshot = node['physical']['snapshot']
             require(snapshot is not None, 'missing remote snapshot bytes')
             snapshot_peak = max(snapshot_peak, snapshot['bytes'])
@@ -469,7 +532,13 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
         counters[name]  # A supported series absent throughout the run is zero.
     delta_summary = {name: {'observed_delta': value.total, 'epoch_gaps': value.gaps,
                             'complete': value.gaps == 0} for name, value in sorted(counters.items())}
-    require(all(row['complete'] for row in delta_summary.values()), 'counter epoch gap: incomplete measurement')
+    recovery = recovery_report(run, operations, witness, faults, anchors)
+    gaps = collection_gaps(run, [*sample_errors, *counter_gaps], recovery['normalized_rows'])
+    epoch_gaps = [row for row in gaps if row['record'] == 'counter_gap']
+    if any(row['attribution']['status'] == 'UNATTRIBUTED' for row in epoch_gaps):
+        raise CounterEpochGapError(gaps)
+    for name, counter in delta_summary.items():
+        counter['fault_attributed_epoch_gaps'] = sum(row['counter'] == name for row in epoch_gaps)
     require(witness['effect_attempts'] - witness['effect_commits'] == witness['verdict']['absorbed_effect_attempts'], 'absorbed effect attempt mismatch')
     require(0 <= witness['provider_retryable_failures'] <= witness['provider_calls'], 'provider receipt population mismatch')
     require(witness['effect_attempts'] >= witness['effect_commits'], 'effect attempts smaller than commits')
@@ -478,23 +547,25 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
     journal = journal_summary(journal_rows, completed)
     missing_journals = [key for key in owned_invocations if key not in cancellations['explained_inbox_ids']
                         and (key not in journal['maxima'] or journal['maxima'][key]['entries'] == 0)]
-    recovery = recovery_report(run, operations, witness, faults, anchors)
     inputs = recovery['inputs']
+    unattributed = any(row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps)
     reasons = recovery['reasons'][:]
+    if unattributed:
+        reasons.append('required collection intervals are missing')
     if unfinished:
         reasons.append('run-owned internal invocations remain unfinished')
     if unexplained:
         reasons.append('run-owned invocations disappeared without a recorded inbox cancellation')
     if missing_journals:
         reasons.append('run-owned invocation has an empty, missing or pruned journal')
-    status = 'FAILED' if unexplained and cancellations['available'] else 'INCOMPLETE' if reasons else 'PASSED'
+    status = 'FAILED' if unattributed or (unexplained and cancellations['available']) else 'INCOMPLETE' if reasons else 'PASSED'
     qualification = {'status': status, 'reasons': reasons,
                      'unfinished_internal': unfinished, 'disappeared_invocations': unexplained,
                      'missing_journal_ids': missing_journals}
     normalized = {name: row['observed_delta'] / completed if completed else None
                   for name, row in delta_summary.items() if name.startswith('postgres_')}
     return {'schema_version': 1, 'run': run['run'], 'mode': run.get('mode', 'smoke'), 'population': count,
-            'qualification': qualification,
+            'qualification': qualification, 'collection_gaps': gaps,
             'cancellations': cancellations,
             'histograms': histograms, 'counters': delta_summary, 'retry_epochs': epoch_rows,
             'client_retries': sum(row['client_attempts'] - 1 for row in operations),
@@ -602,6 +673,8 @@ def archive(log, output, recovery_only=False):
     (output / 'recovery_inputs.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in recovery['inputs']))
     print(f"load recovery inputs={recovery['status']} faults={len(recovery['inputs'])} normalized_rows={len(recovery['normalized_rows'])} results={output / 'recovery.json'}")
     (output / 'normalized_faults.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in recovery['normalized_rows']))
+    gaps = collection_gaps(runs[0], sample_errors, recovery['normalized_rows'])
+    (output / 'collection_gaps.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in gaps))
     if recovery_only:
         (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'run': runs[0]['run'],
                                                        'verdict': 'INCOMPLETE', 'error': 'final metric census pending'}) + '\n')
@@ -612,8 +685,12 @@ def archive(log, output, recovery_only=False):
     try:
         summary = summarize(runs[0], operations, samples, witnesses[0], faults, sample_errors, witness_evidence, anchors)
     except ValueError as error:
-        (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'verdict': 'failed', 'error': str(error)}) + '\n')
+        if isinstance(error, CounterEpochGapError):
+            gaps = error.collection_gaps
+            (output / 'collection_gaps.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in gaps))
+        (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'verdict': 'failed', 'error': str(error), 'collection_gaps': gaps}) + '\n')
         raise
+    (output / 'collection_gaps.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in summary['collection_gaps']))
     (output / 'metrics.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in metric_rows(samples)))
     (output / 'histograms.json').write_text(json.dumps({'schema_version': 1, 'histograms': summary.pop('histograms')}, indent=2) + '\n')
     (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')

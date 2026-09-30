@@ -474,6 +474,8 @@ class Campaign:
         self.restart_in_place(pod, 'worker', WORKER_PROCESS, 'KILL', fault_id, delay)
         at = self.record(fault_id, kind, 'injected', pod, {
             'pod': pod, 'worker_id': busy['worker_id'], 'active': busy['active'], 'signal': 'KILL',
+            'collection_targets': [{'component': 'worker',
+                                    'endpoint': f"http://{self.name}-worker-{busy['index']}-control:18101"}],
             'restart_delay_s': delay,
             'restarts_before': container_status(before, 'worker')['restartCount'],
         })
@@ -511,6 +513,10 @@ class Campaign:
         self.restart_in_place(chosen.pod, 'restate', RESTATE_PROCESS, 'TERM', fault_id, delay)
         at = self.record(fault_id, kind, 'injected', chosen.pod, {
             'pod': chosen.pod, 'node': chosen.node, 'generation_before': chosen.generation,
+            'collection_targets': [
+                {'component': 'restate', 'endpoint': f'http://{self.name}-restate:9070'},
+                {'component': 'restate', 'endpoint': f'http://{chosen.pod}.{self.name}-peers:5122'},
+                {'component': 'restate', 'endpoint': f'http://{chosen.pod}.{self.name}-peers:18102'}],
             'led_partitions': list(chosen.led), 'advancing_partitions': list(chosen.advancing),
             'epochs_before': {str(key): value for key, value in chosen.epochs.items()},
             'signal': 'TERM', 'restart_delay_s': delay,
@@ -594,6 +600,9 @@ class Campaign:
         new_workers = [activity['worker_id'] for activity in new_activity]
         at = self.record(fault_id, kind, 'injected', new_uri, {
             'old_generation': old_generation, 'new_generation': new_generation,
+            'collection_targets': [{'component': 'worker',
+                                    'endpoint': f"http://{self.name}-worker-{activity['index']}-control:18101"}
+                                   for activity in self.worker_activity(old)],
             'old_uri': old_uri, 'new_uri': new_uri, 'old_deployment_id': old_deployment,
             'new_deployment_id': self.deployment_id(new_uri), 'registration': registration,
             'active': work['active'], 'pinned_unfinished_at_move': work['pinned'],

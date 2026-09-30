@@ -30,12 +30,12 @@ def evidence():
                  'cgroup_cpu': {'usage_usec': 10, 'throttled_usec': 0, 'nr_throttled': 0},
                  'cgroup_events': {'oom_kill': 0}, 'clock_ticks_per_second': 100}
     sample = dict(schema_version=1, record='sample', run='r', monotonic_ns=0, collection_finished_ns=5,
-                  workers=[{'node': 'worker', 'resources': resources}],
+                  workers=[{'node': 'worker', 'observed_ns': 5, 'resources': resources}],
                   postgres=dict(epoch='1', stats_reset='1', wal_reset='1', query_reset='1',
                                 transactions=1, blocks_read=1, blocks_hit=1, read_ms=0, write_ms=0,
                                 wal_bytes=10, query_calls=1, query_ms=1, connections=1, waiters=0, lock_waiters=0),
                   invocations=[], journals=[],
-                  restate=[dict(node=f'node-{index}',
+                  restate=[dict(node=f'node-{index}', metrics_observed_ns=5,
                                 prometheus='restate_invoker_invocation_tasks_total{partition_id="1",status="started"} 7',
                                 physical={'allocated_bytes': 100, 'directories': {'log': 100}, 'snapshot': {'bytes': 5}}) for index in range(3)],
                   node_epochs=[dict(name=f'n{index}', gen_node_id=f'{index}:1', address=f'node-{index}') for index in range(3)],
@@ -44,6 +44,9 @@ def evidence():
     final.update(monotonic_ns=110, collection_finished_ns=120,
                  invocations=[dict(id='one', target_service_key='load-r-one', invoked_by_id=None, status='completed', retry_count=90)],
                  journals=[{'id': 'one', 'journal': {'entries': 3, 'bytes': 40}}])
+    final['workers'][0]['observed_ns'] = 120
+    for node in final['restate']:
+        node['metrics_observed_ns'] = 120
     final['restate'][0]['prometheus'] = final['restate'][0]['prometheus'].replace(' 7', ' 8')
     return run, [operation()], [sample, final], witness
 
@@ -340,7 +343,8 @@ class MeasurementsTests(unittest.TestCase):
                              {'operations.jsonl', 'samples.jsonl', 'sample_errors.jsonl', 'metrics.jsonl',
                               'faults.jsonl', 'summary.json', 'histograms.json', 'collection.json',
                               'witness.json', 'witness_evidence.jsonl', 'query_retries.jsonl',
-                              'clock_anchors.jsonl', 'recovery_inputs.jsonl', 'recovery.json', 'normalized_faults.jsonl'})
+                              'clock_anchors.jsonl', 'recovery_inputs.jsonl', 'recovery.json', 'normalized_faults.jsonl',
+                              'collection_gaps.jsonl'})
             for path in output.iterdir():
                 values = [json.loads(line) for line in path.read_text().splitlines()] if path.suffix == '.jsonl' else [json.loads(path.read_text())]
                 self.assertTrue(all(row['schema_version'] == 1 for row in values))
@@ -548,6 +552,184 @@ class MeasurementsTests(unittest.TestCase):
                                 round_trip_ns=2000))
         return rows, anchors
 
+    def gap_campaign(self):
+        run, operations, samples, witness = self.campaign_evidence()
+        for row in operations:
+            for key in ['scheduled_ns', 'sent_ns', 'accepted_ns', 'observed_ns']:
+                row[key] *= 1000
+        for sample in samples:
+            for key in ['monotonic_ns', 'collection_finished_ns']:
+                sample[key] *= 1000
+            for worker in sample['workers']:
+                worker['observed_ns'] *= 1000
+            for node in sample['restate']:
+                node['metrics_observed_ns'] *= 1000
+        faults, anchors = self.normalized_campaign()
+        faults[0]['detail_json'] = json.dumps({'collection_targets': [
+            {'component': 'worker', 'endpoint': 'worker'}]})
+        gap = dict(schema_version=1, record='sample_error', run='r', sample_kind='periodic',
+                   monotonic_ns=80000, error='request timed out',
+                   target={'component': 'worker', 'endpoint': 'worker'})
+        return run, operations, samples, witness, faults, anchors, gap
+
+    def gap_summary(self, fixture):
+        run, operations, samples, witness, faults, anchors, gap = fixture
+        return m.summarize(run, operations, samples, witness, faults=faults,
+                           anchors=anchors, sample_errors=[gap])
+
+    def test_in_window_faulted_target_gap_is_attributed(self):
+        fixture = self.gap_campaign()
+        result = self.gap_summary(fixture)
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        gap = result['collection_gaps'][0]
+        self.assertEqual(gap['error'], 'request timed out')
+        self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
+        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertEqual(gap['attribution']['anchor_ids'], ['1', '2'])
+        self.assertEqual(gap['attribution']['window_ns'], [52000, 108000])
+        self.assertEqual(gap['target'], fixture[-1]['target'])
+
+    def test_out_of_window_gap_fails(self):
+        for instant in [0, 51999, 108001, 200000]:
+            with self.subTest(instant=instant):
+                fixture = self.gap_campaign()
+                fixture[-1]['monotonic_ns'] = instant
+                result = self.gap_summary(fixture)
+                self.assertEqual(result['qualification']['status'], 'FAILED')
+                self.assertEqual(result['collection_gaps'][0]['attribution']['status'], 'UNATTRIBUTED')
+                self.assertIn('required collection intervals are missing', result['qualification']['reasons'])
+
+    def test_wrong_component_gap_fails(self):
+        for target in [{'component': 'restate', 'endpoint': 'worker'},
+                       {'component': 'postgres', 'endpoint': 'database'},
+                       {'component': 'worker', 'endpoint': 'other-worker'}]:
+            with self.subTest(target=target):
+                fixture = self.gap_campaign()
+                fixture[-1]['target'] = target
+                result = self.gap_summary(fixture)
+                self.assertEqual(result['qualification']['status'], 'FAILED')
+                self.assertEqual(result['collection_gaps'][0]['attribution']['status'], 'UNATTRIBUTED')
+
+    def test_final_or_unanchored_gap_is_not_attributed(self):
+        for mode in ['final', 'unanchored', 'unknown-target', 'no-campaign']:
+            with self.subTest(mode=mode):
+                fixture = self.gap_campaign()
+                if mode == 'final':
+                    fixture[-1]['sample_kind'] = 'final'
+                elif mode == 'unanchored':
+                    fixture[-2].pop()
+                elif mode == 'unknown-target':
+                    fixture[-1]['target'] = None
+                else:
+                    fixture[0]['fault_campaign'] = False
+                    for name in m.FAULT_CLASSES:
+                        del fixture[3]['verdict']['classes'][name]
+                    fixture[0]['turns_per_session'] = 2
+                result = self.gap_summary(fixture)
+                self.assertEqual(result['qualification']['status'], 'FAILED')
+                self.assertEqual(result['collection_gaps'][0]['attribution']['status'], 'UNATTRIBUTED')
+
+    def test_fault_window_inner_boundaries_and_restate_target_are_attributed(self):
+        for instant in [52000, 108000]:
+            with self.subTest(instant=instant):
+                fixture = self.gap_campaign()
+                fixture[-1]['monotonic_ns'] = instant
+                fixture[-1]['target'] = {'component': 'restate', 'endpoint': 'admin'}
+                for row in fixture[-3]:
+                    row['kind'] = 'restate-restart'
+                    row['fault_id'] = 'restate-restart'
+                fixture[-3][0]['detail_json'] = json.dumps({'collection_targets': [fixture[-1]['target']]})
+                result = self.gap_summary(fixture)
+                self.assertEqual(result['qualification']['status'], 'PASSED')
+                self.assertEqual(result['collection_gaps'][0]['attribution']['fault_id'], 'restate-restart')
+
+    def test_archive_keeps_gap_attribution_and_unattributed_failure(self):
+        for attributed, epochs in [(True, False), (False, False), (True, True), (False, True)]:
+            with self.subTest(attributed=attributed, epochs=epochs), tempfile.TemporaryDirectory() as tmp:
+                fixture = self.epoch_campaign() if epochs else self.gap_campaign()
+                run, operations, samples, witness, faults, anchors, gap = fixture
+                if not attributed:
+                    gap['target']['endpoint'] = 'other-worker'
+                    faults[0]['detail_json'] = json.dumps({'collection_targets': []})
+                ledgers = witness_evidence(operations)
+                next(row for row in ledgers if row['ledger'] == 'witness_load_faults')['rows'] = faults
+                witness['fault_rows'] = len(faults)
+                log = Path(tmp) / 'load.log'
+                rows = [run, *operations, *samples, *anchors, gap, *ledgers, witness]
+                log.write_text(''.join('load measurement ' + json.dumps(row) + '\n' for row in rows))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    if attributed:
+                        m.archive(log, Path(tmp) / 'results')
+                    else:
+                        reason = 'counter epoch gap' if epochs else 'load qualification is FAILED'
+                        with self.assertRaisesRegex(ValueError, reason):
+                            m.archive(log, Path(tmp) / 'results')
+                output = Path(tmp) / 'results' / 'fig-3790' / 'r'
+                saved = [json.loads(line) for line in (output / 'collection_gaps.jsonl').read_text().splitlines()]
+                summary = json.loads((output / 'summary.json').read_text())
+                self.assertEqual(summary['collection_gaps'], saved)
+                self.assertEqual(len(saved), 5 if epochs else 1)
+                self.assertTrue(all(row['attribution']['status'] == ('FAULT_ATTRIBUTED' if attributed else 'UNATTRIBUTED')
+                                    for row in saved))
+                if epochs and not attributed:
+                    self.assertEqual(summary['verdict'], 'failed')
+                else:
+                    self.assertEqual(summary['qualification']['status'], 'PASSED' if attributed else 'FAILED')
+                if epochs:
+                    self.assertTrue(all(row['unobserved_delta'] is None and not row['complete']
+                                        for row in saved if row['record'] == 'counter_gap'))
+                self.assertEqual(json.loads((output / 'sample_errors.jsonl').read_text()), gap)
+
+    def epoch_campaign(self):
+        fixture = self.gap_campaign()
+        samples = fixture[2]
+        observed = copy.deepcopy(samples[-1])
+        observed.update(monotonic_ns=80000, collection_finished_ns=85000)
+        observed['workers'][0]['observed_ns'] = 81000
+        for node in observed['restate']:
+            node['metrics_observed_ns'] = 82000
+        observed['workers'][0]['resources']['processes'][0]['epoch'] = '2'
+        observed['workers'][0]['resources']['cgroup_cpu']['usage_usec'] = 3
+        samples[-1]['workers'][0]['resources']['processes'][0]['epoch'] = '2'
+        samples[-1]['workers'][0]['resources']['cgroup_cpu']['usage_usec'] = 5
+        samples.insert(1, observed)
+        return fixture
+
+    def test_faulted_counter_epoch_gap_keeps_unknown_delta_and_values(self):
+        result = self.gap_summary(self.epoch_campaign())
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        gaps = [row for row in result['collection_gaps'] if row['record'] == 'counter_gap']
+        self.assertEqual(len(gaps), 4)
+        gap = next(row for row in gaps if row['counter'] == 'worker_usage_usec')
+        self.assertEqual(gap['before'], {'epoch': '1', 'value': 10})
+        self.assertEqual(gap['after'], {'epoch': '2', 'value': 3})
+        self.assertIsNone(gap['unobserved_delta'])
+        self.assertFalse(gap['complete'])
+        self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
+        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertEqual(result['counters']['worker_usage_usec']['observed_delta'], 2)
+        self.assertFalse(result['counters']['worker_usage_usec']['complete'])
+        self.assertEqual(result['counters']['worker_usage_usec']['epoch_gaps'], 1)
+        self.assertEqual(result['counters']['worker_usage_usec']['fault_attributed_epoch_gaps'], 1)
+
+    def test_unfaulted_or_outside_counter_epoch_gap_raises_with_evidence(self):
+        for outside in [True, False]:
+            with self.subTest(outside=outside):
+                fixture = self.epoch_campaign()
+                if outside:
+                    fixture[2][1].update(monotonic_ns=120000, collection_finished_ns=125000)
+                    fixture[2][1]['workers'][0]['observed_ns'] = 121000
+                    fixture[2][-1].update(monotonic_ns=130000, collection_finished_ns=135000)
+                else:
+                    fixture[-3][0]['detail_json'] = json.dumps({'collection_targets': [
+                        {'component': 'worker', 'endpoint': 'other-worker'}]})
+                with self.assertRaisesRegex(ValueError, 'counter epoch gap') as refused:
+                    self.gap_summary(fixture)
+                gaps = [row for row in refused.exception.collection_gaps if row['record'] == 'counter_gap']
+                self.assertEqual(len(gaps), 4)
+                self.assertTrue(all(row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps))
+                self.assertTrue(all(row['unobserved_delta'] is None and not row['complete'] for row in gaps))
+
     def test_campaign_recovery_is_complete_with_explicit_error_bars(self):
         run, operations, samples, witness = self.campaign_evidence()
         # Put the synthetic population on the same nanosecond scale as the anchors.
@@ -557,6 +739,10 @@ class MeasurementsTests(unittest.TestCase):
         for sample in samples:
             for key in ['monotonic_ns', 'collection_finished_ns']:
                 sample[key] *= 1000
+            for worker in sample['workers']:
+                worker['observed_ns'] *= 1000
+            for node in sample['restate']:
+                node['metrics_observed_ns'] *= 1000
         rows, anchors = self.normalized_campaign()
         result = m.summarize(run, operations, samples, witness, faults=rows, anchors=anchors)
         self.assertEqual(result['qualification']['status'], 'PASSED')
@@ -614,6 +800,10 @@ class MeasurementsTests(unittest.TestCase):
         for sample in samples:
             for key in ['monotonic_ns', 'collection_finished_ns']:
                 sample[key] *= 1000
+            for worker in sample['workers']:
+                worker['observed_ns'] *= 1000
+            for node in sample['restate']:
+                node['metrics_observed_ns'] *= 1000
         faults, anchors = self.normalized_campaign()
         witness['fault_rows'] = len(faults)
         ledgers = witness_evidence(operations)

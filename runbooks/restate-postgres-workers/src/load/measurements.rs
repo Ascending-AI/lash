@@ -6,6 +6,18 @@ use sqlx::PgPool;
 use std::io::Write as _;
 use std::time::Instant;
 
+#[derive(Debug, serde::Serialize)]
+struct CollectionTarget {
+    component: &'static str,
+    endpoint: String,
+}
+
+impl std::fmt::Display for CollectionTarget {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "collect {} at {}", self.component, self.endpoint)
+    }
+}
+
 pub struct Collector {
     pub run: String,
     pub workers: Vec<String>,
@@ -19,8 +31,24 @@ pub struct Collector {
 
 impl Collector {
     pub async fn query(&self, query: &str) -> Result<Vec<Value>> {
+        self.query_with_retry(query, |attempt, error| {
+            self.query_retry(query, attempt, error)
+        })
+        .await
+        .with_context(|| CollectionTarget {
+            component: "restate",
+            endpoint: self.admin.clone(),
+        })
+    }
+
+    async fn query_with_retry(
+        &self,
+        query: &str,
+        mut record_retry: impl FnMut(u32, String) -> Result<()>,
+    ) -> Result<Vec<Value>> {
         let deadline = Instant::now() + std::time::Duration::from_secs(10);
         let mut attempt = 0;
+        let mut scanner_restarted = false;
         loop {
             attempt += 1;
             let response = async {
@@ -40,18 +68,33 @@ impl Collector {
             let (status, body) = match response {
                 Ok(response) => response,
                 Err(error) if Instant::now() < deadline && query_transport_retryable(&error) => {
-                    self.query_retry(query, attempt, format!("{error:#}"))?;
+                    record_retry(attempt, format!("{error:#}"))?;
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     continue;
                 }
                 Err(error) => return Err(error.into()),
             };
+            if status.as_u16() == 500 && body.contains("No such scanner") {
+                ensure!(
+                    !scanner_restarted,
+                    "Restate query `{query}` lost its fresh scanner: {body}"
+                );
+                ensure!(
+                    Instant::now() < deadline,
+                    "Restate query `{query}` lost its scanner at the deadline: {body}"
+                );
+                scanner_restarted = true;
+                record_retry(attempt, body)?;
+                // A new POST executes this SQL from the beginning. No scanner
+                // identity or partial response survives the lost node.
+                continue;
+            }
             if status.as_u16() == 500
                 && (body.contains("partition store")
                     || body.contains("partition is being transferred"))
                 && Instant::now() < deadline
             {
-                self.query_retry(query, attempt, body)?;
+                record_retry(attempt, body)?;
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 continue;
             }
@@ -74,6 +117,12 @@ impl Collector {
             "query_kind": if query.contains("sys_journal") { "journal" } else { "invocation_census" },
             "error": error}),
         )
+    }
+
+    pub fn sample_error(&self, error: &anyhow::Error, sample_kind: &str) -> Value {
+        json!({"schema_version": 1, "record": "sample_error", "run": self.run,
+               "monotonic_ns": self.started.elapsed().as_nanos(), "sample_kind": sample_kind,
+               "target": error.downcast_ref::<CollectionTarget>(), "error": format!("{error:#}")})
     }
 
     /// Retain completed journals long enough to read them in the isolated topology.
@@ -177,15 +226,21 @@ impl Collector {
         let start = self.started.elapsed().as_nanos();
         let mut workers = Vec::new();
         for worker in &self.workers {
-            let value: Value = self
-                .client
-                .get(format!("{worker}/load/resources"))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            workers.push(json!({"node": worker, "resources": value}));
+            let value: Value = async {
+                self.client
+                    .get(format!("{worker}/load/resources"))
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await
+            }
+            .await
+            .with_context(|| CollectionTarget {
+                component: "worker",
+                endpoint: worker.clone(),
+            })?;
+            workers.push(json!({"node": worker, "observed_ns": self.started.elapsed().as_nanos(), "resources": value}));
         }
         // Read the durable table directly. The sys_invocation view joins
         // ephemeral leader state, which can disappear during rebalancing.
@@ -240,23 +295,37 @@ impl Collector {
         }
         let mut nodes = Vec::new();
         for node in &self.nodes {
-            let metrics = self
-                .client
-                .get(format!("{node}/metrics"))
-                .send()
-                .await?
-                .error_for_status()?
-                .text()
-                .await?;
-            let physical: Value = self
-                .client
-                .get(format!("{}/physical", node.replace(":5122", ":18102")))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            nodes.push(json!({"node": node, "prometheus": metrics, "physical": physical}));
+            let metrics = async {
+                self.client
+                    .get(format!("{node}/metrics"))
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .text()
+                    .await
+            }
+            .await
+            .with_context(|| CollectionTarget {
+                component: "restate",
+                endpoint: node.clone(),
+            })?;
+            let metrics_observed_ns = self.started.elapsed().as_nanos();
+            let physical_endpoint = node.replace(":5122", ":18102");
+            let physical: Value = async {
+                self.client
+                    .get(format!("{physical_endpoint}/physical"))
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await
+            }
+            .await
+            .with_context(|| CollectionTarget {
+                component: "restate",
+                endpoint: physical_endpoint,
+            })?;
+            nodes.push(json!({"node": node, "metrics_observed_ns": metrics_observed_ns, "prometheus": metrics, "physical": physical}));
         }
         // The admin SQL API exposes invocation data only. Cluster tables are
         // queried through the pinned NodeCtl client in the physical collector.
@@ -279,7 +348,7 @@ impl Collector {
                 'query_ms', (SELECT coalesce(sum(total_exec_time),0) FROM pg_stat_statements WHERE dbid=d.datid),
                 'query_reset', (SELECT stats_reset::text FROM pg_stat_statements_info)
              ) FROM pg_stat_database d WHERE datname=current_database()"
-        ).fetch_one(&self.database).await.context("sample PostgreSQL counters")?;
+        ).fetch_one(&self.database).await.context(CollectionTarget { component: "postgres", endpoint: "lash_database".to_owned() })?;
         Ok(
             json!({"schema_version": 1, "record": "sample", "run": self.run,
             "monotonic_ns": start, "collection_finished_ns": self.started.elapsed().as_nanos(),
@@ -384,6 +453,89 @@ mod tests {
             },
             task,
         ))
+    }
+
+    #[tokio::test]
+    async fn lost_scanner_restarts_the_whole_query_once() -> Result<()> {
+        use std::sync::{Arc, Mutex};
+        let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let state = Arc::clone(&requests);
+        let router = axum::Router::new().route(
+            "/query",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let state = Arc::clone(&state);
+                async move {
+                    let mut requests = state.lock().expect("requests");
+                    requests.push(body);
+                    if requests.len() == 1 {
+                        (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                         axum::Json(json!({"message": "Datafusion error: Internal error: No such scanner. It could have expired due to a long period of inactivity."})))
+                    } else {
+                        (axum::http::StatusCode::OK,
+                         axum::Json(json!({"rows": [{"id": "first"}, {"id": "last"}]})))
+                    }
+                }
+            }),
+        );
+        let (collector, server) = fixture_collector(router).await?;
+        let sql = "SELECT id FROM sys_invocation_status ORDER BY id LIMIT 128";
+        let mut retries = Vec::new();
+        let result = collector
+            .query_with_retry(sql, |attempt, error| {
+                retries.push((attempt, error));
+                Ok(())
+            })
+            .await;
+        server.abort();
+        assert_eq!(result?, vec![json!({"id": "first"}), json!({"id": "last"})]);
+        assert_eq!(
+            *requests.lock().expect("requests"),
+            vec![json!({"query": sql}); 2]
+        );
+        assert_eq!(retries.len(), 1);
+        assert!(retries[0].1.contains("No such scanner"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lost_scanner_is_restarted_only_once() -> Result<()> {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let requests = Arc::new(AtomicUsize::new(0));
+        let state = Arc::clone(&requests);
+        let router = axum::Router::new().route(
+            "/query",
+            axum::routing::post(move || {
+                let state = Arc::clone(&state);
+                async move {
+                    state.fetch_add(1, Ordering::SeqCst);
+                    (
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        "Datafusion error: Internal error: No such scanner.",
+                    )
+                }
+            }),
+        );
+        let (collector, server) = fixture_collector(router).await?;
+        let mut retries = 0;
+        let result = collector
+            .query_with_retry("SELECT id FROM sys_invocation_status", |_, _| {
+                retries += 1;
+                Ok(())
+            })
+            .await;
+        server.abort();
+        assert!(
+            result
+                .expect_err("second lost scanner must fail")
+                .to_string()
+                .contains("No such scanner")
+        );
+        assert_eq!(requests.load(Ordering::SeqCst), 2);
+        assert_eq!(retries, 1);
+        Ok(())
     }
 
     #[tokio::test]
