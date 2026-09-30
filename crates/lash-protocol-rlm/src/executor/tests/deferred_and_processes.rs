@@ -1,6 +1,8 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
 
+mod process_handle_containers;
+
 const SEED: u64 = 0x5_2c0a;
 
 /// Runs a deferred tool resolution and then fails its journal commit, in
@@ -1966,6 +1968,23 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         lash_core::NoProcessWork::for_registry(registry)
             .await_terminal(process_id)
             .await
+    }
+
+    async fn attach_process_terminal(
+        &self,
+        process_id: &ProcessId,
+        key: &lash_core::AwaitEventKey,
+        scope: lash_core::ProcessOpScope<'_>,
+    ) -> Result<(), lash_core::PluginError> {
+        // Container snapshot laws join a child that has already completed.
+        let output = self.await_process(process_id, scope).await?;
+        let terminal = serde_json::to_value(output)
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+        self.effect_host
+            .resolve_await_event(key, lash_core::Resolution::Ok(terminal))
+            .await
+            .map(|_| ())
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
     }
 
     async fn list_visible(

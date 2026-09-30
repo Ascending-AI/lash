@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 mod fig3463_observation;
 #[path = "agent_surface/journaled_randomness.rs"]
 mod journaled_randomness;
+#[path = "agent_surface/process_handle_containers.rs"]
+mod process_handle_containers;
 
 struct Host;
 

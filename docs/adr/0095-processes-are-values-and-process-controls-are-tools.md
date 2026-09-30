@@ -72,6 +72,11 @@ leaf plugin tool that takes and returns those values. The only constructs that
 remain in the language are the ones that read or write the running VM's own
 control state: `waitSignal`, `sleep`, `finish`.
 
+Process handles retain their identity in lists, records and nested containers,
+including across suspension, execution-state snapshots and durable replay
+(FIG-4238). An inferred list type describes its initializer only while its
+contents remain closed; mutation or escape makes its element type unknown.
+
 `defineProcess`, Lashlang `process` declarations, the `start` keyword, `wake`
 in both arities, `registerTrigger` and the `signals` configuration block are
 deleted from both dialects. There is no compatibility reader for any of them.

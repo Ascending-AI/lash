@@ -1,4 +1,4 @@
-//! Which object shapes the field guard may trust (FIG-3626).
+//! Which container types the linker may trust (FIG-3626, FIG-4238).
 //!
 //! The linker refuses a read or write of a field an object's type lacks. That
 //! is sound only while the type is the whole truth about the object: a
@@ -22,6 +22,9 @@
 //! loop whose later iterations run after it. It is conservative: an escape
 //! opens everything the escaping value reaches, and an element read (`o[k]`)
 //! stands for every field of `o`.
+//!
+//! An opened list may gain or replace items. Its initializer's element type
+//! no longer describes its contents, so element reads have type `any`.
 
 use super::*;
 
@@ -139,7 +142,12 @@ impl OpenPlaces {
                 body,
                 ..
             } => {
-                work.push((&**iterable, true));
+                // Iteration shares items, not the container holding them.
+                if let Some((root, mut path, _)) = place(iterable) {
+                    path.push(None);
+                    self.open(root.as_str(), path);
+                }
+                work.push((&**iterable, false));
                 work.extend(bind.iter().map(|bind| (&**bind, true)));
                 work.push((&**body, false));
             }
@@ -324,12 +332,12 @@ impl Linker<'_> {
         }
     }
 
-    /// Every object shape in `ty` opened: what code holding the value may
-    /// have made of it.
+    /// Every container in `ty` opened: what code holding the value may
+    /// have made of its fields or items.
     fn open_deep(&self, ty: TypeExpr, seen: &mut BTreeSet<String>) -> TypeExpr {
         match ty {
             TypeExpr::Object(_) => TypeExpr::Dict,
-            TypeExpr::List(item) => TypeExpr::List(Box::new(self.open_deep(*item, seen))),
+            TypeExpr::List(_) => TypeExpr::List(Box::new(TypeExpr::Any)),
             TypeExpr::Union(items) => union_type(
                 items
                     .into_iter()
