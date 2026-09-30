@@ -591,10 +591,12 @@ impl EffectGroupState for EffectGroupStateImpl {
                 &self.namespace,
                 &shape.wait_scope,
                 &group_key,
-                expected_positions
-                    .iter()
-                    .map(|&position| EffectGroupWaitKind::Admit(position)),
-                EffectGroupWaitResolution::Admit,
+                expected_positions.iter().map(|&position| {
+                    (
+                        EffectGroupWaitKind::Admit(position),
+                        EffectGroupWaitResolution::Admit,
+                    )
+                }),
             )
             .await?;
         }
@@ -691,30 +693,21 @@ impl EffectGroupState for EffectGroupStateImpl {
                     live: live.clone(),
                 };
                 store_index(&ctx, object.writer, record.clone());
-                resolve_group_wait(
+                let refused = EffectGroupWaitResolution::Refused {
+                    reason: request.reason.clone(),
+                };
+                resolve_group_waits(
                     &ctx,
                     &self.namespace,
                     &shape.wait_scope,
                     &group_key,
-                    EffectGroupWaitKind::Ready,
-                    EffectGroupWaitResolution::Refused {
-                        reason: request.reason.clone(),
-                    },
+                    std::iter::once((EffectGroupWaitKind::Ready, refused.clone())).chain(
+                        (0..shape.children()).map(|position| {
+                            (EffectGroupWaitKind::Admit(position), refused.clone())
+                        }),
+                    ),
                 )
                 .await?;
-                for position in 0..shape.children() {
-                    resolve_group_wait(
-                        &ctx,
-                        &self.namespace,
-                        &shape.wait_scope,
-                        &group_key,
-                        EffectGroupWaitKind::Admit(position),
-                        EffectGroupWaitResolution::Refused {
-                            reason: request.reason.clone(),
-                        },
-                    )
-                    .await?;
-                }
                 EffectGroupRegisterRefusalResponse::Refused
             }
             EffectGroupLifecycle::Ready { .. } => {
@@ -1027,36 +1020,33 @@ impl EffectGroupState for EffectGroupStateImpl {
         let wait_scope = live.shape.wait_scope.clone();
         let replay_key = live.shape.member_replay_key(request.position)?.to_string();
         store_index(&ctx, object.writer, record.clone());
-        resolve_group_wait(
+        // The seat's three wakes are independent, so they resolve in one
+        // round trip while this exclusive handler holds the group (FIG-4269).
+        // The rank wake is the opener's. The drained wake is what a §5
+        // barrier parks on: siblings that committed above this child resume
+        // their drains off it. A seated child is past every cancel: its
+        // cancel wait ends here, so the dispatch invocation's watch on it
+        // does not stay open on the deployment until the group closes or
+        // retires.
+        resolve_group_waits(
             &ctx,
             &self.namespace,
             &wait_scope,
             &group_key,
-            EffectGroupWaitKind::Rank(rank),
-            EffectGroupWaitResolution::Rank,
-        )
-        .await?;
-        // The seat is what a §5 barrier parks on: siblings that committed
-        // above this child resume their drains off this wake.
-        resolve_group_wait(
-            &ctx,
-            &self.namespace,
-            &wait_scope,
-            &group_key,
-            EffectGroupWaitKind::Drained(request.position),
-            EffectGroupWaitResolution::Drained,
-        )
-        .await?;
-        // A seated child is past every cancel: its cancel wait ends here, so
-        // the dispatch invocation's watch on it does not stay open on the
-        // deployment until the group closes or retires.
-        resolve_group_wait(
-            &ctx,
-            &self.namespace,
-            &wait_scope,
-            &group_key,
-            EffectGroupWaitKind::Cancel(&replay_key),
-            EffectGroupWaitResolution::Settled,
+            [
+                (
+                    EffectGroupWaitKind::Rank(rank),
+                    EffectGroupWaitResolution::Rank,
+                ),
+                (
+                    EffectGroupWaitKind::Drained(request.position),
+                    EffectGroupWaitResolution::Drained,
+                ),
+                (
+                    EffectGroupWaitKind::Cancel(&replay_key),
+                    EffectGroupWaitResolution::Settled,
+                ),
+            ],
         )
         .await?;
         Ok(Reply::at(
@@ -1237,31 +1227,25 @@ impl EffectGroupState for EffectGroupStateImpl {
                             "effect group {group_key} has no settlement rank for child {position}"
                         ))
                     })?;
-                resolve_group_wait(
+                resolve_group_waits(
                     &ctx,
                     &self.namespace,
                     &shape.wait_scope,
                     &group_key,
-                    EffectGroupWaitKind::Rank(rank),
-                    EffectGroupWaitResolution::Rank,
-                )
-                .await?;
-                resolve_group_wait(
-                    &ctx,
-                    &self.namespace,
-                    &shape.wait_scope,
-                    &group_key,
-                    EffectGroupWaitKind::Cancel(shape.member_replay_key(position)?),
-                    EffectGroupWaitResolution::Cancel,
-                )
-                .await?;
-                resolve_group_wait(
-                    &ctx,
-                    &self.namespace,
-                    &shape.wait_scope,
-                    &group_key,
-                    EffectGroupWaitKind::Admit(position),
-                    EffectGroupWaitResolution::Cancel,
+                    [
+                        (
+                            EffectGroupWaitKind::Rank(rank),
+                            EffectGroupWaitResolution::Rank,
+                        ),
+                        (
+                            EffectGroupWaitKind::Cancel(shape.member_replay_key(position)?),
+                            EffectGroupWaitResolution::Cancel,
+                        ),
+                        (
+                            EffectGroupWaitKind::Admit(position),
+                            EffectGroupWaitResolution::Cancel,
+                        ),
+                    ],
                 )
                 .await?;
                 if let Some(invocation_id) = addresses.get(&position) {
@@ -1482,31 +1466,25 @@ impl EffectGroupState for EffectGroupStateImpl {
         seal_cancel_decisions(&ctx, &self.namespace, &group_key, &decided).await?;
         store_index(&ctx, object.writer, record.clone());
         for (position, rank) in ranks.iter().copied() {
-            resolve_group_wait(
+            resolve_group_waits(
                 &ctx,
                 &self.namespace,
                 &facts.wait_scope,
                 &group_key,
-                EffectGroupWaitKind::Rank(rank),
-                EffectGroupWaitResolution::Rank,
-            )
-            .await?;
-            resolve_group_wait(
-                &ctx,
-                &self.namespace,
-                &facts.wait_scope,
-                &group_key,
-                EffectGroupWaitKind::Cancel(facts.member_replay_key(position)?),
-                EffectGroupWaitResolution::Cancel,
-            )
-            .await?;
-            resolve_group_wait(
-                &ctx,
-                &self.namespace,
-                &facts.wait_scope,
-                &group_key,
-                EffectGroupWaitKind::Admit(position),
-                EffectGroupWaitResolution::Cancel,
+                [
+                    (
+                        EffectGroupWaitKind::Rank(rank),
+                        EffectGroupWaitResolution::Rank,
+                    ),
+                    (
+                        EffectGroupWaitKind::Cancel(facts.member_replay_key(position)?),
+                        EffectGroupWaitResolution::Cancel,
+                    ),
+                    (
+                        EffectGroupWaitKind::Admit(position),
+                        EffectGroupWaitResolution::Cancel,
+                    ),
+                ],
             )
             .await?;
         }

@@ -24,23 +24,23 @@ pub(super) async fn resolve_group_wait(
     kind: EffectGroupWaitKind<'_>,
     value: EffectGroupWaitResolution,
 ) -> Result<(), TerminalError> {
-    resolve_group_waits(ctx, namespace, scope, group_key, [kind], value).await
+    resolve_group_waits(ctx, namespace, scope, group_key, [(kind, value)]).await
 }
 
-/// Resolves each of `kinds` with `value`, every call issued before any is
-/// awaited: one suspension covers the lot rather than one per wait, whatever
-/// the group's width (FIG-4088). The calls are issued and awaited in `kinds`'
-/// order, so the journal is the same on every replay.
+/// Resolves each wait with its own resolution, every call issued before any
+/// is awaited: one round trip and one suspension cover the lot rather than
+/// one per wait, whatever the group's width (FIG-4088) or the number of
+/// wakes one handler owes (FIG-4269). The calls are issued and awaited in
+/// `waits`' order, so the journal is the same on every replay.
 pub(super) async fn resolve_group_waits<'k>(
     ctx: &ObjectContext<'_>,
     namespace: &crate::RestateNamespace,
     scope: &ExecutionScope,
     group_key: &str,
-    kinds: impl IntoIterator<Item = EffectGroupWaitKind<'k>>,
-    value: EffectGroupWaitResolution,
+    waits: impl IntoIterator<Item = (EffectGroupWaitKind<'k>, EffectGroupWaitResolution)>,
 ) -> Result<(), TerminalError> {
     let mut calls = Vec::new();
-    for kind in kinds {
+    for (kind, value) in waits {
         let key = group_wait_key(scope, group_key, kind)?;
         let replay_key = key.key_id.clone();
         let address = RestateDurableWaitAddress::for_key(&key);
@@ -49,7 +49,7 @@ pub(super) async fn resolve_group_waits<'k>(
                 .durable_wait_registry(ctx, durable_wait_index_object_key(&address))
                 .resolve(RestateDurableWaitResolveRequest {
                     key,
-                    resolution: wait_resolution(value.clone())?,
+                    resolution: wait_resolution(value)?,
                 })
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .call(),

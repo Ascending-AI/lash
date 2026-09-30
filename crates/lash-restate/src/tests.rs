@@ -263,6 +263,7 @@ mod effect_group_drain_transitivity;
 mod effect_group_generation_routing;
 mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;
+mod effect_group_settlement_wakes;
 mod effect_group_shape;
 mod effect_host_laws_on_the_double;
 mod effect_layer_wait_children;
