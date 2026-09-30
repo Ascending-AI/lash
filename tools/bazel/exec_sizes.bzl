@@ -357,7 +357,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-restate-test:tool_child_drift__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:turn_crash_replay__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate:lash-restate__unit_test": {"cpu_count": 5, "memory_kb": 1048576},
-    "//crates/lash-restate:lash-restate__unit_test__fv_ca05bdfa": {"cpu_count": 5, "memory_kb": 1048576},
+    "//crates/lash-restate:lash-restate__unit_test__fv_f0e17cf6": {"cpu_count": 5, "memory_kb": 1048576},
     "//crates/lash-rlm-types:lash-rlm-types__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-s3-store:lash-s3-store__unit_test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-sansio:lash-sansio__unit_test": {"cpu_count": 2, "memory_kb": 1048576},
