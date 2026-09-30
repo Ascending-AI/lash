@@ -10,7 +10,8 @@
 //! binding back instead of taking rows twice.
 //!
 //! This module holds what the backends must not decide on their own: what an
-//! admission takes ([`plan_turn_input_admission`]), which rows a settlement
+//! admission takes ([`plan_next_turn_input_admission`],
+//! [`plan_checkpoint_input_admission`]), which rows a settlement
 //! may touch ([`require_admitted_to_root`]), where one composition of the
 //! turn lane stops ([`TurnLaneStop`]), and what a wake leaves behind when it
 //! leaves the queue ([`TerminalProcessWake`]).
@@ -252,35 +253,100 @@ pub fn turn_input_state_after_admission(
     }
 }
 
-/// Compose one turn-input admission over its candidate rows, in
-/// `enqueue_seq` order (FIG-3927): `None` when nothing is admitted.
+/// Compose one idle root admission of next-turn host input over its
+/// candidate rows, in `enqueue_seq` order and at most `max_inputs` of them
+/// (FIG-3927): `None` when there are none.
 ///
-/// A next-turn admission never mixes run specs (FIG-3838): the prefix stops,
-/// never skips, at the first row whose spec differs from its head's. A
-/// checkpoint admission delivers into a running root whose shape is already
-/// recorded, and enqueue refused every differing explicit spec there. The
-/// returned inputs carry the state the admission writes.
+/// The composition never mixes run specs (FIG-3838): the prefix stops, never
+/// skips, at the first row whose spec differs from its head's. How much of
+/// that eligible prefix one root takes is the host's drain policy's decision,
+/// as for queued turn work (ADR 0101 §5.2): the default takes the head alone,
+/// so each next-turn input is its own root and a cancel of one never reaches
+/// another (FIG-4457). A next-turn row keeps its own state when admitted.
 #[must_use]
-pub fn plan_turn_input_admission(
+pub fn plan_next_turn_input_admission(
     session_id: &SessionId,
-    mode: crate::TurnInputAdmissionMode,
     mut rows: Vec<crate::PendingTurnInput>,
+    max_inputs: usize,
+    policy: &crate::TurnLaneAdmissionPolicy,
+    now_epoch_ms: u64,
 ) -> Option<crate::AdmittedTurnInputs> {
     let spec = rows.first()?.run_spec.clone();
-    if matches!(&mode, crate::TurnInputAdmissionMode::NextTurn) {
-        let same_spec = rows.iter().take_while(|row| row.run_spec == spec).count();
-        rows.truncate(same_spec);
+    let same_spec = rows.iter().take_while(|row| row.run_spec == spec).count();
+    rows.truncate(same_spec);
+    if rows.len() > 1 {
+        let candidates = rows
+            .iter()
+            .map(|row| crate::QueuedDrainCandidate {
+                enqueue_seq: row.enqueue_seq,
+                family: crate::QueuedDrainFamily::HostInput,
+                merge_key: None,
+                authority: crate::QueuedWorkAuthority::default(),
+                // One serialized UTF-8 byte of the input charged as one
+                // token, as queued work charges its rendered causes.
+                projected_tokens: serde_json::to_vec(&row.input).map_or(0, |bytes| bytes.len()),
+                pending_age_ms: now_epoch_ms.saturating_sub(row.enqueued_at_ms),
+            })
+            .collect::<Vec<_>>();
+        let request = crate::QueuedDrainRequest::new(
+            &candidates,
+            policy
+                .max_context_tokens
+                .saturating_sub(policy.action_token_reserve),
+            policy.max_context_tokens,
+            max_inputs,
+            crate::AdmissionBoundary::Idle,
+        );
+        let selected = policy
+            .drain_policy
+            .select_drain(&request)
+            .drain_count()
+            .clamp(1, rows.len());
+        tracing::debug!(
+            target: "lash::queued_work_batching",
+            drain_policy = policy.drain_policy.name(),
+            offered = rows.len(),
+            selected,
+            "next-turn input drain policy selection"
+        );
+        rows.truncate(selected);
     }
-    if turn_input_state_after_admission(&mode) == Some(crate::TurnInputStateKind::Accepted) {
-        for input in &mut rows {
-            if let Some(accepted) = input.state.accepted() {
-                input.state = accepted;
-            }
+    Some(crate::AdmittedTurnInputs {
+        session_id: session_id.clone(),
+        mode: crate::TurnInputAdmissionMode::NextTurn,
+        inputs: rows,
+        applications: Vec::new(),
+    })
+}
+
+/// Compose one checkpoint admission of the input addressed to the running
+/// physical turn `turn_id`, over its candidate rows in `enqueue_seq` order
+/// (FIG-3927): `None` when there are none.
+///
+/// The input joins a running root whose shape is already recorded, and
+/// enqueue refused every differing explicit spec there. Each returned input
+/// is `accepted` into the running turn, the state the admission writes.
+#[must_use]
+pub fn plan_checkpoint_input_admission(
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    checkpoint: crate::CheckpointKind,
+    mut rows: Vec<crate::PendingTurnInput>,
+) -> Option<crate::AdmittedTurnInputs> {
+    if rows.is_empty() {
+        return None;
+    }
+    for input in &mut rows {
+        if let Some(accepted) = input.state.accepted() {
+            input.state = accepted;
         }
     }
     Some(crate::AdmittedTurnInputs {
         session_id: session_id.clone(),
-        mode,
+        mode: crate::TurnInputAdmissionMode::ActiveTurn {
+            turn_id: turn_id.clone(),
+            checkpoint,
+        },
         inputs: rows,
         applications: Vec::new(),
     })

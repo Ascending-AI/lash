@@ -381,6 +381,25 @@ lash_conformance::frame_open_redrive_tests!(
     }
 );
 
+// FIG-4457's queued input roots law on a live endpoint: the first drive's
+// death is a failed handler attempt Restate redelivers, and the second input
+// is accepted in between.
+lash_conformance::queued_input_roots_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        // Restate state outlives a run: each run names its own session.
+        let prefix: &'static str = Box::leak(
+            format!("restate-queued-input-roots-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        (harness, prefix, effect_host, stores, turn_runner)
+    }
+);
+
 // FIG-4297's bound-trigger duplicate law on a live endpoint: each emission
 // runs in a probe handler, the delivery's process in the endpoint's
 // `LashProcessWorkflow`, and the first emission's crash is a failed handler

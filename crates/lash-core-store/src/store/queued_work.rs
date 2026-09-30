@@ -350,7 +350,7 @@ pub fn select_turn_work_indices(
         .iter()
         .map(|candidate| crate::QueuedDrainCandidate {
             enqueue_seq: candidate.enqueue_seq,
-            kind: candidate.kind,
+            family: crate::QueuedDrainFamily::QueuedTurnWork,
             merge_key: candidate.merge_key.clone(),
             authority: candidate.authority.clone(),
             projected_tokens: rendered_token_upper_bound(std::slice::from_ref(candidate)),

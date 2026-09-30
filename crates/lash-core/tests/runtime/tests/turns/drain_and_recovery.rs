@@ -1384,9 +1384,10 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
 }
 
 /// The drive path's test entry (FIG-3600): an idle session answers an empty
-/// claim, a drain runs one root whose admission takes the admissible input prefix,
-/// and a drain re-run under the same identity replays its recorded drive
-/// instead of admitting anything new.
+/// claim, a drain runs one root whose admission takes the head input (the
+/// default drain gives each input its own root, FIG-4457), and a drain re-run
+/// under the same identity replays its recorded drive instead of admitting
+/// anything new; the next drain runs the next input.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeated_drain() {
     let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
@@ -1403,7 +1404,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     };
     let (runtime, store) = standard_runtime_with_transport_and_double_queue_store(
         &double,
-        mock_provider(vec![answer("first answer")]),
+        mock_provider(vec![answer("first answer"), answer("second answer")]),
     )
     .await;
     let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
@@ -1500,9 +1501,14 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
         .await
         .expect("a later drain answers");
     handler.close().await.expect("close the scope's handler");
-    assert!(
-        after.ran().is_none(),
-        "the first root's admission took both inputs, so a later drain has nothing to run"
+    assert_eq!(
+        after
+            .ran()
+            .expect("the later drain runs the second input's own root")
+            .assistant_output
+            .safe_text,
+        "second answer",
+        "the first root's admission took the first input alone"
     );
     assert_eq!(
         lash_core::store::TurnInputStore::list_turn_input_applications(store.as_ref(), &session)

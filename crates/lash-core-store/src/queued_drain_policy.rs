@@ -1,13 +1,16 @@
-//! Host-owned selection of which queued work drains on one wake.
+//! Host-owned selection of how much turn-lane work one root takes.
 //!
-//! Lash owns the *laws* of a queued-work claim: the queue head must be turn
-//! work, a delivery boundary must admit it, and only batchable turn work
-//! sharing the head's delivery policy may travel with it (ADR 0101 §5.2).
+//! Lash owns the *laws* of a composition: of queued work, the queue head must
+//! be turn work, a delivery boundary must admit it, and only batchable turn
+//! work sharing the head's delivery policy may travel with it; of next-turn
+//! host input, only inputs sharing the head's run spec may travel with it.
+//! Either stops at the other family's earliest open row (ADR 0101 §5.2).
 //! What Lash does not own is *how much* of that legal, strictly FIFO-ordered
 //! prefix a host wants to execute in one turn. That is a product decision —
 //! throughput against per-turn context pressure, and which producers may
 //! share a turn — so it is a host policy seam ([`QueuedDrainPolicy`]) rather
-//! than kernel arithmetic.
+//! than kernel arithmetic. One policy decides for both families; each
+//! candidate names its [`QueuedDrainFamily`].
 //!
 //! Each candidate carries its own `authority` and `merge_key`. Lash does not
 //! compare them: it applies no authorization policy. A host that keeps
@@ -57,9 +60,25 @@
 
 use std::sync::Arc;
 
-use crate::{AdmissionBoundary, QueuedWorkAuthority, QueuedWorkKind};
+use crate::{AdmissionBoundary, QueuedWorkAuthority};
 
-/// One claimable queued-work row offered to a [`QueuedDrainPolicy`].
+/// The admission family of the rows one drain offers.
+///
+/// A composition takes rows of one family only: it stops at the other
+/// family's earliest open row (ADR 0101 §5.2), so every candidate of one
+/// [`QueuedDrainRequest`] names the same family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum QueuedDrainFamily {
+    /// Next-turn host input sharing the head's run spec, at an idle
+    /// admission. Host input carries no merge key and no authority: its
+    /// candidates offer `None` and the default authority.
+    HostInput,
+    /// Batchable queued turn work, such as process wakes, sharing the head's
+    /// delivery policy.
+    QueuedTurnWork,
+}
+
+/// One claimable turn-lane row offered to a [`QueuedDrainPolicy`].
 ///
 /// Candidates are presented in durable `enqueue_seq` order and are already
 /// filtered to rows that may legally share this turn with the queue head.
@@ -69,8 +88,8 @@ use crate::{AdmissionBoundary, QueuedWorkAuthority, QueuedWorkKind};
 pub struct QueuedDrainCandidate {
     /// Durable queue position, ascending and unique per session.
     pub enqueue_seq: u64,
-    /// Semantic row kind; only [`QueuedWorkKind::Turn`] rows are ever batchable.
-    pub kind: QueuedWorkKind,
+    /// The admission family this row belongs to.
+    pub family: QueuedDrainFamily,
     /// This row's producer-selected grouping label.
     pub merge_key: Option<String>,
     /// This row's producer-stamped execution authority.
@@ -133,8 +152,8 @@ impl<'a> QueuedDrainRequest<'a> {
         self.max_context_tokens
     }
 
-    /// The host's fresh-claim row bound; the candidate list is already capped
-    /// by it.
+    /// The host's fresh-claim row bound for this family; the candidate list
+    /// is already capped by it.
     pub fn max_rows(&self) -> usize {
         self.max_rows
     }
@@ -213,14 +232,16 @@ pub trait QueuedDrainPolicy: std::fmt::Debug + Send + Sync {
 /// The two shipped drain shapes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum DrainMode {
-    /// One queued row per drain, strict FIFO. The Lash default: each turn
-    /// carries the prompt plus exactly one row, which either fits the model
-    /// window or is irreducibly oversized and named as such.
+    /// One row per root, strict FIFO. The Lash default: each turn carries
+    /// the prompt plus exactly one row, which either fits the model window or
+    /// is irreducibly oversized and named as such, and each next-turn host
+    /// input is its own root.
     #[default]
     OneAtATime,
-    /// Every eligible pending row in one drain, strict FIFO, for large-window
+    /// Every eligible pending row in one root, strict FIFO, for large-window
     /// hosts that want throughput and accept the provider as the authority on
-    /// what fits.
+    /// what fits. Host inputs that share a root share its answer and its
+    /// cancellation.
     All,
 }
 
@@ -298,7 +319,7 @@ mod tests {
     fn candidate(enqueue_seq: u64) -> QueuedDrainCandidate {
         QueuedDrainCandidate {
             enqueue_seq,
-            kind: QueuedWorkKind::Turn,
+            family: QueuedDrainFamily::QueuedTurnWork,
             merge_key: Some("wake".to_string()),
             authority: QueuedWorkAuthority::default(),
             projected_tokens: 128,

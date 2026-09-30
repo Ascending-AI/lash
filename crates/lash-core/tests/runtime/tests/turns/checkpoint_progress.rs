@@ -1093,6 +1093,25 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
     );
 }
 
+/// [`journal_replay_host`] whose drain takes every eligible input into one
+/// root (`DrainMode::All`): the opening input joins the queued input's root
+/// as a member, which the default drain never composes (FIG-4457).
+fn composing_journal_replay_host(
+    backend: &lash_core::Backend,
+    controller: Arc<dyn lash_core::testing::EffectLayer>,
+) -> lash_core::facade_support::EmbeddedRuntimeHost {
+    let mut config = lash_core::testing::runtime_helpers::test_runtime_host_config_with_provider(
+        &super::effect::backend_with_effect_layer(backend, controller),
+        mock_provider(Vec::new()).into_handle(),
+    );
+    config.durability.queued_work_batching = config
+        .durability
+        .queued_work_batching
+        .clone()
+        .with_drain_mode(lash_core::DrainMode::All);
+    lash_core::facade_support::EmbeddedRuntimeHost::new(config)
+}
+
 pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
     double: &lash_restate_test::RestateTestBackend,
     store: Arc<RecordingStore>,
@@ -1138,7 +1157,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
-        journal_replay_host(&backend, Arc::clone(&controller)),
+        composing_journal_replay_host(&backend, Arc::clone(&controller)),
         runtime_store,
     ))
     .await;
@@ -1195,7 +1214,7 @@ pub(super) async fn redrive_checkpoint_injected_turn(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        journal_replay_host(&backend, Arc::clone(&controller)),
+        composing_journal_replay_host(&backend, Arc::clone(&controller)),
         store,
     )
     .await;

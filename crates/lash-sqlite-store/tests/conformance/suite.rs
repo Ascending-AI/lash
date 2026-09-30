@@ -119,6 +119,34 @@ lash_conformance::frame_open_redrive_tests!({
     )
 });
 
+// FIG-4457: two queued inputs, the second sent while the first one's drive
+// is down, get their own roots under the default drain, and a cancel of one
+// leaves the other untouched. Each drive runs inside a handler of the Restate
+// double over this substrate's stores.
+lash_conformance::queued_input_roots_tests!({
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4457 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the queued input roots law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    (
+        (backend, double),
+        "sqlite-queued-input-roots",
+        effect_host,
+        stores,
+        runner,
+    )
+});
+
 // FIG-4297: a duplicate of a bound trigger delivery's occurrence, emitted by
 // a fresh invocation after the bound process was pruned, returns that process
 // and starts nothing, and the original emission's replay still answers it.

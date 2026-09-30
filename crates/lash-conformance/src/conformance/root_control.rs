@@ -993,7 +993,10 @@ pub async fn fork_releases_the_old_owner_before_the_new_root_drives_in_original_
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let f = Fixture::new(prefix, "fork-parked", &host, &stores).await;
+    let mut f = Fixture::new(prefix, "fork-parked", &host, &stores).await;
+    // The parked root composed both inputs, which only a composing drain
+    // does (FIG-4457).
+    f.parts.compose_inputs();
     let second = f.parts.enqueue("second", Some("second")).await;
     f.parts
         .store

@@ -87,8 +87,13 @@ pub(crate) async fn admit_root_sqlite(
                 }
                 let (inputs, queued) = match &request.head {
                     AdmittedHead::Input(head) => {
-                        let Some(inputs) =
-                            compose_next_turn_inputs_conn(tx, session_id, request.max_inputs)?
+                        let Some(inputs) = compose_next_turn_inputs_conn(
+                            tx,
+                            now,
+                            session_id,
+                            request.max_inputs,
+                            &request.policy,
+                        )?
                         else {
                             return Ok(TxOutcome::Commit(None));
                         };
@@ -433,11 +438,13 @@ fn read_step_admission_conn(
 }
 
 /// The open next-turn inputs a root's admission takes, up to `max_inputs`,
-/// composed by the shared rule.
+/// composed by the shared rule under the host's drain `policy`.
 fn compose_next_turn_inputs_conn(
     tx: &Connection,
+    now: u64,
     session_id: &SessionId,
     max_inputs: usize,
+    policy: &lash_core_execution::TurnLaneAdmissionPolicy,
 ) -> Result<Option<lash_core_execution::AdmittedTurnInputs>, StoreError> {
     if max_inputs == 0 {
         return Ok(None);
@@ -466,10 +473,8 @@ fn compose_next_turn_inputs_conn(
         .into_iter()
         .map(pending_turn_input_from_row)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(lash_core_execution::store::plan_turn_input_admission(
-        session_id,
-        lash_core_execution::TurnInputAdmissionMode::NextTurn,
-        inputs,
+    Ok(lash_core_execution::store::plan_next_turn_input_admission(
+        session_id, inputs, max_inputs, policy, now,
     ))
 }
 
@@ -509,13 +514,8 @@ fn compose_active_turn_inputs_conn(
         .into_iter()
         .map(pending_turn_input_from_row)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(lash_core_execution::store::plan_turn_input_admission(
-        session_id,
-        lash_core_execution::TurnInputAdmissionMode::ActiveTurn {
-            turn_id: turn_id.clone(),
-            checkpoint,
-        },
-        inputs,
+    Ok(lash_core_execution::store::plan_checkpoint_input_admission(
+        session_id, turn_id, checkpoint, inputs,
     ))
 }
 

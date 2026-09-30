@@ -536,6 +536,14 @@ impl Journal {
         self
     }
 
+    /// Take every eligible input, up to the admission bound, into one root
+    /// (`DrainMode::All`): the default drain gives each input its own root
+    /// (FIG-4457).
+    fn composing(mut self) -> Self {
+        self.batching = self.batching.with_drain_mode(crate::DrainMode::All);
+        self
+    }
+
     /// Run the direct turn `turn_id` against `store` on a fresh runtime.
     pub(super) async fn run(
         &self,
@@ -876,7 +884,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     let turn_id = TurnId::from(format!("{prefix}-vacuum-redrive-absorbed"));
     enqueue_next_turn(&store, "queued first").await;
     enqueue_next_turn(&store, "queued second").await;
-    let journal = Journal::new(&backend);
+    let journal = Journal::new(&backend).composing();
     let (provider, requests) = recording_provider("answered all three");
     journal
         .run(&store, provider.clone(), &turn_id, "direct third")
@@ -1162,7 +1170,9 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
     let turn_id = TurnId::from(format!("{prefix}-queued-direct-turn"));
     let first = enqueue_next_turn(&store, "earliest admission").await;
     let second = enqueue_next_turn(&store, "second admission").await;
-    let journal = Journal::new(&backend).with_turn_input_admission(2);
+    let journal = Journal::new(&backend)
+        .with_turn_input_admission(2)
+        .composing();
     let (provider, requests) = recording_provider("answered in order");
 
     let turn = journal

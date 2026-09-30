@@ -79,8 +79,8 @@ pub use crate::session_graph::RealizedNodeTimestamp;
 pub use crate::session_store_factory_types::SessionLookup;
 pub use admission_plan::{
     IngressRowId, IngressSettlement, ROOT_ADMISSION_STEP, TerminalProcessWake, TurnLaneStop,
-    deferred_wake_records, plan_turn_input_admission, require_admitted_to_root,
-    require_open_command, turn_input_state_after_admission,
+    deferred_wake_records, plan_checkpoint_input_admission, plan_next_turn_input_admission,
+    require_admitted_to_root, require_open_command, turn_input_state_after_admission,
 };
 pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
 pub use attachment_referrers::{

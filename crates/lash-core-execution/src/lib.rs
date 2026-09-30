@@ -294,6 +294,7 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
     pub use crate::runtime::QueuedDrainCandidate;
+    pub use crate::runtime::QueuedDrainFamily;
     pub use crate::runtime::QueuedDrainPolicy;
     pub use crate::runtime::QueuedDrainRequest;
     pub use crate::runtime::QueuedDrainSelection;
@@ -808,12 +809,12 @@ pub use runtime::{
     ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox,
     ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, QueuedDrainCandidate,
-    QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority,
-    QueuedWorkBatchingConfig, QueuedWorkKind, RecordedJournal, RecordedKeyFence, RecordedKeyRange,
-    RecordedKeys, RecordedRender, RefusedWriteRange, RegistryScopeClose, Resolution,
-    ResolveOutcome, ResolvedProcessDefinition, ResolvedRun, RunDefinition, RunDefinitions,
-    RunOverrides, RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution,
-    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
+    QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+    QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind, RecordedJournal,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender, RefusedWriteRange,
+    RegistryScopeClose, Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun,
+    RunDefinition, RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash,
+    RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,

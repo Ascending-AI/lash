@@ -225,16 +225,22 @@ Idle admission compares the next input with the earliest queued turn work.
 A composition of either admission family stops at the other family's earliest
 open turn row. It never skips that stop to take later work. A checkpoint can
 select input addressed to its running turn. Its unaddressed prefix stops at a
-delivery mismatch and at kind, total, or host policy bounds. The host's drain
-policy chooses how much eligible work to take. `authority` and `merge_key` are
-per-item data for policy and traces, not equality gates for composition: a
-host that keeps principals apart does so in its `QueuedDrainPolicy`, which
-sees each candidate's authority and merge key. The default policy takes one
-row at a time.
+delivery mismatch and at kind, total, or host policy bounds. An idle
+composition of next-turn input stops at a run-spec change and at the host's
+input bound. The host's drain policy chooses how much eligible work to take,
+of either family: each candidate names its `QueuedDrainFamily`. `authority`
+and `merge_key` are per-item data for policy and traces, not equality gates
+for composition: a host that keeps principals apart does so in its
+`QueuedDrainPolicy`, which sees each candidate's authority and merge key; host
+input carries neither. The default policy takes one row at a time, so each
+next-turn input is its own root and a cancel of one never reaches another.
 
 Evidence: `crates/lash-core-store/src/store/queued_work.rs`
-(`select_turn_work_indices`) and
-`crates/lash-core-store/src/queued_drain_policy.rs:24`.
+(`select_turn_work_indices`),
+`crates/lash-core-store/src/store/admission_plan.rs`
+(`plan_next_turn_input_admission`),
+`crates/lash-core-store/src/queued_drain_policy.rs`, and
+`crates/lash-conformance/src/conformance/queued_input_roots.rs`.
 
 One root answers every input it admits, at idle or at its checkpoints. Each
 input retains its own application evidence even when inputs share a root's
