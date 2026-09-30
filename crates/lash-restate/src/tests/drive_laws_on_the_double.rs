@@ -46,6 +46,44 @@ lash_conformance::turn_config_tests!({
     (harness, prefix, effect_host, stores, turn_runner)
 });
 
+// FIG-4376's execution-control laws where every await suspends and every
+// resumption replays the handler's journal from its start: the root's
+// recorded config, its turn budget included, is served from the journal on
+// every resumption.
+mod recorded_execution_controls_under_replay {
+    use super::{HarnessServer, LiveConformanceHarness};
+
+    async fn always_replay_harness(
+        law: &str,
+    ) -> (
+        LiveConformanceHarness,
+        &'static str,
+        std::sync::Arc<dyn lash_core::EffectHost>,
+        std::sync::Arc<dyn lash_core::StoreSet>,
+        std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    ) {
+        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+            unreachable!("in_process names the server double");
+        };
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+                seed,
+                always_replay: true,
+            })
+            .await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str =
+            Box::leak(format!("restate-{law}-replay-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, effect_host, stores, turn_runner)
+    }
+
+    lash_conformance::turn_config_tests!(@law [] {
+        always_replay_harness("recorded-controls-redrive").await
+    }; (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
+}
+
 // L-S8: a fresh execution of a started root is SubstrateLost. Every run
 // of the probe runner is a fresh invocation, so its second run of the
 // same admission is the fresh execution.

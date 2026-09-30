@@ -10,9 +10,11 @@
 ///
 /// # Integrator class
 ///
-/// Host applications choose this policy when constructing or reopening a
-/// session. Provider adapters continue to report retry guarantees as facts.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Session config (FIG-4376): a host states it when it creates a session.
+/// Provider adapters continue to report retry guarantees as facts.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum ChargeSafetyPolicy {
     /// Require an idempotency or resume guarantee before buying another
@@ -22,13 +24,20 @@ pub enum ChargeSafetyPolicy {
     /// Permit bounded duplicate billing when no provider guarantee exists.
     AcceptDuplicateBilling {
         /// Maximum unsafe retries per logical LLM call. Lash hard-clamps this
-        /// value to five.
+        /// value to [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`].
         max_unsafe_retries: u8,
         /// Skip the unsafe retry when provider-reported tokens already billed
         /// for the abandoned generation exceed this bound. When the provider
         /// reports no partial usage, Lash treats the tokens at stake as zero,
-        /// so this cost bound does not bind; the hard clamp of at most five
-        /// unsafe retries still applies.
+        /// so this cost bound does not bind; the hard clamp of at most
+        /// [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`] unsafe retries still
+        /// applies.
         max_duplicate_cost_tokens: Option<u64>,
     },
+}
+
+impl ChargeSafetyPolicy {
+    /// The most unsafe retries Lash buys for one logical LLM call, whatever
+    /// the policy states.
+    pub const MAX_UNSAFE_RETRIES: u8 = 5;
 }

@@ -496,7 +496,6 @@ async fn main() -> Result<()> {
         .metadata
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
     let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), protocol)
-        .no_progress_budget(lash::NoProgressBudget::bounded(4))
         .provider(provider)
         .model(
             lash::ModelSpec::builder(&args.model)
@@ -534,6 +533,8 @@ async fn main() -> Result<()> {
     match core
         .session(&args.session_id)
         .create(lash::SessionCreation {
+            spec: lash::SessionSpec::default()
+                .no_progress_budget(lash::NoProgressBudget::bounded(4)),
             plugin_options: lash::plugins::PluginOptions::typed(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras::default(),

@@ -14,8 +14,8 @@ use super::{
     PluginError, PluginHost, PluginLifecycleEventHook, PluginOperationFailure,
     PluginOperationOutcome, PluginOperationRegistration, PluginOperationSpec, PluginQuery,
     PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler,
-    PromptContributor, SessionConfigMutator, SessionToolAccess, SubagentSessionContext,
-    ToolCatalogContributor, ToolPresentationStep, TurnContextTransform,
+    PromptContributor, SessionToolAccess, SubagentSessionContext, ToolCatalogContributor,
+    ToolPresentationStep, TurnContextTransform,
 };
 use crate::ToolProvider;
 
@@ -96,7 +96,6 @@ pub struct PluginSpec {
     /// Composable presentation steps, applied in list order (FIG-3420).
     pub presentation_steps: Vec<ToolPresentationStep>,
     pub runtime_event_hooks: Vec<PluginLifecycleEventHook>,
-    pub session_config_mutators: Vec<SessionConfigMutator>,
     pub(crate) plugin_operations: Vec<PluginOperationRegistration>,
     pub turn_context_transforms: Vec<(i32, Arc<dyn TurnContextTransform>)>,
     pub context_compactors: Vec<(i32, Arc<dyn ContextCompactor>)>,
@@ -185,11 +184,6 @@ impl PluginSpec {
 
     pub fn with_runtime_event(mut self, hook: PluginLifecycleEventHook) -> Self {
         self.runtime_event_hooks.push(hook);
-        self
-    }
-
-    pub fn with_session_config_mutator(mut self, hook: SessionConfigMutator) -> Self {
-        self.session_config_mutators.push(hook);
         self
     }
 
@@ -757,9 +751,6 @@ impl SessionPlugin for SpecPlugin {
         }
         for hook in &self.spec.runtime_event_hooks {
             reg.session().on_event(Arc::clone(hook));
-        }
-        for hook in &self.spec.session_config_mutators {
-            reg.session().config_mutator(Arc::clone(hook));
         }
         for operation in &self.spec.plugin_operations {
             reg.operations().register(operation.clone())?;

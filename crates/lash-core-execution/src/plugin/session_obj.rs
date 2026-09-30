@@ -859,20 +859,6 @@ impl PluginSession {
         !self.contributions.runtime_event_hooks.is_empty()
     }
 
-    pub async fn mutate_session_config(
-        &self,
-        ctx: SessionConfigChangedContext,
-        mut policy: SessionPolicy,
-    ) -> SessionPolicy {
-        for hook in &self.contributions.session_config_mutators {
-            match hook(ctx.clone(), policy.clone()).await {
-                Ok(next_policy) => policy = next_policy,
-                Err(err) => tracing::warn!("plugin config mutator failed: {err}"),
-            }
-        }
-        policy
-    }
-
     /// Host handles capture every namespace. Plugin-facing handles export none.
     pub fn export_state(&self) -> PluginState {
         if self.host.export_plugin_namespaces {

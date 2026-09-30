@@ -961,7 +961,8 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
         &backend,
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
-    let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+    let turn_budget = max_turns.map_or(lash::TurnBudget::Unbounded, lash::TurnBudget::bounded);
+    let mut builder = lash::LashCore::rlm_builder(backend, turn_budget, factory)
         // The process surface is rendered from the tool catalogue, so a host that
         // wants `processes.*` inside a cell installs the plugin that supplies it.
         // Without it every fixed process contract's first cell dies on
@@ -984,9 +985,6 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
     }
     if install_subagents {
         builder = builder.plugin(agent_contract_subagents_plugin());
-    }
-    if let Some(max_turns) = max_turns {
-        builder = builder.turn_budget(lash::TurnBudget::bounded(max_turns));
     }
     let core = builder
         .build(crate::sim_process_owner())

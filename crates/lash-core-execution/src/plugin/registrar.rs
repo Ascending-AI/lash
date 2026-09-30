@@ -103,7 +103,6 @@ pub(crate) struct PluginContributions {
     pub(crate) presentation_steps: Vec<RegisteredHook<ToolPresentationStep>>,
     pub(crate) presentation_presenter: Option<RegisteredExclusiveHook<ToolPresentationPresenter>>,
     pub(crate) runtime_event_hooks: Vec<RegisteredHook<PluginLifecycleEventHook>>,
-    pub(crate) session_config_mutators: Vec<SessionConfigMutator>,
     pub(crate) plugin_operations: BTreeMap<String, RegisteredPluginOperation>,
     pub(crate) turn_context_transforms: Vec<(i32, RegisteredHook<Arc<dyn TurnContextTransform>>)>,
     pub(crate) context_compactors: Vec<(i32, RegisteredHook<Arc<dyn ContextCompactor>>)>,
@@ -248,10 +247,6 @@ impl SessionRegistrations<'_> {
             &self.reg.registering_plugin_id,
             hook,
         );
-    }
-
-    pub fn config_mutator(self, hook: SessionConfigMutator) {
-        self.reg.contributions.session_config_mutators.push(hook);
     }
 }
 

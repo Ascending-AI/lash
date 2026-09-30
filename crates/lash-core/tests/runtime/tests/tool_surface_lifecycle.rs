@@ -665,8 +665,8 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                 backend.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
-            )
-            .with_session_policy(standard_test_policy()),
+                standard_test_policy(),
+            ),
         )
         .expect("valid test worker config"),
     );

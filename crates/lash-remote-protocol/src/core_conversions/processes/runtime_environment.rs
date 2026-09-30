@@ -382,16 +382,14 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             session_id,
             autonomous,
             turn_budget,
-            // The no-progress budget is host-owned live policy and is
-            // deliberately absent from the remote process wire: its default is
-            // bounded, so a peer that never hears the value resolves to the
-            // bound. Omission can therefore only fail safe — it can drop an
-            // explicit `Unbounded` opt-out, never an explicit bound. Carrying
-            // it would be a `REMOTE_PROTOCOL_VERSION` shape change for a knob
-            // the peer's own host configuration already supplies.
+            // The no-progress budget is absent from the remote process wire:
+            // its default is bounded, so a peer that never hears the value
+            // resolves to the bound. Omission can therefore only fail safe —
+            // it can drop an explicit `Unbounded` opt-out, never an explicit
+            // bound.
             no_progress_budget: _,
-            // Charge appetite is likewise host-owned live policy. A remote
-            // peer resolves its own safe default unless its host opts in.
+            // Charge appetite is likewise absent: a remote peer resolves the
+            // charge-safe default.
             charge_safety: _,
             prompt,
             generation,

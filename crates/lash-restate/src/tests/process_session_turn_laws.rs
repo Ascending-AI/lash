@@ -95,19 +95,17 @@ async fn worker_for(
     runtime_host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
-    DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(plugin_host),
-            runtime_host,
-            restate_process_work(registry, continuation_store()),
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(lash_core::SessionPolicy {
+    DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
+        Arc::new(plugin_host),
+        runtime_host,
+        restate_process_work(registry, continuation_store()),
+        Arc::new(lash_core::NoSessionWork::new()),
+        lash_core::testing::runtime_lease_owner(),
+        lash_core::SessionPolicy {
             provider_id: "mock".to_string(),
             ..recovery_session_policy()
-        }),
-    )
+        },
+    ))
     .expect("valid SessionTurn worker")
 }
 

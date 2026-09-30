@@ -29,9 +29,10 @@ a second facade session model.
 A parked session retains its owner binding across resume. Applying that binding
 to a receiving core environment restores the owning backend, effect host,
 attachment store, process-environment store, and work ports. The receiving core
-supplies live provider resolution, plugin factories, tracing, and live policy.
-The durable session config, including session prompt and generation, remains
-recorded config under ADR 0074; the live core prompt is separate.
+supplies live provider resolution, plugin factories and tracing. The durable
+session config, including session prompt, generation and the execution
+controls of ADR 0030, remains recorded config under ADR 0074; the live core
+prompt is separate.
 
 Durable turn input crosses mandatory acceptance. Replayable protocol options
 and durable RLM seeds can cross that boundary. Process-local projection

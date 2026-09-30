@@ -284,6 +284,37 @@ lash_conformance::tool_child_turn_cancel_tests!(
     }
 );
 
+// FIG-4376's execution-control laws on a live server: a redrive replays the
+// root's recorded config, turn budget included, from the server's journal.
+mod recorded_execution_controls_live {
+    use super::effect_group_conformance;
+
+    async fn live_harness(
+        law: &str,
+    ) -> (
+        effect_group_conformance::LiveConformanceHarness,
+        &'static str,
+        std::sync::Arc<dyn lash_core::EffectHost>,
+        std::sync::Arc<dyn lash_core::StoreSet>,
+        std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    ) {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str =
+            Box::leak(format!("restate-{law}-live-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, effect_host, stores, turn_runner)
+    }
+
+    lash_conformance::turn_config_tests!(@law [
+        #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    ] {
+        live_harness("recorded-controls-redrive").await
+    }; (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
+}
+
 // The turn runs inside a live handler: its tool call opens a real Restate
 // effect group whose child runs in the endpoint's dispatch invocation, which
 // the recording contexts cannot serve (FIG-3397).

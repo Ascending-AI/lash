@@ -27,10 +27,22 @@ provider is refused with `ProviderMismatch`.
 are immutable history and retain the model recorded when the frame opens.
 Later configuration changes are typed config commands in a durable,
 revision-checked transaction (ADR 0126). The core owner's commands cover
-provider, model, prompt, generation, attachment acceptance, turn budget and
-tool access; each plugin's commands cover its own namespace. Live execution controls, such as
-turn and no-progress budgets, autonomy and charge safety, follow the open
-without replacing recorded configuration.
+provider, model, prompt, generation, attachment acceptance, the execution
+controls and tool access; each plugin's commands cover its own namespace.
+
+The execution controls are the turn budget, autonomy, the no-progress budget
+and charge safety. They are session configuration like the model. The creator
+states them in `SessionCreation::spec`; unset controls take the core's
+creation defaults. Each root snapshots the configuration, controls included,
+in its recorded `ResolveTurnConfig` step (`ResolvedRun`). Its turns, redrives,
+replays and a recovered follow-on run under that snapshot, so a later
+configuration change reaches the next root, never a running or replayed one.
+An urgent stop is a recorded cancellation, not a configuration change.
+
+The opener owns only the session binding: the store and the worker wiring
+it runs on. An open, including the engine's own reopen, overrides no recorded
+fact. A session-turn process's worker names the configuration that process's
+session is created with; there is no implicit default.
 
 Input admission does not select a model. Child-session execution and direct
 LLM requests have explicit model selection at their own boundaries. The
@@ -47,17 +59,22 @@ an old frame to overwrite current policy.
 ## Consequences
 
 Reopening a session uses its durable configuration, including before its
-first turn. Hosts that need different configurations create distinct sessions
-or submit explicit patches. A frame's recorded model explains its history;
-it does not override the session's current model.
+first turn. One engine runs sessions with different turn budgets or other
+execution controls, each as it recorded them. Hosts that need different
+configurations create distinct sessions or submit explicit patches. A frame's
+recorded model explains its history; it does not override the session's
+current model.
 
-A turn-level overlay and host-wins reopen merging are rejected because each
-adds a second configuration authority. Structured child or direct requests
-remain explicit and do not change the parent session policy.
+A turn-level overlay, host-wins reopen merging, per-open overrides of the
+execution controls and a plugin hook that rewrites the whole policy are
+rejected because each adds a second configuration authority. Structured child
+or direct requests remain explicit and do not change the parent session
+policy.
 
 ## Implementation
 
 - [Creation and open](../../crates/lash/src/session.rs), including recorded-state loading and provider-pin validation.
 - [Creation head contract](../../crates/lash-core-store/src/session_identity.rs).
 - [Session policy and immutable frames](../../crates/lash-core-store/src/session_state.rs).
-- [Durable configuration application](../../crates/lash-core/src/runtime/drive/turn_config.rs).
+- [Durable configuration application and the per-root snapshot](../../crates/lash-core/src/runtime/drive/turn_config.rs).
+- [Recorded configuration and its patch](../../crates/lash-core-store/src/session_policy.rs).

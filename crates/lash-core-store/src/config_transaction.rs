@@ -21,7 +21,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The owner id of the session's core config: provider, model, prompt,
-/// generation, budget and tool access. No plugin may register it.
+/// generation, the execution controls and tool access. No plugin may
+/// register it.
 pub const CORE_CONFIG_OWNER: &str = "core";
 
 /// The core owner's share of a session's recorded config: every config head
@@ -34,6 +35,9 @@ pub struct CoreConfig {
     pub provider_id: String,
     pub model: crate::ModelSpec,
     pub turn_budget: crate::TurnBudget,
+    pub autonomous: bool,
+    pub no_progress_budget: crate::NoProgressBudget,
+    pub charge_safety: crate::ChargeSafetyPolicy,
     /// `None` only for a head written before prompt persistence existed; a
     /// command that changes the prompt records `Some`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,6 +53,9 @@ impl CoreConfig {
             provider_id: config.provider_id.clone(),
             model: config.model.clone(),
             turn_budget: config.turn_budget,
+            autonomous: config.autonomous,
+            no_progress_budget: config.no_progress_budget,
+            charge_safety: config.charge_safety.clone(),
             prompt: config.prompt.clone(),
             generation: config.generation.clone(),
             tool_access: config.tool_access.clone(),
@@ -60,6 +67,9 @@ impl CoreConfig {
         config.provider_id = self.provider_id.clone();
         config.model = self.model.clone();
         config.turn_budget = self.turn_budget;
+        config.autonomous = self.autonomous;
+        config.no_progress_budget = self.no_progress_budget;
+        config.charge_safety = self.charge_safety.clone();
         config.prompt = self.prompt.clone();
         config.generation = self.generation.clone();
         config.tool_access = self.tool_access.clone();
@@ -183,13 +193,13 @@ pub enum ConfigTransactionOutcome {
 #[serde(deny_unknown_fields)]
 pub struct ConfigResolution {
     pub base_revision: u64,
-    pub result: ConfigResolutionResult,
+    pub result: ConfigResolutionDecision,
 }
 
 /// The recorded decision of a config transaction.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ConfigResolutionResult {
+pub enum ConfigResolutionDecision {
     /// The complete replacements for every touched owner, and each
     /// command's output in order.
     Applied {
@@ -214,7 +224,7 @@ impl ConfigResolution {
     /// Returns the outcome the command settles as.
     pub fn publish(&self, config: &mut crate::PersistedSessionConfig) -> ConfigTransactionOutcome {
         match &self.result {
-            ConfigResolutionResult::Applied {
+            ConfigResolutionDecision::Applied {
                 core,
                 namespaces,
                 outputs,
@@ -230,11 +240,13 @@ impl ConfigResolution {
                     outputs: outputs.clone(),
                 }
             }
-            ConfigResolutionResult::Stale { expected, actual } => ConfigTransactionOutcome::Stale {
-                expected: *expected,
-                actual: *actual,
-            },
-            ConfigResolutionResult::Refused { refusal } => ConfigTransactionOutcome::Refused {
+            ConfigResolutionDecision::Stale { expected, actual } => {
+                ConfigTransactionOutcome::Stale {
+                    expected: *expected,
+                    actual: *actual,
+                }
+            }
+            ConfigResolutionDecision::Refused { refusal } => ConfigTransactionOutcome::Refused {
                 refusal: refusal.clone(),
             },
         }
@@ -256,7 +268,7 @@ mod tests {
     fn applied(core: Option<CoreConfig>) -> ConfigResolution {
         ConfigResolution {
             base_revision: 4,
-            result: ConfigResolutionResult::Applied {
+            result: ConfigResolutionDecision::Applied {
                 core: core.map(Box::new),
                 namespaces: BTreeMap::from([(
                     "counter".to_string(),
@@ -294,7 +306,7 @@ mod tests {
 
         let restating = ConfigResolution {
             base_revision: 5,
-            result: ConfigResolutionResult::Applied {
+            result: ConfigResolutionDecision::Applied {
                 core: Some(Box::new(CoreConfig::of(&config))),
                 namespaces: BTreeMap::new(),
                 outputs: Vec::new(),
@@ -310,11 +322,11 @@ mod tests {
     fn stale_and_refused_resolutions_publish_nothing() {
         let before = head();
         for result in [
-            ConfigResolutionResult::Stale {
+            ConfigResolutionDecision::Stale {
                 expected: 3,
                 actual: 4,
             },
-            ConfigResolutionResult::Refused {
+            ConfigResolutionDecision::Refused {
                 refusal: ConfigRefusal {
                     index: Some(0),
                     owner: "counter".to_string(),

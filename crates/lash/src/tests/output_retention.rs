@@ -14,8 +14,6 @@
 //! * **rooted** — an attachment sweep with no grace keeps every retained
 //!   attachment the commit names.
 
-#![allow(clippy::disallowed_methods)]
-
 use super::*;
 use lash_core::llm::types::LlmResponse;
 
@@ -342,28 +340,10 @@ fn collect_retained(
 /// database URL is set. `LASH_REQUIRE_POSTGRES=1` makes a missing URL a
 /// failure, so a gate that promises the PostgreSQL leg cannot skip it.
 async fn postgres_double() -> Option<(lash_core::Backend, Box<dyn std::any::Any>)> {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        assert!(
-            std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-            "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        eprintln!("skipping the PostgreSQL leg: LASH_POSTGRES_DATABASE_URL is not set");
-        return None;
-    };
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-        .await
-        .expect("connect to PostgreSQL");
-    let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            attachments.path(),
-        )),
-    )) as Arc<dyn lash_core::StoreSet>;
+    let (stores, held) = postgres_store_set().await?;
     let backend =
         double_backend_over(lash_restate_test::ServerConfig::default(), move |_| stores).await;
-    Some((backend, Box::new((database, attachments, storage))))
+    Some((backend, held))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

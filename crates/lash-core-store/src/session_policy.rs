@@ -14,18 +14,13 @@ pub struct SessionPolicy {
     /// Bound on consecutive provider attempts within one turn that commit no
     /// successful execution.
     ///
-    /// Host-owned live policy in the sense of ADR 0030: it is reconciled from
-    /// the host's configuration on every reopen and is deliberately not
-    /// persisted with the session head, so a host that changes the bound
-    /// changes it for sessions already on disk. Its default is bounded, so a
-    /// carrier that predates the field resolves to the bound rather than to a
-    /// loop.
+    /// Session config like the turn budget (FIG-4376), recorded at creation.
+    /// Its default is bounded, so a carrier that states none resolves to the
+    /// bound rather than to a loop.
     pub no_progress_budget: NoProgressBudget,
-    /// Live host risk appetite for duplicate provider billing.
-    ///
-    /// Like `no_progress_budget`, this is reconciled from host configuration
-    /// on every reopen and is deliberately absent from the persisted session
-    /// head. Old carriers therefore resolve to the charge-safe default.
+    /// The session's appetite for duplicate provider billing: session config
+    /// like the turn budget (FIG-4376). A carrier that states none resolves to
+    /// the charge-safe default.
     pub charge_safety: ChargeSafetyPolicy,
     pub prompt: crate::PromptLayer,
     /// Caller-owned generation intent applied to every LLM call this session

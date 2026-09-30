@@ -4,19 +4,21 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
         double_backend().await,
         crate::TurnBudget::Unbounded,
     ))
-    .charge_safety(lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
-        max_unsafe_retries: 2,
-        max_duplicate_cost_tokens: None,
-    })
     .provider(retrying_visible_stream_provider())
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("retry-visible-observation")
-        .created()
-        .await
-        .open()
+    core.session("retry-visible-observation")
+        .create(crate::SessionCreation {
+            spec: crate::SessionSpec::default().charge_safety(
+                lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
+                    max_unsafe_retries: 2,
+                    max_duplicate_cost_tokens: None,
+                },
+            ),
+            ..Default::default()
+        })
         .await?;
+    let session = core.session("retry-visible-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
     let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_cursor(&cursor)?

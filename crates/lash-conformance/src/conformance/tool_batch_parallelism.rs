@@ -1331,8 +1331,8 @@ async fn drive_turn(
                 ),
                 Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
-            )
-            .with_session_policy(policy.clone()),
+                policy.clone(),
+            ),
         )
         .expect("build the tool-group parallelism process worker");
         let runner = runner.expect("a producer that runs in a process is run by the law's tier");

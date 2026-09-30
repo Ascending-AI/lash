@@ -12,8 +12,8 @@ pub struct LoadedSessionWindow {
 }
 
 /// Adopt a window read onto a default state. Adoption is head-authoritative
-/// (FIG-1875): the live-owned lease facts start from their defaults, the
-/// head's turn budget and no live session-id binding.
+/// (FIG-1875): every config fact is the head's, and the session binding
+/// starts unbound.
 pub fn window_state(
     read: SessionWindowRead,
     fleet: super::FleetFormat,
@@ -65,9 +65,10 @@ pub async fn load_session_read_view(
     ))
 }
 
-/// Re-adopt the session's current frame into `state`, keeping the live-owned
-/// facts the resident open decided. A session with no head leaves `state`
-/// unchanged.
+/// Re-adopt the session's current frame into `state`, keeping the session
+/// binding and the resident open's tool-state claim. Everything else,
+/// the execution controls included (FIG-4376), is the head's. A session with
+/// no head leaves `state` unchanged.
 pub async fn refresh_session_window(
     store: &SessionStore,
     state: &mut crate::RuntimeSessionState,
@@ -78,7 +79,6 @@ pub async fn refresh_session_window(
     validate_window_session(store.session_id(), &read)?;
     let mut fresh = window_state(read, store.fleet_format())?.state;
     fresh.policy.session_id = state.policy.session_id.clone();
-    fresh.policy.turn_budget = state.policy.turn_budget;
     // `preserve_tool_state_snapshot` is a per-open claim (FIG-3353), not
     // durable content: a whole-state reload must keep the resident open's
     // decision or a later stamp would export the unreconciled registry.

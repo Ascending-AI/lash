@@ -230,8 +230,7 @@ async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeS
     crate::session::load_state_from_store(&id, &core.policy, &store).await
 }
 
-/// The turn budget the session's durable config head records. The resident
-/// state's budget is the opener's live policy.
+/// The turn budget the session's durable config head records.
 async fn recorded_turn_budget(core: &LashCore, id: &str) -> Result<crate::TurnBudget> {
     Ok(lash_core::SessionCommitStore::load_session_head_meta(
         core.store_factory.as_ref(),
@@ -323,8 +322,11 @@ async fn the_command_catalog_lists_every_registered_command() -> Result<()> {
             "clear_prompt_template",
             "replace_prompt_slot",
             "set_attachment_acceptance",
+            "set_autonomy",
+            "set_charge_safety",
             "set_generation",
             "set_model",
+            "set_no_progress_budget",
             "set_prompt",
             "set_prompt_template",
             "set_provider",

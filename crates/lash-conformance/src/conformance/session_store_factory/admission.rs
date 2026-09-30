@@ -32,8 +32,10 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         crate::StoreError::InvalidSessionId { .. }
     ));
 
-    // The host API's creating verb bakes its config in (FIG-4099, FIG-4112).
-    let request = crate::SessionStoreCreateRequest {
+    // The host API's creating verb bakes its config in (FIG-4099, FIG-4112),
+    // the execution controls with the rest (FIG-4376): every one is stated
+    // off its default so the round trip below proves each is recorded.
+    let mut request = crate::SessionStoreCreateRequest {
         head: crate::SessionCreationHead::Config,
         ..session_store_request(
             &SessionId::from("admission-created"),
@@ -44,6 +46,14 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
             },
         )
     };
+    request.config.turn_budget = crate::TurnBudget::bounded(7);
+    request.config.autonomous = true;
+    request.config.no_progress_budget = crate::NoProgressBudget::bounded(3);
+    request.config.charge_safety = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+        max_unsafe_retries: 2,
+        max_duplicate_cost_tokens: Some(4_096),
+    };
+    let request = request;
     assert_eq!(
         factory
             .admit_session(&request)

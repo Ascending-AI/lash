@@ -447,7 +447,18 @@ pub enum SessionNodePayload {
 pub struct PersistedSessionConfig {
     pub provider_id: String,
     pub model: crate::ModelSpec,
+    /// The bound on protocol iterations per turn (FIG-4376). Like every
+    /// execution control below it is session config: recorded at creation and
+    /// snapshotted per root in its recorded
+    /// [`ResolvedRun`](crate::run_spec::ResolvedRun).
     pub turn_budget: crate::TurnBudget,
+    /// Whether the session's turns run autonomously.
+    pub autonomous: bool,
+    /// The bound on consecutive provider attempts within one turn that
+    /// commit no successful execution.
+    pub no_progress_budget: crate::NoProgressBudget,
+    /// The session's appetite for duplicate provider billing.
+    pub charge_safety: crate::ChargeSafetyPolicy,
     /// Session prompt configuration required to continue a cold-loaded
     /// session with the composition it last committed.
     ///
@@ -483,14 +494,15 @@ pub struct PersistedSessionConfig {
 }
 
 impl PersistedSessionConfig {
-    /// The session policy this config records: its durable fields over a
-    /// neutral policy with the recorded turn budget. Live-owned policy (the
-    /// session binding, autonomy, the no-progress budget, charge safety) is
-    /// not config and starts neutral.
+    /// The session policy this config records. Only the session binding is
+    /// not config, and starts unbound.
     pub fn session_policy(&self) -> crate::SessionPolicy {
         let mut policy = crate::SessionPolicy::new(self.turn_budget);
         policy.provider_id = self.provider_id.clone();
         policy.model = self.model.clone();
+        policy.autonomous = self.autonomous;
+        policy.no_progress_budget = self.no_progress_budget;
+        policy.charge_safety = self.charge_safety.clone();
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
         }
@@ -503,12 +515,17 @@ impl PersistedSessionConfig {
     /// Store implementors reading durable session heads populate the provider
     /// and model fields from the row; the budget has no default by doctrine,
     /// so every construction names `TurnBudget::Bounded(n)` or `Unbounded`
-    /// explicitly.
+    /// explicitly. The other execution controls start at the values
+    /// [`SessionPolicy::new`](crate::SessionPolicy::new) states.
     pub fn new(turn_budget: crate::TurnBudget) -> Self {
+        let neutral = crate::SessionPolicy::new(turn_budget);
         Self {
             provider_id: String::new(),
             model: crate::ModelSpec::default(),
             turn_budget,
+            autonomous: neutral.autonomous,
+            no_progress_budget: neutral.no_progress_budget,
+            charge_safety: neutral.charge_safety,
             prompt: None,
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
@@ -531,6 +548,9 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             provider_id: policy.recorded_provider_id().to_string(),
             model: policy.model.clone(),
             turn_budget: policy.turn_budget,
+            autonomous: policy.autonomous,
+            no_progress_budget: policy.no_progress_budget,
+            charge_safety: policy.charge_safety.clone(),
             prompt: Some(policy.prompt.clone()),
             generation: policy.generation.clone(),
             tool_access: crate::SessionToolAccess::default(),

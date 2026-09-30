@@ -7,8 +7,9 @@ Accepted.
 ## Context
 
 A session records its config with its head: the core route, prompt,
-generation, attachment acceptance, tool access and turn budget, and one
-namespace per installed plugin, the protocol's included (FIG-4379,
+generation, attachment acceptance, tool access, the execution controls
+(turn budget, autonomy, no-progress budget and charge safety; FIG-4376), and
+one namespace per installed plugin, the protocol's included (FIG-4379,
 [ADR 0013](0013-protocol-capabilities-enter-through-the-plugin-contract.md)).
 Changing that record through an open patch bag had two flaws. The bag named
 fields rather than allowed changes, so every owner had to decide from a raw
@@ -37,7 +38,9 @@ the next namespace and the command's output. It sees immutable facts only. A
 setting with no command cannot change after creation. Core config is owned
 by the reserved `core` owner, whose commands include `SetProvider`,
 `SetModel`, `SetAttachmentAcceptance`, the prompt commands, `SetGeneration`,
-`SetToolAccess` and `SetTurnBudget`. The RLM and standard protocols register
+`SetToolAccess`, `SetTurnBudget`, `SetAutonomy`, `SetNoProgressBudget` and
+`SetChargeSafety`. `SetChargeSafety` refuses a policy accepting more unsafe
+retries than the provider handle ever buys. The RLM and standard protocols register
 one render command each (`SetRlmRender`, `SetStandardRender`).
 
 **Transactions.** A `ConfigTransaction` is an ordered list of

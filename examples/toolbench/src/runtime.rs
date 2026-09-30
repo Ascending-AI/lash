@@ -276,6 +276,8 @@ async fn run_turn(
     };
     core.session(session_id.clone())
         .create(lash::SessionCreation {
+            spec: lash::SessionSpec::default()
+                .no_progress_budget(lash::NoProgressBudget::Unbounded),
             plugin_options,
             ..Default::default()
         })
@@ -498,7 +500,6 @@ fn build_turn_core(
     let core = builder
         .trace_sink(Arc::new(telemetry.capture.clone()))
         .trace_level(lash::tracing::TraceLevel::Extended)
-        .no_progress_budget(lash::NoProgressBudget::Unbounded)
         .configure_plugins(|stack| {
             stack.push(telemetry.plugin());
             if let Some(marker) = shutdown_marker {

@@ -177,8 +177,8 @@ impl DoubleProcessHarness {
                 self.wiring.clone(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
-            )
-            .with_session_policy(harness_session_policy()),
+                harness_session_policy(),
+            ),
         )
         .expect("valid double process worker");
         self.double.install_process_worker(worker);

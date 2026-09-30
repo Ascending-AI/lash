@@ -302,13 +302,13 @@ impl AgentScenarioSetup {
                     Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
                 );
         let store_factory = lash_core::Backend::from(backend.clone()).session_store_factory();
-        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(
-            backend.into(),
-            crate::TurnBudget::Unbounded,
-            factory,
-        ))
-        .provider(provider)
-        .model(mock_model_spec());
+        let turn_budget = self
+            .max_turns
+            .map_or(crate::TurnBudget::Unbounded, crate::TurnBudget::bounded);
+        let mut builder =
+            explicit_ephemeral_facets(LashCore::rlm_builder(backend.into(), turn_budget, factory))
+                .provider(provider)
+                .model(mock_model_spec());
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
         }
@@ -324,9 +324,6 @@ impl AgentScenarioSetup {
         }
         if self.install_llm_tools {
             builder = builder.plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()));
-        }
-        if let Some(max_turns) = self.max_turns {
-            builder = builder.turn_budget(lash_core::TurnBudget::bounded(max_turns));
         }
         let core = builder.build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);

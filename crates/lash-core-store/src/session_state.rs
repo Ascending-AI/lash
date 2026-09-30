@@ -1332,8 +1332,8 @@ mod tests;
 /// Adopt a durable session config onto resident state: the one config→state
 /// mapping, shared by head adoption and by a root's recorded turn config
 /// (FIG-3600 S6, D3 §2.1). The durable config wins for every fact it
-/// carries; the turn budget stays live-owned (FIG-1875), and a `None` prompt
-/// or protocol-turn-options value (a head written before the field existed)
+/// carries, the execution controls included (FIG-4376); a `None` prompt or
+/// protocol-turn-options value (a head written before the field existed)
 /// keeps the resident one.
 pub fn adopt_session_config(
     state: &mut RuntimeSessionState,
@@ -1383,6 +1383,10 @@ pub(super) fn apply_persisted_session_config(
 ) {
     state.policy.model = config.model.clone();
     state.policy.provider_id = config.provider_id.clone();
+    state.policy.turn_budget = config.turn_budget;
+    state.policy.autonomous = config.autonomous;
+    state.policy.no_progress_budget = config.no_progress_budget;
+    state.policy.charge_safety = config.charge_safety.clone();
     if let Some(prompt) = config.prompt.as_ref() {
         state.policy.prompt = prompt.clone();
     }
@@ -1454,22 +1458,19 @@ pub(crate) fn apply_session_checkpoint(
 /// The runtime-lease facts that stay live-owned across a durable-head
 /// adoption (FIG-1875).
 ///
-/// Everything the head carries is adopted head-authoritatively; only these
-/// process-local lease facts are installed by the caller. The provider
+/// Everything the head carries is adopted head-authoritatively; only the
+/// session binding is installed by the caller (FIG-4376). The provider
 /// resolver is also live-owned, but it lives outside `RuntimeSessionState`
 /// and is never touched by adoption.
 pub struct LiveOwnedSessionFacts {
     pub(crate) session_id: Option<SessionId>,
-    pub(crate) turn_budget: crate::TurnBudget,
 }
 
 impl LiveOwnedSessionFacts {
     /// Capture the live-owned facts of the policy about to be overwritten.
     pub fn of(policy: &SessionPolicy) -> Self {
-        Self {
-            session_id: policy.session_id.clone(),
-            turn_budget: policy.turn_budget,
-        }
+        let session_id = policy.session_id.clone();
+        Self { session_id }
     }
 }
 
@@ -1480,11 +1481,8 @@ impl LiveOwnedSessionFacts {
 /// it carries — the current frame's window, frames, config, protocol turn
 /// options, checkpoint progress, authority, and usage totals. The resident
 /// graph becomes exactly the window, so residency starts proportional to the
-/// current frame (§9). No resident copy of a durable fact is
-/// preserved; the only survivors are the caller-supplied
-/// [`LiveOwnedSessionFacts`] plus whatever the target state carries for facts
-/// the head does not represent (for example the live-policy flags
-/// `autonomous` and `no_progress_budget`).
+/// current frame (§9). No resident copy of a durable fact is preserved; the
+/// only survivor is the caller's [`LiveOwnedSessionFacts`], the binding.
 pub fn adopt_durable_head(
     state: &mut RuntimeSessionState,
     head: crate::store::SessionWindowRead,
@@ -1529,7 +1527,6 @@ pub fn adopt_durable_head(
     state.authority.resolved_run = None;
     state.authority.resolved_render = None;
     state.policy.session_id = live_owned.session_id;
-    state.policy.turn_budget = live_owned.turn_budget;
     // The config is adopted before the checkpoint restore, so a
     // checkpointless graph's initial frame captures it.
     apply_session_checkpoint(state, checkpoint, fleet_format)?;

@@ -31,8 +31,8 @@ pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::compat;
 pub use lash_core_store::config_transaction::{
-    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution, ConfigResolutionResult,
-    ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
+    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution,
+    ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
 };
 pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;

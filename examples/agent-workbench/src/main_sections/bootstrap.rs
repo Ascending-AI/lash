@@ -312,14 +312,14 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     .session_spec(
         lash::SessionSpec::new()
             .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
+            .no_progress_budget(lash::NoProgressBudget::bounded(
+                WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
+            ))
             .generation(lash::direct::GenerationOptions {
                 output_token_cap,
                 ..Default::default()
             }),
     )
-    .no_progress_budget(lash::NoProgressBudget::bounded(
-        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-    ))
     .model(model_spec);
     let builder = if let Some(tool_provider) =
         dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)

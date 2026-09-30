@@ -100,11 +100,13 @@ pub struct SessionSpec {
     pub provider_id: Option<String>,
     pub model: Option<ModelSpec>,
     pub turn_budget: Option<TurnBudget>,
+    /// Whether the session's turns run autonomously. `None` keeps the base
+    /// policy's.
+    pub autonomous: Option<bool>,
     /// Bound on consecutive unproductive provider attempts. `None` keeps the
     /// bound the base policy already carries.
     pub no_progress_budget: Option<NoProgressBudget>,
-    /// Host duplicate-billing appetite. `None` preserves the live base
-    /// policy.
+    /// Duplicate-billing appetite. `None` keeps the base policy's.
     pub charge_safety: Option<ChargeSafetyPolicy>,
     pub prompt: Option<crate::PromptLayer>,
     /// Generation intent for every LLM call the session makes. `None` inherits
@@ -122,6 +124,7 @@ impl SessionSpec {
             provider_id: None,
             model: None,
             turn_budget: None,
+            autonomous: None,
             no_progress_budget: None,
             charge_safety: None,
             prompt: None,
@@ -149,6 +152,12 @@ impl SessionSpec {
 
     pub fn turn_budget(mut self, turn_budget: TurnBudget) -> Self {
         self.turn_budget = Some(turn_budget);
+        self
+    }
+
+    /// Whether the session's turns run autonomously.
+    pub fn autonomous(mut self, autonomous: bool) -> Self {
+        self.autonomous = Some(autonomous);
         self
     }
 
@@ -210,6 +219,9 @@ impl SessionSpec {
         }
         if let Some(turn_budget) = self.turn_budget {
             policy.turn_budget = turn_budget;
+        }
+        if let Some(autonomous) = self.autonomous {
+            policy.autonomous = autonomous;
         }
         if let Some(no_progress_budget) = self.no_progress_budget {
             policy.no_progress_budget = no_progress_budget;
@@ -343,29 +355,31 @@ mod tests {
         );
     }
 
+    /// Charge safety is recorded session config (FIG-4376): a chosen appetite
+    /// survives the durable policy round trip, and the safe default stays
+    /// absent so the default shape does not widen.
     #[test]
-    fn charge_safety_is_live_host_policy_and_never_enters_the_durable_policy_shape() {
+    fn charge_safety_round_trips_through_the_durable_policy_shape() {
+        let default_value = serde_json::to_value(SessionPolicy::new(crate::TurnBudget::Unbounded))
+            .expect("serialize default policy");
+        assert!(
+            default_value.get("charge_safety").is_none(),
+            "the safe default must not widen the persisted shape: {default_value}"
+        );
+
         let mut policy = SessionPolicy::new(crate::TurnBudget::Unbounded);
         policy.charge_safety = ChargeSafetyPolicy::AcceptDuplicateBilling {
             max_unsafe_retries: 2,
             max_duplicate_cost_tokens: Some(4_096),
         };
-
-        let value = serde_json::to_value(policy).expect("serialize policy");
-        assert!(
-            value.get("charge_safety").is_none(),
-            "live charge appetite must not enter a durable carrier: {value}"
-        );
-        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode old carrier");
-        assert_eq!(
-            decoded.charge_safety,
-            ChargeSafetyPolicy::RequireGuarantee,
-            "old and reopened carriers resolve to the safe host default"
-        );
+        let value = serde_json::to_value(&policy).expect("serialize policy");
+        assert!(value.get("charge_safety").is_some(), "{value}");
+        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode policy");
+        assert_eq!(decoded.charge_safety, policy.charge_safety);
     }
 
     #[test]
-    fn session_spec_reconciles_charge_safety_from_live_host_configuration() {
+    fn session_spec_states_charge_safety_for_creation() {
         let base = SessionPolicy::new(crate::TurnBudget::Unbounded);
         let appetite = ChargeSafetyPolicy::AcceptDuplicateBilling {
             max_unsafe_retries: 3,

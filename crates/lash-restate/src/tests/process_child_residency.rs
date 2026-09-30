@@ -45,19 +45,17 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
             .into_handle(),
         ));
     let session_store_factory = runtime_host.session_store_factory();
-    let worker = DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(plugin_host),
-            runtime_host,
-            process_work,
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(lash_core::SessionPolicy {
+    let worker = DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
+        Arc::new(plugin_host),
+        runtime_host,
+        process_work,
+        Arc::new(lash_core::NoSessionWork::new()),
+        lash_core::testing::runtime_lease_owner(),
+        lash_core::SessionPolicy {
             provider_id: "mock".to_string(),
             ..recovery_session_policy()
-        }),
-    )
+        },
+    ))
     .expect("valid liveness worker");
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),

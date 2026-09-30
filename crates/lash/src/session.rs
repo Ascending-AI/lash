@@ -361,7 +361,7 @@ impl SessionBuilder {
 
     /// The supplied snapshot is the session's state, config included, and
     /// runs as supplied. Only a snapshot that states no config at all — no
-    /// model and no provider — takes this open's live policy.
+    /// model and no provider — takes the core's creation defaults.
     async fn open_supplied_state(
         self,
         mut state: RuntimeSessionState,
@@ -374,7 +374,7 @@ impl SessionBuilder {
             });
         }
         let resolved = self.existing_store().await?;
-        let policy = self.live_policy();
+        let policy = self.opening_policy();
         if state.policy.recorded_provider_id().is_empty() && state.policy.model.id.trim().is_empty()
         {
             state.policy = policy.clone();
@@ -382,15 +382,16 @@ impl SessionBuilder {
         self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
         refuse_provider_mismatch(&state, &policy)?;
-        adopt_live_policy(&mut state, &policy);
+        fill_unrecorded_route(&mut state, &policy);
         Box::pin(self.open_resolved(state, resolved, resident)).await
     }
 
-    /// The live policy this open runs with: the core's, with this open's
-    /// provider resolver named as the provider it serves. It records nothing;
-    /// [`adopt_live_policy`] carries only its live-owned facts onto the
-    /// session's recorded config.
-    fn live_policy(&self) -> SessionPolicy {
+    /// What this open brings to the session: its binding, and the core's
+    /// creation defaults with this open's provider resolver named as the
+    /// provider it serves. It records nothing and overrides nothing the
+    /// session recorded: [`fill_unrecorded_route`] reads only its route, for
+    /// a head that recorded none, and the binding.
+    fn opening_policy(&self) -> SessionPolicy {
         let mut policy = self.core.policy.clone();
         if let Some(provider) = &self.provider {
             policy.provider_id = provider.kind().to_string();
@@ -400,15 +401,15 @@ impl SessionBuilder {
     }
 
     /// The state an existing session opens with: what it recorded, as
-    /// recorded (FIG-4099). Only live policy — the turn budget and the host's
-    /// execution knobs — follows this open; nothing is written. A catalog row
-    /// with no head — one its creator commits itself — starts from this open's
-    /// live policy.
+    /// recorded (FIG-4099), its execution controls included (FIG-4376). Only
+    /// the session binding follows this open; nothing is written. A catalog
+    /// row with no head — one its creator commits itself — starts from the
+    /// core's creation defaults.
     async fn recorded_state(
         &self,
         store: &lash_core::store::SessionStore,
     ) -> Result<RuntimeSessionState> {
-        let policy = self.live_policy();
+        let policy = self.opening_policy();
         let Some(loaded) = load_persisted_window(store).await? else {
             return Ok(empty_runtime_session_state(self.session_id.clone(), policy));
         };
@@ -420,7 +421,7 @@ impl SessionBuilder {
             });
         }
         refuse_provider_mismatch(&state, &policy)?;
-        adopt_live_policy(&mut state, &policy);
+        fill_unrecorded_route(&mut state, &policy);
         Ok(state)
     }
 
@@ -574,8 +575,8 @@ pub(crate) async fn resolve_existing_session(
 }
 
 /// The state the engine opens `session_id` with: what the session recorded,
-/// as recorded, with the engine's live policy (FIG-4099). A catalog row with
-/// no head starts from `policy`.
+/// as recorded (FIG-4099, FIG-4376), bound to `session_id`. A catalog row
+/// with no head starts from `policy`, the core's creation defaults.
 pub(crate) async fn load_state_from_store(
     session_id: &SessionId,
     policy: &SessionPolicy,
@@ -597,34 +598,31 @@ pub(crate) async fn load_state_from_store(
             requested: session_id.clone(),
         });
     }
-    adopt_live_policy(&mut state, policy);
+    fill_unrecorded_route(&mut state, policy);
     Ok(state)
 }
 
-/// Carry an open's live policy onto recorded state (FIG-4099).
+/// Bind recorded state to its opener and fill a route it never recorded
+/// (FIG-4099, FIG-4376).
 ///
 /// The recorded config — provider, model, attachment acceptance, prompt,
-/// generation — is the session's and stays as recorded. The facts ADR 0030
-/// leaves live-owned follow the open: its session binding, the turn budget,
-/// autonomy, the no-progress budget and the charge-safety policy.
+/// generation and the execution controls (turn budget, autonomy, no-progress
+/// budget, charge safety) — is the session's and stays as recorded. The
+/// opener owns only the session binding.
 ///
 /// A head that records no model or no provider pin — a creator that stated
 /// none, or a head written before creation recorded config by a first commit
 /// that carried an empty config — has nothing to keep for that fact, so the
-/// open's value fills the absence in memory. Nothing is written; the
+/// opener's value fills the absence in memory. Nothing is written; the
 /// session's next commit records what it ran with.
-fn adopt_live_policy(state: &mut RuntimeSessionState, policy: &SessionPolicy) {
+fn fill_unrecorded_route(state: &mut RuntimeSessionState, opening: &SessionPolicy) {
     if state.policy.model.id.trim().is_empty() {
-        state.policy.model = policy.model.clone();
+        state.policy.model = opening.model.clone();
     }
     if state.policy.recorded_provider_id().is_empty() {
-        state.policy.provider_id = policy.provider_id.clone();
+        state.policy.provider_id = opening.provider_id.clone();
     }
-    state.policy.session_id = policy.session_id.clone();
-    state.policy.autonomous = policy.autonomous;
-    state.policy.turn_budget = policy.turn_budget;
-    state.policy.no_progress_budget = policy.no_progress_budget;
-    state.policy.charge_safety = policy.charge_safety.clone();
+    state.policy.session_id = opening.session_id.clone();
 }
 
 /// Refuse an open whose live provider cannot serve the session's recorded

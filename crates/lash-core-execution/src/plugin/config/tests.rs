@@ -306,7 +306,7 @@ fn a_stale_transaction_runs_no_reducer_and_publishes_nothing() {
     let resolution = registry.resolve(&base, &transaction, &no_route_check);
     assert_eq!(
         resolution.result,
-        ConfigResolutionResult::Stale {
+        ConfigResolutionDecision::Stale {
             expected: 3,
             actual: 4
         }
@@ -404,7 +404,7 @@ fn the_final_candidate_is_validated_by_every_touched_owner() {
         )
         .expect("admitted");
     let resolution = registry.resolve(&base, &transaction, &no_route_check);
-    let ConfigResolutionResult::Refused { refusal } = resolution.result else {
+    let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
         panic!("the final candidate is refused");
     };
     assert_eq!(refusal.index, None);

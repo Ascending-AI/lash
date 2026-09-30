@@ -189,6 +189,33 @@ pub(crate) async fn redeploy(
     .expect("redeploy the Restate double over the same stores")
 }
 
+/// A PostgreSQL store set on a database of its own, with what must outlive
+/// it; `None` when no PostgreSQL is configured (and it is not required).
+#[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the gate's database URL is host configuration.
+pub(crate) async fn postgres_store_set()
+-> Option<(Arc<dyn lash_core::StoreSet>, Box<dyn std::any::Any>)> {
+    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        assert!(
+            std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
+            "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        eprintln!("skipping the PostgreSQL leg: LASH_POSTGRES_DATABASE_URL is not set");
+        return None;
+    };
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+        .await
+        .expect("connect to PostgreSQL");
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    )) as Arc<dyn lash_core::StoreSet>;
+    Some((stores, Box::new((database, attachments, storage))))
+}
+
 /// Under the Restate double a session's writer claim frees when the engine
 /// lane's last turn settles, and a host admit (`open`, `durable`, `create`)
 /// can race that release: retry `Contended` until a bounded deadline. The

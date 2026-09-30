@@ -241,8 +241,8 @@ async fn fixtures() -> Fixtures {
                 backend_handle.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
-            )
-            .with_session_policy(lash_core::testing::standard_test_policy()),
+                lash_core::testing::standard_test_policy(),
+            ),
         )
         .expect("valid test worker config"),
     );

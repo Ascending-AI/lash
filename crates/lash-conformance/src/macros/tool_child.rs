@@ -116,6 +116,8 @@ macro_rules! turn_config_tests {
             (a_batch_keeps_its_turn_lane_place_behind_the_command_lane, "run-spec-batch-order"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_recovered_follow_on_inherits_its_roots_recorded_run, "run-spec-follow-on-inherit"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*

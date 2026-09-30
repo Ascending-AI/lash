@@ -772,10 +772,13 @@ fn benchmark_rlm_builder(
     provider: ProviderHandle,
     factory: lash_protocol_rlm::RlmProtocolPluginFactory,
 ) -> lash::LashCoreBuilder {
-    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .provider(provider)
-        .model(benchmark_model_spec())
-        .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
+    lash::LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS),
+        factory,
+    )
+    .provider(provider)
+    .model(benchmark_model_spec())
 }
 
 // The benchmark plugin list, in push order. Every conditional reads the

@@ -363,7 +363,7 @@ fn publish_config_resolution(
     if resolution.base_revision != state.config_revision
         && matches!(
             resolution.result,
-            crate::ConfigResolutionResult::Applied { .. }
+            crate::ConfigResolutionDecision::Applied { .. }
         )
     {
         return crate::ConfigTransactionOutcome::Stale {
@@ -375,8 +375,6 @@ fn publish_config_resolution(
     let outcome = resolution.publish(&mut config);
     if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
         crate::runtime::state::adopt_session_config(state, &config);
-        // The turn budget is not among the fields head adoption carries.
-        state.policy.turn_budget = config.turn_budget;
     }
     outcome
 }

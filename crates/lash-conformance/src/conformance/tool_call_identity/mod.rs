@@ -561,8 +561,8 @@ impl World {
                 ),
                 Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
-            )
-            .with_session_policy(policy),
+                policy,
+            ),
         )
         .expect("build the tool-call identity process worker");
         world.processes = Some(WorldProcesses {

@@ -92,8 +92,9 @@ pub mod config {
     pub use crate::admin::config_transactions::{ConfigSettlement, ConfigWrite};
     pub use lash_core::plugin::config::core::{
         AddPromptContribution, ClearPromptSlot, ClearPromptTemplate, ReplacePromptSlot,
-        SetAttachmentAcceptance, SetGeneration, SetModel, SetPrompt, SetPromptTemplate,
-        SetProvider, SetToolAccess, SetTurnBudget,
+        SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetModel,
+        SetNoProgressBudget, SetPrompt, SetPromptTemplate, SetProvider, SetToolAccess,
+        SetTurnBudget,
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,

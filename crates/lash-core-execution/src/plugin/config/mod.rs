@@ -31,8 +31,8 @@ use serde::de::DeserializeOwned;
 
 pub use self::core::{CORE_CONFIG_IMPLEMENTATION, CoreConfigOwner, CoreConfigRefusal};
 pub use lash_core_store::config_transaction::{
-    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution, ConfigResolutionResult,
-    ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
+    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution,
+    ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
 };
 pub use lash_core_store::execution_state::{AdmittedPluginConfig, PluginConfig};
 
@@ -771,7 +771,7 @@ impl ConfigRegistry {
         let result = if transaction.expected_revision == base_revision {
             self.reduce(base, transaction, validate_core)
         } else {
-            ConfigResolutionResult::Stale {
+            ConfigResolutionDecision::Stale {
                 expected: transaction.expected_revision,
                 actual: base_revision,
             }
@@ -787,13 +787,13 @@ impl ConfigRegistry {
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
         validate_core: &dyn Fn(&CoreConfig, &CoreConfig) -> Result<(), ConfigRefusal>,
-    ) -> ConfigResolutionResult {
+    ) -> ConfigResolutionDecision {
         let base_core = CoreConfig::of(base);
         let mut candidate: BTreeMap<String, serde_json::Value> = BTreeMap::new();
         let mut outputs = Vec::with_capacity(transaction.entries.len());
         for (index, entry) in transaction.entries.iter().enumerate() {
             let refused =
-                |refusal: serde_json::Value, message: String| ConfigResolutionResult::Refused {
+                |refusal: serde_json::Value, message: String| ConfigResolutionDecision::Refused {
                     refusal: ConfigRefusal {
                         index: Some(index),
                         owner: entry.owner.clone(),
@@ -852,7 +852,7 @@ impl ConfigRegistry {
             Some(value) => match serde_json::from_value::<CoreConfig>(value) {
                 Ok(core) => Some(core),
                 Err(error) => {
-                    return ConfigResolutionResult::Refused {
+                    return ConfigResolutionDecision::Refused {
                         refusal: unreadable(CORE_CONFIG_OWNER, error.to_string()),
                     };
                 }
@@ -870,7 +870,7 @@ impl ConfigRegistry {
         if core.is_some()
             && let Err(refusal) = validate_core(&base_core, &final_core)
         {
-            return ConfigResolutionResult::Refused { refusal };
+            return ConfigResolutionDecision::Refused { refusal };
         }
         // Every owner judges the final candidate, touched or not: a change
         // to one namespace, the core's included, can break another owner's
@@ -884,10 +884,10 @@ impl ConfigRegistry {
                     .owner
                     .validate(owner, value, base.plugin_config.get(owner), &facts)
             {
-                return ConfigResolutionResult::Refused { refusal };
+                return ConfigResolutionDecision::Refused { refusal };
             }
         }
-        ConfigResolutionResult::Applied {
+        ConfigResolutionDecision::Applied {
             core: core.map(Box::new),
             namespaces,
             outputs,

@@ -744,8 +744,8 @@ impl LashCore {
             self.substrate_slot.setup.process.clone(),
             Arc::clone(&self.substrate_slot.setup.session_work),
             self.drive_owner.clone(),
-        )
-        .with_session_policy(self.policy.clone()))
+            self.policy.clone(),
+        ))
     }
 }
 

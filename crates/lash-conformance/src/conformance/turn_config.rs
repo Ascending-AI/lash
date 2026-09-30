@@ -32,12 +32,20 @@ struct ConfigParts {
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 }
 
+async fn build_runtime(parts: ConfigParts) -> crate::LashRuntime {
+    build_runtime_under(parts, crate::testing::mock_session_policy()).await
+}
+
+/// The law's runtime, opened with `policy` as its creation defaults: what a
+/// session with no head yet starts from, and what its first commit records.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn build_runtime(parts: ConfigParts) -> crate::LashRuntime {
-    let mut policy = crate::testing::mock_session_policy();
+async fn build_runtime_under(
+    parts: ConfigParts,
+    mut policy: crate::SessionPolicy,
+) -> crate::LashRuntime {
     policy.session_id = Some(parts.session_id.clone());
     Box::pin(
         crate::LashRuntime::builder(parts.host, crate::testing::runtime_lease_owner())
@@ -1144,3 +1152,216 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
 
 mod command_settlement;
 pub use command_settlement::*;
+
+/// The tool a looping model calls on every iteration of its turn.
+const LOOKUP_TOOL: &str = "turn_config_lookup_probe";
+
+struct LookupTool;
+
+fn lookup_tool() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        format!("tool:{LOOKUP_TOOL}"),
+        LOOKUP_TOOL,
+        "A tool that answers every call.",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for LookupTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![lookup_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == LOOKUP_TOOL).then(|| Arc::new(lookup_tool().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::from_output(
+            crate::ToolCallOutput::success(serde_json::json!({"found": true})),
+        ))
+    }
+}
+
+/// A model that calls [`LOOKUP_TOOL`] on every call and never answers, so a
+/// turn runs until its budget stops it. `calls` counts its calls.
+fn looping_model(calls: &Arc<AtomicUsize>) -> crate::ProviderHandle {
+    let calls = Arc::clone(calls);
+    crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete(move |_request| {
+            let index = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                Ok(crate::LlmResponse {
+                    parts: vec![crate::LlmOutputPart::ToolCall {
+                        call_id: format!("turn-config-lookup-{index}"),
+                        tool_name: LOOKUP_TOOL.into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }],
+                    ..crate::LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+/// A looping-model law's session: [`LookupTool`] installed and `calls`
+/// counting the model's calls.
+async fn looping_session(
+    prefix: &str,
+    name: &str,
+    effect_host: &Arc<dyn crate::EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+    calls: &Arc<AtomicUsize>,
+) -> ConfigParts {
+    let mut parts = law_session(
+        prefix,
+        name,
+        effect_host,
+        stores,
+        Arc::new(crate::SingleProviderResolver::new(looping_model(calls))),
+    )
+    .await;
+    parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+        "conformance-turn-config-lookup-probe",
+        crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(LookupTool)),
+    ))];
+    parts
+}
+
+/// A policy whose execution controls are `turn_budget`, over the mock route.
+fn policy_with_budget(turn_budget: crate::TurnBudget) -> crate::SessionPolicy {
+    crate::SessionPolicy {
+        turn_budget,
+        ..crate::testing::mock_session_policy()
+    }
+}
+
+/// One turn attempt of `root` on a runtime opened with `policy`, sending how
+/// the turn returned on `turn_tx`.
+fn looping_attempt(
+    parts: &ConfigParts,
+    root: &TurnId,
+    policy: crate::SessionPolicy,
+    turn_tx: TurnResultTx,
+) -> crate::ConformanceTurnAttempt {
+    let parts = parts.clone();
+    let root = root.clone();
+    Arc::new(move |scope| {
+        let parts = parts.clone();
+        let root = root.clone();
+        let policy = policy.clone();
+        let turn_tx = turn_tx.clone();
+        Box::pin(async move {
+            let mut runtime = build_runtime_under(parts, policy).await;
+            let turn = runtime
+                .drive_turn(
+                    text_input(&root, "look everything up"),
+                    crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+                )
+                .await;
+            let end = crate::ConformanceTurnEnd::of(&turn);
+            let _ = turn_tx.send(turn);
+            end
+        })
+    })
+}
+
+/// Crashes a root's execution after its config is recorded and before its
+/// first model call.
+struct CrashBeforeFirstModelCall;
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashBeforeFirstModelCall {
+    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
+        if phase == lash_core::runtime::RuntimeTurnPhase::PromptBuild {
+            panic!("injected crash after the root's config record and before its model call");
+        }
+    }
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+}
+
+/// A redrive runs under the execution controls its root recorded (FIG-4376,
+/// ADR 0105 §1). The root's first execution records its config, turn budget
+/// included, and dies before its first model call. The redrive opens the
+/// session under other creation defaults, as a redeployed worker with another
+/// default budget would: it reads the record back and stops at the recorded
+/// bound.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_redrive_runs_under_the_execution_controls_its_root_recorded(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    const RECORDED_TURNS: usize = 2;
+    const REDEPLOYED_TURNS: usize = 5;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let parts = looping_session(
+        prefix,
+        "recorded-controls-redrive",
+        &effect_host,
+        &stores,
+        &calls,
+    )
+    .await;
+    let root = TurnId::from(format!("{prefix}-turn-config-recorded-controls-root"));
+    let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
+    let crashing: crate::ConformanceTurnAttempt = {
+        let parts = parts.clone();
+        let root = root.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let root = root.clone();
+            Box::pin(async move {
+                let mut runtime = build_runtime_under(
+                    parts,
+                    policy_with_budget(crate::TurnBudget::bounded(RECORDED_TURNS)),
+                )
+                .await;
+                runtime.set_turn_phase_probe(Arc::new(CrashBeforeFirstModelCall));
+                let _ = runtime
+                    .drive_turn(
+                        text_input(&root, "look everything up"),
+                        crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+                    )
+                    .await;
+                panic!("the crash fires before the root's first model call");
+            })
+        })
+    };
+    runner
+        .run_crashed_then_redriven_turn(
+            admit(crate::ExecutionScope::turn(&parts.session_id, &root)),
+            crashing,
+            looping_attempt(
+                &parts,
+                &root,
+                policy_with_budget(crate::TurnBudget::bounded(REDEPLOYED_TURNS)),
+                turn_tx,
+            ),
+        )
+        .await;
+    let turn = turn_rx
+        .recv()
+        .await
+        .expect("the tier's runner redrove the root")
+        .unwrap_or_else(|error| panic!("the redriven root runs: {error:?}"));
+    assert_eq!(
+        turn.outcome,
+        crate::TurnOutcome::Stopped(crate::TurnStop::MaxTurns),
+        "the redriven root stops at a bound"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        RECORDED_TURNS,
+        "the redriven root stops at the bound its root recorded, not the redrive's default"
+    );
+}

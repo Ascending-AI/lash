@@ -878,16 +878,14 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
             .with_execution_trace(trace_sink, lash_trace::TraceContext::default()),
         ),
     );
-    DurableProcessWorker::new(
-        lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(plugin_host),
-            runtime_host,
-            process_work,
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        )
-        .with_session_policy(recovery_session_policy()),
-    )
+    DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
+        Arc::new(plugin_host),
+        runtime_host,
+        process_work,
+        Arc::new(lash_core::NoSessionWork::new()),
+        lash_core::testing::runtime_lease_owner(),
+        recovery_session_policy(),
+    ))
     .expect("valid test process worker")
 }
 

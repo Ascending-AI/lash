@@ -112,12 +112,20 @@ async fn probe_session(
     let core = lash::LashCore::standard_builder(backend.clone(), lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .charge_safety(charge_safety)
         .provider(provider_handle)
         .model(model)
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session = crate::open_created_session(&core, session_id.to_string())
+    core.session(session_id.to_string())
+        .create(lash::SessionCreation {
+            spec: lash::SessionSpec::default().charge_safety(charge_safety),
+            ..Default::default()
+        })
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session = core
+        .session(session_id.to_string())
+        .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     // The exhausted turn is expected to fail; the retried one to succeed. The

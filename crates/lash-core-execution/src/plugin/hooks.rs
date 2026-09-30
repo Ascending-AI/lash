@@ -11,9 +11,6 @@ pub type PluginLifecycleFuture<'run> =
 pub type PluginLifecycleEventHook =
     Arc<dyn for<'run> Fn(PluginLifecycleEvent<'run>) -> PluginLifecycleFuture<'run> + Send + Sync>;
 pub type PluginSessionTask = PluginFuture<()>;
-pub type SessionConfigMutator = Arc<
-    dyn Fn(SessionConfigChangedContext, SessionPolicy) -> PluginFuture<SessionPolicy> + Send + Sync,
->;
 pub type BeforeTurnHook =
     Arc<dyn Fn(TurnHookContext) -> PluginFuture<Vec<TurnPluginDirective>> + Send + Sync>;
 /// Inspects a tool call before dispatch and returns directives for the runtime to apply.

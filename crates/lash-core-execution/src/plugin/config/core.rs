@@ -1,5 +1,7 @@
 //! The core owner's config commands (FIG-4379): the changes a session's
-//! provider, model, prompt, generation, turn budget and tool access admit.
+//! provider, model, prompt, generation, execution controls (turn budget,
+//! autonomy, no-progress budget, charge safety; FIG-4376) and tool access
+//! admit.
 //!
 //! The core owner is not a plugin. Its share of the session's config is the
 //! [`CoreConfig`] view of the config head, its reducers are the functions
@@ -47,6 +49,10 @@ pub enum CoreConfigRefusal {
         provider_id: String,
         model: String,
     },
+    /// A charge-safety policy that accepts more unsafe retries than Lash
+    /// ever buys: recorded, it would claim retries the provider handle
+    /// clamps away.
+    UnsafeRetriesAboveCeiling { requested: u8, ceiling: u8 },
 }
 
 impl std::fmt::Display for CoreConfigRefusal {
@@ -60,6 +66,10 @@ impl std::fmt::Display for CoreConfigRefusal {
                 formatter,
                 "no provider of this host serves provider `{provider_id}` with model `{model}`: \
                  {code}"
+            ),
+            Self::UnsafeRetriesAboveCeiling { requested, ceiling } => write!(
+                formatter,
+                "charge safety accepts {requested} unsafe retries, above the ceiling of {ceiling}"
             ),
         }
     }
@@ -243,6 +253,51 @@ impl ConfigCommand for SetTurnBudget {
     const NAME: &'static str = "set_turn_budget";
 }
 
+/// Whether the session's turns run autonomously from its next root. Every
+/// value is admissible.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetAutonomy {
+    pub autonomous: bool,
+}
+
+impl ConfigCommand for SetAutonomy {
+    type Owner = CoreConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_autonomy";
+}
+
+/// The consecutive unproductive attempts the session allows from its next
+/// root. A zero bound does not decode, so it is refused at submit; every
+/// decodable value is admissible.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetNoProgressBudget {
+    pub no_progress_budget: crate::NoProgressBudget,
+}
+
+impl ConfigCommand for SetNoProgressBudget {
+    type Owner = CoreConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_no_progress_budget";
+}
+
+/// The charge-safety policy the session runs under from its next root. A
+/// policy accepting more unsafe retries than
+/// [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`](crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES)
+/// is refused.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetChargeSafety {
+    pub charge_safety: crate::ChargeSafetyPolicy,
+}
+
+impl ConfigCommand for SetChargeSafety {
+    type Owner = CoreConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_charge_safety";
+}
+
 /// Replace the session's tool authority, whole.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -330,6 +385,34 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
     reg.command::<SetTurnBudget>(|core, command| {
         changed(CoreConfig {
             turn_budget: command.turn_budget,
+            ..core.clone()
+        })
+    })?;
+    reg.command::<SetAutonomy>(|core, command| {
+        changed(CoreConfig {
+            autonomous: command.autonomous,
+            ..core.clone()
+        })
+    })?;
+    reg.command::<SetNoProgressBudget>(|core, command| {
+        changed(CoreConfig {
+            no_progress_budget: command.no_progress_budget,
+            ..core.clone()
+        })
+    })?;
+    reg.command::<SetChargeSafety>(|core, command| {
+        if let crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries, ..
+        } = command.charge_safety
+            && max_unsafe_retries > crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES
+        {
+            return Err(CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+                requested: max_unsafe_retries,
+                ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+            });
+        }
+        changed(CoreConfig {
+            charge_safety: command.charge_safety,
             ..core.clone()
         })
     })?;
