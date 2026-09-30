@@ -324,6 +324,14 @@ impl SessionDriver for InstalledSessionDriver {
     ) -> Result<(), DriveAbort> {
         self.driver.close_root(controller, session, root).await
     }
+
+    async fn root_run_ended(
+        &self,
+        session: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        self.driver.root_run_ended(session, root).await
+    }
 }
 
 impl RestateSessionDriverSlot {
@@ -1141,11 +1149,25 @@ async fn drive_admissions(
                                     error = %error,
                                     "session drive consumed a released root execution"
                                 );
-                                RootOutcome::Released { root }
+                                RootOutcome::Released { root: root.clone() }
                             }
                         }
                     }
                 };
+                // The run has ended, so no attempt of it is open: the root's
+                // journal replays no more once its terminal is durable, and
+                // the cleanups awaiting it are due now (ADR 0113 §2.5). A
+                // replay of this drive nudges again, which only shortens a
+                // wait, so the nudge is not journaled; a failed one leaves
+                // each cleanup to its deferral.
+                if let Err(error) = driver.root_run_ended(&request.session, &root).await {
+                    tracing::warn!(
+                        session_id = request.session.as_str(),
+                        root = root.as_str(),
+                        error = %error,
+                        "the artifact cleanups awaiting the ended root were not nudged"
+                    );
+                }
                 let stop = rules.after(&work, &outcome);
                 let yielded_root = outcome.root().clone();
                 ran.push(outcome);
@@ -1359,6 +1381,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SessionDriver for IdleDriver {
+        async fn root_run_ended(
+            &self,
+            _session: &lash_core::SessionId,
+            _root: &lash_core::TurnId,
+        ) -> Result<(), lash_core::StoreError> {
+            Ok(())
+        }
+
         async fn admit(
             &self,
             _controller: lash_core::ScopedEffectController<'_>,

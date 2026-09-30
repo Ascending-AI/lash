@@ -98,6 +98,14 @@ fn runtime_error(message: impl Into<String>) -> lash_core::RuntimeError {
 
 #[async_trait::async_trait]
 impl SessionDriver for HeldDriver {
+    async fn root_run_ended(
+        &self,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
     async fn admit(
         &self,
         controller: ScopedEffectController<'_>,

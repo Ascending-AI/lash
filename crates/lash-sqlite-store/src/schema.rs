@@ -690,6 +690,7 @@ CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
+    awaited_journal_key TEXT,
     obligation_id TEXT NOT NULL,
     obligation_state TEXT NOT NULL,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -709,6 +710,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
 CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
     ON artifact_cleanup_obligations(obligation_id)
     WHERE obligation_state = 'stalled';
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_awaited_journal
+    ON artifact_cleanup_obligations(awaited_journal_key)
+    WHERE awaited_journal_key IS NOT NULL AND obligation_state = 'due';
 
 
 CREATE TABLE IF NOT EXISTS release_stamp (
@@ -1373,6 +1377,7 @@ CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
+    awaited_journal_key TEXT,
     obligation_id TEXT NOT NULL,
     obligation_state TEXT NOT NULL,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1392,6 +1397,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
 CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
     ON artifact_cleanup_obligations(obligation_id)
     WHERE obligation_state = 'stalled';
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_awaited_journal
+    ON artifact_cleanup_obligations(awaited_journal_key)
+    WHERE awaited_journal_key IS NOT NULL AND obligation_state = 'due';
 
 CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,

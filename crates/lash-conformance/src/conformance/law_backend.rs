@@ -471,6 +471,14 @@ impl crate::store::ArtifactCleanupLedger for UnavailableArtifactCleanup {
         StoreLawStores::no_second_substrate("artifact cleanup ledger")
     }
 
+    async fn nudge_awaiting_journal(
+        &self,
+        _: &lash_sansio::EffectJournalIdentity,
+        _: u64,
+    ) -> Result<u64, crate::StoreError> {
+        StoreLawStores::no_second_substrate("artifact cleanup ledger")
+    }
+
     async fn load_cleanup(
         &self,
         _: &crate::store::ObligationId,

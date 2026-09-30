@@ -575,18 +575,19 @@ pub(crate) fn arm_cleanup_tx(
         .to_json()
         .map_err(|error| StoreError::Backend(error.to_string()))?;
     let due = sql_i64("artifact cleanup due instant", now_ms)?;
+    let awaited = cleanup.awaited_journal().map(|journal| journal.key());
     match CleanupUpsert::decide(existing.as_ref(), cleanup) {
         CleanupUpsert::Insert => {
             tx.execute(
                 CLEANUPS.insert_if_absent.sql(),
-                params![kind, referrer_id, body, id.as_str(), due],
+                params![kind, referrer_id, body, id.as_str(), due, awaited],
             )
             .map_err(sqlite_error)?;
         }
         CleanupUpsert::ReplaceGuard => {
             tx.execute(
                 CLEANUPS.replace_guard_with_ended.sql(),
-                params![kind, referrer_id, body, due],
+                params![kind, referrer_id, body, due, awaited],
             )
             .map_err(sqlite_error)?;
         }
@@ -771,6 +772,31 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
             .await
             .map_err(sqlite_error)?;
         Ok(core + registry > 0)
+    }
+
+    async fn nudge_awaiting_journal(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+        now_ms: u64,
+    ) -> Result<u64, StoreError> {
+        let due = sql_i64("artifact cleanup due instant", now_ms)?;
+        let mut nudged = 0;
+        for database in [&self.core, &self.registry] {
+            let key = journal.key().to_owned();
+            let changed = database
+                .conn
+                .write(move |tx| {
+                    crate::conn::cached_execute(
+                        tx,
+                        CLEANUPS.nudge_awaiting_journal.sql(),
+                        rusqlite::params![key, due],
+                    )
+                })
+                .await
+                .map_err(sqlite_error)?;
+            nudged += changed as u64;
+        }
+        Ok(nudged)
     }
 
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {

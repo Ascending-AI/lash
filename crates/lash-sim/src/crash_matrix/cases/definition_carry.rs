@@ -18,6 +18,37 @@ use crate::crash_matrix::{CrashPoint, Seam};
 
 const KIND: &str = "definition-carry-engine";
 
+/// Keeps the carry turn open across a recovery tick after the crash
+/// (FIG-4359): the successor frame's first model call waits here until the
+/// case's check has seen a tick run since the restart. A live server replays
+/// the crashed turn on wall time, so its recovery pass can meet the turn
+/// still open — the predecessor's end gated on the turn's journal, the
+/// turn's execution referrer waiting for it — and defer both; the double
+/// settles every invocation before each tick and never would. The hold gives
+/// both engines that interleaving.
+struct OpenTurnHold {
+    released: tokio::sync::watch::Sender<bool>,
+}
+
+impl OpenTurnHold {
+    fn new() -> Self {
+        Self {
+            released: tokio::sync::watch::Sender::new(false),
+        }
+    }
+
+    async fn wait(&self) {
+        let mut released = self.released.subscribe();
+        // The sender lives as long as the hold, so the wait ends only on
+        // the release.
+        let _ = released.wait_for(|released| *released).await;
+    }
+
+    fn release(&self) {
+        self.released.send_replace(true);
+    }
+}
+
 #[derive(Default)]
 struct EngineStore {
     edges: Mutex<BTreeMap<String, Vec<ArtifactReferrer>>>,
@@ -153,16 +184,21 @@ impl PluginFactory for Factory {
     }
 }
 
-fn core(store: Arc<EngineStore>, id: lash_core::ProcessDefinitionId) -> CoreBuild {
+fn core(
+    store: Arc<EngineStore>,
+    id: lash_core::ProcessDefinitionId,
+    hold: Arc<OpenTurnHold>,
+) -> CoreBuild {
     Arc::new(move |backend, owner| {
         let tag = id.to_tagged_json();
+        let hold = hold.clone();
         let provider = lash_core::testing::TestProvider::builder().kind(KIND).complete(move |request: lash_core::llm::types::LlmRequest| {
-            let tag = tag.clone();
+            let (tag, hold) = (tag.clone(), hold.clone());
             async move {
                 let text = serde_json::to_string(&request).map_err(|error| lash_core::llm::transport::LlmTransportError::new(error.to_string()))?;
                 let code = if text.contains("cleanup complete") { "finish('cleaned');".into() }
                     else if text.contains("input:uncarry;") { "await control.continue_as({task: 'cleanup complete'});".into() }
-                    else if text.contains("activation complete") { "finish(definition_id);".into() }
+                    else if text.contains("activation complete") { hold.wait().await; "finish(definition_id);".into() }
                     else { format!("const kept = await processes.get({{definition_id: {tag}}}); await control.continue_as({{task: 'activation complete', seed: {{definition_id: kept.id}}}});") };
                 Ok::<_, lash_core::llm::transport::LlmTransportError>(lash_core::llm::types::LlmResponse {parts: vec![lash_core::llm::types::LlmOutputPart::Text {text: format!("<typescript>\n{code}\n</typescript>"), response_meta: None}], ..Default::default()})
             }
@@ -193,22 +229,32 @@ fn core(store: Arc<EngineStore>, id: lash_core::ProcessDefinitionId) -> CoreBuil
     })
 }
 
+/// The successor keeps its complete share until the predecessor's end is
+/// delivered, then everything is reclaimed after an uncarried switch. The
+/// carry turn is held open until the first check after a recovery tick
+/// since the restart, `ticks_at_restart` of them having run before it.
 fn carried_then_reclaimed(
     store: Arc<EngineStore>,
     id: lash_core::ProcessDefinitionId,
     pin: lash_core::HostArtifactPin,
     session: lash_core::SessionId,
+    hold: Arc<OpenTurnHold>,
+    ticks_at_restart: usize,
 ) -> CustomCheck {
     let carried = Arc::new(AtomicBool::new(false));
     Arc::new(move |world| {
-        let (store, id, session, carried, pin) = (
+        let (store, id, session, carried, pin, hold) = (
             store.clone(),
             id.clone(),
             session.clone(),
             carried.clone(),
             pin.clone(),
+            hold.clone(),
         );
         Box::pin(async move {
+            if world.ticks_run() > ticks_at_restart {
+                hold.release();
+            }
             if !carried.load(Ordering::SeqCst) {
                 let frames = store.frames();
                 let [frame] = frames.as_slice() else {
@@ -277,7 +323,8 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
     )
     .map_err(|error| error.to_string())?;
     let id = draft.id();
-    let world = CrashWorld::new(seed, core(store.clone(), id.clone()), false).await?;
+    let hold = Arc::new(OpenTurnHold::new());
+    let world = CrashWorld::new(seed, core(store.clone(), id.clone(), hold.clone()), false).await?;
     world.restart().await?;
     let pin = lash_core::HostArtifactPin::mint();
     world
@@ -305,6 +352,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         }
     }
     let origin_ms = crash_and_restart(&world).await?;
+    let ticks_at_restart = world.ticks_run();
     Ok(Staged {
         world,
         origin_ms,
@@ -312,7 +360,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         expected: Expected {
             custom: vec![(
                 "definition_carry",
-                carried_then_reclaimed(store, id, pin, session),
+                carried_then_reclaimed(store, id, pin, session, hold, ticks_at_restart),
             )],
             ..Default::default()
         },

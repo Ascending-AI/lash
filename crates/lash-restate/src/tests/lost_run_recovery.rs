@@ -130,6 +130,14 @@ struct RecoveryDriver {
 
 #[async_trait::async_trait]
 impl lash_core::SessionDriver for RecoveryDriver {
+    async fn root_run_ended(
+        &self,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
     async fn reconcile(
         &self,
         cursor: &ReconcileCursor,

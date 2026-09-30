@@ -42,6 +42,14 @@ fn redrive_unsettled() -> lash_core::RuntimeError {
 }
 #[async_trait::async_trait]
 impl SessionDriver for Driver {
+    async fn root_run_ended(
+        &self,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
     async fn admit(
         &self,
         _: lash_core::ScopedEffectController<'_>,
@@ -1235,6 +1243,14 @@ struct TickingDriver {
 }
 #[async_trait::async_trait]
 impl SessionDriver for TickingDriver {
+    async fn root_run_ended(
+        &self,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
     fn owns_reconciliation(&self) -> bool {
         true
     }
@@ -1414,6 +1430,14 @@ struct CadenceDriver {
 }
 #[async_trait::async_trait]
 impl SessionDriver for CadenceDriver {
+    async fn root_run_ended(
+        &self,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
     fn owns_reconciliation(&self) -> bool {
         true
     }
@@ -1667,6 +1691,14 @@ struct StartedRootDriver {
 }
 #[async_trait::async_trait]
 impl SessionDriver for StartedRootDriver {
+    async fn root_run_ended(
+        &self,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
     async fn admit(
         &self,
         _: lash_core::ScopedEffectController<'_>,

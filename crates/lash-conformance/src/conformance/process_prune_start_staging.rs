@@ -773,6 +773,14 @@ impl crate::ArtifactCleanupLedger for RelayOnEnd {
         self.inner.nudge(referrer, now_ms).await
     }
 
+    async fn nudge_awaiting_journal(
+        &self,
+        journal: &lash_sansio::EffectJournalIdentity,
+        now_ms: u64,
+    ) -> Result<u64, crate::StoreError> {
+        self.inner.nudge_awaiting_journal(journal, now_ms).await
+    }
+
     async fn load_cleanup(
         &self,
         id: &crate::ObligationId,
