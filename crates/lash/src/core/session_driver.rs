@@ -196,7 +196,26 @@ impl CoreSessionDriver {
                 OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
             })?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let is_root_session = state.authority.subagent.is_none();
+        let recorded_parent_session_id =
+            match crate::session::recorded_parent_session_id(&store).await {
+                Ok(parent) => parent,
+                Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
+                    return Err(OpenFailure::Contended);
+                }
+                Err(crate::EmbedError::Store(
+                    error @ (lash_core::StoreError::SessionDeleted { .. }
+                    | lash_core::StoreError::SessionClosing { .. }),
+                )) => {
+                    return Err(OpenFailure::SessionRetired(session_retired_error(
+                        session_id, error,
+                    )));
+                }
+                Err(error) => {
+                    return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
+                        error.to_string(),
+                    )));
+                }
+            };
         let mut runtime = LashRuntime::from_environment(
             &env,
             policy,
@@ -218,7 +237,7 @@ impl CoreSessionDriver {
         runtime
             .configure_protocol_on_materialize(
                 &lash_core::PluginOptions::default(),
-                is_root_session,
+                recorded_parent_session_id.is_none(),
             )
             .map_err(OpenFailure::Terminal)?;
         Ok(RuntimeHandle::with_live_replay_store(
