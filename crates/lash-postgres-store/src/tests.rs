@@ -1397,11 +1397,12 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         .execute(storage.pool())
         .await
         .expect("reset statement statistics before the admission measurement");
+    let root = TurnId::from("statement-pin-root");
     let admission = store
         .admit_root(
             &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
                 &lease,
-                &TurnId::from("statement-pin-root"),
+                &root,
                 lash_core_execution::store::AdmittedHead::Input(input.input_id),
             ),
         )
@@ -1440,25 +1441,52 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         "admission round trips changed",
     );
 
+    state.head_revision = seed_receipt.head_revision;
+    let (mut measured_commit, _) =
+        lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+            .with_operation(lash_core_execution::OperationId::turn(
+                &session_id,
+                "statement-pin-commit",
+                "final",
+            ))
+            .expect("build statement-pin commit");
+    let error = store
+        .commit_runtime_state(measured_commit.clone())
+        .await
+        .expect_err("the admitted root owns the head against an unfenced write");
+    assert!(
+        matches!(
+            &error,
+            StoreError::SessionHeadOwned {
+                session_id: owned_session,
+                owner: lash_core_execution::store::SessionHeadOwner::Root { root: owner },
+            } if owned_session == session_id && owner == root
+        ),
+        "the unfenced commit must identify the owning root, got {error:?}"
+    );
+    assert_eq!(
+        store
+            .load_session_head_meta(&session_id)
+            .await
+            .expect("read the head after the ownership refusal")
+            .expect("the seeded head remains")
+            .head_revision,
+        seed_receipt.head_revision,
+        "an ownership refusal must leave the head unchanged"
+    );
+    measured_commit.drive_fence = Some(Box::new(lease));
     sqlx::query(
         "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
     )
         .execute(storage.pool())
         .await
         .expect("reset statement statistics before the head-commit measurement");
-    state.head_revision = seed_receipt.head_revision;
-    let (measured_commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
-        .with_operation(lash_core_execution::OperationId::turn(
-            &session_id,
-            "statement-pin-commit",
-            "final",
-        ))
-        .expect("build statement-pin commit");
-    store
+    let receipt = store
         .commit_runtime_state(measured_commit)
         .await
         .expect("measured statement-pin commit");
     let commit_statements = postgres_statement_calls_by_name(storage.pool()).await;
+    assert_eq!(receipt.head_revision, seed_receipt.head_revision + 1);
     // The pending follow-on read (ADR 0101 §3, FIG-3542) adds one read to the
     // previous 16-round-trip head commit: the head-write invariant decides
     // against the locked fact. The commit refuses a session the catalog never
@@ -1468,12 +1496,15 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
     // Attachment acquisition takes the Session referrer lock after the history
     // lock and checks its fence even when this commit has no attachment ids.
     // This replaces the old attachment-row update.
-    // This fixture does not pass through the testing lease-epoch probe.
+    // The root's commit presents its drive fence (FIG-4202), adding one
+    // locked drive-epoch read. It does not sample the PostgreSQL clock, so
+    // this fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
             ("begin", 1),
             ("commit", 1),
             ("writer-fence", 1),
+            ("drive-epoch-read", 1),
             ("advisory-lock", 2),
             ("deleted-session-check", 1),
             ("head-lock", 1),

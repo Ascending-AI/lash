@@ -272,6 +272,25 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         .acquired()
         .expect("session drive sealed");
 
+    let withdrawable = store
+        .enqueue_queued_work(QueuedWorkBatchDraft::new(
+            &session_id,
+            DeliveryPolicy::EarliestSafeBoundary,
+            SessionCommand::RefreshToolCatalog {
+                reason: "clock-contract withdrawn command".to_string(),
+            },
+        ))
+        .await
+        .expect("enqueue a command before admission under skewed client clock");
+    assert_eq!(
+        store
+            .cancel_queued_work_batch(&session, &withdrawable.batch_id)
+            .await
+            .expect("withdraw an unread command against PostgreSQL time")
+            .expect("a command is withdrawable before its fenced read")
+            .batch_id,
+        withdrawable.batch_id
+    );
     let command = store
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
@@ -308,8 +327,9 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         .await
         .expect("enqueue pending input under skewed client clock");
 
-    // The command lane is bindless: the run reads the command, and it stays
-    // open (and withdrawable) until a fenced commit applies it.
+    // The command lane is bindless: its fenced read delivers the obligation
+    // and admits the command, so withdrawal no longer reaches it (FIG-4202).
+    let command_read_before = db_now_ms(&storage).await;
     let commands = store
         .open_session_command_run(&fence)
         .await
@@ -322,14 +342,78 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         vec![command.batch_id.as_str()],
         "the session command is readable despite a future-skewed client clock"
     );
-    assert_eq!(
+    assert!(
         store
             .cancel_queued_work_batch(&session, &command.batch_id)
             .await
-            .expect("cancel the open command")
-            .expect("an unapplied command is withdrawable")
-            .batch_id,
-        command.batch_id
+            .expect("refuse withdrawal of the admitted command")
+            .is_none(),
+        "the fenced read admits the command before its applying commit"
+    );
+    let (obligation, admitted_root, delivered_at): (String, Option<String>, i64) = sqlx::query_as(
+        "SELECT obligation_state, admitted_root, obligation_settled_at_ms
+         FROM lash_queued_work_batches WHERE session_id = $1 AND batch_id = $2",
+    )
+    .bind(session.as_str())
+    .bind(command.batch_id.as_str())
+    .fetch_one(storage.pool())
+    .await
+    .expect("read the command admission after refused withdrawal");
+    assert_eq!(obligation, "delivered");
+    assert_eq!(
+        admitted_root, None,
+        "command admission takes no root binding"
+    );
+    let delivered_at = u64::try_from(delivered_at).expect("nonnegative command delivery timestamp");
+    assert!(
+        (command_read_before..=db_now_ms(&storage).await).contains(&delivered_at),
+        "command admission must stamp PostgreSQL time despite the skewed client clock"
+    );
+    assert_eq!(
+        store
+            .open_session_command_run(&fence)
+            .await
+            .expect("reread the admitted command")
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![command.batch_id.as_str()],
+        "refused withdrawal leaves the admitted command available to its drive"
+    );
+    assert!(
+        store
+            .queued_work_batch_completion(&session, &command.batch_id)
+            .await
+            .expect("read the unapplied command's completion")
+            .is_none(),
+        "admission alone does not apply the command"
+    );
+    let mut state = RuntimeSessionState {
+        session_id: session.clone(),
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+        ))
+    };
+    let mut command_commit = RuntimeCommit::persisted_state_for_test(&state);
+    command_commit.drive_fence = Some(Box::new(fence.clone()));
+    command_commit.applied_commands = Some(lash_core_execution::runtime::QueuedWorkCompletion {
+        session_id: session.clone(),
+        batch_ids: vec![command.batch_id.clone()],
+    });
+    let command_receipt = store
+        .commit_runtime_state(command_commit)
+        .await
+        .expect("apply the admitted command under its drive fence");
+    state.head_revision = command_receipt.head_revision;
+    assert_eq!(
+        store
+            .queued_work_batch_completion(&session, &command.batch_id)
+            .await
+            .expect("read the applied command's completion")
+            .expect("the fenced command commit records its receipt")
+            .head_revision,
+        command_receipt.head_revision,
+        "the command and session head settle in the same commit"
     );
 
     let root = TurnId::from("clock-contract-root");
@@ -444,12 +528,6 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     settlement
         .completed_inputs
         .push(checkpoint_inputs.completion());
-    let state = RuntimeSessionState {
-        session_id: session.clone(),
-        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-        ))
-    };
     let mut commit = lash_core_execution::testing::store_fixtures::settling_commit_for_test(
         RuntimeCommit::persisted_state_for_test(&state),
         &fence,
