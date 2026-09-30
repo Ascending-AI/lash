@@ -125,6 +125,15 @@ endpoints = ["HSW"]
 shards = 1
 timeout_seconds = 420
 
+# The load delete's cleanup replays its recorded listing after a child appears.
+[suites.workload-delete]
+label = "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test"
+cwd = "runbooks/restate-postgres-workers"
+filters = ["load::worker::cleanup_tests::live_restate_"]
+endpoints = ["WDP"]
+shards = 1
+timeout_seconds = 180
+
 [suites.public-process-command]
 label = "//crates/lash:integration__test"
 cwd = "crates/lash"
