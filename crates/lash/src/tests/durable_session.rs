@@ -93,6 +93,238 @@ fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
     .build(crate::testing::runtime_lease_owner())
 }
 
+#[derive(Clone, Copy)]
+enum CatalogFailure {
+    Contended,
+    Unsupported,
+}
+
+impl CatalogFailure {
+    fn error(self) -> StoreError {
+        match self {
+            Self::Contended => StoreError::Contended,
+            Self::Unsupported => StoreError::UnsupportedStoreOperation {
+                operation: "lookup_session",
+            },
+        }
+    }
+
+    fn is_preserved(self, error: &EmbedError) -> bool {
+        let typed = match (self, error) {
+            (Self::Contended, EmbedError::Store(StoreError::Contended)) => true,
+            (
+                Self::Unsupported,
+                EmbedError::Store(StoreError::UnsupportedStoreOperation { operation }),
+            ) => *operation == "lookup_session",
+            _ => false,
+        };
+        typed && error.is_retryable() == matches!(self, Self::Contended)
+    }
+}
+
+struct FailingCatalog {
+    inner: Arc<dyn DeploymentStore>,
+    failure: CatalogFailure,
+    enabled: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait]
+impl lash_core::store::RuntimeStoreDecorator for FailingCatalog {
+    type Inner = dyn DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
+    }
+
+    async fn lookup_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<lash_core::store::SessionLookup, StoreError> {
+        if self.enabled.load(Ordering::SeqCst) {
+            Err(self.failure.error())
+        } else {
+            self.inner.lookup_session(session_id).await
+        }
+    }
+}
+
+impl lash_core::DeploymentStoreDecorator for FailingCatalog {}
+
+async fn catalog_failure_matrix(failure: CatalogFailure) -> Result<()> {
+    let double = restate_double(SEED).await;
+    let failing = Arc::new(FailingCatalog {
+        inner: double.lash_backend().session_store_factory(),
+        failure,
+        enabled: std::sync::atomic::AtomicBool::new(false),
+    });
+    let (backend, counts) = counting_factory(
+        &DecoratedBackend::over(double.lash_backend())
+            .session_store_factory({
+                let failing = Arc::clone(&failing);
+                move |_| failing
+            })
+            .into(),
+        0,
+    );
+    let core = counting_core(backend)?;
+    crate::tests::create_catalog_session(&core, "catalog-failure").await?;
+    counts.admissions.store(0, Ordering::SeqCst);
+    counts.by_id_opens.store(0, Ordering::SeqCst);
+    failing.enabled.store(true, Ordering::SeqCst);
+    let durable = core.session("catalog-failure").durable().await?;
+    let results = [
+        (
+            "live open",
+            core.session("catalog-failure").open().await.map(drop),
+        ),
+        (
+            "durable acquisition",
+            durable.pending_turn_inputs().await.map(drop),
+        ),
+        ("tombstone read", durable.was_deleted().await.map(drop)),
+        (
+            "process session scope",
+            core.processes()
+                .session_scope(&SessionId::from("catalog-failure"))
+                .await
+                .map(drop),
+        ),
+    ];
+    let failures = results
+        .into_iter()
+        .filter_map(|(api, result)| match result {
+            Err(error) if failure.is_preserved(&error) => None,
+            other => Some(format!("{api}: {other:?}")),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(counts.admissions.load(Ordering::SeqCst), 0);
+    assert_eq!(counts.by_id_opens.load(Ordering::SeqCst), 4);
+    assert!(
+        failures.is_empty(),
+        "catalog failures lost their typed carrier or retryability: {failures:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn catalog_contention_retains_its_type_and_retryability_across_existing_session_apis()
+-> Result<()> {
+    catalog_failure_matrix(CatalogFailure::Contended).await
+}
+
+#[tokio::test]
+async fn unsupported_catalog_lookup_retains_its_operation_across_existing_session_apis()
+-> Result<()> {
+    catalog_failure_matrix(CatalogFailure::Unsupported).await
+}
+
+#[tokio::test]
+async fn existing_session_apis_preserve_absence_and_tombstones_without_creating() -> Result<()> {
+    let double = restate_double(SEED).await;
+    let (backend, counts) = counting_factory(&double.lash_backend(), 0);
+    let core = counting_core(backend)?;
+    crate::tests::create_catalog_session(&core, "catalog-deleted").await?;
+    lash_core::SessionCatalogStore::delete_session(
+        counts.as_ref(),
+        &SessionId::from("catalog-deleted"),
+    )
+    .await
+    .expect("delete the catalog session");
+    counts.admissions.store(0, Ordering::SeqCst);
+    for (id, deleted) in [("catalog-absent", false), ("catalog-deleted", true)] {
+        let session_id = SessionId::from(id);
+        let open_error = core
+            .session(id)
+            .open()
+            .await
+            .err()
+            .expect("open refuses the id");
+        let durable = core.session(id).durable().await?;
+        let acquisition_error = durable
+            .pending_turn_inputs()
+            .await
+            .expect_err("acquisition refuses the id");
+        for error in [open_error, acquisition_error] {
+            if deleted {
+                assert!(
+                    matches!(error, EmbedError::Store(StoreError::SessionDeleted { session_id: found }) if found == session_id)
+                );
+            } else {
+                assert!(
+                    matches!(error, EmbedError::UnknownSession { session_id: found } if found == session_id)
+                );
+            }
+        }
+        assert_eq!(durable.was_deleted().await?, deleted);
+        assert!(!durable.exists().await?);
+        assert!(durable.read().await?.is_none());
+        assert!(
+            matches!(core.processes().session_scope(&session_id).await, Err(EmbedError::UnknownSession { session_id: found }) if found == session_id)
+        );
+    }
+    assert_eq!(counts.admissions.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_acquisition_retries_contention_once_for_clones_and_reuses_bound_stores()
+-> Result<()> {
+    let double = restate_double(SEED).await;
+    let failing = Arc::new(FailingCatalog {
+        inner: double.lash_backend().session_store_factory(),
+        failure: CatalogFailure::Contended,
+        enabled: std::sync::atomic::AtomicBool::new(false),
+    });
+    let (backend, counts) = counting_factory(
+        &DecoratedBackend::over(double.lash_backend())
+            .session_store_factory({
+                let failing = Arc::clone(&failing);
+                move |_| failing
+            })
+            .into(),
+        20,
+    );
+    let core = counting_core(backend)?;
+    let bound = core
+        .session("retry-acquisition")
+        .create(crate::SessionCreation::default())
+        .await?;
+    let durable = core.session("retry-acquisition").durable().await?;
+    counts.admissions.store(0, Ordering::SeqCst);
+    counts.by_id_opens.store(0, Ordering::SeqCst);
+    failing.enabled.store(true, Ordering::SeqCst);
+    let error = durable
+        .pending_turn_inputs()
+        .await
+        .expect_err("first lookup is contended");
+    assert!(CatalogFailure::Contended.is_preserved(&error), "{error:?}");
+    bound.pending_turn_inputs().await?;
+    assert_eq!(
+        counts.by_id_opens.load(Ordering::SeqCst),
+        1,
+        "bound store bypasses lookup"
+    );
+    failing.enabled.store(false, Ordering::SeqCst);
+    let mut tasks = Vec::new();
+    for _ in 0..5 {
+        let durable = durable.clone();
+        tasks.push(tokio::spawn(
+            async move { durable.pending_turn_inputs().await },
+        ));
+    }
+    for task in tasks {
+        task.await.expect("clone lookup task")?;
+    }
+    durable.queued_work().await?;
+    assert_eq!(
+        counts.by_id_opens.load(Ordering::SeqCst),
+        2,
+        "one failed and one successful acquisition across clones"
+    );
+    assert_eq!(counts.admissions.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
 #[tokio::test]
 async fn durable_acquisition_is_non_creating_and_happens_once_per_handle() -> Result<()> {
     let double = restate_double(SEED).await;
@@ -1060,7 +1292,7 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
-    // The session genuinely exists: this open created it.
+    // The session exists because create wrote its catalog metadata.
     crate::tests::create_catalog_session(&core, "no-by-id-seam").await?;
 
     let durable = core.session("no-by-id-seam").durable().await?;
@@ -1073,15 +1305,8 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
         .await
         .expect_err("a catalog that cannot resolve by id refuses the acquisition");
     match &error {
-        EmbedError::StoreFactory {
-            session_id,
-            message,
-        } => {
-            assert_eq!(session_id.as_str(), "no-by-id-seam");
-            assert!(
-                message.contains(NO_BY_ID_LOOKUP_OPERATION),
-                "the error names the missing capability, got {message}"
-            );
+        EmbedError::Store(StoreError::UnsupportedStoreOperation { operation }) => {
+            assert_eq!(*operation, NO_BY_ID_LOOKUP_OPERATION);
         }
         other => {
             panic!("a missing by-id seam must not be reported as an absent session, got {other:?}")

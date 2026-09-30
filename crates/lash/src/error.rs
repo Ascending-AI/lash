@@ -48,12 +48,6 @@ pub enum EmbedError {
     )]
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
-    #[error("failed to create store for session `{session_id}`: {message}")]
-    StoreFactory {
-        /// Session whose store could not be created.
-        session_id: SessionId,
-        message: String,
-    },
     /// Session-store deletion stopped after witnessing some reclaim progress.
     ///
     /// The typed failure preserves the partial storage report required by ADR
@@ -299,7 +293,6 @@ impl EmbedError {
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
-            | Self::StoreFactory { .. }
             | Self::SessionDeleteStorage { .. }
             | Self::Store(_)
             | Self::StoreSessionMismatch { .. }
@@ -368,8 +361,7 @@ impl EmbedError {
             | Self::Session(SessionError::ProviderUnavailable { .. })
             | Self::Session(SessionError::CodeExecutionUnavailable) => true,
             Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
-            Self::StoreFactory { .. }
-            | Self::SessionDeleteStorage { .. }
+            Self::SessionDeleteStorage { .. }
             | Self::SessionDeleteProcess { .. }
             | Self::SessionStillInUse
             | Self::TraceFlush(_)

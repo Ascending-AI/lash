@@ -37,7 +37,7 @@
 //!
 //! A catalog that cannot resolve a session by id at all is a different answer
 //! from a session that is not there: it surfaces as
-//! [`EmbedError::StoreFactory`] carrying the implementor's reason, never as
+//! [`EmbedError::Store`] preserving the typed catalog error, never as
 //! [`EmbedError::UnknownSession`], so a host is not sent looking for a session
 //! that exists.
 //!
@@ -193,34 +193,7 @@ impl DurableSession {
         if let DurableAcquisition::Bound(store) = &self.acquisition {
             return Ok(store.clone());
         }
-        // `lookup_session` keeps its answers apart: `Err` is a catalog that
-        // could not answer, and surfaces as `StoreFactory`; `Deleted` and
-        // `Absent` are answers (ADR 0112 §1.1).
-        let lookup = self
-            .catalog
-            .lookup_session(&self.session_id)
-            .await
-            .map_err(|error| EmbedError::StoreFactory {
-                session_id: self.session_id.clone(),
-                message: error.to_string(),
-            })?;
-        match lookup {
-            lash_core::store::SessionLookup::Live(_) => {
-                let runtime: Arc<dyn lash_core::store::RuntimeStore> = self.catalog.clone();
-                Ok(lash_core::store::SessionStore::new(
-                    runtime,
-                    self.session_id.clone(),
-                )?)
-            }
-            lash_core::store::SessionLookup::Deleted => {
-                Err(EmbedError::Store(lash_core::StoreError::SessionDeleted {
-                    session_id: self.session_id.clone(),
-                }))
-            }
-            lash_core::store::SessionLookup::Absent => Err(EmbedError::UnknownSession {
-                session_id: self.session_id.clone(),
-            }),
-        }
+        crate::session::resolve_existing_session(&self.catalog, &self.session_id).await
     }
 
     /// Used only by the settled reads, whose job is to report absence.
@@ -445,9 +418,6 @@ impl DurableSession {
             .lookup_session(&self.session_id)
             .await
             .map(|lookup| matches!(lookup, lash_core::store::SessionLookup::Deleted))
-            .map_err(|error| EmbedError::StoreFactory {
-                session_id: self.session_id.clone(),
-                message: error.to_string(),
-            })
+            .map_err(EmbedError::Store)
     }
 }

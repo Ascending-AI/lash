@@ -388,7 +388,7 @@ pub use lash_core_execution::runtime::{
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, RuntimeTurnPhaseProbeSlot,
     TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent, admit_session_state_generation,
     admit_session_view, live_session_view, park_turn_of_refused_group_child,
-    park_turn_refused_by_generation,
+    park_turn_refused_by_generation, session_is_live,
 };
 
 mod normalized_item {

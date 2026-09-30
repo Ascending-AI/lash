@@ -395,17 +395,9 @@ impl Processes {
     }
 
     async fn require_live_session(&self, session_id: &SessionId) -> Result<()> {
-        let live = matches!(
-            self.core
-                .store_factory
-                .lookup_session(session_id)
-                .await
-                .map_err(|error| EmbedError::StoreFactory {
-                    session_id: session_id.clone(),
-                    message: error.to_string(),
-                })?,
-            lash_core::store::SessionLookup::Live(_)
-        );
+        let live =
+            lash_core::runtime::session_is_live(self.core.store_factory.as_ref(), session_id)
+                .await?;
         if live {
             Ok(())
         } else {
