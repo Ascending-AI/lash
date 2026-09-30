@@ -1,6 +1,7 @@
 use super::*;
 
 const SEED: u64 = 0x5c_f109;
+use lash_core::Backend;
 use lash_sansio::SessionId;
 
 struct ShutdownRecordingPluginFactory {
@@ -440,4 +441,130 @@ finish("done");"#,
         }
         Ok(())
     })
+}
+
+struct BuilderSentinelTools {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait]
+impl ToolProvider for BuilderSentinelTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        AppTools.tool_manifests()
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        AppTools.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        AppTools.execute(call).await
+    }
+}
+
+async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend) -> Result<()> {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let responses = Arc::new(TokioMutex::new(VecDeque::from_iter((0..3).flat_map(
+        |turn| {
+            [
+                LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: format!("sentinel-{turn}"),
+                        tool_name: "app_lookup".to_string(),
+                        input_json: "{}".to_string(),
+                        replay: None,
+                    }],
+                    ..LlmResponse::default()
+                },
+                LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "done".to_string(),
+                        response_meta: None,
+                    }],
+                    ..LlmResponse::default()
+                },
+            ]
+        },
+    ))));
+    let provider = crate::testing::TestProvider::builder()
+        .complete(move |_| {
+            let responses = Arc::clone(&responses);
+            async move {
+                Ok(responses
+                    .lock()
+                    .await
+                    .pop_front()
+                    .expect("scripted response"))
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .tools(Arc::new(BuilderSentinelTools {
+        calls: Arc::clone(&calls),
+    }))
+    .plugin(Arc::new(SurfacePluginFactory))
+    .build(crate::testing::runtime_lease_owner())?;
+    let id = "builder-sentinels";
+    let mut session = core.session(id).created().await.open().await?;
+    for turn in 0..3 {
+        let events = RecordingEvents::default();
+        session
+            .send(TurnInput::text("probe"))
+            .output_into(&events)
+            .await?;
+        settle_session_drive(&core, id).await;
+        let hook_invoked = events.snapshot().await.into_iter().any(|event| {
+            matches!(
+                event.event,
+                TurnEvent::PluginRuntime { plugin_id, .. } if plugin_id == "surface_test"
+            )
+        });
+        assert_eq!(
+            (
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                hook_invoked
+            ),
+            (turn + 1, true),
+            "configured tool and hook must run before and after session rematerialization"
+        );
+        if turn == 0 {
+            session = core.resume(session.park().await?).await?;
+        } else if turn == 1 {
+            session.close().await?;
+            session = core.session(id).open().await?;
+        }
+    }
+    session.close().await?;
+    core.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn builder_configured_tools_and_hooks_are_never_discarded_on_sqlite() -> Result<()> {
+    builder_configured_tools_and_hooks_are_never_discarded(double_backend().await).await
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn builder_configured_tools_and_hooks_are_never_discarded_on_postgres() -> Result<()> {
+    let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("PostgreSQL gate URL");
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    )) as Arc<dyn lash_core::StoreSet>;
+    let backend =
+        double_backend_over(lash_restate_test::ServerConfig::default(), move |_| stores).await;
+    builder_configured_tools_and_hooks_are_never_discarded(backend).await
 }

@@ -994,7 +994,6 @@ pub mod durability {
 
 /// Runtime events, errors, and execution controls.
 pub mod runtime {
-    pub use crate::core::AdvancedLashCoreBuilder;
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;

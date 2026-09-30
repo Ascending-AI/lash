@@ -1,0 +1,5 @@
+error[E0599]: no method named `advanced` found for struct `LashCoreBuilder` in the current scope
+ --> tests/ui/core_builder_plugin_host_is_removed.rs:4:21
+  |
+4 |     let _ = builder.advanced().plugin_host(host);
+  |                     ^^^^^^^^ method not found in `LashCoreBuilder`

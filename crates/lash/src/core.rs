@@ -11,7 +11,6 @@ use lash_core::facade_support;
 use lash_core_worker::DurableProcessWorkerConfig;
 use lash_sansio::SessionId;
 
-mod advanced_builder;
 mod drain;
 pub(crate) mod held_drives;
 mod recovery;
@@ -22,7 +21,6 @@ mod session_policy;
 mod tool_child_context;
 mod work_drivers;
 
-pub use advanced_builder::AdvancedLashCoreBuilder;
 pub use drain::{DeploymentDrainStatus, GenerationDrainStatus};
 use session_driver::{CoreSessionDriver, CoreSessionDriverConfig};
 pub(crate) use work_drivers::ResolvedQueuedWork;
@@ -400,9 +398,8 @@ impl LashCore {
     ///
     /// Every factory is visited even after failures. Each failure is warned and
     /// the first is returned after the walk. Implementations own their timeout
-    /// policy and must make repeated shutdown calls idempotent. Factories added
-    /// through [`AdvancedLashCoreBuilder::plugin_host`] are included. Extra
-    /// factories supplied only to durable-process-worker configuration or to an
+    /// policy and must make repeated shutdown calls idempotent. Extra factories
+    /// supplied only to durable-process-worker configuration or to an
     /// individual session are host-owned and are not walked by this method.
     pub async fn shutdown(&self) -> Result<()> {
         // A stopping deployment hands recovery leadership over now rather
@@ -770,7 +767,6 @@ pub struct LashCoreBuilder {
     abort_drain_grace: Option<std::time::Duration>,
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
-    plugin_host: Option<PluginHost>,
     recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
     recovery_pass: lash_core::engine::RecoveryPassBudget,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
@@ -801,7 +797,6 @@ impl LashCoreBuilder {
             abort_drain_grace: None,
             tool_providers: Vec::new(),
             plugin_stack: PluginStack::default(),
-            plugin_host: None,
             recovery_lease: None,
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
@@ -1006,7 +1001,7 @@ impl LashCoreBuilder {
     /// turn. The incarnation id changes once per process boot.
     pub fn build(mut self, drive_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
         let protocol_factory = self.protocol_factory.clone();
-        if protocol_factory.is_none() && self.plugin_host.is_none() {
+        if protocol_factory.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
         }
         let provider_id = self
@@ -1061,21 +1056,17 @@ impl LashCoreBuilder {
                 .watched()
                 .add_event_sink(Arc::clone(&process_event_sink)),
         ));
-        let plugin_factories = if let Some(plugin_host) = self.plugin_host {
-            plugin_host.factories().to_vec()
-        } else {
-            let mut factories = Vec::new();
-            if !self.tool_providers.is_empty() {
-                let spec = self
-                    .tool_providers
-                    .into_iter()
-                    .fold(PluginSpec::new(), PluginSpec::with_tool_provider);
-                factories.push(Arc::new(StaticPluginFactory::new("embed_tools", spec))
+        let mut plugin_factories = Vec::new();
+        if !self.tool_providers.is_empty() {
+            let spec = self
+                .tool_providers
+                .into_iter()
+                .fold(PluginSpec::new(), PluginSpec::with_tool_provider);
+            plugin_factories
+                .push(Arc::new(StaticPluginFactory::new("embed_tools", spec))
                     as Arc<dyn PluginFactory>);
-            }
-            factories.extend(self.plugin_stack.into_factories());
-            factories
-        };
+        }
+        plugin_factories.extend(self.plugin_stack.into_factories());
         refuse_foreign_backend_factories(
             &backend,
             protocol_factory.iter().chain(plugin_factories.iter()),
@@ -1234,10 +1225,6 @@ impl LashCoreBuilder {
         })));
         let installed = install_session_driver(session_work, driver.clone(), &owner);
         (driver, installed)
-    }
-
-    pub fn advanced(self) -> AdvancedLashCoreBuilder {
-        AdvancedLashCoreBuilder { builder: self }
     }
 
     /// Bounds of the process observation hub: its per-process ring capacity

@@ -187,16 +187,6 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
     .expect("build through the standard builder");
     paths.push(("standard_builder", core, passes));
 
-    let (backend, passes) = recorded_backend().await;
-    let core = configured(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-    ))
-    .advanced()
-    .build(owner())
-    .expect("build through the advanced builder");
-    paths.push(("advanced", core, passes));
-
     #[cfg(feature = "rlm")]
     {
         let (backend, passes) = recorded_backend().await;

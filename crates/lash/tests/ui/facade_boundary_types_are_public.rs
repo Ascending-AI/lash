@@ -25,7 +25,6 @@ use lash::plugins::{
     ReplaceToolArgsDirective, ToolCallHookContext, ToolCatalogContribution, ToolResultHookContext,
 };
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
-use lash::runtime::AdvancedLashCoreBuilder;
 use lash::tools::{ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::{TokenLedgerEntry, TokenUsage};
@@ -157,11 +156,12 @@ fn generation_disposition_is_readable(
     Some((disposition, requested_temperature_survived))
 }
 
-fn advanced_builder_accepts_a_plugin_host(
-    builder: AdvancedLashCoreBuilder,
-    plugin_host: lash::plugins::PluginHost,
-) -> AdvancedLashCoreBuilder {
-    builder.plugin_host(plugin_host)
+fn builder_accepts_tools_and_plugins(
+    builder: lash::LashCoreBuilder,
+    tools: Arc<dyn lash::tools::ToolProvider>,
+    plugin: Arc<dyn lash::plugins::PluginFactory>,
+) -> lash::LashCoreBuilder {
+    builder.tools(tools).plugin(plugin)
 }
 
 fn a_core_is_built_over_one_backend(backend: lash::Backend) -> lash::LashCoreBuilder {
@@ -341,7 +341,7 @@ fn main() {
     let _ = direct_response_type_is_nameable;
     let _ = direct_payload_types_are_nameable;
     let _ = generation_option_types_are_nameable;
-    let _ = advanced_builder_accepts_a_plugin_host;
+    let _ = builder_accepts_tools_and_plugins;
     let _ = a_core_is_built_over_one_backend;
     let _ = tool_contract_types_are_nameable;
     let _ = tool_catalog_types_are_nameable;
