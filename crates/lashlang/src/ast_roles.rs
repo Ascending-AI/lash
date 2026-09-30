@@ -76,6 +76,11 @@ pub enum StructuralRole {
     /// `operation` is the front end's name for the transform; structure never
     /// depends on it. See [`CollectionTransformParts`].
     CollectionTransform { operation: AstString },
+    /// A recursive JSON value traversal. The block binds its input and
+    /// options, then runs a traversal or dispatches to it. This role is
+    /// display metadata: its children and execution hashes are those of the
+    /// block, so adding it preserves existing execution identities.
+    JsonTraversal,
     /// The process failure wrapper around an authored run body. `expr` is
     /// `Try { body: Finish(Call { function: run, args }), catch e: Fail(e) }`,
     /// where `run` is a `Function` or a builtin call whose first argument is
@@ -101,6 +106,15 @@ pub(super) fn check_program_roles(program: &Program) -> Result<(), InvalidAst> {
 }
 
 impl StructuralRole {
+    /// The wrapped expression's execution path. The JSON display role keeps
+    /// its block's existing path; other roles contribute a wrapper node.
+    pub(crate) fn inner_path(&self, path: &AstPath) -> AstPath {
+        match self {
+            Self::JsonTraversal => path.clone(),
+            _ => path.child(0),
+        }
+    }
+
     /// The role's name as diagnostics and hashes spell it.
     pub fn name(&self) -> &'static str {
         match self {
@@ -108,6 +122,7 @@ impl StructuralRole {
             Self::Completion => "completion",
             Self::AttributeAssign => "attribute_assign",
             Self::CollectionTransform { .. } => "collection_transform",
+            Self::JsonTraversal => "json_traversal",
             Self::ProcessWrapper => "process_wrapper",
         }
     }
@@ -139,6 +154,13 @@ impl StructuralRole {
             Self::ProcessWrapper => process_wrapper_run_path(expr)
                 .map(|_| ())
                 .ok_or_else(|| malformed("a process wrapper finishes with its run call and fails with what it catches")),
+            Self::JsonTraversal => match expr {
+                Expr::Block(items) if items.len() >= 2
+                    && items[..items.len() - 1].iter().all(|item|
+                        matches!(item, Expr::Assign { target, .. } if target.is_simple()))
+                    && matches!(items.last(), Some(Expr::If { .. } | Expr::Block(_))) => Ok(()),
+                _ => Err(malformed("a JSON traversal binds its input and options before running its traversal")),
+            },
         }
     }
 }
@@ -519,6 +541,7 @@ pub const LIFTED_PROCESS_NAME_PREFIX: &str = "__process_";
 /// Domain v2 (FIG-3571): the preimage serializes the carrier IR body, so the
 /// same source lifts to a different name than under v1; v1 stays reserved.
 pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
+    let body = without_json_traversal_roles(body);
     let preimage = serde_json::json!({
         "body": body,
         "path": path,
@@ -528,6 +551,43 @@ pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
         preimage.to_string(),
     );
     format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")
+}
+
+/// The execution preimage predates the JSON display role. Keep the stored
+/// role while omitting it from the lifted-process name's serialized body.
+fn without_json_traversal_roles(body: &Expr) -> std::borrow::Cow<'_, Expr> {
+    let mut pending = vec![body];
+    let mut found = false;
+    while let Some(expr) = pending.pop() {
+        if matches!(
+            expr,
+            Expr::Role {
+                role: StructuralRole::JsonTraversal,
+                ..
+            }
+        ) {
+            found = true;
+            break;
+        }
+        pending.extend(expr.children());
+    }
+    if !found {
+        return std::borrow::Cow::Borrowed(body);
+    }
+    struct ExecutionBody;
+    impl crate::ExprFolder for ExecutionBody {
+        fn fold_expr(&mut self, expr: Expr) -> Expr {
+            match expr {
+                Expr::Role {
+                    role: StructuralRole::JsonTraversal,
+                    expr,
+                } => self.fold_expr(*expr),
+                expr => crate::fold_expr_children(self, expr),
+            }
+        }
+    }
+    use crate::ExprFolder;
+    std::borrow::Cow::Owned(ExecutionBody.fold_expr(body.clone()))
 }
 
 impl Program {

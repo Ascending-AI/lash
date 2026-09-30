@@ -1247,8 +1247,10 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             write_expr(writer, body);
         }
         Expr::Role { role, expr } => {
-            writer.atom("role");
-            write_structural_role(writer, role);
+            if !matches!(role, crate::StructuralRole::JsonTraversal) {
+                writer.atom("role");
+                write_structural_role(writer, role);
+            }
             write_expr(writer, expr);
         }
         Expr::While { condition, body } => {

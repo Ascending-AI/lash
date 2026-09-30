@@ -1017,7 +1017,11 @@ impl<'p> Printer<'p> {
                     args
                 ))
             }
-            Expr::Block(_) => Err(TypeScriptSourceError::Unrepresentable {
+            Expr::Block(_)
+            | Expr::Role {
+                role: StructuralRole::JsonTraversal,
+                ..
+            } => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a block in expression position",
             }),
             Expr::Role { .. } => Err(TypeScriptSourceError::Unrepresentable {

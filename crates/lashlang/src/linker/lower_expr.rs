@@ -100,8 +100,9 @@ impl<'module> Linker<'module> {
                 self.lower_label_annotated(path, label, inner, scope, expected)
             }
             Expr::Role { role, expr: inner } => {
+                let inner_path = role.inner_path(path);
                 let (inner, binding) =
-                    self.lower_expr_expected(inner, &path.child(0), scope, expected)?;
+                    self.lower_expr_expected(inner, &inner_path, scope, expected)?;
                 Ok((
                     Expr::Role {
                         role: role.clone(),

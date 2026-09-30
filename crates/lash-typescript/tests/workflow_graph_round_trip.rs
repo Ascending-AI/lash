@@ -133,18 +133,166 @@ fn nested_json_stringify_round_trips() {
 }
 
 #[test]
+fn json_traversal_has_an_explicit_role() {
+    let expression =
+        parse_typescript_expression("JSON.stringify({a: 1})", &BTreeSet::new(), &BTreeSet::new())
+            .expect("JSON call lowers");
+    assert!(matches!(expression, lashlang::Expr::Role { role, .. }
+        if role.name() == "json_traversal"));
+}
+
+#[test]
+fn unmarked_json_traversal_is_not_sugared() {
+    let expression =
+        parse_typescript_expression("JSON.stringify({a: 1})", &BTreeSet::new(), &BTreeSet::new())
+            .expect("JSON call lowers");
+    let unmarked = match expression {
+        lashlang::Expr::Role { expr, .. } => *expr,
+        expression => expression,
+    };
+    assert!(typescript_expression_source(&unmarked).is_err());
+}
+
+#[test]
+fn json_traversal_printing_does_not_depend_on_binding_names() {
+    use lashlang::{AstString, Expr, ExprFolder, fold_expr_children};
+    struct Rename;
+    impl ExprFolder for Rename {
+        fn fold_expr(&mut self, mut expression: Expr) -> Expr {
+            let rename = |name: &mut AstString| *name = format!("renamed_{name}").into();
+            match &mut expression {
+                Expr::Variable(name) => rename(name),
+                Expr::Assign { target, .. } => rename(&mut target.root),
+                Expr::For { binding, .. } => rename(binding),
+                Expr::Function(function) => {
+                    for name in function
+                        .name
+                        .iter_mut()
+                        .chain(function.receiver.iter_mut())
+                        .chain(function.params.iter_mut())
+                        .chain(function.captures.iter_mut())
+                    {
+                        rename(name);
+                    }
+                }
+                _ => {}
+            }
+            fold_expr_children(self, expression)
+        }
+    }
+    let expression =
+        parse_typescript_expression("JSON.stringify({a: 1})", &BTreeSet::new(), &BTreeSet::new())
+            .expect("JSON call lowers");
+    let expected = typescript_expression_source(&expression).expect("original traversal prints");
+    assert_eq!(
+        typescript_expression_source(&Rename.fold_expr(expression))
+            .expect("renamed traversal prints"),
+        expected
+    );
+}
+
+#[test]
+fn malformed_json_traversal_roles_are_refused() {
+    use lashlang::Expr;
+    let mut expression =
+        parse_typescript_expression("JSON.stringify(1)", &BTreeSet::new(), &BTreeSet::new())
+            .expect("JSON call lowers");
+    let Expr::Role { expr, .. } = &mut expression else {
+        panic!("JSON role");
+    };
+    **expr = Expr::Undefined;
+    let mut program = parse("finish(1);").expect("program parses");
+    program.main = expression.clone();
+    assert!(matches!(
+        lashlang::validate_ast(&program),
+        Err(lashlang::InvalidAst::MalformedRole {
+            role: "json_traversal",
+            ..
+        })
+    ));
+    assert!(typescript_expression_source(&expression).is_err());
+}
+
+#[test]
+fn json_traversal_roles_preserve_execution_identities() {
+    use lashlang::{Expr, ExprFolder, fold_expr_children};
+    struct ExecutionBody;
+    impl ExprFolder for ExecutionBody {
+        fn fold_expr(&mut self, expression: Expr) -> Expr {
+            match expression {
+                Expr::Role { role, expr } if role.name() == "json_traversal" => {
+                    self.fold_expr(*expr)
+                }
+                expression => fold_expr_children(self, expression),
+            }
+        }
+    }
+    for source in [
+        "finish(JSON.stringify({a: 1}));",
+        "const a = JSON.stringify({text: JSON.stringify([1])}); finish(a);",
+    ] {
+        let program = parse(source).expect("source parses");
+        let mut legacy = program.clone();
+        legacy.main = ExecutionBody.fold_expr(legacy.main);
+        let original =
+            lashlang::ModuleArtifact::from_program(legacy.clone()).expect("legacy admits");
+        let marked =
+            lashlang::ModuleArtifact::from_program(program.clone()).expect("marked admits");
+        assert_eq!(marked.module_ref(), original.module_ref());
+        assert_eq!(marked.source_identity(), original.source_identity());
+        assert_eq!(
+            lashlang::lifted_process_identity(&program.main, &[2, 3]),
+            lashlang::lifted_process_identity(&legacy.main, &[2, 3])
+        );
+        let compile = lashlang::testing::harness::compile_program;
+        let marked_compiled = compile(&program);
+        let legacy_compiled = compile(&legacy);
+        assert_eq!(
+            lashlang::testing::harness::compiled_execution_sites(&marked_compiled),
+            lashlang::testing::harness::compiled_execution_sites(&legacy_compiled)
+        );
+        let linked = lashlang::testing::harness::link_labeled(program);
+        let legacy_linked = lashlang::testing::harness::link_labeled(legacy);
+        assert_eq!(
+            linked.artifact.module_ref(),
+            legacy_linked.artifact.module_ref()
+        );
+    }
+}
+
+#[test]
 fn edited_json_traversals_are_refused() {
     use lashlang::Expr;
-    for edit in 0..4 {
+    for edit in 0..5 {
         let mut expression = parse_typescript_expression(
             "JSON.stringify({a: 1})",
             &BTreeSet::new(),
             &BTreeSet::new(),
         )
         .expect("JSON call lowers");
-        let Expr::Block(prefix) = &mut expression else {
+        let Expr::Role { expr, .. } = &mut expression else {
+            panic!("JSON role")
+        };
+        let Expr::Block(prefix) = expr.as_mut() else {
             panic!("JSON prefix")
         };
+        if edit == 4 {
+            let Expr::If { condition, .. } = prefix.last_mut().expect("dispatch") else {
+                panic!("JSON dispatch")
+            };
+            let Expr::JavaScriptBinary { left, .. } = condition.as_mut() else {
+                panic!("JSON dispatch condition")
+            };
+            let Expr::BuiltinCall { args, .. } = left.as_mut() else {
+                panic!("container classification")
+            };
+            args[1] = Expr::Variable("binding_0".into());
+            assert!(
+                typescript_expression_source(&expression).is_err(),
+                "an unbound name must not alias a normalized binding"
+            );
+            continue;
+        }
         let Expr::If { else_block, .. } = prefix.last_mut().expect("dispatch") else {
             panic!("JSON dispatch")
         };

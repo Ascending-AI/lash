@@ -802,6 +802,13 @@ impl Expr {
                 buffer.push(condition);
                 buffer.push(body);
             }
+            Expr::Role {
+                role: StructuralRole::JsonTraversal,
+                expr,
+            } => match expr.as_ref() {
+                Expr::Block(expressions) => buffer.extend(expressions.iter()),
+                _ => buffer.push(expr),
+            },
             Expr::Role { expr, .. } => buffer.push(expr),
             Expr::HostDescriptorConstructor { input, .. } => buffer.push(input),
             Expr::ReceiverCall { receiver, args, .. } => {
@@ -934,6 +941,13 @@ impl Expr {
                 buffer.push(condition);
                 buffer.push(body);
             }
+            Expr::Role {
+                role: StructuralRole::JsonTraversal,
+                expr,
+            } => match expr.as_mut() {
+                Expr::Block(expressions) => buffer.extend(expressions.iter_mut()),
+                inner => buffer.push(inner),
+            },
             Expr::Role { expr, .. } => buffer.push(expr),
             Expr::HostDescriptorConstructor { input, .. } => buffer.push(input),
             Expr::ReceiverCall { receiver, args, .. } => {

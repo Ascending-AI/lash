@@ -352,7 +352,10 @@ impl Lowerer {
                 else_block: Box::new(guest_traversal),
             });
         }
-        Ok(LashExpr::Block(prefix))
+        Ok(LashExpr::Role {
+            role: lashlang::StructuralRole::JsonTraversal,
+            expr: Box::new(LashExpr::Block(prefix)),
+        })
     }
 }
 

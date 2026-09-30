@@ -1418,6 +1418,22 @@
         },
         {
           "additionalProperties": false,
+          "description": "A recursive JSON value traversal. The block binds its input and options, then runs a traversal or dispatches to it. This role is display metadata: its children and execution hashes are those of the block, so adding it preserves existing execution identities.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "json_traversal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The process failure wrapper around an authored run body. `expr` is `Try { body: Finish(Call { function: run, args }), catch e: Fail(e) }`, where `run` is a `Function` or a builtin call whose first argument is one; the run function's body is the authored process body.",
           "properties": {
             "kind": {

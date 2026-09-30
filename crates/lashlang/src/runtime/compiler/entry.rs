@@ -492,7 +492,10 @@ impl Compiler {
                 }
                 self.compile_expr_discarding_value(expr, &path.child(0));
             }
-            Expr::Role { expr, .. } => self.compile_expr_discarding_value(expr, &path.child(0)),
+            Expr::Role { role, expr } => {
+                let inner_path = role.inner_path(path);
+                self.compile_expr_discarding_value(expr, &inner_path);
+            }
             Expr::Block(expressions) => {
                 for (index, expression) in expressions.iter().enumerate() {
                     self.compile_expr_discarding_value(expression, &path.child(index as u32));

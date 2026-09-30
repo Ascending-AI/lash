@@ -371,6 +371,9 @@ export type StructuralRole =
       operation: string;
     }
   | {
+      kind: 'json_traversal';
+    }
+  | {
       kind: 'process_wrapper';
     };
 /**

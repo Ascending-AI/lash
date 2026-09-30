@@ -243,7 +243,10 @@ impl Compiler {
                 }
                 self.compile_expr(expr, &path.child(0));
             }
-            Expr::Role { expr, .. } => self.compile_expr(expr, &path.child(0)),
+            Expr::Role { role, expr } => {
+                let inner_path = role.inner_path(path);
+                self.compile_expr(expr, &inner_path);
+            }
             Expr::Block(expressions) => self.compile_block_value(expressions, path),
             Expr::Assign { target, expr } => self.compile_assignment_expr(target, expr, true, path),
             Expr::For {
