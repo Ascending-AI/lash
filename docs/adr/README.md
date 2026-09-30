@@ -115,23 +115,20 @@ The generated region below is checked against the live filenames and headings.
 | 0067 | [Every durable row names one owner and one reclaim trigger](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) |
 | 0068 | [One meaning per outcome-type suffix](0068-one-meaning-per-outcome-suffix.md) |
 | 0069 | [Durable acceptance is the sole turn ingress](0069-durable-acceptance-is-the-sole-turn-ingress.md) |
-| 0070 | [Cache capabilities are host-supplied data, not URL or model-name inference](0070-cache-capabilities-are-host-supplied-data.md) |
+| 0070 | [Cache capabilities are host-supplied data](0070-cache-capabilities-are-host-supplied-data.md) |
 | 0071 | [Engines emit unified tool-call accounting outside model projection](0071-engines-emit-unified-tool-call-accounting.md) |
-| 0072 | [Reasoning wire encoding is pluggable dialect policy](0072-reasoning-wire-encoding-is-pluggable-dialect-policy.md) |
-| 0073 | [0073 — Gradual value types through to the workflow editor](0073-gradual-value-types-through-to-the-workflow-editor.md) |
+| 0073 | [Gradual value types through to the workflow editor](0073-gradual-value-types-through-to-the-workflow-editor.md) |
 | 0074 | [Generation intent is session policy, and its fate on the wire is reported](0074-generation-intent-is-session-policy-and-its-fate-is-reported.md) |
-| 0075 | [Host prompt presence controls reopen authority](0075-host-prompt-presence-controls-reopen-authority.md) |
-| 0076 | [Lashlang durable stores hold exclusively owned copies](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md) |
-| 0077 | [Session state migrates totally at admission](0077-session-state-migrates-totally-at-admission.md) |
+| 0076 | [Durable VM state preserves shared references and owns its roots](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md) |
+| 0077 | [Session state admits one compatible continuation generation](0077-session-state-migrates-totally-at-admission.md) |
 | 0078 | [Plugin state is a lash-mediated per-plugin store](0078-plugin-state-is-a-lash-mediated-per-plugin-store.md) |
-| 0079 | [One promised package: the facade owns the API; internals are lash-internal-*](0079-one-promised-package-facade-owns-the-api.md) |
-| 0080 | [Substrate attestation is not a lease short-circuit; failover waits the lease TTL](0080-substrate-attestation-is-not-a-lease-short-circuit.md) |
-| 0081 | [Destructive schema changes are currently reject-and-recreate](0081-destructive-schema-changes-are-currently-reject-and-recreate.md) |
-| 0082 | [0082 — The process registry is composed from narrow concern traits](0082-process-registry-is-composed-from-narrow-concern-traits.md) |
-| 0083 | [0083 — RLM channels are pinned when a session materializes](0083-rlm-native-tool-channel.md) |
+| 0079 | [One promised package: the facade owns the API](0079-one-promised-package-facade-owns-the-api.md) |
+| 0081 | [SQL stores refuse unsupported schemas and report the writing release](0081-destructive-schema-changes-are-currently-reject-and-recreate.md) |
+| 0082 | [The process registry is composed from narrow concern traits](0082-process-registry-is-composed-from-narrow-concern-traits.md) |
+| 0083 | [RLM channels are pinned when a session materializes](0083-rlm-native-tool-channel.md) |
 | 0084 | [Separate initial instructions from positional runtime feedback](0084-runtime-feedback-position.md) |
 | 0085 | [RLM prompts teach only enabled capabilities](0085-rlm-prompt-teaches-only-enabled-capabilities.md) |
-| 0086 | [Aggregate await shapes and `?` placement](0086-aggregate-await-shapes-and-question-placement.md) |
+| 0086 | [Aggregate await operates on handles](0086-aggregate-await-shapes-and-question-placement.md) |
 | 0087 | [TypeScript aggregates evaluate runtime arrays](0087-typescript-runtime-promise-arrays.md) |
 | 0088 | [Facade sessions bind storage and lifecycle owners](0088-facade-sessions-bind-storage-and-lifecycle-owners.md) |
 | 0089 | [Parent relationships do not define a second session model](0089-parent-relationships-do-not-define-a-second-session-model.md) |

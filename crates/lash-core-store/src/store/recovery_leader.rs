@@ -2,7 +2,7 @@
 //!
 //! One row per engine authority in the storage names the deployment that runs
 //! the leader-only recovery duties. It is load control, never a fence: every
-//! duty stays idempotent under two overlapping leaders (ADR 0080). Every
+//! duty stays idempotent under two overlapping leaders (ADR 0109 §1.6). Every
 //! comparison runs on the database clock, read inside the statement's own
 //! transaction, so hosts with skewed clocks agree on expiry.
 

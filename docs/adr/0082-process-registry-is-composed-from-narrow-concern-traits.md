@@ -1,86 +1,62 @@
-# 0082 — The process registry is composed from narrow concern traits
-
-Date: 2026-09-08
-
-## Status
-
-Accepted
-
-Amended 2026-09-27 (FIG-3863): process leases and native process-recovery
-sweeps are removed under [ADR 0110](0110-the-engine-owns-process-recovery.md)
-and decision D21. `ProcessWakeOutbox` remains because its claim-token state is
-the ADR 0109 obligation relay. `ProcessQuery` exposes a bounded non-terminal
-registry page for Restate admission and lost-run reconciliation.
+# 0082: The process registry is composed from narrow concern traits
 
 ## Context
 
-`ProcessRegistry` had grown into one 47-plus-method trait bundling every
-process-store concern: registration, observer edges, the event log, lifecycle
-transitions, tool-intent durability, the wake-delivery outbox, query/scan reads,
-and retention. A wide trait cannot be composed, decorated, or
-partially reused: every backend had to re-implement all of it by hand, and a
-decorator that only wanted to observe mutations (`WatchedProcessRegistry`)
-still had to hand-forward every read, wake, and retention method.
+Process persistence has independent query, mutation, delivery, and retention
+concerns. A backend or decorator should implement and test one concern without
+hand-forwarding every unrelated operation.
 
 ## Decision
 
-The registry contract is a set of narrow, single-concern traits that a backend
-composes (`crates/lash-core-execution/src/runtime/process/registry_concerns.rs`):
+The registry contract has nine concern traits:
 
-- `ProcessQuery` — point reads, listings, the change feed, bounded pages of
-  non-terminal process rows, aggregates.
-- `ProcessRegistrar` — registration and the durable external backend
-  reference.
-- `ProcessObserverRegistry` — observer edges, subscription targeting,
-  session-scoped routing cleanup.
-- `ProcessEventLog` — the per-process append-only event log.
-- `ProcessLifecycle` — started fact, waits, caller-departure markers,
-  terminal completion, parent-end teardown plans.
-- `ProcessToolIntents` — durable tool-intent submission admission and
-  settlement.
-- `ProcessWakeOutbox` — wake-delivery retention policy and the
-  claim/settle/redrive protocol.
-- `ProcessRetention` — physical reclamation of terminal rows and tombstones.
-- `ProcessClockRebind` — rebinding a backend to the runtime clock at facade
-  construction.
+- `ProcessQuery` supplies point reads, listings, change feeds, bounded
+  non-terminal pages, and aggregates.
+- `ProcessRegistrar` registers a process and records its external backend reference.
+- `ProcessObserverRegistry` owns observer edges and session routing cleanup.
+- `ProcessEventLog` owns the append-only process event log.
+- `ProcessLifecycle` records starts, waits, departures, completion, and parent-end teardown.
+- `ProcessToolIntents` admits and settles durable tool-intent submissions.
+- `ProcessWakeOutbox` owns wake obligations and their claim, settle, and redrive protocol.
+- `ProcessRetention` reclaims terminal rows and tombstones.
+- `ProcessClockRebind` binds the registry to the runtime clock.
 
-`ProcessRegistry` remains the composed contract: a supertrait bundle over the
-nine concerns, blanket-implemented for any type implementing every one of them.
-`Arc<dyn ProcessRegistry>` stays the uniform runtime handle; supertrait methods
-resolve on the trait object unchanged, so consumers are unaffected.
+`ProcessRegistry` composes all nine and `FleetFormatStore` as supertraits. A
+blanket implementation covers types satisfying the complete bundle.
+`Arc<dyn ProcessRegistry>` is the common runtime handle. Methods remain
+available through the concern traits on that object.
 
-Two deliberate read-dependency supertraits exist:
-`ProcessObserverRegistry: ProcessQuery` (observer defaults resolve identity
-and liveness through point reads) and `ProcessEventLog: ProcessQuery` (the
-incarnation-pinned `*_ref` defaults resolve one exact incarnation before
-touching the log). No other concern implies another.
+`ProcessObserverRegistry` and `ProcessEventLog` depend on `ProcessQuery` for
+identity and incarnation checks. Other concerns do not acquire unrelated
+concern obligations. Backend implementations group methods by concern, and a
+decorator delegates unintercepted concerns wholesale.
 
-Backends implement each concern in its own `impl` block. Decorators implement
-only the concern(s) they intercept and delegate the remaining concerns
-wholesale instead of hand-forwarding method-by-method.
+Process execution and recovery belong to the engine under ADR 0110; registry
+concerns are persistence reads and writes. Wake-outbox claim tokens belong to
+the obligation relay under ADR 0109.
+
+The runtime-store decorator follows the same ownership rule. Its default
+forwarder and component implementations derive from one `runtime_store_operations!`
+list. Provided convenience operations compose the decorator's own required
+primitives, so interception also applies through those operations.
+
+## Alternatives considered
+
+One wide trait requires every wrapper to forward unrelated methods and makes
+concern isolation hard to express. Independent contracts plus a composed bundle
+provide both narrow implementation units and one runtime handle. Separate
+handwritten forwarding lists allow provided methods to drift between them.
 
 ## Consequences
 
-- Out-of-tree backends implement the narrow traits; `impl ProcessRegistry for
-  X` blocks no longer exist (the blanket impl owns that name). This is a
-  source-level break for backend implementors and invisible to registry
-  consumers.
-- A wrapper or test double can now cover exactly one concern and be proven —
-  at compile time — not to carry any other concern's obligations.
-- The conformance suites keep taking `ConformanceProcessRegistry`
-  (`ProcessRegistry + ProcessRegistryTestSupport`), unchanged.
-- Registry semantics are unchanged: this decomposition moved method
-  declarations and impl-block boundaries only.
-- The same wholesale-delegation rule binds the runtime-persistence
-  decorator surface: `RuntimePersistenceDecorator`'s defaulted forwarder
-  and the blanket component-trait implementations are both generated from
-  one `persistence_operations!` list
-  (`crates/lash-core-store/src/store/runtime_persistence_decorator.rs`), so
-  a defaulted component method can no longer drift past the decorator and
-  silently resolve to the trait's own default.
+Backend implementors satisfy the concern traits and `FleetFormatStore`; the
+blanket implementation owns `ProcessRegistry`. Conformance support is a
+separate testing contract. A concern-only wrapper cannot satisfy another
+concern's bound accidentally. Composition does not grant process-execution
+ownership to storage.
 
-## Amendment (FIG-4125, 2026-09-29)
+## Code references
 
-Item 22: The pre-cutover registry composition below is historical under
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). Scoped
-registration and the current process lifetime contract govern.
+- `crates/lash-core-execution/src/runtime/process/registry_concerns.rs:40-994` declares the concern traits.
+- `crates/lash-core-execution/src/runtime/process/registry.rs:703-729` composes the registry and fleet format.
+- `crates/lash-core-store/src/store/runtime_store_decorator.rs` defines the generated forwarding contract.

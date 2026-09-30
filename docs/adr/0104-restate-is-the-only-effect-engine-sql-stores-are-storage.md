@@ -388,7 +388,7 @@ old decision as historical.
 | [0068](0068-one-meaning-per-outcome-suffix.md) | `SessionExecutionLeaseClaimOutcome` |
 | [0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) | claiming accepted input under the session-execution lease |
 | [0077](0077-session-state-migrates-totally-at-admission.md) | admission under the session-execution lease |
-| [0080](0080-substrate-attestation-is-not-a-lease-short-circuit.md) | failover that waits out the session-execution lease TTL |
+| [0101](0101-one-session-ingress-carries-every-admitted-item.md) | durable session drive-epoch fencing |
 | [0082](0082-process-registry-is-composed-from-narrow-concern-traits.md) | the `ProcessWakeOutbox` registry concern and bounded non-terminal pages |
 | [0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md) | the SQL tiers' parent-end ledger write and its crash window |
 | [0119](0119-durable-session-and-live-session-are-two-authorities.md) (durable session) | the live session's Session Execution Lease |

@@ -2,8 +2,7 @@
 
 ## Status
 
-Accepted 2026-09-29 (FIG-4120). Supersedes
-[ADR 0072](0072-reasoning-wire-encoding-is-pluggable-dialect-policy.md).
+Accepted 2026-09-29 (FIG-4120).
 Amends [ADR 0026](0026-model-capability-is-host-supplied-data.md) (the
 capability shape and where defaults live),
 [ADR 0070](0070-cache-capabilities-are-host-supplied-data.md) (no URL-derived
@@ -99,8 +98,8 @@ Off also requires the capability's `disable`.
 A route with no dialect refuses an explicit selection with
 `reasoning_encoding_unrepresentable`, and `ProviderDefault` sends nothing. No
 URL selects a dialect. Lash does not guess `OpenAi` for an unknown gateway:
-ADR 0072's Opper probe showed that gateways ignore wrong-shape fields, so a
-guess would only move the silent drop to the gateway.
+Gateways can ignore wrong-shape fields, so guessing a dialect can move an
+unsupported selection past local validation without honoring it.
 
 The pluggable `ReasoningWireEncoder` / `ReasoningWireFormat` machinery is
 deleted. No host used a custom encoder, and a custom encoder could not

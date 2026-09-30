@@ -40,8 +40,7 @@ Amends [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.
 O2 and O3 (the mechanism behind "reconcile every unacknowledged intent" and
 "retry needs an explicit attempt policy") and
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md) §5
-(amendment text in §6 below). [ADR 0080](0080-substrate-attestation-is-not-a-lease-short-circuit.md)
-stands: the leader lease is load control, never a fence.
+(amendment text in §6 below). The leader lease is load control, never a fence, as specified in §1.6 below.
 
 Amended 2026-09-28 (FIG-3927), implemented: [ADR
 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s claim-free
