@@ -70,7 +70,7 @@ fn program(params: &str, inputs: &str) -> String {
         const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
         finish(await triggers.register({{
           source: schedule,
-          target: remember,
+          target: {{ definition: remember }},
         {inputs}  subscription_key: "remembered-key"
         }}));
         "#
@@ -108,7 +108,7 @@ fn register_update_and_revive_share_the_arrow() {
             const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
             finish(await triggers.{operation}({{
               source: schedule,
-              target: remember,
+              target: {{ definition: remember }},
               inputs: (event) => ({{ tick: event }}),
               subscription_key: "remembered-key"{extra}
             }}));
@@ -116,6 +116,56 @@ fn register_update_and_revive_share_the_arrow() {
         );
         lash_typescript::link(&source, &environment())
             .unwrap_or_else(|error| panic!("triggers.{operation}: {error}"));
+    }
+}
+
+#[test]
+fn inline_definition_targets_lift_for_each_registration_operation() {
+    for (operation, extra) in [
+        ("register", ""),
+        ("update", ", expected_revision: 1"),
+        ("revive", ", expected_revision: 1"),
+    ] {
+        let source = format!(
+            r#"
+            await triggers.{operation}({{
+              source: timer.Schedule({{ expr: "0 8 * * *" }}),
+              target: {{ definition: async (tick: timer.Tick) => {{ return true; }} }},
+              subscription_key: "inline-key"{extra}
+            }});
+            "#
+        );
+        let linked = lash_typescript::link(&source, &environment())
+            .unwrap_or_else(|error| panic!("triggers.{operation}: {error}"));
+        let declarations = &linked.artifact.ir().declarations;
+        let [lashlang::Declaration::Process(process)] = declarations.as_slice() else {
+            panic!("triggers.{operation} must lift exactly one process: {declarations:?}");
+        };
+        assert_eq!(process.params.len(), 1);
+        assert_eq!(process.params[0].name.as_str(), "tick");
+        assert_eq!(
+            process.params[0].ty,
+            lashlang::TypeExpr::Ref("timer.Tick".into())
+        );
+        assert_eq!(process.return_ty, Some(lashlang::TypeExpr::Bool));
+    }
+}
+
+#[test]
+fn trigger_targets_refuse_bare_processes_and_closures() {
+    for target in [
+        "async (tick) => { return true; }",
+        "{ definition: (tick) => { return true; } }",
+    ] {
+        let source = format!(
+            r#"await triggers.register({{
+                source: timer.Schedule({{ expr: "0 8 * * *" }}),
+                target: {target},
+                subscription_key: "invalid-target"
+            }});"#
+        );
+        let error = reject(&source);
+        assert_eq!(error.code, DiagnosticCode::LinkError, "{target}: {error}");
     }
 }
 
@@ -282,7 +332,7 @@ fn a_fixed_value_is_an_ordinary_expression_in_the_enclosing_scope() {
         const schedule = timer.Schedule({ expr: "0 8 * * *" });
         finish(await triggers.register({
           source: schedule,
-          target: remember,
+          target: { definition: remember },
           inputs: (event) => ({ tick: event, label: event }),
           subscription_key: "remembered-key"
         }));
@@ -295,15 +345,15 @@ fn a_fixed_value_is_an_ordinary_expression_in_the_enclosing_scope() {
     );
 }
 
-/// A process is a value, so a target reaches the registration through any
-/// expression that evaluates to one.
+/// A target's definition reaches the registration through any expression
+/// that evaluates to a process value.
 ///
 /// The retired `ProcessTargetStaticRequired` rule existed because `start` and
 /// the registration took a *binding name* rather than a value; with the forms
 /// gone, an alias, a record field and a call all resolve to the same lifted
 /// declaration, and nothing is left to spell wrong.
 #[test]
-fn a_trigger_target_is_any_expression_that_names_a_process() {
+fn a_trigger_target_definition_is_any_expression_that_names_a_process() {
     for target in ["remember", "alias"] {
         let source = format!(
             r#"
@@ -312,7 +362,7 @@ fn a_trigger_target_is_any_expression_that_names_a_process() {
             const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
             finish(await triggers.register({{
               source: schedule,
-              target: {target},
+              target: {{ definition: {target} }},
               inputs: (event) => ({{ tick: event }})
             }}));
             "#
@@ -339,7 +389,7 @@ fn a_process_can_register_a_trigger_aimed_at_another_process() {
           const schedule = timer.Schedule({ expr: "0 8 * * *" });
           await triggers.register({
             source: schedule,
-            target: remember,
+            target: { definition: remember },
             inputs: (event) => ({ tick: event }),
             subscription_key: "remembered-key"
           });
@@ -361,12 +411,12 @@ fn registrations_in_a_process_body_keep_their_source_order() {
         const owner = async () => {
           const schedule = timer.Schedule({ expr: "0 8 * * *" });
           await triggers.register({
-            source: schedule, target: first,
+            source: schedule, target: { definition: first },
             inputs: (event) => ({ tick: event }),
             subscription_key: "first-key"
           });
           await triggers.register({
-            source: schedule, target: second,
+            source: schedule, target: { definition: second },
             inputs: (event) => ({ tick: event }),
             subscription_key: "second-key"
           });

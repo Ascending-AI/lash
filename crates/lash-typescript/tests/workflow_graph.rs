@@ -1384,7 +1384,7 @@ fn source_slice<'a>(source: &'a str, node: &WorkflowNode) -> &'a str {
 #[test]
 fn canonical_source_spans_cover_bound_and_inline_process_bodies_without_shape_matching() {
     let authored = r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});return "done";};
-await triggers.register({source:{expr:"0 8 * * *"},target:async(event)=>{await tools.echo({value:"inline"});return event;}});
+await triggers.register({source:{expr:"0 8 * * *"},target:{definition:async(event)=>{await tools.echo({value:"inline"});return event;}}});
 "#;
     let canonical = canonical(authored);
     let graph = workflow_graph_from_source(authored).expect("formatted source projects");
@@ -1563,7 +1563,7 @@ fn canonical_span_goldens_cover_every_textual_node() {
             "lifted-inline",
             goldens::SPAN_LIFTED_INLINE,
             &[
-                "await (triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: async (event) => {\n  await (tools.echo({ value: \"inline\" }));\n  return event;\n} }))",
+                "await (triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: { definition: async (event) => {\n  await (tools.echo({ value: \"inline\" }));\n  return event;\n} } }))",
                 r#"await (tools.echo({ value: "inline" }))"#,
                 "return event;",
             ],
@@ -2336,7 +2336,7 @@ fn a_label_with_no_spelling_is_refused_by_the_renderer() {
 /// argument position.
 #[test]
 fn an_inline_process_body_projects_as_a_process_container() {
-    let source = "await triggers.register({\n  source: { expr: \"0 8 * * *\" },\n  target: async (event) => {\n    print(event);\n  },\n})\nfinish(null);\n";
+    let source = "await triggers.register({\n  source: { expr: \"0 8 * * *\" },\n  target: { definition: async (event) => {\n    print(event);\n  } },\n})\nfinish(null);\n";
     let canonical = canonical(source);
     let graph = workflow_graph_from_source(&canonical).expect("canonical source projects");
     let literal = graph
