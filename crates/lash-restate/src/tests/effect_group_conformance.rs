@@ -2416,9 +2416,14 @@ async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &se
                 .await
                 .expect("modify the effect-group index state");
             let status = response.status;
-            let bytes = lash_http_transport::read_http_body_bytes(response.body, None, "state")
-                .await
-                .unwrap_or_default();
+            let bytes = lash_http_transport::read_http_body_bytes(
+                response.body,
+                16 * 1024 * 1024,
+                None,
+                "state",
+            )
+            .await
+            .unwrap_or_default();
             (status, String::from_utf8_lossy(&bytes).into_owned())
         }
     };

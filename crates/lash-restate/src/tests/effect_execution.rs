@@ -341,6 +341,7 @@ pub(super) fn short_restate_timeouts(
     RestateConnectionConfig {
         control_timeout_ms,
         attach_ceiling_ms,
+        ..RestateConnectionConfig::default()
     }
 }
 

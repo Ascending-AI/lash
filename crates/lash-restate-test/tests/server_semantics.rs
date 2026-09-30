@@ -249,7 +249,7 @@ async fn post(server: &RestateTestServer, path: &str, body: &str) -> (u16, Strin
     .with_header("content-type", "application/json");
     let response = server.transport().send(request, None).await.unwrap();
     let status = response.status;
-    let body = read_http_body_bytes(response.body, None, "body")
+    let body = read_http_body_bytes(response.body, 16 * 1024 * 1024, None, "body")
         .await
         .unwrap();
     (status, String::from_utf8_lossy(&body).into_owned())
@@ -354,7 +354,7 @@ async fn post_get_attach(server: &RestateTestServer, path: &str) -> (u16, String
     );
     let response = server.transport().send(request, None).await.unwrap();
     let status = response.status;
-    let body = read_http_body_bytes(response.body, None, "body")
+    let body = read_http_body_bytes(response.body, 16 * 1024 * 1024, None, "body")
         .await
         .unwrap();
     (status, String::from_utf8_lossy(&body).into_owned())
@@ -592,7 +592,7 @@ async fn request(server: &RestateTestServer, method: HttpMethod, path: &str) -> 
     let request = HttpRequest::new(method, format!("{}/{path}", server.ingress_url()), "");
     let response = server.transport().send(request, None).await.unwrap();
     let status = response.status;
-    let body = read_http_body_bytes(response.body, None, "body")
+    let body = read_http_body_bytes(response.body, 16 * 1024 * 1024, None, "body")
         .await
         .unwrap();
     (status, String::from_utf8_lossy(&body).into_owned())

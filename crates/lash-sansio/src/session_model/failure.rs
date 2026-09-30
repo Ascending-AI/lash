@@ -188,6 +188,8 @@ pub enum TurnFailureCode {
     InvalidStructuredOutput,
     /// The provider response body could not be read.
     BodyReadFailed,
+    /// A non-SSE HTTP response exceeded the caller-selected raw byte budget.
+    HttpResponseBodyTooLarge,
 
     /// / A token-usage counter overflowed while accumulating turn usage.
     TokenUsageOverflow,
@@ -334,6 +336,7 @@ impl TurnFailureCode {
             Self::ChargeSafetyRetryDenied => "charge_safety_retry_denied",
             Self::InvalidStructuredOutput => "invalid_structured_output",
             Self::BodyReadFailed => "body_read_failed",
+            Self::HttpResponseBodyTooLarge => "http_response_body_too_large",
             Self::TokenUsageOverflow => "token_usage_overflow",
             Self::ReconfigureFailed => "reconfigure_failed",
             Self::MissingDone => "missing_done",
@@ -440,6 +443,7 @@ impl TurnFailureCode {
             "charge_safety_retry_denied" => Self::ChargeSafetyRetryDenied,
             "invalid_structured_output" => Self::InvalidStructuredOutput,
             "body_read_failed" => Self::BodyReadFailed,
+            "http_response_body_too_large" => Self::HttpResponseBodyTooLarge,
             "token_usage_overflow" => Self::TokenUsageOverflow,
             "reconfigure_failed" => Self::ReconfigureFailed,
             "missing_done" => Self::MissingDone,
@@ -525,6 +529,7 @@ impl TurnFailureCode {
         Self::ChargeSafetyRetryDenied,
         Self::InvalidStructuredOutput,
         Self::BodyReadFailed,
+        Self::HttpResponseBodyTooLarge,
         Self::TokenUsageOverflow,
         Self::ReconfigureFailed,
         Self::MissingDone,
@@ -1147,6 +1152,7 @@ mod tests {
             TurnFailureCode::ChargeSafetyRetryDenied,
             TurnFailureCode::InvalidStructuredOutput,
             TurnFailureCode::BodyReadFailed,
+            TurnFailureCode::HttpResponseBodyTooLarge,
             TurnFailureCode::TokenUsageOverflow,
             TurnFailureCode::ReconfigureFailed,
             TurnFailureCode::MissingDone,
@@ -1341,7 +1347,7 @@ mod tests {
     fn all_named_covers_every_named_arm() {
         assert_eq!(
             TurnFailureCode::ALL_NAMED.len(),
-            75,
+            76,
             "a new named arm must be added to ALL_NAMED"
         );
         for code in TurnFailureCode::ALL_NAMED {

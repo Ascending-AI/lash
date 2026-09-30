@@ -29,6 +29,7 @@ mod output_started_tests;
 mod reasoning_retention_tests;
 mod replay_provenance_tests;
 mod request_work_tests;
+mod response_body_budget;
 mod responses_text_slot_tests;
 mod session_affinity_tests;
 mod sessions;

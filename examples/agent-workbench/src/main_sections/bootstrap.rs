@@ -257,6 +257,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 lash_restate::RestateConnectionConfig {
                     control_timeout_ms: 30_000,
                     attach_ceiling_ms: 6 * 60 * 60 * 1_000,
+                    ..lash_restate::RestateConnectionConfig::default()
                 },
             ),
             lash_restate::RestateConnection::with_client(

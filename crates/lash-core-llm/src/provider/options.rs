@@ -162,9 +162,19 @@ pub struct ProviderOptions {
     /// `None` (or `0`) applies the transport default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sse_total_bytes: Option<u64>,
+    /// Maximum raw bytes read before decoding a non-SSE response, including
+    /// HTTP errors and auxiliary lookups. `None` uses 16 MiB; zero permits
+    /// only an empty body. Content-Length never determines this budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_body_bytes: Option<u64>,
 }
 
 impl ProviderOptions {
+    /// Effective raw byte budget, clamped to the addressable size on this target.
+    pub fn response_body_limit(&self) -> usize {
+        usize::try_from(self.response_body_bytes.unwrap_or(16 * 1024 * 1024)).unwrap_or(usize::MAX)
+    }
+
     pub fn is_default(&self) -> bool {
         self.reliability == ProviderReliability::default()
             && !self.expose_thinking
@@ -174,6 +184,7 @@ impl ProviderOptions {
             && self.response_metadata_body_paths.is_empty()
             && self.sse_event_bytes.is_none_or(|bytes| bytes == 0)
             && self.sse_total_bytes.is_none_or(|bytes| bytes == 0)
+            && self.response_body_bytes.is_none()
     }
 
     pub fn llm_timeouts(&self) -> LlmTimeouts {

@@ -3,7 +3,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use lash_sansio::llm::types::ProviderFailureKind;
 use lash_sansio::session_model::TurnFailureCode;
 
@@ -330,21 +330,54 @@ impl ByteStream for ReqwestByteStream {
     }
 }
 
+/// Read at most `max_bytes` raw bytes. Charge each complete transport chunk
+/// before copying it, and validate an already buffered body before returning it.
+/// Content-Length is advisory and is never used to reserve or admit bytes.
+///
+/// Accumulator allocation requests never exceed the budget. Geometric growth
+/// clamped to the budget requests at most `3 * max_bytes` bytes cumulatively,
+/// plus fixed bookkeeping. Transport-owned chunks and allocator overhead are
+/// outside this bound; an oversized chunk is neither copied nor decoded.
+/// The pinned allocator witness allows 2 KiB for fixed refusal/bookkeeping data.
 pub async fn read_http_body_bytes(
     body: HttpResponseBody,
+    max_bytes: usize,
     timeout: Option<Duration>,
     timeout_message: &str,
 ) -> Result<Bytes, LlmTransportError> {
     match body {
-        HttpResponseBody::Buffered(bytes) => Ok(bytes),
+        HttpResponseBody::Buffered(bytes) => {
+            if bytes.len() > max_bytes {
+                return Err(LlmTransportError::response_body_too_large(
+                    max_bytes,
+                    bytes.len(),
+                ));
+            }
+            Ok(bytes)
+        }
         HttpResponseBody::Streamed(mut stream) => {
             run_with_timeout(
                 async move {
-                    let mut body = BytesMut::new();
+                    let mut body = Vec::new();
                     while let Some(chunk) = stream.next_chunk().await? {
+                        if chunk.len() > max_bytes - body.len() {
+                            return Err(LlmTransportError::response_body_too_large(
+                                max_bytes,
+                                body.len().saturating_add(chunk.len()),
+                            ));
+                        }
+                        let next_len = body.len() + chunk.len();
+                        if next_len > body.capacity() {
+                            let capacity = body
+                                .capacity()
+                                .saturating_mul(2)
+                                .max(8)
+                                .clamp(next_len, max_bytes);
+                            body.reserve_exact(capacity - body.len());
+                        }
                         body.extend_from_slice(&chunk);
                     }
-                    Ok(body.freeze())
+                    Ok(Bytes::from(body))
                 },
                 timeout,
                 timeout_message,
@@ -354,12 +387,20 @@ pub async fn read_http_body_bytes(
     }
 }
 
+/// Decode only an admitted body. Invalid UTF-8 can expand to at most three
+/// output bytes per raw byte. On the pinned toolchain the allocation witness
+/// bounds cumulative reader/text allocation requests by `12 * max_bytes + 2048`,
+/// excluding transport poll futures. The fixture counts those too, allowing
+/// another 32 bytes per poll for its boxed future on the pinned toolchain.
+/// These counters include reallocations, not RSS or transport-owned chunks, and
+/// exclude subsequent caller-owned JSON parsing.
 pub async fn read_http_body_text(
     body: HttpResponseBody,
+    max_bytes: usize,
     timeout: Option<Duration>,
     timeout_message: &str,
 ) -> Result<String, LlmTransportError> {
-    let body = read_http_body_bytes(body, timeout, timeout_message).await?;
+    let body = read_http_body_bytes(body, max_bytes, timeout, timeout_message).await?;
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
@@ -480,6 +521,247 @@ where
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
+    struct BudgetFixtureStream {
+        chunks: std::collections::VecDeque<Bytes>,
+        polls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl ByteStream for BudgetFixtureStream {
+        async fn next_chunk(&mut self) -> Result<Option<Bytes>, LlmTransportError> {
+            self.polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.chunks.pop_front())
+        }
+    }
+
+    #[tokio::test]
+    async fn response_body_budget_refuses_buffered_limit_plus_one() {
+        let result =
+            read_http_body_bytes(HttpResponseBody::buffered("123456789"), 8, None, "body").await;
+        assert!(
+            result.is_err(),
+            "nine bytes must refuse the selected eight-byte budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn response_body_budget_refuses_streamed_limit_plus_one_before_next_poll() {
+        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let body = HttpResponseBody::streamed(BudgetFixtureStream {
+            chunks: [
+                Bytes::from_static(b"12345678"),
+                Bytes::from_static(b"9"),
+                Bytes::from_static(b"never polled"),
+            ]
+            .into(),
+            polls: polls.clone(),
+        });
+        let result = read_http_body_bytes(body, 8, None, "body").await;
+        assert!(
+            result.is_err(),
+            "the excess chunk must refuse before append"
+        );
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn response_body_budget_exact_limit_and_zero_are_inclusive() {
+        for chunks in [
+            vec![Bytes::from_static(b"12345678")],
+            vec![
+                Bytes::from_static(b"1234"),
+                Bytes::new(),
+                Bytes::from_static(b"5678"),
+            ],
+        ] {
+            let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let body = HttpResponseBody::streamed(BudgetFixtureStream {
+                chunks: chunks.into(),
+                polls,
+            });
+            assert_eq!(
+                read_http_body_bytes(body, 8, None, "body")
+                    .await
+                    .unwrap()
+                    .as_ref(),
+                b"12345678"
+            );
+        }
+        assert_eq!(
+            read_http_body_bytes(HttpResponseBody::buffered("12345678"), 8, None, "body")
+                .await
+                .unwrap()
+                .as_ref(),
+            b"12345678"
+        );
+        assert!(
+            read_http_body_bytes(HttpResponseBody::buffered(Bytes::new()), 0, None, "body")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let empty_stream = HttpResponseBody::streamed(BudgetFixtureStream {
+            chunks: [Bytes::new()].into(),
+            polls: Default::default(),
+        });
+        assert!(
+            read_http_body_bytes(empty_stream, 0, None, "body")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let error = read_http_body_text(HttpResponseBody::buffered("x"), 0, None, "body")
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error.context.as_ref(),
+            crate::HttpFailureContext::ResponseBodyTooLarge {
+                limit: 0,
+                received_at_least: 1
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn response_body_budget_allocation_requests_are_bounded() {
+        use crate::allocation_counter::Measurement;
+        const LIMIT: usize = 4096;
+        for byte in [b'x', 0xff] {
+            let chunks = (0..LIMIT).map(|_| Bytes::from(vec![byte])).collect();
+            let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let body = HttpResponseBody::streamed(BudgetFixtureStream {
+                chunks,
+                polls: polls.clone(),
+            });
+            let measurement = Measurement::start();
+            let text = read_http_body_text(body, LIMIT, None, "body")
+                .await
+                .unwrap();
+            let counts = measurement.finish();
+            assert_eq!(text.len(), if byte == b'x' { LIMIT } else { 3 * LIMIT });
+            let poll_count = polls.load(std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(poll_count, LIMIT + 1);
+            assert!(
+                counts.allocated <= 12 * LIMIT + 32 * poll_count + 2048,
+                "{counts:?}"
+            );
+            assert!(counts.largest <= 4 * LIMIT, "{counts:?}");
+        }
+        // A non-power-of-two budget must cap allocation requests as well as length.
+        const UNEVEN_LIMIT: usize = 3000;
+        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let body = HttpResponseBody::streamed(BudgetFixtureStream {
+            chunks: (0..UNEVEN_LIMIT)
+                .map(|_| Bytes::from_static(b"x"))
+                .collect(),
+            polls: polls.clone(),
+        });
+        let measurement = Measurement::start();
+        let bytes = read_http_body_bytes(body, UNEVEN_LIMIT, None, "body")
+            .await
+            .unwrap();
+        let counts = measurement.finish();
+        assert_eq!(bytes.len(), UNEVEN_LIMIT);
+        assert!(
+            counts.largest <= UNEVEN_LIMIT,
+            "accumulator over-reserved: {counts:?}"
+        );
+        assert!(
+            counts.allocated <= 3 * UNEVEN_LIMIT + 32 * (UNEVEN_LIMIT + 1) + 2048,
+            "{counts:?}"
+        );
+
+        // Reject a huge first chunk without allocating any body storage.
+        let oversized = Bytes::from(vec![b'x'; LIMIT * 1024]);
+        for body in [
+            HttpResponseBody::buffered(oversized.clone()),
+            HttpResponseBody::streamed(BudgetFixtureStream {
+                chunks: [oversized].into(),
+                polls: Default::default(),
+            }),
+        ] {
+            let measurement = Measurement::start();
+            let error = read_http_body_text(body, LIMIT, None, "body")
+                .await
+                .unwrap_err();
+            let counts = measurement.finish();
+            assert!(matches!(
+                error.context.as_ref(),
+                crate::HttpFailureContext::ResponseBodyTooLarge { limit: LIMIT, .. }
+            ));
+            assert!(
+                counts.allocated <= 2048,
+                "oversize copied or decoded bytes: {counts:?}"
+            );
+        }
+        // Exactly LIMIT bytes may allocate body storage; the next giant chunk
+        // must not increase that storage or trigger any further stream polls.
+        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let body = HttpResponseBody::streamed(BudgetFixtureStream {
+            chunks: [
+                Bytes::from(vec![b'x'; LIMIT]),
+                Bytes::from(vec![b'x'; LIMIT * 1024]),
+                Bytes::from_static(b"unread"),
+            ]
+            .into(),
+            polls: polls.clone(),
+        });
+        let measurement = Measurement::start();
+        let error = read_http_body_bytes(body, LIMIT, None, "body")
+            .await
+            .unwrap_err();
+        let counts = measurement.finish();
+        assert!(matches!(
+            error.context.as_ref(),
+            crate::HttpFailureContext::ResponseBodyTooLarge { limit: LIMIT, .. }
+        ));
+        assert!(
+            counts.allocated <= LIMIT + 2048,
+            "excess append allocated: {counts:?}"
+        );
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn response_body_budget_http_fixtures_ignore_advisory_lengths() {
+        for (headers, wire_body) in [
+            ("Connection: close\r\n", "123456789"),
+            (
+                "Transfer-Encoding: chunked\r\nConnection: close\r\n",
+                "8\r\n12345678\r\n1\r\n9\r\n0\r\n\r\n",
+            ),
+            ("Content-Length: 9\r\nConnection: close\r\n", "123456789"),
+            (
+                "Content-Length: 1000000000\r\nConnection: close\r\n",
+                "123456789",
+            ),
+        ] {
+            for limit in [8, 9] {
+                // A false large length cannot prove EOF at the exact limit.
+                if limit == 9 && headers.contains("1000000000") {
+                    continue;
+                }
+                let (base, requests) =
+                    spawn_capture_server(format!("HTTP/1.1 200 OK\r\n{headers}\r\n{wire_body}"));
+                let response = ReqwestHttpTransport::new()
+                    .send(HttpRequest::new(HttpMethod::Get, base, Bytes::new()), None)
+                    .await
+                    .unwrap();
+                let result = read_http_body_bytes(response.body, limit, None, "body").await;
+                let _ = requests.recv().unwrap();
+                if limit == 9 {
+                    assert_eq!(result.unwrap().as_ref(), b"123456789");
+                } else {
+                    assert!(matches!(
+                        result.unwrap_err().context.as_ref(),
+                        crate::HttpFailureContext::ResponseBodyTooLarge { limit: 8, .. }
+                    ));
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn buffered_response_preserves_status_headers_and_body() {
         let response = HttpResponse {
@@ -508,9 +790,14 @@ mod tests {
             "application/json"
         ));
 
-        let text = read_http_body_text(response.body, Some(Duration::from_secs(1)), "timed out")
-            .await
-            .expect("buffered body");
+        let text = read_http_body_text(
+            response.body,
+            1024,
+            Some(Duration::from_secs(1)),
+            "timed out",
+        )
+        .await
+        .expect("buffered body");
         assert_eq!(text, r#"{"error":"rate limit"}"#);
     }
 

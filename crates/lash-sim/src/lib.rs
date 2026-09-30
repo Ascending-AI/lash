@@ -38,6 +38,8 @@ mod provider_variation_matrix;
 pub mod provider_variations;
 pub mod recording;
 pub mod replay;
+#[cfg(test)]
+mod response_body_budget;
 pub mod runner;
 pub mod runtime_boundaries;
 pub mod runtime_contracts;
