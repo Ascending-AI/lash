@@ -65,12 +65,12 @@ lash_rust_integration_test(
     extra_compile_data = [
         ":lashctl",
     ],
-    test_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl)"},
+    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "crates/lashctl",
     package_name = "lashctl",
-    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl)"},
+    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -87,12 +87,12 @@ lash_rust_integration_test(
     extra_compile_data = [
         ":lashctl",
     ],
-    test_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl)"},
+    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "crates/lashctl",
     package_name = "lashctl",
-    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl)"},
+    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -148,8 +148,8 @@ lash_rust_feature_test(
     manifest_dir = "crates/lashctl",
     package_name = "lashctl",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_1f79102d)"},
-    test_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_1f79102d)"},
+    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_1f79102d)"},
+    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_1f79102d)"},
     tags = [
         "feature-lane",
         "manual",
@@ -175,8 +175,8 @@ lash_rust_feature_test(
     manifest_dir = "crates/lashctl",
     package_name = "lashctl",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_a8aa2e1a)"},
-    test_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_a8aa2e1a)"},
+    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_a8aa2e1a)"},
+    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_a8aa2e1a)"},
     tags = [
         "feature-lane",
         "manual",
@@ -300,8 +300,8 @@ lash_rust_feature_test(
     manifest_dir = "crates/lashctl",
     package_name = "lashctl",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_1f79102d)"},
-    test_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_1f79102d)"},
+    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_1f79102d)"},
+    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_1f79102d)"},
     tags = [
         "feature-lane",
         "manual",
@@ -327,8 +327,8 @@ lash_rust_feature_test(
     manifest_dir = "crates/lashctl",
     package_name = "lashctl",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_a8aa2e1a)"},
-    test_env = {"CARGO_BIN_EXE_lashctl": "$(rootpath :lashctl__fv_a8aa2e1a)"},
+    rustc_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_a8aa2e1a)"},
+    test_env = {"CARGO_BIN_EXE_lashctl": "$(location :lashctl__fv_a8aa2e1a)"},
     tags = [
         "feature-lane",
         "manual",
