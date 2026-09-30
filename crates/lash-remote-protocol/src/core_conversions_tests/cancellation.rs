@@ -31,61 +31,104 @@ fn cancelled_mid_call_record_converts_and_validates() {
 }
 
 #[test]
-fn turn_cancel_core_conversions_round_trip_every_envelope() {
-    let core_request = lash_core::facade_support::TurnCancelRequest::new(
-        lash_core::facade_support::TurnAddress::new("session", "turn"),
-        "cancel-request",
-        Some("queue-superseder".to_string()),
-    )
-    .with_reason("newer input arrived");
-    let remote_request = RemoteTurnCancelRequest::from(core_request.clone());
-    remote_request
-        .validate()
-        .expect("valid remote cancel request");
-    let round_trip = remote_request.try_into_core().expect("core cancel request");
-    assert_eq!(round_trip, core_request);
-
-    let evidence = lash_core::facade_support::TurnCancellationEvidence {
-        request_id: "cancel-request".to_string(),
-        origin: Some("workbench-user".to_string()),
-        reason: Some("stop button".to_string()),
-        undelivered: lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer,
-        mode: lash_core::facade_support::TurnCancelMode::Immediate,
-        honoured_after_step: None,
+fn remote_cancel_roundtrip_preserves_all_modes_and_checkpoint_evidence() {
+    use lash_core::facade_support::{
+        TurnAddress, TurnCancelMode, TurnCancelOutcome, TurnCancelRequest,
+        TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnStop,
     };
-    let remote_evidence = RemoteTurnCancellationEvidence::from(evidence.clone());
-    assert_eq!(
-        lash_core::facade_support::TurnCancellationEvidence::from(remote_evidence),
-        evidence
-    );
-    let evidence_without_origin = lash_core::facade_support::TurnCancellationEvidence {
-        request_id: "cancel-without-origin".to_string(),
-        origin: None,
-        reason: None,
-        undelivered: lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer,
-        mode: lash_core::facade_support::TurnCancelMode::Immediate,
-        honoured_after_step: None,
-    };
-    let remote_evidence = RemoteTurnCancellationEvidence::from(evidence_without_origin.clone());
-    assert_eq!(
-        lash_core::facade_support::TurnCancellationEvidence::from(remote_evidence),
-        evidence_without_origin
-    );
 
-    for core_outcome in [
-        lash_core::facade_support::TurnCancelOutcome::Requested(evidence.clone()),
-        lash_core::facade_support::TurnCancelOutcome::AlreadyRequested(evidence.clone()),
-        lash_core::facade_support::TurnCancelOutcome::PolicyConflict {
-            requested: lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Drop,
-            accepted: evidence.clone(),
-        },
-        lash_core::facade_support::TurnCancelOutcome::CompletionWonRace,
-        lash_core::facade_support::TurnCancelOutcome::UnknownOrRevoked,
-    ] {
-        let remote = RemoteTurnCancelOutcome::from(core_outcome.clone());
-        let round_trip = lash_core::facade_support::TurnCancelOutcome::from(remote);
-        assert_eq!(round_trip, core_outcome);
+    fn wire_roundtrip<T: serde::Serialize + serde::de::DeserializeOwned>(value: T) -> T {
+        serde_json::from_slice(&serde_json::to_vec(&value).expect("encode cancellation"))
+            .expect("decode cancellation")
     }
+
+    let mut losses = Vec::new();
+    for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
+        for undelivered in [
+            TurnCancelUndeliveredInputPolicy::Defer,
+            TurnCancelUndeliveredInputPolicy::Drop,
+        ] {
+            for origin in [None, Some("host-origin".to_string())] {
+                let request = TurnCancelRequest::new(
+                    TurnAddress::new("session", "turn"),
+                    "cancel-request",
+                    origin.clone(),
+                )
+                .with_reason("stop at the requested boundary")
+                .undelivered(undelivered)
+                .mode(mode);
+                let remote = wire_roundtrip(RemoteTurnCancelRequest::from(request.clone()));
+                remote.validate().expect("valid cancellation request");
+                let actual = remote.try_into_core().expect("core cancellation request");
+                if actual != request {
+                    losses.push(format!("request: expected {request:?}, got {actual:?}"));
+                }
+
+                for honoured_after_step in [None, Some(0), Some(7)] {
+                    let evidence = TurnCancellationEvidence {
+                        request_id: request.request_id.clone(),
+                        origin: origin.clone(),
+                        reason: request.reason.clone(),
+                        undelivered,
+                        mode,
+                        honoured_after_step,
+                    };
+                    let remote =
+                        wire_roundtrip(RemoteTurnCancellationEvidence::from(evidence.clone()));
+                    remote.validate().expect("valid cancellation evidence");
+                    let actual = TurnCancellationEvidence::from(remote);
+                    if actual != evidence {
+                        losses.push(format!("evidence: expected {evidence:?}, got {actual:?}"));
+                    }
+                    let stop = TurnStop::Cancelled {
+                        evidence: evidence.clone(),
+                    };
+                    let RemoteTurnStop::Cancelled { evidence: decoded } =
+                        wire_roundtrip(RemoteTurnStop::from(stop.clone()))
+                    else {
+                        panic!("cancellation changed the terminal stop variant");
+                    };
+                    let actual = TurnStop::Cancelled {
+                        evidence: decoded.into(),
+                    };
+                    if actual != stop {
+                        losses.push(format!("terminal: expected {stop:?}, got {actual:?}"));
+                    }
+                    for outcome in [
+                        TurnCancelOutcome::Requested(evidence.clone()),
+                        TurnCancelOutcome::AlreadyRequested(evidence.clone()),
+                        TurnCancelOutcome::Escalated(evidence.clone()),
+                        TurnCancelOutcome::PolicyConflict {
+                            requested: TurnCancelUndeliveredInputPolicy::Defer,
+                            accepted: evidence.clone(),
+                        },
+                        TurnCancelOutcome::PolicyConflict {
+                            requested: TurnCancelUndeliveredInputPolicy::Drop,
+                            accepted: evidence.clone(),
+                        },
+                        TurnCancelOutcome::CompletionWonRace,
+                        TurnCancelOutcome::UnknownOrRevoked,
+                    ] {
+                        let receipt = wire_roundtrip(RemoteTurnCancelReceipt::new(
+                            "session",
+                            "turn",
+                            RemoteTurnCancelOutcome::from(outcome.clone()),
+                        ));
+                        receipt.validate().expect("valid cancellation receipt");
+                        let actual = TurnCancelOutcome::from(receipt.outcome);
+                        if actual != outcome {
+                            losses.push(format!("outcome: expected {outcome:?}, got {actual:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        losses.is_empty(),
+        "remote cancellation lost fields:\n{}",
+        losses.join("\n")
+    );
 }
 
 #[test]

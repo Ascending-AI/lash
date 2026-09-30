@@ -235,3 +235,38 @@ async fn a_reattached_emission_reports_the_deliveries_its_committed_attempt_star
             .await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: kiln gate with pg16"]
+async fn remote_after_step_waits_for_committed_boundary_postgres() {
+    let url = database_url().expect("PostgreSQL service is required");
+    let _lock = DatabaseLock::acquire(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(&url)
+        .await
+        .expect("connect PostgreSQL");
+    reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let double = lash_restate_test::backend_with_store_set(
+        0x4282,
+        lash_restate_test::ServerConfig::default(),
+        lash_restate_test::DeploymentHooks::default(),
+        |clock| async {
+            Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+                lash_core::WakeDeliveryConfig::default(),
+                clock,
+            )) as Arc<dyn lash_core::StoreSet>)
+        },
+    )
+    .await
+    .expect("start the PostgreSQL Restate double");
+    super::remote_turn_cancel::held_step_law(
+        double.lash_backend(),
+        super::remote_turn_cancel::TurnRunner::Double(double),
+        "remote-postgres",
+    )
+    .await;
+}

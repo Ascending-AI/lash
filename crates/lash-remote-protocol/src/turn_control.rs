@@ -15,6 +15,15 @@ pub enum RemoteTurnCancelUndeliveredInputPolicy {
     Drop,
 }
 
+/// The boundary at which a turn honours the cancellation request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTurnCancelMode {
+    #[default]
+    Immediate,
+    AfterStep,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnCancellationEvidence {
     pub request_id: String,
@@ -25,6 +34,12 @@ pub struct RemoteTurnCancellationEvidence {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "remote_undelivered_is_defer")]
     pub undelivered: RemoteTurnCancelUndeliveredInputPolicy,
+    #[serde(default, skip_serializing_if = "remote_mode_is_immediate")]
+    pub mode: RemoteTurnCancelMode,
+    /// The committed protocol iteration that honoured an after-step stop.
+    /// Absent for immediate stops and requests honoured before any step ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub honoured_after_step: Option<usize>,
 }
 
 impl RemoteTurnCancellationEvidence {
@@ -49,6 +64,14 @@ pub struct RemoteTurnCancelRequest {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "remote_undelivered_is_defer")]
     pub undelivered: RemoteTurnCancelUndeliveredInputPolicy,
+    /// Immediate cancellation interrupts the current step; after-step
+    /// cancellation waits for that iteration's checkpoint to commit.
+    #[serde(default, skip_serializing_if = "remote_mode_is_immediate")]
+    pub mode: RemoteTurnCancelMode,
+}
+
+fn remote_mode_is_immediate(value: &RemoteTurnCancelMode) -> bool {
+    matches!(value, RemoteTurnCancelMode::Immediate)
 }
 
 fn remote_undelivered_is_defer(value: &RemoteTurnCancelUndeliveredInputPolicy) -> bool {
@@ -72,6 +95,9 @@ pub enum RemoteTurnCancelOutcome {
     AlreadyRequested {
         cancellation: RemoteTurnCancellationEvidence,
     },
+    Escalated {
+        cancellation: RemoteTurnCancellationEvidence,
+    },
     PolicyConflict {
         requested: RemoteTurnCancelUndeliveredInputPolicy,
         accepted: RemoteTurnCancellationEvidence,
@@ -83,9 +109,9 @@ pub enum RemoteTurnCancelOutcome {
 impl RemoteTurnCancelOutcome {
     fn validate(&self) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::Requested { cancellation } | Self::AlreadyRequested { cancellation } => {
-                cancellation.validate()
-            }
+            Self::Requested { cancellation }
+            | Self::AlreadyRequested { cancellation }
+            | Self::Escalated { cancellation } => cancellation.validate(),
             Self::PolicyConflict { accepted, .. } => accepted.validate(),
             Self::CompletionWonRace | Self::UnknownOrRevoked => Ok(()),
         }

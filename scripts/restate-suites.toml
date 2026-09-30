@@ -132,3 +132,11 @@ filters = ["public_process_command_replay::live_"]
 endpoints = ["PC"]
 shards = 1
 timeout_seconds = 180
+
+[suites.remote-cancellation]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::remote_turn_cancel::live_remote_after_step_waits_for_committed_boundary"]
+endpoints = ["EG_RESTATE_ENDPOINT"]
+shards = 1
+timeout_seconds = 180

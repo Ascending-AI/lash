@@ -561,6 +561,8 @@ fn remote_turn_result_derives_status_from_its_outcome() {
                     origin: Some("workbench-user".to_string()),
                     reason: Some("stop".to_string()),
                     undelivered: RemoteTurnCancelUndeliveredInputPolicy::Defer,
+                    mode: RemoteTurnCancelMode::Immediate,
+                    honoured_after_step: None,
                 },
             },
         },
@@ -603,13 +605,16 @@ fn remote_cancelled_stop_requires_and_preserves_evidence() {
             origin: Some("workbench-user".to_string()),
             reason: Some("stop".to_string()),
             undelivered: RemoteTurnCancelUndeliveredInputPolicy::Drop,
+            mode: RemoteTurnCancelMode::AfterStep,
+            honoured_after_step: Some(7),
         },
     };
     let wire = serde_json::to_value(&stop).unwrap();
     assert_eq!(
         wire,
         serde_json::json!({"type":"cancelled","evidence": {
-            "request_id":"request-1", "origin":"workbench-user", "reason":"stop", "undelivered":"drop"
+            "request_id":"request-1", "origin":"workbench-user", "reason":"stop", "undelivered":"drop",
+            "mode":"after_step", "honoured_after_step":7
         }})
     );
     assert_eq!(
@@ -623,6 +628,12 @@ fn remote_cancelled_stop_requires_and_preserves_evidence() {
 
 #[test]
 fn remote_turn_cancel_envelopes_round_trip() {
+    let request_schema =
+        serde_json::to_value(schemars::schema_for!(RemoteTurnCancelRequest)).unwrap();
+    let request_schema = jsonschema::JSONSchema::compile(&request_schema).unwrap();
+    let receipt_schema =
+        serde_json::to_value(schemars::schema_for!(RemoteTurnCancelReceipt)).unwrap();
+    let receipt_schema = jsonschema::JSONSchema::compile(&receipt_schema).unwrap();
     let request = RemoteTurnCancelRequest {
         session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
@@ -630,6 +641,7 @@ fn remote_turn_cancel_envelopes_round_trip() {
         origin: Some("test-host".to_string()),
         reason: Some("superseded by newer input".to_string()),
         undelivered: RemoteTurnCancelUndeliveredInputPolicy::Drop,
+        mode: RemoteTurnCancelMode::AfterStep,
     };
     request.validate().expect("valid cancellation request");
     let decoded: RemoteTurnCancelRequest = serde_json::from_value(
@@ -643,23 +655,43 @@ fn remote_turn_cancel_envelopes_round_trip() {
     let encoded = serde_json::to_value(&request_without_origin)
         .expect("serialize cancellation request without origin");
     assert!(encoded.get("origin").is_none());
+    assert_eq!(encoded["mode"], "after_step");
+    assert!(request_schema.is_valid(&encoded));
     assert_eq!(
         serde_json::from_value::<RemoteTurnCancelRequest>(encoded)
             .expect("deserialize cancellation request without origin"),
         request_without_origin
     );
 
+    let mut immediate = serde_json::to_value(&request).unwrap();
+    immediate["mode"] = serde_json::json!("immediate");
+    assert!(request_schema.is_valid(&immediate));
+    assert_eq!(
+        serde_json::from_value::<RemoteTurnCancelRequest>(immediate.clone())
+            .unwrap()
+            .mode,
+        RemoteTurnCancelMode::Immediate,
+    );
+    immediate["mode"] = serde_json::json!("unsupported");
+    assert!(!request_schema.is_valid(&immediate));
+    assert!(serde_json::from_value::<RemoteTurnCancelRequest>(immediate).is_err());
+
     let evidence = RemoteTurnCancellationEvidence {
         request_id: "request-1".to_string(),
         origin: Some("test-host".to_string()),
         reason: None,
         undelivered: RemoteTurnCancelUndeliveredInputPolicy::Defer,
+        mode: RemoteTurnCancelMode::AfterStep,
+        honoured_after_step: Some(7),
     };
     for outcome in [
         RemoteTurnCancelOutcome::Requested {
             cancellation: evidence.clone(),
         },
         RemoteTurnCancelOutcome::AlreadyRequested {
+            cancellation: evidence.clone(),
+        },
+        RemoteTurnCancelOutcome::Escalated {
             cancellation: evidence.clone(),
         },
         RemoteTurnCancelOutcome::PolicyConflict {
@@ -671,12 +703,21 @@ fn remote_turn_cancel_envelopes_round_trip() {
     ] {
         let receipt = RemoteTurnCancelReceipt::new("session", "turn", outcome);
         receipt.validate().expect("valid cancellation receipt");
-        let decoded: RemoteTurnCancelReceipt = serde_json::from_value(
-            serde_json::to_value(&receipt).expect("serialize cancellation receipt"),
-        )
-        .expect("deserialize cancellation receipt");
+        let encoded = serde_json::to_value(&receipt).expect("serialize cancellation receipt");
+        assert!(receipt_schema.is_valid(&encoded));
+        let decoded: RemoteTurnCancelReceipt =
+            serde_json::from_value(encoded).expect("deserialize cancellation receipt");
         assert_eq!(decoded, receipt);
     }
+    let malformed = serde_json::json!({
+        "session_id": "session", "turn_id": "turn", "outcome": {
+            "outcome": "escalated", "cancellation": {
+                "request_id": "request-1", "mode": "after_step", "honoured_after_step": "seven"
+            }
+        }
+    });
+    assert!(!receipt_schema.is_valid(&malformed));
+    assert!(serde_json::from_value::<RemoteTurnCancelReceipt>(malformed).is_err());
 }
 
 #[test]

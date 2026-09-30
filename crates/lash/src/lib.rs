@@ -838,8 +838,9 @@ pub mod remote {
     /// Foreground-turn cancellation request and receipt envelopes.
     pub mod turn_control {
         pub use lash_remote_protocol::turn_control::{
-            RemoteTurnCancelOutcome, RemoteTurnCancelReceipt, RemoteTurnCancelRequest,
-            RemoteTurnCancelUndeliveredInputPolicy, RemoteTurnCancellationEvidence,
+            RemoteTurnCancelMode, RemoteTurnCancelOutcome, RemoteTurnCancelReceipt,
+            RemoteTurnCancelRequest, RemoteTurnCancelUndeliveredInputPolicy,
+            RemoteTurnCancellationEvidence,
         };
     }
 
