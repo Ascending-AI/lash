@@ -622,7 +622,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lashlang:dialect_cost__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lashlang:integration__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lashlang:lashlang__unit_test": {"cpu_count": 3, "memory_kb": 1048576},
-    "//crates/lashlang:lashlang__unit_test__fv_59c81af4": {"cpu_count": 3, "memory_kb": 1048576},
+    "//crates/lashlang:lashlang__unit_test__fv_41763c4b": {"cpu_count": 3, "memory_kb": 1048576},
     "//crates/lashlang:observation_cost__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lashlang:property__test": {"cpu_count": 3, "memory_kb": 1048576},
     "//crates/lashlang:stack_budget__test": {"cpu_count": 1, "memory_kb": 1048576},

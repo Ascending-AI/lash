@@ -323,11 +323,7 @@ impl Server {
                     .owner
                     .as_ref()
                     .ok_or_else(|| PoolError::protocol("missing owner"))?,
-                vm_contract: &lashlang::vm_contract_identity(),
-                format_version: match kind {
-                    VmStateKind::Snapshot => lashlang::LASHLANG_SNAPSHOT_VERSION,
-                    VmStateKind::Continuation => lashlang::VM_CONTINUATION_FORMAT_VERSION,
-                },
+                reads: &lashlang::vm_contract_reads(),
                 max_bytes: self.bootstrap.state,
             })
             .map_err(PoolError::protocol)
@@ -345,7 +341,7 @@ impl Server {
             self.owner
                 .clone()
                 .ok_or_else(|| PoolError::protocol("missing owner"))?,
-            lashlang::vm_contract_identity(),
+            lashlang::vm_contract_versions(),
             match kind {
                 VmStateKind::Snapshot => lashlang::LASHLANG_SNAPSHOT_VERSION,
                 VmStateKind::Continuation => lashlang::VM_CONTINUATION_FORMAT_VERSION,

@@ -365,12 +365,7 @@ impl Checkout {
             && let Err(error) = state.check(&StateExpectation {
                 kind,
                 owner: &start.owner,
-                vm_contract: &lashlang::vm_contract_identity(),
-                format_version: if kind == VmStateKind::Snapshot {
-                    lashlang::LASHLANG_SNAPSHOT_VERSION
-                } else {
-                    lashlang::VM_CONTINUATION_FORMAT_VERSION
-                },
+                reads: &lashlang::vm_contract_reads(),
                 max_bytes: self.pool.config.protocol.max_vm_state_bytes,
             })
         {
@@ -630,12 +625,7 @@ impl Checkout {
                                     .owner
                                     .as_ref()
                                     .ok_or_else(|| PoolError::protocol("response has no owner"))?,
-                                vm_contract: &lashlang::vm_contract_identity(),
-                                format_version: if kind == VmStateKind::Snapshot {
-                                    lashlang::LASHLANG_SNAPSHOT_VERSION
-                                } else {
-                                    lashlang::VM_CONTINUATION_FORMAT_VERSION
-                                },
+                                reads: &lashlang::vm_contract_reads(),
                                 max_bytes: self.pool.config.protocol.max_vm_state_bytes,
                             })
                             .map_err(PoolError::protocol)?;

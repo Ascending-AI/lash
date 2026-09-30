@@ -38,6 +38,7 @@ synthetic-next = ["lash-core-execution/synthetic-next"]
 workspace = true
 
 [dependencies]
+lash-vm-protocol = { workspace = true }
 async-trait = { workspace = true }
 compact_str = { version = "0.9.0", features = ["serde"] }
 futures-executor = "0.3"

@@ -44,3 +44,5 @@ pub use outcome::{InfrastructureOutcome, SupervisorEvidence, WorkerLimit};
 pub use state::{
     OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner, VmStateKind,
 };
+mod contract;
+pub use contract::{VmContract, VmContractComponent, VmContractReads};

@@ -16,7 +16,14 @@ use crate::transport::{WorkerRead, WorkerTransport};
 use super::pool::PoolShared;
 
 /// The VM contract the fake's state is written under.
-pub const FAKE_VM_CONTRACT: &str = "lash-vm-broker fake worker v1";
+pub const FAKE_VM_CONTRACT: lash_vm_protocol::VmContract = lash_vm_protocol::VmContract {
+    bytecode: 1,
+    continuation: FAKE_STATE_FORMAT,
+    snapshot: FAKE_STATE_FORMAT,
+    accounting: 1,
+    heap: 1,
+    abi: 1,
+};
 
 /// The format version of the fake's state, continuation and snapshot alike.
 pub const FAKE_STATE_FORMAT: u32 = 1;

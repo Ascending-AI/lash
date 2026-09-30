@@ -21,6 +21,7 @@ workspace = true
 # state through this crate as opaque bytes, and the type-level proof that it
 # cannot decode them semantically is that nothing here can (ADR 0123).
 [dependencies]
+lash-sansio = { workspace = true }
 base64 = { workspace = true }
 blake3 = { workspace = true }
 rmp-serde = { workspace = true }

@@ -35,14 +35,12 @@ use std::time::Duration;
 
 use lash_sansio::sync::MutexExt;
 use lash_vm_broker::testing::{
-    FAKE_STATE_FORMAT, FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, PoolStats,
-    ScriptedProgram, Step,
+    FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, PoolStats, ScriptedProgram, Step,
 };
 use lash_vm_broker::{
     AdmittedContext, AdmittedKind, AdmittedOperation, ArgumentContract, BoundOperation, Broker,
     BrokerBounds, BrokerFailure, BrokeredEnd, CodeCallIdentities, FrameFence, FrozenBindings,
-    Invocation, ParentEffects, ParentFault, Performed, RequestFingerprint, RunStart, StateContract,
-    ToolRoute,
+    Invocation, ParentEffects, ParentFault, Performed, RequestFingerprint, RunStart, ToolRoute,
 };
 use lash_vm_protocol::{
     BuildIdentity, DecodeLimits, EffectOutcome, FrameCodec, FrameEpoch, OwnerEpoch, VmLimits,
@@ -77,12 +75,8 @@ fn codec() -> FrameCodec {
     )
 }
 
-fn contract() -> StateContract {
-    StateContract {
-        vm_contract: FAKE_VM_CONTRACT.into(),
-        continuation_format: FAKE_STATE_FORMAT,
-        snapshot_format: FAKE_STATE_FORMAT,
-    }
+fn contract() -> lash_vm_protocol::VmContractReads {
+    FAKE_VM_CONTRACT.exact_reads()
 }
 
 fn bounds() -> BrokerBounds {

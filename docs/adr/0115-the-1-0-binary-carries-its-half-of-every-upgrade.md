@@ -1134,3 +1134,28 @@ took:
   `lashctl objects-sweep` read `_compat` through Restate SQL and call
   `upgrade` through ingress. The object state is the only cursor, so an
   interrupted sweep resumes by being run again.
+
+## Amendment (FIG-4261, 2026-09-30)
+
+A segment handover admits each VM contract component against the receiving
+build's declared read range. Opaque state carries the bytecode, continuation,
+snapshot, instruction-accounting, heap-size-schedule and ABI versions as
+separate numbers. Whole-contract string equality is removed. A component
+outside its range is refused with its name, version and supported range,
+before the worker decodes the state. The state's outer format stamp must also
+agree with its continuation or snapshot component. Owner, kind, size and hash
+checks still apply.
+
+The continuation range is the same range the worker's continuation decoder
+uses. The snapshot range comes from the FIG-3802 guarded read window and its
+upcaster chain. Admission does not itself decode or rewrite VM bytes; the
+worker decodes admitted state through these existing decoders.
+
+In the synthetic tier, N reads continuation `[29,29]` and snapshot `[14,14]`;
+N+1 reads continuation `[29,30]` and snapshot `[14,15]`. The other components
+remain exact ranges at their current versions. N's parked state therefore
+resumes on N+1. A state N+1 writes with continuation 30 or snapshot 15 is
+outside N's ranges and N refuses it typed. Such a continuation remains routed
+to N+1's recorded generation, whose deployment must remain until it drains
+(§3.5). A state N+1 writes wholly within N's ranges is admitted on rollback.
+These are synthetic bumps only; the pre-1.0 version freeze still holds.

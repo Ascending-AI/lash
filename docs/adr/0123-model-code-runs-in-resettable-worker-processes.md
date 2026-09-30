@@ -158,10 +158,11 @@ policy.
 ### 5. The parent never decodes VM state
 
 To the parent, VM state is `lash_vm_protocol::OpaqueVmState`: a kind, an
-owner, the exact VM contract (`lashlang::vm_contract_identity()`), a format
+owner, the VM component versions (`lashlang::vm_contract_versions()`), a format
 version, a length, a BLAKE3 digest and the bytes. The parent checks those
-structurally and nothing else. The semantic decoders, which restore guest
-values and compile regular expressions, are reachable only through
+structurally, admitting each component against its declared read range
+(`lashlang::vm_contract_reads()`, ADR 0115, FIG-4261). The semantic decoders,
+which restore guest values and compile regular expressions, are reachable only through
 `VmInstance` (`open_continuation`, `open_snapshot`,
 `restore_durable_parts`): `VmContinuation` no longer implements
 `Deserialize`, and the protocol crate depends on nothing that could decode

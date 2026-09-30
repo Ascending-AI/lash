@@ -30,7 +30,14 @@ fn start_frame() -> ParentFrame {
             state: StartState::Continuation(OpaqueVmState::seal(
                 VmStateKind::Continuation,
                 VmOwner::new("session-a"),
-                "vm-contract",
+                crate::VmContract {
+                    bytecode: 1,
+                    continuation: 29,
+                    snapshot: 1,
+                    accounting: 1,
+                    heap: 1,
+                    abi: 1,
+                },
                 29,
                 vec![1, 2, 3, 4],
             )),
@@ -94,7 +101,14 @@ fn every_message_round_trips() {
     let state = OpaqueVmState::seal(
         VmStateKind::Snapshot,
         VmOwner::new("session-a"),
-        "vm-contract",
+        crate::VmContract {
+            bytecode: 1,
+            continuation: 29,
+            snapshot: 1,
+            accounting: 1,
+            heap: 1,
+            abi: 1,
+        },
         1,
         vec![9; 16],
     );

@@ -75,7 +75,7 @@ use lash_vm_protocol::{
     EffectResponse, EncodedPayload, FrameCodec, FrameEpoch, FrameReader, HeaderRefusal,
     InfrastructureOutcome, MessageFence, OpaqueStateRefusal, OpaqueVmState, ParentFrame,
     ParentMessage, ProgramSource, ProtocolBounds, Start, StartState, StateExpectation,
-    SupervisorEvidence, VmLimits, VmStateKind, WorkerMessage,
+    SupervisorEvidence, VmContractReads, VmLimits, VmStateKind, WorkerMessage,
 };
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -110,15 +110,6 @@ impl BrokerBounds {
             cancel_grace: Duration::from_secs(1),
         }
     }
-}
-
-/// The VM contracts the parent expects state to be written under: the
-/// structural facts it checks opaque state against, and nothing more.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StateContract {
-    pub vm_contract: String,
-    pub continuation_format: u32,
-    pub snapshot_format: u32,
 }
 
 /// The frame a session is in, shared by its runs: opening a frame advances
@@ -307,7 +298,7 @@ pub struct Broker<'a> {
     pub checkpoints: &'a dyn CheckpointStore,
     pub slots: &'a dyn WorkerSlots,
     pub codec: FrameCodec,
-    pub contract: StateContract,
+    pub contract: VmContractReads,
     pub bounds: BrokerBounds,
     pub frames: FrameFence,
 }
@@ -424,11 +415,7 @@ impl Broker<'_> {
         StateExpectation {
             kind,
             owner: &self.context.owner,
-            vm_contract: &self.contract.vm_contract,
-            format_version: match kind {
-                VmStateKind::Continuation => self.contract.continuation_format,
-                VmStateKind::Snapshot => self.contract.snapshot_format,
-            },
+            reads: &self.contract,
             max_bytes: self.bounds.protocol.max_vm_state_bytes,
         }
     }

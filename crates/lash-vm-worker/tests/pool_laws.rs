@@ -674,7 +674,7 @@ fn state_kind_mismatch_is_refused_before_worker_dispatch() {
         let state = OpaqueVmState::seal(
             kind,
             input.owner.clone(),
-            lashlang::vm_contract_identity(),
+            lashlang::vm_contract_versions(),
             if kind == VmStateKind::Snapshot {
                 lashlang::LASHLANG_SNAPSHOT_VERSION
             } else {

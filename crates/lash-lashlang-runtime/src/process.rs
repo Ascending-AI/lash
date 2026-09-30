@@ -394,10 +394,10 @@ pub async fn run_lashlang_process(
                 // The parent's only look at the VM bytes: size, owner, the
                 // VM contract they were written under, format and hash.
                 let owner = segment_continuation_owner(context.process_id());
-                let vm_contract = lashlang::vm_contract_identity();
+                let reads = lashlang::vm_contract_reads();
                 if let Err(refusal) = state
                     .vm
-                    .check(&segment_continuation_expectation(&owner, &vm_contract))
+                    .check(&segment_continuation_expectation(&owner, &reads))
                 {
                     return Ok(process_lashlang_failure(
                         LashlangProcessFailureCode::ProcessSegmentHandoverInvalid,
@@ -816,7 +816,7 @@ fn capture_segment(
         vm: lash_vm_protocol::OpaqueVmState::seal(
             lash_vm_protocol::VmStateKind::Continuation,
             segment_continuation_owner(&host.process_id),
-            lashlang::vm_contract_identity(),
+            lashlang::vm_contract_versions(),
             lashlang::VM_CONTINUATION_FORMAT_VERSION,
             continuation,
         ),
@@ -845,17 +845,16 @@ fn segment_continuation_owner(process_id: &ProcessId) -> lash_vm_protocol::VmOwn
     lash_vm_protocol::VmOwner::new(format!("process:{process_id}"))
 }
 
-/// What a segment's continuation must be: this process's, written under this
-/// build's VM contracts, within the size bound.
+/// A segment continuation belongs to this process, is inside each VM
+/// component's read range, and is within the size bound.
 fn segment_continuation_expectation<'a>(
     owner: &'a lash_vm_protocol::VmOwner,
-    vm_contract: &'a str,
+    reads: &'a lash_vm_protocol::VmContractReads,
 ) -> lash_vm_protocol::StateExpectation<'a> {
     lash_vm_protocol::StateExpectation {
         kind: lash_vm_protocol::VmStateKind::Continuation,
         owner,
-        vm_contract,
-        format_version: lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        reads,
         max_bytes: MAX_SEGMENT_CONTINUATION_BYTES,
     }
 }

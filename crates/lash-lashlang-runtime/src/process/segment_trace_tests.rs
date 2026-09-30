@@ -621,7 +621,7 @@ fn sealed_continuation(
     lash_vm_protocol::OpaqueVmState::seal(
         lash_vm_protocol::VmStateKind::Continuation,
         super::segment_continuation_owner(process_id),
-        lashlang::vm_contract_identity(),
+        lashlang::vm_contract_versions(),
         lashlang::VM_CONTINUATION_FORMAT_VERSION,
         continuation.to_bytes().expect("encode the continuation"),
     )
@@ -700,21 +700,21 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
     let sealed = lash_vm_protocol::OpaqueVmState::seal(
         lash_vm_protocol::VmStateKind::Continuation,
         owner.clone(),
-        lashlang::vm_contract_identity(),
+        lashlang::vm_contract_versions(),
         10,
         bytes,
     );
 
-    let vm_contract = lashlang::vm_contract_identity();
+    let reads = lashlang::vm_contract_reads();
     assert_eq!(
-        sealed.check(&super::segment_continuation_expectation(
-            &owner,
-            &vm_contract
-        )),
-        Err(lash_vm_protocol::OpaqueStateRefusal::WrongFormatVersion {
-            expected: lashlang::VM_CONTINUATION_FORMAT_VERSION,
-            found: 10,
-        })
+        sealed.check(&super::segment_continuation_expectation(&owner, &reads)),
+        Err(
+            lash_vm_protocol::OpaqueStateRefusal::ComponentOutsideReadRange {
+                component: lash_vm_protocol::VmContractComponent::Continuation,
+                reads: lashlang::VM_CONTINUATION_READ_RANGE,
+                found: 10,
+            }
+        )
     );
     let Err(refusal) = super::worker_side::open_continuation(&sealed) else {
         panic!("the v10 VM continuation must be refused by the current decoder");
@@ -831,7 +831,7 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     fixture["segment_state"]["vm"] = serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
         lash_vm_protocol::VmStateKind::Continuation,
         super::segment_continuation_owner(&lash_sansio::ProcessId::fixture("fixture")),
-        lashlang::vm_contract_identity(),
+        lashlang::vm_contract_versions(),
         lashlang::VM_CONTINUATION_FORMAT_VERSION,
         continuation,
     ))

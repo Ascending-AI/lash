@@ -37,7 +37,7 @@ pub use authority::{
 };
 pub use broker::{
     Broker, BrokerBounds, BrokerFailure, BrokeredEnd, FrameFence, ParkedOperation, RunStart,
-    SettledOperation, Settlement, StateContract,
+    SettledOperation, Settlement,
 };
 pub use effects::{ParentEffects, ParentFault, Performed};
 pub use identity::CodeCallIdentities;

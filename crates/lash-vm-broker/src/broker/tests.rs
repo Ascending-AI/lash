@@ -20,8 +20,7 @@ use crate::authority::{
 };
 use crate::identity::CodeCallIdentities;
 use crate::testing::{
-    FAKE_STATE_FORMAT, FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, ScriptedProgram,
-    Step,
+    FAKE_VM_CONTRACT, FakeWorkerPool, Fault, MemoryCheckpoints, ScriptedProgram, Step,
 };
 
 /// An in-memory journal: first write wins, and a recorded outcome is served
@@ -156,12 +155,8 @@ fn echo(value: i64) -> Step {
     })
 }
 
-fn contract() -> StateContract {
-    StateContract {
-        vm_contract: FAKE_VM_CONTRACT.into(),
-        continuation_format: FAKE_STATE_FORMAT,
-        snapshot_format: FAKE_STATE_FORMAT,
-    }
+fn contract() -> lash_vm_protocol::VmContractReads {
+    FAKE_VM_CONTRACT.exact_reads()
 }
 
 fn bounds() -> BrokerBounds {

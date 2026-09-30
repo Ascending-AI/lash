@@ -2270,6 +2270,7 @@ dependencies = [
  "lash-internal-render",
  "lash-internal-sansio",
  "lash-internal-typescript",
+ "lash-internal-vm-protocol",
  "lash-regress",
  "num-bigint",
  "num-traits",
@@ -2830,6 +2831,7 @@ version = "0.0.0-dev"
 dependencies = [
  "base64",
  "blake3",
+ "lash-internal-sansio",
  "rmp-serde",
  "serde",
  "serde_bytes",

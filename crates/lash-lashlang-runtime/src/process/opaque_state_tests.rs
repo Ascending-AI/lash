@@ -93,13 +93,13 @@ async fn parent_state_decode_never_compiles_regexp() {
 
     let process_id = lash_sansio::ProcessId::fixture("regexp-witness");
     let owner = segment_continuation_owner(&process_id);
-    let vm_contract = lashlang::vm_contract_identity();
+    let vm_contract = lashlang::vm_contract_versions();
     let envelope = serde_json::to_vec(&LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: lash_vm_protocol::OpaqueVmState::seal(
             lash_vm_protocol::VmStateKind::Continuation,
             owner.clone(),
-            vm_contract.clone(),
+            vm_contract,
             lashlang::VM_CONTINUATION_FORMAT_VERSION,
             poisoned,
         ),
@@ -119,9 +119,10 @@ async fn parent_state_decode_never_compiles_regexp() {
     let decoded = decode_lashlang_segment_state(&envelope)
         .expect("the parent decodes the envelope without touching the VM bytes");
     assert_eq!(
-        decoded
-            .vm
-            .check(&segment_continuation_expectation(&owner, &vm_contract)),
+        decoded.vm.check(&segment_continuation_expectation(
+            &owner,
+            &lashlang::vm_contract_reads()
+        )),
         Ok(()),
         "the parent's structural check passes bytes the VM would refuse"
     );

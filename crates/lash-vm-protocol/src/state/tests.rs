@@ -1,10 +1,20 @@
 use super::*;
 
+const CONTRACT: VmContract = VmContract {
+    bytecode: 30,
+    continuation: 29,
+    snapshot: 14,
+    accounting: 3,
+    heap: 3,
+    abi: 14,
+};
+const READS: VmContractReads = CONTRACT.exact_reads();
+
 fn state() -> OpaqueVmState {
     OpaqueVmState::seal(
         VmStateKind::Continuation,
         VmOwner::new("process-1"),
-        "vm-contract-a",
+        CONTRACT,
         29,
         b"continuation bytes".to_vec(),
     )
@@ -14,8 +24,7 @@ fn expectation(owner: &VmOwner) -> StateExpectation<'_> {
     StateExpectation {
         kind: VmStateKind::Continuation,
         owner,
-        vm_contract: "vm-contract-a",
-        format_version: 29,
+        reads: &READS,
         max_bytes: 1024,
     }
 }
@@ -38,17 +47,29 @@ fn the_structural_check_names_each_mismatch() {
     ));
     assert!(matches!(
         state().check(&StateExpectation {
-            vm_contract: "vm-contract-b",
+            reads: &VmContractReads {
+                abi: VersionRange::exactly(15),
+                ..READS
+            },
             ..expectation(&owner)
         }),
-        Err(OpaqueStateRefusal::WrongVmContract { .. })
+        Err(OpaqueStateRefusal::ComponentOutsideReadRange {
+            component: VmContractComponent::Abi,
+            ..
+        })
     ));
     assert!(matches!(
         state().check(&StateExpectation {
-            format_version: 30,
+            reads: &VmContractReads {
+                continuation: VersionRange::exactly(30),
+                ..READS
+            },
             ..expectation(&owner)
         }),
-        Err(OpaqueStateRefusal::WrongFormatVersion { .. })
+        Err(OpaqueStateRefusal::ComponentOutsideReadRange {
+            component: VmContractComponent::Continuation,
+            ..
+        })
     ));
     assert!(matches!(
         state().check(&StateExpectation {
@@ -81,6 +102,10 @@ fn json_carries_the_bytes_as_base64_and_the_facts_readably() {
     let json = serde_json::to_value(state()).unwrap();
     assert_eq!(json["kind"], "continuation");
     assert_eq!(json["format_version"], 29);
+    assert_eq!(
+        json["vm_contract"],
+        serde_json::json!({"bytecode":30,"continuation":29,"snapshot":14,"accounting":3,"heap":3,"abi":14})
+    );
     assert_eq!(json["bytes"], "Y29udGludWF0aW9uIGJ5dGVz");
     let back: OpaqueVmState = serde_json::from_value(json).unwrap();
     assert_eq!(back, state());
@@ -91,4 +116,96 @@ fn an_unknown_field_is_refused() {
     let mut json = serde_json::to_value(state()).unwrap();
     json["deferred_resolutions"] = serde_json::json!({});
     assert!(serde_json::from_value::<OpaqueVmState>(json).is_err());
+    let mut json = serde_json::to_value(state()).unwrap();
+    json["vm_contract"]["future_component"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<OpaqueVmState>(json).is_err());
+    let mut json = serde_json::to_value(state()).unwrap();
+    json["vm_contract"] = serde_json::json!("legacy-whole-contract");
+    assert!(serde_json::from_value::<OpaqueVmState>(json).is_err());
+}
+
+#[test]
+fn every_component_is_checked_against_both_range_bounds() {
+    let widened = VmContractReads {
+        bytecode: VersionRange::between(30, 31),
+        continuation: VersionRange::between(29, 30),
+        snapshot: VersionRange::between(14, 15),
+        accounting: VersionRange::between(3, 4),
+        heap: VersionRange::between(3, 4),
+        abi: VersionRange::between(14, 15),
+    };
+    assert_eq!(widened.admit(CONTRACT), Ok(()));
+    assert_eq!(
+        widened.admit(VmContract {
+            bytecode: 31,
+            continuation: 30,
+            snapshot: 15,
+            accounting: 4,
+            heap: 4,
+            abi: 15
+        }),
+        Ok(())
+    );
+    for (component, min, max) in [
+        (VmContractComponent::Bytecode, 30, 31),
+        (VmContractComponent::Continuation, 29, 30),
+        (VmContractComponent::Snapshot, 14, 15),
+        (VmContractComponent::Accounting, 3, 4),
+        (VmContractComponent::Heap, 3, 4),
+        (VmContractComponent::Abi, 14, 15),
+    ] {
+        for found in [min - 1, max + 1] {
+            let mut contract = CONTRACT;
+            match component {
+                VmContractComponent::Bytecode => contract.bytecode = found,
+                VmContractComponent::Continuation => contract.continuation = found,
+                VmContractComponent::Snapshot => contract.snapshot = found,
+                VmContractComponent::Accounting => contract.accounting = found,
+                VmContractComponent::Heap => contract.heap = found,
+                VmContractComponent::Abi => contract.abi = found,
+            }
+            assert_eq!(
+                widened.admit(contract),
+                Err(OpaqueStateRefusal::ComponentOutsideReadRange {
+                    component,
+                    found,
+                    reads: VersionRange::between(min, max)
+                })
+            );
+        }
+    }
+}
+
+#[test]
+fn the_outer_format_agrees_with_its_contract_component() {
+    let owner = VmOwner::new("process-1");
+    for (kind, component, format, contract) in [
+        (
+            VmStateKind::Continuation,
+            VmContractComponent::Continuation,
+            30,
+            29,
+        ),
+        (VmStateKind::Snapshot, VmContractComponent::Snapshot, 15, 14),
+    ] {
+        let state = OpaqueVmState::seal(kind, owner.clone(), CONTRACT, format, Vec::new());
+        let reads = VmContractReads {
+            continuation: VersionRange::between(29, 30),
+            snapshot: VersionRange::between(14, 15),
+            ..READS
+        };
+        assert_eq!(
+            state.check(&StateExpectation {
+                kind,
+                owner: &owner,
+                reads: &reads,
+                max_bytes: 1024
+            }),
+            Err(OpaqueStateRefusal::ConflictingFormatVersion {
+                component,
+                contract,
+                found: format
+            })
+        );
+    }
 }

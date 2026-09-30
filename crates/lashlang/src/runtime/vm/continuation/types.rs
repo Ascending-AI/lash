@@ -20,7 +20,9 @@ impl VmContinuation {
             serde_json::from_slice(bytes).map_err(|error| undecodable(error.to_string()))?;
         if let Some(version_val) = raw.get("format_version") {
             if let Some(version) = version_val.as_u64() {
-                if !super::decodes_format(version) {
+                if !u32::try_from(version)
+                    .is_ok_and(|version| crate::VM_CONTINUATION_READ_RANGE.contains(version))
+                {
                     return Err(match u32::try_from(version) {
                         Ok(found) => ContinuationError::FormatVersionMismatch {
                             expected: VM_CONTINUATION_FORMAT_VERSION,

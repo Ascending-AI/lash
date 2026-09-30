@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod namespace;
 
+#[cfg(test)]
+mod vm_contract_tests;
+
 mod artifact;
 mod ast;
 mod ast_string;
@@ -17,6 +20,8 @@ mod span;
 mod tracking;
 mod trigger;
 mod value_refs;
+mod vm_contract;
+pub use vm_contract::{VM_CONTINUATION_READ_RANGE, vm_contract_reads, vm_contract_versions};
 mod workflow_graph;
 
 #[cfg(any(test, feature = "testing"))]
@@ -182,19 +187,6 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// executable and is refused.
 pub const BYTECODE_FORMAT_VERSION: u32 = 30;
 
-/// The identity of the VM contracts that decide how parked VM state decodes:
-/// the bytecode, continuation and snapshot formats, the instruction
-/// accounting, the heap size schedule and the VM ABI.
-///
-/// Opaque VM state carries it (ADR 0123): a parent checks that the bytes it
-/// holds were written under the contracts this build decodes, without
-/// decoding them. It is the part of the build identity durable state is
-/// fenced by.
-pub fn vm_contract_identity() -> String {
-    format!(
-        "lashlang-vm/bytecode-{BYTECODE_FORMAT_VERSION}/continuation-{VM_CONTINUATION_FORMAT_VERSION}/snapshot-{LASHLANG_SNAPSHOT_VERSION}/accounting-{INSTRUCTION_ACCOUNTING_VERSION}/heap-{HEAP_SIZE_SCHEDULE_VERSION}/{LASHLANG_VM_ABI_VERSION}"
-    )
-}
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,
