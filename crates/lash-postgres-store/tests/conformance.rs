@@ -284,6 +284,19 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
             }
         }
     }
+
+    /// Process segments run in the double's process workflow: the worker is
+    /// installed there, and the runtime's own port only observes the
+    /// registry that workflow writes terminals into.
+    fn process_work(
+        &self,
+        watched: lash_core_execution::WatchedRegistry,
+        worker: lash_core_worker::DurableProcessWorker,
+    ) -> lash_core_execution::ProcessWorkWiring {
+        self.backend.install_process_worker(worker);
+        let port = Arc::new(lash_core_execution::NoProcessWork::new(&watched));
+        lash_core_execution::ProcessWorkWiring::new(watched, port)
+    }
 }
 
 /// A backend for a law whose turns must run inside a Restate handler:
@@ -1930,6 +1943,28 @@ mod frame_open {
         (
             (lock, storage, attachments, double),
             "pg-frame-open",
+            host,
+            stores,
+            runner,
+        )
+    });
+}
+
+mod bound_trigger_duplicate {
+    use super::*;
+    // FIG-4297: a duplicate of a bound trigger delivery's occurrence, emitted
+    // by a fresh invocation after the bound process was pruned, returns that
+    // process and starts nothing, and the original emission's replay still
+    // answers it, over this test's PostgreSQL stores.
+    lash_conformance::bound_trigger_duplicate_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
+        (
+            (lock, storage, attachments, double),
+            "pg-bound-trigger",
             host,
             stores,
             runner,

@@ -39,6 +39,7 @@ mod attachment_referrers;
 pub use attachment_referrers::*;
 mod attachment_store;
 mod await_event_cold;
+mod bound_trigger_duplicate;
 mod law_backend;
 pub(crate) use law_backend::{LawBackend, StoreLawBackend, law_session_store};
 pub use law_backend::{backend_over, recording_backend_over};

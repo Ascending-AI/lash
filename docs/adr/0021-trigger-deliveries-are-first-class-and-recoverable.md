@@ -16,6 +16,8 @@ The reservation transaction arms a `TriggerDelivery` obligation keyed by the occ
 
 Start-key idempotence lasts while the process is retained under ADR 0107. Registration therefore pins the process to its delivery in the registration transaction. Prune cannot delete it between registration and bind. After bind commits, producer and recovery release the pin. A lost release conservatively retains the row; retention releases pins whose delivery is bound or absent before pruning. A permanent delivery refusal stalls `refused` visibly.
 
+A binding outlives its process, so the binding, not the start key, answers a duplicate emission. Emit journals its admission of each delivery before it prepares a start: `Start` for a delivery the store answers unbound, `Bound` with the process for one it answers bound. Emit acts on the recorded admission alone. A fresh emission that meets a bound delivery reports `Started` with that process, even one retention has pruned, and registers, schedules and pins nothing. A replay of an emission that admitted a start serves that admission and then its recorded start, so its journal replays in shape although the store now answers the delivery bound. Relay recovery journals nothing and needs no admission.
+
 ## Cross-store retention protocol
 
 Process retention commits a tombstone before delivery cleanup. Reconciliation snapshots exact `(occurrence_id, subscription_id, process_id)` identities, classifies tombstoned processes, revalidates at the action boundary, then deletes only matching observed delivery rows. A live row takes precedence over a stale tombstone. Each trigger-store delete is atomic and idempotent; the two stores need no distributed transaction.

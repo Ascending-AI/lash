@@ -401,6 +401,13 @@ pub enum RuntimeEffectCommand {
     Trigger {
         command: Box<crate::TriggerCommand>,
     },
+    /// Record an emission's admission of one delivery it ingested before
+    /// the delivery's start is prepared (FIG-4297). The envelope names only
+    /// the delivery; the decision is the step's outcome.
+    AdmitTriggerDelivery {
+        occurrence_id: String,
+        subscription_id: String,
+    },
     Process {
         command: Box<ProcessCommand>,
     },
@@ -585,6 +592,7 @@ impl RuntimeEffectCommand {
             }
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
+            Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
@@ -1261,6 +1269,12 @@ pub enum RuntimeEffectOutcome {
     Trigger {
         result: Box<crate::TriggerEffectResult>,
     },
+    /// The admission an
+    /// [`AdmitTriggerDelivery`](RuntimeEffectCommand::AdmitTriggerDelivery)
+    /// recorded for its delivery.
+    AdmitTriggerDelivery {
+        admission: Box<crate::TriggerDeliveryAdmission>,
+    },
     Process {
         result: ProcessEffectOutcome,
     },
@@ -1665,6 +1679,20 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Extracts the admission an emission recorded for one trigger delivery
+    /// (FIG-4297).
+    pub fn into_trigger_delivery_admission(
+        self,
+    ) -> Result<crate::TriggerDeliveryAdmission, RuntimeEffectControllerError> {
+        match self {
+            Self::AdmitTriggerDelivery { admission } => Ok(*admission),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::AdmitTriggerDelivery,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_exec_code(
         self,
     ) -> Result<Result<ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError> {
@@ -1772,6 +1800,7 @@ impl RuntimeEffectOutcome {
             }
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
+            Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,

@@ -75,6 +75,19 @@ impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
                 panic!("the law's crashed turn did not redrive in its handler: {error}")
             });
     }
+
+    /// Process segments run in the double's process workflow: the worker is
+    /// installed there, and the runtime's own port only observes the
+    /// registry that workflow writes terminals into.
+    fn process_work(
+        &self,
+        watched: lash_core_execution::WatchedRegistry,
+        worker: lash_core_worker::DurableProcessWorker,
+    ) -> lash_core_execution::ProcessWorkWiring {
+        self.0.install_process_worker(worker);
+        let port = Arc::new(lash_core_execution::NoProcessWork::new(&watched));
+        lash_core_execution::ProcessWorkWiring::new(watched, port)
+    }
 }
 
 // FIG-4110: every frame open (a context-pressure frame, a pressure frame
@@ -100,6 +113,35 @@ lash_conformance::frame_open_redrive_tests!({
     (
         (backend, double),
         "sqlite-frame-open",
+        effect_host,
+        stores,
+        runner,
+    )
+});
+
+// FIG-4297: a duplicate of a bound trigger delivery's occurrence, emitted by
+// a fresh invocation after the bound process was pruned, returns that process
+// and starts nothing, and the original emission's replay still answers it.
+// Every emission runs inside a handler of the Restate double over this
+// substrate's stores, and the delivery's process runs in its process workflow.
+lash_conformance::bound_trigger_duplicate_tests!({
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4297 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the bound-trigger law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    (
+        (backend, double),
+        "sqlite-bound-trigger",
         effect_host,
         stores,
         runner,

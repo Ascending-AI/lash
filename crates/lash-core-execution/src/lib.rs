@@ -579,7 +579,7 @@ pub use tool_result::{
 };
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
-    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryAdmission, TriggerDeliveryReservation,
     TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog,
     TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
     TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,

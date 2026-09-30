@@ -505,19 +505,34 @@ impl TriggerRouter {
         let mut deliveries = Vec::new();
         for reservation in reservations {
             // A replay finds the occurrence and its reservation already
-            // recorded (FIG-806). It emits the same deterministic process
-            // start, which its journal answers with the process the first
-            // attempt started, so the delivery reports `Started` on every
-            // attempt: the settled outcome, never the live store read
-            // (FIG-4272).
-            let process_id = match self
-                .start_delivery(
-                    &reservation,
-                    Arc::clone(process_work.registry()),
-                    effect_controller,
-                )
+            // recorded, and bound once its first attempt bound it (FIG-806).
+            // The emission journals its admission of the delivery before it
+            // prepares a start, and acts on the recorded admission alone
+            // (FIG-4297): a replay of an emission that found the delivery
+            // unbound consumes the start it journaled, whose journal answers
+            // the process the first attempt started, and an emission that
+            // found it bound answers the bound process and starts nothing,
+            // since after that process is pruned its start key would mint
+            // another. Either way the delivery reports `Started` with its
+            // process on every attempt: the settled outcome, never the live
+            // store read (FIG-4272).
+            let admission = self
+                .admit_delivery(&reservation, effect_controller)
                 .await
-            {
+                .map_err(PluginError::from);
+            let started = match admission {
+                Ok(TriggerDeliveryAdmission::Bound { process_id }) => Ok(process_id),
+                Ok(TriggerDeliveryAdmission::Start) => {
+                    self.start_delivery(
+                        &reservation,
+                        Arc::clone(process_work.registry()),
+                        effect_controller,
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            };
+            let process_id = match started {
                 Ok(process_id) => process_id,
                 Err(err) => {
                     deliveries.push(reservation.emit_report(
@@ -537,6 +552,56 @@ impl TriggerRouter {
             TriggerEmitReport::new(occurrence.occurrence_id, deliveries),
             realization,
         ))
+    }
+
+    /// Record this emission's admission of `reservation` (FIG-4297): bound
+    /// to the process the store answered it bound to, or admitted to start.
+    ///
+    /// The first execution decides from the reservation this emission's
+    /// ingest answered; every replay serves the recorded decision.
+    async fn admit_delivery(
+        &self,
+        reservation: &TriggerDeliveryReservation,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<TriggerDeliveryAdmission, crate::RuntimeEffectControllerError> {
+        let subscription = &reservation.subscription;
+        let occurrence = &reservation.occurrence;
+        let replay_key = format!(
+            "trigger-admission:{}:{}:{}:{}",
+            occurrence.occurrence_id,
+            subscription.subscription_id,
+            subscription.incarnation,
+            subscription.revision
+        );
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(effect_controller.execution_scope().clone(), replay_key)?,
+            delivery_attribution(subscription),
+            format!(
+                "trigger-admission:{}:{}",
+                occurrence.occurrence_id, subscription.subscription_id
+            ),
+        )
+        .with_caused_by(Some(delivery_causal_ref(reservation)));
+        let admission = match reservation.process_id.clone() {
+            Some(process_id) => TriggerDeliveryAdmission::Bound { process_id },
+            None => TriggerDeliveryAdmission::Start,
+        };
+        effect_controller
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::AdmitTriggerDelivery {
+                        occurrence_id: occurrence.occurrence_id.clone(),
+                        subscription_id: subscription.subscription_id.clone(),
+                    },
+                ),
+                crate::RuntimeEffectLocalExecutor::owned_runner(
+                    Box::new(DeliveryAdmissionRunner { admission }),
+                    None,
+                ),
+            )
+            .await?
+            .into_trigger_delivery_admission()
     }
 
     pub async fn start_delivery(
@@ -793,17 +858,8 @@ impl TriggerRouter {
                 .map_err(DeliveryStartRefusal::Refused)?;
         let target = apply_trigger_inputs(subscription.target.clone(), args)
             .map_err(DeliveryStartRefusal::Refused)?;
-        let causal_ref = crate::CausalRef::TriggerOccurrence {
-            occurrence_id: occurrence.occurrence_id.clone(),
-            subscription_id: Some(subscription.subscription_id.clone()),
-            subscription_incarnation: Some(subscription.incarnation.clone()),
-            subscription_revision: Some(subscription.revision),
-        };
-        let attribution = subscription
-            .registrant_session_id()
-            .cloned()
-            .map(crate::RuntimeAttribution::for_session)
-            .unwrap_or_else(crate::RuntimeAttribution::none);
+        let causal_ref = delivery_causal_ref(reservation);
+        let attribution = delivery_attribution(subscription);
         let trigger_occurrence_invocation =
             crate::runtime::causal::trigger_occurrence_invocation(attribution.clone(), &causal_ref);
         // Engine-admission ruling (FIG-1488): this route deliberately stays
@@ -850,6 +906,56 @@ impl TriggerRouter {
             },
             attribution,
             causal_ref,
+        })
+    }
+}
+
+/// The cause a delivery's journaled steps record: its occurrence, through
+/// the subscription it was reserved for.
+fn delivery_causal_ref(reservation: &TriggerDeliveryReservation) -> crate::CausalRef {
+    let subscription = &reservation.subscription;
+    crate::CausalRef::TriggerOccurrence {
+        occurrence_id: reservation.occurrence.occurrence_id.clone(),
+        subscription_id: Some(subscription.subscription_id.clone()),
+        subscription_incarnation: Some(subscription.incarnation.clone()),
+        subscription_revision: Some(subscription.revision),
+    }
+}
+
+/// The attribution a delivery's journaled steps record: the session that
+/// registered its subscription, when one did.
+fn delivery_attribution(subscription: &TriggerSubscriptionRecord) -> crate::RuntimeAttribution {
+    subscription
+        .registrant_session_id()
+        .cloned()
+        .map(crate::RuntimeAttribution::for_session)
+        .unwrap_or_else(crate::RuntimeAttribution::none)
+}
+
+/// The first execution of one `AdmitTriggerDelivery` step: it records the
+/// admission decided from the reservation the emission's ingest answered.
+/// None of it enters the envelope, which names only the delivery.
+struct DeliveryAdmissionRunner {
+    admission: TriggerDeliveryAdmission,
+}
+
+#[async_trait::async_trait]
+impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for DeliveryAdmissionRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "trigger delivery admission executor cannot execute {} command",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        Ok(crate::RuntimeEffectOutcome::AdmitTriggerDelivery {
+            admission: Box::new(self.admission),
         })
     }
 }

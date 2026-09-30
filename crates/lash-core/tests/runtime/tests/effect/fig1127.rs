@@ -3,11 +3,13 @@ use super::*;
 const SEED: u64 = 0x5_e286;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_without_session_nodes() {
+async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_without_session_nodes()
+ {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     #[derive(Clone)]
     struct ControllerOwnedTriggerEmitter<'h> {
+        admissions: Arc<std::sync::atomic::AtomicUsize>,
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
         native: lash_core::ScopedEffectController<'h>,
     }
@@ -26,11 +28,17 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             envelope: RuntimeEffectEnvelope,
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-            assert!(
-                matches!(&envelope.command, RuntimeEffectCommand::Process { .. }),
-                "non-tool trigger emission issues only its reserved process start"
-            );
-            self.process_starts.fetch_add(1, Ordering::SeqCst);
+            // A non-tool trigger emission issues only its delivery's
+            // admission (FIG-4297) and the reserved process start.
+            match &envelope.command {
+                RuntimeEffectCommand::AdmitTriggerDelivery { .. } => {
+                    self.admissions.fetch_add(1, Ordering::SeqCst);
+                }
+                RuntimeEffectCommand::Process { .. } => {
+                    self.process_starts.fetch_add(1, Ordering::SeqCst);
+                }
+                other => panic!("non-tool trigger emission issued {}", other.kind().as_str()),
+            }
             self.native
                 .controller()
                 .execute_effect(envelope, local_executor)
@@ -161,6 +169,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         .await
         .expect("open the scope's handler");
     let controller = ControllerOwnedTriggerEmitter {
+        admissions: Arc::default(),
         process_starts: Arc::default(),
         native: handler.scoped(),
     };
@@ -184,7 +193,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     let redrive = router
         .emit(occurrence(), &scoped_controller)
         .await
-        .expect("redrive non-tool trigger");
+        .expect("re-emit non-tool trigger");
 
     assert_eq!(first.deliveries.len(), 1);
     assert_eq!(redrive.deliveries.len(), 1);
@@ -196,10 +205,15 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         redrive, first,
         "the redrive reports the delivery the first emission started (FIG-4272)"
     );
+    // The second emission records its own admission, and the delivery it
+    // meets is bound: it answers the bound process and starts nothing.
     assert_eq!(
-        controller.process_starts.load(Ordering::SeqCst),
-        2,
-        "the controller-owned redrive re-emits the deterministic reserved start"
+        (
+            controller.admissions.load(Ordering::SeqCst),
+            controller.process_starts.load(Ordering::SeqCst),
+        ),
+        (2, 1),
+        "the re-emission records its admission of the bound delivery and starts nothing"
     );
     assert_eq!(
         lash_core::TriggerStore::list_deliveries(store.as_ref())

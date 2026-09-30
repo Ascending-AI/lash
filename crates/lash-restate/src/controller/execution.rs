@@ -163,6 +163,7 @@ pub(crate) fn restate_effect_execution(
         command @ (RuntimeEffectCommand::Direct { .. }
         | RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }
+        | RuntimeEffectCommand::AdmitTriggerDelivery { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::DrawRootStart { .. }

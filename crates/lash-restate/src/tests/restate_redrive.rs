@@ -1563,13 +1563,20 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
         workflow_key,
         &input,
         vec![invocation_id.to_string()],
-        vec![serde_json::Value::Bool(true), serde_json::Value::Null],
+        (0..2)
+            .flat_map(|_| [serde_json::Value::Bool(true), serde_json::Value::Null])
+            .collect(),
     )
     .await
     .expect("trigger start should suspend on its terminal delivery call");
     assert_eq!(
         restate_message_types(&suspended).expect("decode trigger suspension"),
         vec![
+            // The emission's journaled admission of the delivery (FIG-4297).
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             // The start's frontier marker (FIG-3779), acknowledged.
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
@@ -1594,7 +1601,7 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec!["begin_effect", "end_effect", "complete"]
+        [["begin_effect", "end_effect"].repeat(2), vec!["complete"]].concat()
     );
     let replay = encode_recorded_commands_with_invocations_replay(
         workflow_key,
@@ -1750,26 +1757,32 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         workflow_key,
         &input,
         invocation_ids.iter().map(ToString::to_string).collect(),
-        vec![
-            serde_json::Value::Bool(true),
-            serde_json::Value::Null,
-            serde_json::Value::Bool(true),
-            serde_json::Value::Null,
-        ],
+        (0..4)
+            .flat_map(|_| [serde_json::Value::Bool(true), serde_json::Value::Null])
+            .collect(),
     )
     .await
     .expect("initial multi-subscription attempt should suspend after both starts");
     assert_eq!(
         restate_message_types(&suspended).expect("decode multi-subscription suspension"),
         vec![
+            // Each delivery journals its admission first (FIG-4297), then its
+            // start: the start's frontier marker (FIG-3779), its
+            // registration, its send and its external reference (ADR 0107).
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-            // Each start journals its frontier marker first (FIG-3779), then
-            // its registration, its send and its external reference (ADR 0107).
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
@@ -1795,13 +1808,7 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec![
-            "begin_effect",
-            "end_effect",
-            "begin_effect",
-            "end_effect",
-            "complete"
-        ]
+        [["begin_effect", "end_effect"].repeat(4), vec!["complete"]].concat()
     );
 
     let replay = encode_recorded_commands_with_invocations_replay(
@@ -1902,7 +1909,10 @@ pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery
         "fig811-client-attempt-one",
         &input,
         vec![workflow_invocation_id.to_string()],
+        // The admission's and the start's effect brackets, then the sink.
         vec![
+            serde_json::Value::Bool(true),
+            serde_json::Value::Null,
             serde_json::Value::Bool(true),
             serde_json::Value::Null,
             serde_json::Value::Null,
@@ -1927,6 +1937,8 @@ pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery
         "fig811-client-attempt-two",
         &input,
         vec![workflow_invocation_id.to_string()],
+        // The delivery is bound: the admission's effect bracket, then the
+        // sink, and no start (FIG-4297).
         vec![
             serde_json::Value::Bool(true),
             serde_json::Value::Null,

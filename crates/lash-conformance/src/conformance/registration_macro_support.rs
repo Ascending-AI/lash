@@ -8,6 +8,7 @@ pub use super::attachment_referrers::*;
 pub use super::attachment_store::*;
 pub use super::await_event_cold::*;
 pub use super::batch_sugar::*;
+pub use super::bound_trigger_duplicate::*;
 pub use super::cancelled_turn_withheld_input::*;
 pub use super::cell_binding_drift::*;
 pub use super::completion_routing::*;
