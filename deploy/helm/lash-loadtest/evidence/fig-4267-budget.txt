@@ -1,0 +1,43 @@
+FIG-4267 PostgreSQL connection-budget evidence
+Implementation checkpoint 756894f8bc92ce7656f39700274b848b06b2cc5e; red baseline a2f2938d5e09bc4d39e9055fa58852a989d5cb4d.
+
+Defect: overlapping worker runtime/witness pools and other clients were not sized
+against live server capacity. FIG-4260 measured configured persistent maxima of 113
+and captured reserved-slot exhaustion. No actual occupancy census at that abort.
+
+Red tests: preflight exited 2 for unknown budget flags instead of refusing with 3;
+chart lacked the pre-upgrade budget Job; witness opened connection 3 despite cap 2.
+Raw logs: target/fig-4267/red-preflight.log, red-chart.log, red-witness-pool.log.
+
+Eight new tests passed 20/20 each, counted from executed full Rust test paths with
+sharding disabled and twenty Python runs of both new methods. 160 executions.
+Affected suites: 763 passed, 3 ignored across 16 targets. Query SUM(bigint) decode
+failure fixed with explicit bigint cast; complete lashctl suites then passed 11/11.
+Chart tests: 26/26; two lint profiles and six templates. Operator guide: 10 verbs.
+One workspace kiln clippy passed, 271 success artifacts. kiln fmt passed.
+Clean rebase build passed on main 4370e0a291. Final landing build recorded separately.
+
+Live run target/fig-3790/lash-fig-4267-20260930T091006Z:
+Temporary roll-only controller samples healthy warm-up backlog, then uses the
+existing rolling method with real admission, drain and retirement checks.
+Live pre-upgrade hook accepted 2*18*2+12+10=94, server max_connections 94 and
+reserved slots 3. Four overlapping workers measured store pools of 16/15/16/16 and
+witness pools of 2/2/2/2. Census: 90 samples, maximum 84 backends including
+five PostgreSQL background processes. No reserved-slot error observed.
+New admission moved with 249 old pinned invocations. The roll fault FAILED on
+five nonanswers; it did not complete drain/retirement. Full campaign also FAILED
+on worker-kill nonanswers. Both recovery acceptance results are blocked by FIG-4277.
+
+Host at full-campaign failure: load 280.59/252.46/212.80; CPU PSI some 80.94/78.60/77.69.
+Isolated run start: load 161.02/157.46/181.98; CPU PSI some 75.84/77.36/75.50.
+At isolated failure capture at 09:27:18 UTC: load 299.11/270.96/236.03;
+CPU PSI some 78.02/78.46/76.99. Lost answers remain correctness failures.
+The earlier attempt has no contemporaneous host snapshot.
+
+Targeted FIG-4277 evidence: target/fig-4267/fig-4277-capture and
+fig-4277-roll-capture. The latter contains all five root status rows, full
+journals and requested witness/delete rows. A query for directly invoked
+children returned zero. Completed root status later cannot establish deadline status.
+
+Open: completed short rolling recovery and full campaign, blocked by FIG-4277.
+This is a partial FIG-4267 delivery; no completed rolling smoke is claimed.

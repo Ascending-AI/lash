@@ -30,6 +30,31 @@ spec:
               SQL
               psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /opt/lash/witness.sql
           resources: {{ toJson .Values.driver.resources }}
+---
+# The server's live setting is authoritative. Run before migration and before
+# Helm starts replacement workers, including rolls that reuse the image.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-connection-preflight-{{ .Values.workers.generation }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 30
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: preflight
+          image: "{{ .Values.image.repository }}:{{ index .Values.workers.generationImages .Values.workers.generation | default .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [lashctl, preflight, --json, --processes-per-generation, {{ .Values.workers.count | quote }}, --pool-max, {{ add (int .Values.workers.pgConnections) (int .Values.workers.witnessConnections) | quote }}, --generations, {{ .Values.postgres.maxGenerations | quote }}, --workers, {{ .Values.postgres.otherWorkers | quote }}, --admin-headroom, {{ .Values.postgres.adminHeadroom | quote }}]
+          env:
+            - {name: LASH_POSTGRES_DATABASE_URL, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: database-url}}}
+          resources: {{ toJson .Values.driver.resources }}
 {{- $replacement := index .Values.workers.generationImages .Values.workers.generation }}
 {{- if $replacement }}
 ---

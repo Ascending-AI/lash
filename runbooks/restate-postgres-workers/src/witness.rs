@@ -37,9 +37,18 @@ pub fn effect_logical_key(parent_workflow_id: &str, tool: &str, key: &str) -> St
 pub async fn connect_witness() -> Result<PgPool> {
     let url = std::env::var(WITNESS_DATABASE_URL_ENV)
         .with_context(|| format!("{WITNESS_DATABASE_URL_ENV} must be set"))?;
+    let max_connections = std::env::var("WITNESS_CONNECTIONS_PER_PROCESS")
+        .context("WITNESS_CONNECTIONS_PER_PROCESS must declare the witness pool budget")?
+        .parse::<std::num::NonZeroU32>()
+        .context("parse positive witness connection limit")?
+        .get();
     let deadline = Instant::now() + Duration::from_secs(90);
     loop {
-        match PgPoolOptions::new().max_connections(8).connect(&url).await {
+        match PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect(&url)
+            .await
+        {
             Ok(pool) => return Ok(pool),
             Err(err) if Instant::now() < deadline => {
                 tracing::warn!(error = %err, "witness database not ready yet");
@@ -214,4 +223,58 @@ pub async fn record_effect_reply(
     .await
     .with_context(|| format!("witness the reply to attempt `{attempt_id}`"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod connection_budget_tests {
+    use super::*;
+    use sqlx::Connection;
+
+    #[tokio::test]
+    async fn configured_witness_pool_counts_connections_under_load() {
+        let Ok(url) = std::env::var(WITNESS_DATABASE_URL_ENV) else {
+            assert_ne!(std::env::var("LASH_REQUIRE_POSTGRES").as_deref(), Ok("1"));
+            return;
+        };
+        assert_eq!(
+            std::env::var("WITNESS_CONNECTIONS_PER_PROCESS").as_deref(),
+            Ok("2")
+        );
+        let pool = connect_witness()
+            .await
+            .expect("connect configured witness pool");
+        let first = pool.acquire().await.expect("first connection");
+        let second = pool.acquire().await.expect("second connection");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), pool.acquire())
+                .await
+                .is_err(),
+            "configured witness limit was ignored: a third connection opened"
+        );
+        let mut observer = sqlx::PgConnection::connect(&url).await.expect("observer");
+        let observer_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut observer)
+            .await
+            .expect("observer pid");
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..32 {
+            let pool = pool.clone();
+            tasks.spawn(async move {
+                sqlx::query("SELECT pg_sleep(0.005)")
+                    .execute(&pool)
+                    .await
+                    .expect("queued witness work");
+            });
+        }
+        let connections: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE application_name = current_setting('application_name') AND pid <> $1")
+            .bind(observer_pid).fetch_one(&mut observer).await.expect("count connections");
+        assert_eq!(connections, 2);
+        drop((first, second));
+        while let Some(task) = tasks.join_next().await {
+            task.expect("witness task");
+        }
+        assert!(pool.size() <= 2);
+        println!("witness connections=2 concurrent requests=32 configured cap=2");
+        pool.close().await;
+    }
 }

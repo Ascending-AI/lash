@@ -235,6 +235,24 @@ N+1 run side by side; contract raises it.
 **Rollback** to release N before finalize is guaranteed, and a test proves
 it. SQLite keeps migrating on open, after a backup.
 
+**Connection capacity during a roll (FIG-4267).** The host declares
+`peak connections = processes per generation * pool max * overlapping generations
++ workers + admin headroom`. N/N+1 overlap uses two generations; the documented
+roll with rollback can retain three and must budget three. `pool max` sums all
+persistent pools in each process. Lash store components share one explicitly
+sized `PostgresStorage` pool through clones; an independently opened pool adds
+to the process total. `workers` sums the connection limits for other clients
+across every database on the server, and administrative headroom includes the
+server's reserved slots. Test-topology witness pools count in topology sizing only.
+
+`lashctl preflight --processes-per-generation <n> --pool-max <n>
+--generations <n> --workers <n> --admin-headroom <n>` reads the live server's
+`max_connections` and reserved-slot settings and refuses a roll whose peak
+cannot fit, before replacements start. Bare preflight checks schema only.
+The load chart uses the same formula and a pre-upgrade budget hook; its server
+capacity is derived from the declaration. See the
+[rolling runbook](../../runbooks/rolling-upgrade/runbook.md#postgresql-connection-budget).
+
 ### 6. Tests and gates
 
 **Change lifecycle.** Every format change is a version bump, and the author of

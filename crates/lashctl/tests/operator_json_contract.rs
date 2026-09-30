@@ -406,3 +406,70 @@ async fn operator_json_contract_postgres() {
         .expect("drop scratch schema");
     admin.close().await.expect("close scratch admin");
 }
+
+#[test]
+fn rolling_preflight_refuses_an_oversubscribed_budget() {
+    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        assert_ne!(std::env::var("LASH_REQUIRE_POSTGRES").as_deref(), Ok("1"));
+        return;
+    };
+    let (code, body) = run(
+        &[
+            "preflight",
+            "--processes-per-generation",
+            "1000000",
+            "--pool-max",
+            "16",
+            "--generations",
+            "3",
+            "--workers",
+            "12",
+            "--admin-headroom",
+            "10",
+            "--json",
+        ],
+        Some(&url),
+    );
+    assert_eq!(code, 3, "capacity refusal: {body}");
+    assert_eq!(
+        body["error"]["refusal"]["refusal"],
+        "connection_budget_exceeded"
+    );
+    let report = &body["error"]["refusal"]["report"];
+    assert_eq!(report["peak_connections"], 48000022u64);
+    assert!(
+        report["server"]["max_connections"]
+            .as_u64()
+            .expect("observed capacity")
+            < 48000022
+    );
+    let (code, accepted) = run(
+        &[
+            "preflight",
+            "--processes-per-generation",
+            "1",
+            "--pool-max",
+            "1",
+            "--generations",
+            "2",
+            "--workers",
+            "0",
+            "--admin-headroom",
+            "10",
+            "--json",
+        ],
+        Some(&url),
+    );
+    assert_eq!(code, 0, "small declaration fits: {accepted}");
+    assert_eq!(
+        accepted["result"]["connection_budget"]["peak_connections"],
+        12
+    );
+    assert_eq!(
+        accepted["result"]["connection_budget"]["server"],
+        report["server"]
+    );
+    println!(
+        "oversubscribed preflight refused; bounded roll accepted against live server capacity"
+    );
+}

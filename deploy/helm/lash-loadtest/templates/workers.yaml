@@ -1,3 +1,12 @@
+{{- if lt (int .Values.postgres.otherWorkers) (add (mul 3 (int .Values.workers.witnessConnections)) 6) -}}
+{{- fail "postgres.otherWorkers must cover provider, smoke, driver and probes" -}}
+{{- end -}}
+{{- if gt (int (include "loadtest.connectionPeak" .)) (int .Values.postgres.maxConnections) -}}
+{{- fail "rolling PostgreSQL connection budget exceeds postgres.maxConnections" -}}
+{{- end -}}
+{{- if gt (add 1 (len .Values.workers.retainedGenerations)) (int .Values.postgres.maxGenerations) -}}
+{{- fail "worker generations exceed postgres.maxGenerations" -}}
+{{- end -}}
 {{- $name := include "loadtest.name" . -}}
 {{- if has .Values.workers.generation .Values.workers.retainedGenerations -}}
 {{- fail "workers.generation cannot also be retained" -}}

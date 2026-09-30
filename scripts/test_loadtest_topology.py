@@ -6,6 +6,7 @@ import unittest
 import yaml
 
 import check_loadtest_cluster as proof
+from loadtest_connection_budget import peak_connections
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -120,6 +121,38 @@ class ChartTests(unittest.TestCase):
     def documents(self, profile):
         return [document for document in yaml.safe_load_all(
             (ROOT / 'target/loadtest-tools' / profile).read_text()) if document]
+
+    def test_rolling_connection_budget_is_enforced_before_upgrade(self):
+        documents = self.documents('retained-generations.yaml')
+        job = proof.job(documents, 'connection-preflight-next')
+        self.assertEqual(job['metadata']['annotations']['helm.sh/hook'], 'pre-upgrade')
+        self.assertEqual(job['metadata']['annotations']['helm.sh/hook-weight'], '-10')
+        container = job['spec']['template']['spec']['containers'][0]
+        command = container['command']
+        self.assertEqual(command[:2], ['lashctl', 'preflight'])
+        self.assertEqual(command[command.index('--processes-per-generation') + 1], '2')
+        self.assertEqual(command[command.index('--pool-max') + 1], '18')
+        self.assertEqual(command[command.index('--generations') + 1], '2')
+        self.assertIn('secretKeyRef', container['env'][0]['valueFrom'])
+        with self.assertRaises(subprocess.CalledProcessError):
+            subprocess.run([
+                str(ROOT / 'target/loadtest-tools/helm'), 'template', 'budget',
+                str(ROOT / 'deploy/helm/lash-loadtest'), '--set', 'workers.count=100',
+            ], check=True, capture_output=True)
+
+    def test_sizing_counts_all_pools_and_three_rollback_generations(self):
+        values = yaml.safe_load((ROOT / 'deploy/helm/lash-loadtest/values.yaml').read_text())
+        self.assertEqual(peak_connections(values), 94)
+        values['postgres']['maxGenerations'] = 3
+        self.assertEqual(peak_connections(values), 130)
+        values['workers']['witnessConnections'] = 8
+        with self.assertRaises(ValueError):
+            peak_connections(values)
+        values['postgres']['otherWorkers'] = 30
+        self.assertEqual(peak_connections(values), 184)
+        values['workers']['pgConnections'] = 0
+        with self.assertRaises(ValueError):
+            peak_connections(values)
 
     def test_local_topology_and_persistence(self):
         documents = self.documents('values-local.yaml.rendered.yaml')

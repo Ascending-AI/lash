@@ -17,17 +17,18 @@ use lash_core_store::store::{
 };
 use lash_core_store::store::{ObligationKey, ObligationKind, StalledObligation, StoreError};
 use lash_postgres_store::{
-    FinalizeReport, MigrateError, MigrationPhase, MigrationReport, MigrationStep, PostgresStorage,
-    PostgresStorePreflight,
+    FinalizeReport, MigrateError, MigrationPhase, MigrationReport, MigrationStep,
+    PostgresConnectionBudget, PostgresStorage, PostgresStoreConfig, PostgresStorePreflight,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
+const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -147,7 +148,9 @@ enum Command {
     ObjectsSweep {
         restate: RestateTarget,
     },
-    Preflight,
+    Preflight {
+        budget: Option<PostgresConnectionBudget>,
+    },
     Version,
 }
 
@@ -176,7 +179,7 @@ impl Command {
             Self::FinalizeHold(_) => "finalize-hold",
             Self::ObjectsPreflight { .. } => "objects-preflight",
             Self::ObjectsSweep { .. } => "objects-sweep",
-            Self::Preflight => "preflight",
+            Self::Preflight { .. } => "preflight",
             Self::Version => "version",
         }
     }
@@ -286,11 +289,59 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
                 Command::ObjectsPreflight { restate }
             }
         }
-        "preflight" if rest.is_empty() => Command::Preflight,
+        "preflight" => Command::Preflight {
+            budget: parse_connection_budget(rest)?,
+        },
         "version" if rest.is_empty() => Command::Version,
         _ => return Err(CliError::new(Exit::Usage, USAGE)),
     };
     Ok(Invocation { command, json })
+}
+
+fn parse_connection_budget(rest: &[String]) -> Result<Option<PostgresConnectionBudget>, CliError> {
+    if rest.is_empty() {
+        return Ok(None);
+    }
+    let mut processes = None;
+    let mut pool_max = None;
+    let mut generations = None;
+    let mut workers = None;
+    let mut headroom = None;
+    for pair in rest.chunks(2) {
+        if pair.len() != 2 {
+            return Err(CliError::new(Exit::Usage, USAGE));
+        }
+        let slot = match pair[0].as_str() {
+            "--processes-per-generation" => &mut processes,
+            "--pool-max" => &mut pool_max,
+            "--generations" => &mut generations,
+            "--workers" => &mut workers,
+            "--admin-headroom" => &mut headroom,
+            _ => return Err(CliError::new(Exit::Usage, USAGE)),
+        };
+        if slot.is_some() {
+            return Err(CliError::new(Exit::Usage, USAGE));
+        }
+        *slot = Some(
+            pair[1]
+                .parse::<u32>()
+                .map_err(|_| CliError::new(Exit::Usage, USAGE))?,
+        );
+    }
+    let required = |value: Option<u32>| {
+        value.ok_or_else(|| CliError::new(Exit::Usage, "rolling preflight requires processes-per-generation, pool-max, generations, workers and admin-headroom"))
+    };
+    let budget = PostgresConnectionBudget {
+        processes_per_generation: required(processes)?,
+        pool_max: required(pool_max)?,
+        generations: required(generations)?,
+        workers: required(workers)?,
+        admin_headroom: required(headroom)?,
+    };
+    budget
+        .peak_connections()
+        .map_err(|error| CliError::new(Exit::Usage, error.to_string()))?;
+    Ok(Some(budget))
 }
 
 /// `--restate-admin-url <url> [--restate-ingress-url <url>] [--namespace <ns>]`;
@@ -584,9 +635,15 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             (objects_sweep_result(&report), exit)
         }
         Command::Version => {
-            let storage = PostgresStorage::connect(&database_url()?)
-                .await
-                .map_err(CliError::store)?;
+            let storage = PostgresStorage::connect_with(
+                &database_url()?,
+                PostgresStoreConfig {
+                    max_connections: OPERATOR_POOL_MAX,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(CliError::store)?;
             let generations = storage.fleet_generations().await.map_err(CliError::store)?;
             (version_result(&generations), Exit::Done)
         }
@@ -605,9 +662,15 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             restate_admin_url,
             mode,
         } => {
-            let storage = PostgresStorage::connect(&database_url()?)
-                .await
-                .map_err(CliError::store)?;
+            let storage = PostgresStorage::connect_with(
+                &database_url()?,
+                PostgresStoreConfig {
+                    max_connections: OPERATOR_POOL_MAX,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(CliError::store)?;
             let registry = lash_restate::RestateDeploymentRegistry::new(
                 lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
                     restate_admin_url.clone(),
@@ -625,9 +688,15 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             (finalize_result(&report), Exit::Done)
         }
         Command::FinalizeHold(action) => {
-            let storage = PostgresStorage::connect(&database_url()?)
-                .await
-                .map_err(CliError::store)?;
+            let storage = PostgresStorage::connect_with(
+                &database_url()?,
+                PostgresStoreConfig {
+                    max_connections: OPERATOR_POOL_MAX,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(CliError::store)?;
             let result = match action {
                 HoldAction::Show => hold_result(
                     storage
@@ -654,9 +723,29 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             };
             (result, Exit::Done)
         }
-        Command::Preflight => {
+        Command::Preflight { budget } => {
             let url = database_url()?;
             let probe = PostgresStorePreflight::for_database_url(&url).map_err(CliError::store)?;
+            let capacity = if let Some(budget) = budget {
+                let checked = probe
+                    .connection_capacity()
+                    .await
+                    .map_err(CliError::store)
+                    .and_then(|capacity| {
+                        budget.check(capacity).map_err(|refusal| {
+                            CliError::refused(Exit::Refused, refusal.to_string(), &refusal)
+                        })
+                    });
+                match checked {
+                    Ok(report) => Some(report),
+                    Err(error) => {
+                        probe.close().await;
+                        return Err(error);
+                    }
+                }
+            } else {
+                None
+            };
             let status = probe.schema_status().await.map_err(CliError::store);
             probe.close().await;
             let status = status?;
@@ -700,17 +789,24 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                 StoreSchemaOutcome::Undecided => Exit::Refused,
                 _ => Exit::Refused,
             };
-            (
-                json!({"outcome":exit.name(),"databases":databases,"release":release,"fleet_format":fleet}),
-                exit,
-            )
+            let mut result = json!({"outcome":exit.name(),"databases":databases,"release":release,"fleet_format":fleet});
+            if let Some(capacity) = capacity {
+                result["connection_budget"] = json!(capacity);
+            }
+            (result, exit)
         }
         Command::Drain { generation }
         | Command::EndDrain { generation }
         | Command::DrainStatus { generation } => {
-            let storage = PostgresStorage::connect(&database_url()?)
-                .await
-                .map_err(CliError::store)?;
+            let storage = PostgresStorage::connect_with(
+                &database_url()?,
+                PostgresStoreConfig {
+                    max_connections: OPERATOR_POOL_MAX,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(CliError::store)?;
             let drain = storage.generation_drain();
             match command {
                 Command::Drain { .. } => {
@@ -907,6 +1003,46 @@ mod tests {
 
     fn words(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_owned()).collect()
+    }
+
+    #[test]
+    fn rolling_preflight_requires_every_budget_term_and_refuses_excess_capacity() {
+        let args = words(&[
+            "preflight",
+            "--processes-per-generation",
+            "2",
+            "--pool-max",
+            "18",
+            "--generations",
+            "3",
+            "--workers",
+            "12",
+            "--admin-headroom",
+            "10",
+        ]);
+        let invocation = parse(args.clone()).unwrap_or_else(|error| panic!("{}", error.message));
+        let Command::Preflight {
+            budget: Some(budget),
+        } = invocation.command
+        else {
+            panic!("roll budget missing");
+        };
+        assert!(
+            matches!(budget.check(lash_postgres_store::PostgresConnectionCapacity { max_connections: 100, reserved_connections: 3 }), Err(lash_postgres_store::PostgresConnectionBudgetRefusal::ConnectionBudgetExceeded { report }) if report.peak_connections == 130)
+        );
+        for index in (1..args.len()).step_by(2) {
+            let mut missing = args.clone();
+            missing.drain(index..index + 2);
+            assert!(parse(missing).is_err(), "missing budget term at {index}");
+        }
+        for bad in ["0", "-1", "4294967296", "nonsense"] {
+            let mut invalid = args.clone();
+            invalid[2] = bad.to_owned();
+            assert!(parse(invalid).is_err());
+        }
+        let mut duplicate = args;
+        duplicate.extend(words(&["--workers", "12"]));
+        assert!(parse(duplicate).is_err());
     }
 
     #[test]

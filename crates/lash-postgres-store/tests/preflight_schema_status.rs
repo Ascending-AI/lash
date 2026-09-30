@@ -706,3 +706,63 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
     readonly.close().await;
     scratch.cleanup().await;
 }
+
+#[tokio::test]
+async fn store_components_share_one_bounded_pool_under_load() {
+    use lash_postgres_store::PostgresStoreConfig;
+    let Some(url) = database_url() else {
+        return;
+    };
+    let scratch = ScratchSchema::provision(&url).await;
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let application = format!("budget_{}", scratch.name);
+    let url = format!(
+        "{url}{separator}options=-csearch_path%3D{}&application_name={application}",
+        scratch.name
+    );
+    let storage = PostgresStorage::connect_with(
+        &url,
+        PostgresStoreConfig {
+            max_connections: 3,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("bounded storage");
+    let clone = storage.clone();
+    let _store = storage.store();
+    let _processes = storage.process_registry();
+    let first = storage.pool().acquire().await.expect("first");
+    let second = clone.pool().acquire().await.expect("second");
+    let third = storage.pool().acquire().await.expect("third");
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..32 {
+        let clone = storage.clone();
+        tasks.spawn(async move {
+            sqlx::query("SELECT pg_sleep(0.005)")
+                .execute(clone.pool())
+                .await
+                .expect("queued store read");
+        });
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), clone.pool().acquire())
+            .await
+            .is_err()
+    );
+    let connections: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE application_name = $1")
+            .bind(&application)
+            .fetch_one(&scratch.pool)
+            .await
+            .expect("count pool connections");
+    assert_eq!(connections, 3);
+    drop((first, second, third));
+    while let Some(task) = tasks.join_next().await {
+        task.expect("store task");
+    }
+    assert!(storage.pool().size() <= 3);
+    println!("store connections=3 concurrent requests=32 configured cap=3 shared components=4");
+    storage.pool().close().await;
+    scratch.cleanup().await;
+}

@@ -32,6 +32,8 @@ chart=deploy/helm/lash-loadtest
 profile="${LASH_LOADTEST_VALUES:-$chart/values-local.yaml}"
 python3 - "$chart/values.yaml" "$profile" "$run" "$name" <<'PYVALUES'
 import json, pathlib, sys, yaml
+sys.path.insert(0, 'scripts')
+from loadtest_connection_budget import peak_connections
 base, profile, directory, tag = sys.argv[1:]
 values = yaml.safe_load(open(base))
 def merge(target, overlay):
@@ -46,6 +48,7 @@ if (values['restate']['replicas'] != 3 or values['restate']['partitions'] != 24
     raise SystemExit('the v1 topology proof requires three Restate nodes, 24 partitions and replication two')
 if values['s3']['mode'] != 'garage':
     raise SystemExit('the local proof uses run-owned Garage storage')
+values['postgres']['maxConnections'] = peak_connections(values)
 values['image']['tag'] = tag
 values['driver']['enabled'] = False
 values['load']['enabled'] = False
@@ -125,7 +128,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 binaries=(lash-e2e-worker lash-e2e-mock-provider lash-loadtest-smoke lash-loadtest-driver)
-labels=()
+labels=("//crates/lashctl:lashctl")
 for binary in "${binaries[@]}"; do labels+=("//runbooks/restate-postgres-workers:${binary}__bin"); done
 # The rolling deploy's replacement generation (FIG-4169): the same worker and
 # its operator binary built as the synthetic N+1, resolved from the generated
@@ -148,6 +151,7 @@ for resolved in "$next_worker" "$next_lashctl"; do
 done
 labels+=("//runbooks/restate-postgres-workers:$next_worker" "//crates/lashctl:$next_lashctl")
 kiln build --remote_download_outputs=toplevel "${labels[@]}"
+install -m 755 bazel-bin/crates/lashctl/lashctl target/loadtest-image/bin/lashctl
 rm -rf target/loadtest-image/bin-next
 mkdir -p target/loadtest-image/bin-next
 for binary in "${binaries[@]}"; do

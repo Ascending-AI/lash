@@ -421,3 +421,15 @@ Counter epoch transitions follow the same target and window rule. Worker resourc
 Normalization uses only the event's recorded anchor. Its absolute timestamp error bar is half the round trip, rounded up, plus one microsecond for witness precision. Recovery durations retain the difference of both endpoint intervals. A witness offset that moves beyond the start and event anchor bounds leaves recovery inputs INCOMPLETE. Missing anchors name the fault ID, phase and event ID. Every raw row must normalize before recovery inputs qualify COMPLETE.
 
 The accepted population includes all inputs accepted through the injection interval's upper bound. Every one must reach a durable terminal by the backlog recovery interval's upper bound. The controller records absolute witness microseconds for first service progress and for the observation where its full recovery conditions hold. The existing stable hold and durability verdict remain required. These bounds qualify the collection; they establish no performance budget.
+
+## PostgreSQL capacity
+
+`postgres.maxConnections` must cover
+`workers.count * (workers.pgConnections + workers.witnessConnections) * postgres.maxGenerations + postgres.otherWorkers + postgres.adminHeadroom`.
+The default two-generation roll needs 94 connections. A rollback campaign
+uses three generations and needs 130. `scripts/multi-node-load.sh` derives the
+server setting with `scripts/loadtest_connection_budget.py::peak_connections`.
+The chart rejects a peak above the declaration and runs `lashctl preflight`
+against the live server before upgrades. Witness pools are configured to two
+connections per process. The other clients and reserved-slot allocation are
+listed in the [rolling runbook](../../../runbooks/rolling-upgrade/runbook.md#postgresql-connection-budget).

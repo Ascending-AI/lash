@@ -22,6 +22,7 @@ initContainers:
 {{- define "loadtest.env" -}}
 env:
   - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: database-url}}}
+  - {name: WITNESS_CONNECTIONS_PER_PROCESS, value: {{ .Values.workers.witnessConnections | quote }}}
   - {name: WITNESS_DATABASE_URL, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: witness-database-url}}}
   - {name: S3_ACCESS_KEY, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: s3-access-key}}}
   - {name: S3_SECRET_KEY, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: s3-secret-key}}}
@@ -46,4 +47,8 @@ if [ -f /fault/restart-hold ]; then
     sleep "$delay"
   fi
 fi
+{{- end -}}
+
+{{- define "loadtest.connectionPeak" -}}
+{{- add (mul (int .Values.workers.count) (add (int .Values.workers.pgConnections) (int .Values.workers.witnessConnections)) (int .Values.postgres.maxGenerations)) (int .Values.postgres.otherWorkers) (int .Values.postgres.adminHeadroom) -}}
 {{- end -}}

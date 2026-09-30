@@ -84,6 +84,24 @@ impl PostgresStorePreflight {
         })
     }
 
+    /// Read server-wide capacity, including slots unavailable to normal clients.
+    /// `reserved_connections` is absent before PostgreSQL 16.
+    pub async fn connection_capacity(
+        &self,
+    ) -> Result<crate::PostgresConnectionCapacity, StoreError> {
+        let (max_connections, reserved_connections): (i64, i64) = sqlx::query_as(
+            "SELECT MAX(setting::bigint) FILTER (WHERE name = 'max_connections'),
+                    COALESCE(SUM(setting::bigint) FILTER (WHERE name IN ('superuser_reserved_connections', 'reserved_connections')), 0)::bigint
+             FROM pg_settings WHERE name IN ('max_connections', 'superuser_reserved_connections', 'reserved_connections')",
+        ).fetch_one(&self.pool).await.map_err(crate::store_sqlx_error)?;
+        Ok(crate::PostgresConnectionCapacity {
+            max_connections: u32::try_from(max_connections)
+                .map_err(|error| StoreError::Backend(error.to_string()))?,
+            reserved_connections: u32::try_from(reserved_connections)
+                .map_err(|error| StoreError::Backend(error.to_string()))?,
+        })
+    }
+
     /// Probe over a pool the caller already owns.
     ///
     /// The caller keeps ownership: [`PostgresStorePreflight::close`] is a no-op

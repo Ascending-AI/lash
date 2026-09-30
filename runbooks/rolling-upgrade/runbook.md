@@ -111,6 +111,57 @@ under `just phase-a`. The legs that finalize (`history_after_finalize`,
 finalize` the same way; `finalize_races_every_writer` races writers against
 the production flip itself.
 
+## PostgreSQL connection budget
+
+Before starting a roll, declare the peak server-wide capacity:
+
+```text
+peak connections = processes per generation * pool max * overlapping generations
+                   + workers + admin headroom
+```
+
+An ordinary N/N+1 roll has two overlapping generations. The roll with rollback
+procedure can retain three generations, so declare `--generations 3` for it.
+`pool max` is the sum of every persistent PostgreSQL pool in one process.
+Open one `PostgresStorage::connect_with` with an explicit
+`PostgresStoreConfig.max_connections` per process, then clone that storage
+for its store components. Independent pools add their maxima to this total.
+`workers` is the sum of connection limits for other clients of every database
+on the server. Administrative headroom includes both PostgreSQL reserved-slot
+settings and operator probes.
+
+Run the budget preflight before starting replacement processes:
+
+```bash
+lashctl preflight --processes-per-generation 2 --pool-max 18 --generations 3 --workers 12 --admin-headroom 10 --json
+```
+
+This declaration needs 130 connections. Preflight reads `max_connections`,
+`superuser_reserved_connections` and, where present, `reserved_connections`
+from the live server. It exits 3 with `connection_budget_exceeded` when the peak
+cannot fit, or `reserved_connections_unbudgeted` when headroom omits reserved
+slots. A successful report includes the declaration, the observed server
+settings and the peak. Unflagged `preflight` remains a schema probe; it does
+not authorize a roll. Changing a server setting alone does not replace the
+budget check.
+
+The load topology declares `workers.pgConnections` for its store pool and
+`workers.witnessConnections` for its separate witness database pool. Those
+witnesses are test clients, not a production Lash requirement. The local
+limits are 16 + 2 per load worker. Its other-client allocation is 12: provider
+2, smoke client 2, load driver 3 including its measurement connection,
+fault probe 1, migration/preflight 2, and diagnostic clients 2.
+If the witness cap changes, the other-client allocation must cover at least
+`3 * workers.witnessConnections + 6`; both sizing and chart rendering check it.
+`postgres.adminHeadroom` is 10 and `postgres.maxGenerations` defaults to 2.
+`scripts/loadtest_connection_budget.py::peak_connections` computes the same
+formula for `scripts/multi-node-load.sh`, which provisions the server at the
+declared peak. A rollback campaign sets `maxGenerations` to 3 before sizing.
+The chart refuses a declaration above `postgres.maxConnections` and runs a
+budget preflight hook against the live server before every Helm upgrade.
+Keep both checks: a rendered chart cannot prove the server has restarted with
+its configured capacity.
+
 ## Operator commands
 
 The harness runs these exact command forms with `LASH_POSTGRES_DATABASE_URL`

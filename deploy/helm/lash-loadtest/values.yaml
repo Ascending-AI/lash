@@ -21,6 +21,7 @@ restate:
   antiAffinity: preferred
 workers:
   pgConnections: 16
+  witnessConnections: 2
   count: 2
   generation: initial
   retainedGenerations: []
@@ -30,6 +31,12 @@ workers:
     limits: {cpu: "2", memory: 2Gi}
   nodeSelector: {}
 postgres:
+  # Every database on this server shares this capacity. A rollback campaign
+  # overrides maxGenerations to 3 and sizes maxConnections from the budget.
+  maxConnections: 100
+  maxGenerations: 2
+  otherWorkers: 12
+  adminHeadroom: 10
   image: postgres:16-alpine
   storage: 20Gi
   storageClass: ""

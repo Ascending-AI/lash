@@ -763,6 +763,8 @@ pub struct PostgresLashlangArtifactStore {
 /// fence. `lock_timeout` caps lock waits before surfacing retryable contention.
 #[derive(Clone, Debug)]
 pub struct PostgresStoreConfig {
+    /// Maximum connections across every store component using this pool.
+    /// Open one storage per process and clone it for its components.
     pub max_connections: u32,
     pub min_connections: u32,
     /// How long `acquire` may take before erroring, including pool waits and
@@ -1578,6 +1580,11 @@ mod turn_ingress;
 pub use backend::PostgresStoreSet;
 use guarded_tx::begin_guarded;
 pub use migrate::{MigrateError, MigrationPhase, MigrationRefusal, MigrationReport, MigrationStep};
+mod connection_budget;
+pub use connection_budget::{
+    PostgresConnectionBudget, PostgresConnectionBudgetRefusal, PostgresConnectionBudgetReport,
+    PostgresConnectionCapacity,
+};
 pub use preflight::PostgresStorePreflight;
 pub use process_definitions::PostgresProcessDefinitionRegistry;
 use schema_shape::verify_schema_shape;

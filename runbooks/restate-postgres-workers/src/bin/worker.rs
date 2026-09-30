@@ -95,9 +95,10 @@ impl AppState {
         let storage = PostgresStorage::connect_with(
             &database_url,
             lash_postgres_store::PostgresStoreConfig {
-                max_connections: env("POSTGRES_CONNECTIONS_PER_WORKER", "16")
-                    .parse()
-                    .context("parse worker PostgreSQL connection limit")?,
+                max_connections: required_env("POSTGRES_CONNECTIONS_PER_WORKER")?
+                    .parse::<std::num::NonZeroU32>()
+                    .context("parse worker PostgreSQL connection limit")?
+                    .get(),
                 ..Default::default()
             },
         )
