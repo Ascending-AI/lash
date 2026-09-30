@@ -5,7 +5,7 @@ use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant};
 
@@ -21,6 +21,13 @@ use crate::runtime::RuntimeSessionState;
 const SESSION_CURSOR_PREFIX: &str = "lashsc2:";
 const DEFAULT_LIVE_REPLAY_CAPACITY: usize = 2048;
 const DEFAULT_LIVE_REPLAY_TTL: Duration = Duration::from_secs(120);
+const EXPIRY_WORK_PER_CALL: usize = 64;
+
+#[path = "replay/bytes.rs"]
+mod bytes;
+#[path = "replay/retention.rs"]
+mod retention;
+use retention::ReplayRetention;
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -450,9 +457,15 @@ impl Drop for PreparedLiveReplayPublication {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ReplayNotification {
+    position: u64,
+    event: Weak<SessionObservationEvent>,
+}
+
 type LiveReplayRecvResult = (
-    Result<Arc<SessionObservationEvent>, broadcast::error::RecvError>,
-    broadcast::Receiver<Arc<SessionObservationEvent>>,
+    Result<ReplayNotification, broadcast::error::RecvError>,
+    broadcast::Receiver<ReplayNotification>,
 );
 
 #[cfg(test)]
@@ -476,7 +489,7 @@ pub struct LiveReplaySubscription {
 impl LiveReplaySubscription {
     fn new(
         replay: Vec<Arc<SessionObservationEvent>>,
-        receiver: broadcast::Receiver<Arc<SessionObservationEvent>>,
+        receiver: broadcast::Receiver<ReplayNotification>,
         after_position: u64,
     ) -> Self {
         Self {
@@ -499,7 +512,7 @@ impl LiveReplaySubscription {
 }
 
 async fn live_replay_recv(
-    mut receiver: broadcast::Receiver<Arc<SessionObservationEvent>>,
+    mut receiver: broadcast::Receiver<ReplayNotification>,
 ) -> LiveReplayRecvResult {
     let result = receiver.recv().await;
     #[cfg(test)]
@@ -512,10 +525,6 @@ async fn live_replay_recv(
 impl Stream for LiveReplaySubscription {
     type Item = Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the store writes cursors in the parsable form"
-    )]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(event) = self.replay.pop_front() {
             return Poll::Ready(Some(Ok(event)));
@@ -526,18 +535,18 @@ impl Stream for LiveReplaySubscription {
         let (result, receiver) = ready!(self.receiver.poll(cx));
         self.receiver.set(live_replay_recv(receiver));
         match result {
-            Ok(event) => {
-                let position = event
-                    .cursor
-                    .parse()
-                    .expect("store-created live event cursor must parse")
-                    .live_position;
-                if position <= self.after_position {
+            Ok(notification) => {
+                if notification.position <= self.after_position {
                     cx.waker().wake_by_ref();
                     Poll::Pending
                 } else {
-                    self.after_position = position;
-                    Poll::Ready(Some(Ok(event)))
+                    self.after_position = notification.position;
+                    Poll::Ready(Some(
+                        notification
+                            .event
+                            .upgrade()
+                            .ok_or(LiveReplayStoreError::SubscriberLagged(1)),
+                    ))
                 }
             }
             Err(broadcast::error::RecvError::Lagged(count)) => {
@@ -634,6 +643,10 @@ pub trait LiveReplayStore: Send + Sync {
 pub struct InMemoryLiveReplayStoreConfig {
     pub max_events_per_session: usize,
     pub max_age: Duration,
+    /// Maximum resident session entries across this store.
+    pub max_sessions: usize,
+    /// Maximum charged bytes across session metadata and reserved/retained events.
+    pub max_retained_bytes: usize,
 }
 
 impl Default for InMemoryLiveReplayStoreConfig {
@@ -641,6 +654,8 @@ impl Default for InMemoryLiveReplayStoreConfig {
         Self {
             max_events_per_session: DEFAULT_LIVE_REPLAY_CAPACITY,
             max_age: DEFAULT_LIVE_REPLAY_TTL,
+            max_sessions: 4096,
+            max_retained_bytes: 64 * 1024 * 1024,
         }
     }
 }
@@ -650,7 +665,7 @@ pub struct InMemoryLiveReplayStore {
     replay_incarnation_id: String,
     config: InMemoryLiveReplayStoreConfig,
     clock: Arc<dyn crate::Clock>,
-    sessions: Arc<StdMutex<HashMap<SessionId, LiveReplaySessionBuffer>>>,
+    sessions: Arc<StdMutex<ReplayRetention>>,
     #[cfg(any(test, feature = "testing"))]
     before_notification_gate: Option<BeforeNotificationGate>,
 }
@@ -679,16 +694,26 @@ impl InMemoryLiveReplayStore {
             replay_incarnation_id: uuid::Uuid::new_v4().to_string(),
             config,
             clock,
-            sessions: Arc::new(StdMutex::new(HashMap::new())),
+            sessions: Arc::new(StdMutex::new(ReplayRetention::default())),
             #[cfg(any(test, feature = "testing"))]
             before_notification_gate: None,
         }
+    }
+
+    /// Release all entries idle beyond `max_age`, including reservations and
+    /// live channels. Hosts call this tick during traffic-free periods; normal
+    /// store calls also perform a bounded amount of global expiry work.
+    pub fn expire_idle_sessions(&self) -> usize {
+        self.sessions
+            .lock_recover()
+            .expire(&self.config, self.clock.now(), usize::MAX)
     }
 
     pub fn with_bounds(max_events_per_session: usize, max_age: Duration) -> Self {
         Self::new(InMemoryLiveReplayStoreConfig {
             max_events_per_session,
             max_age,
+            ..InMemoryLiveReplayStoreConfig::default()
         })
     }
 
@@ -726,6 +751,11 @@ impl Default for InMemoryLiveReplayStore {
 
 #[derive(Debug)]
 struct LiveReplaySessionBuffer {
+    replay_incarnation_id: String,
+    first_position: u64,
+    last_access: Instant,
+    retained_bytes: usize,
+    channel_bytes: usize,
     events: VecDeque<StoredObservationEvent>,
     tail_position: u64,
     settled_position: u64,
@@ -737,15 +767,20 @@ struct LiveReplaySessionBuffer {
     /// the observations its first attempt already delivered; `prepare_publication`
     /// collapses those redeliveries into the stored copy (FIG-3753).
     delivered_activity_positions: HashMap<crate::TurnActivityId, u64>,
-    sender: Option<broadcast::Sender<Arc<SessionObservationEvent>>>,
+    sender: Option<broadcast::Sender<ReplayNotification>>,
 }
 
 impl LiveReplaySessionBuffer {
-    fn new() -> Self {
+    fn new(now: Instant, first_position: u64, replay_incarnation_id: &str) -> Self {
         Self {
+            replay_incarnation_id: replay_incarnation_id.to_string(),
+            first_position,
+            last_access: now,
+            retained_bytes: 0,
+            channel_bytes: 0,
             events: VecDeque::new(),
-            tail_position: 0,
-            settled_position: 0,
+            tail_position: first_position,
+            settled_position: first_position,
             unavailable_through: 0,
             reservations: BTreeMap::new(),
             delivered_activity_positions: HashMap::new(),
@@ -777,34 +812,53 @@ impl LiveReplaySessionBuffer {
     /// Drop the oldest stored event and release the activity identity it
     /// held, so a delivery after the replay window can land fresh.
     fn drop_front(&mut self) {
-        if let Some(stored) = self.events.pop_front()
-            && let SessionObservationEventPayload::TurnActivity(activity) = &stored.event.payload
-            && self.delivered_activity_positions.get(&activity.id) == Some(&stored.position)
-        {
-            self.delivered_activity_positions.remove(&activity.id);
+        if let Some(stored) = self.events.pop_front() {
+            self.retained_bytes -= stored.retained_bytes;
+            if let SessionObservationEventPayload::TurnActivity(activity) = &stored.event.payload
+                && self.delivered_activity_positions.get(&activity.id) == Some(&stored.position)
+            {
+                self.delivered_activity_positions.remove(&activity.id);
+            }
         }
     }
 
     fn subscribe(
         &mut self,
         channel_capacity: usize,
-    ) -> broadcast::Receiver<Arc<SessionObservationEvent>> {
+        channel_bytes: usize,
+    ) -> broadcast::Receiver<ReplayNotification> {
         match self.sender.as_ref() {
             Some(sender) => sender.subscribe(),
             None => {
                 let (sender, receiver) = broadcast::channel(channel_capacity.max(1));
                 self.sender = Some(sender);
+                self.channel_bytes = channel_bytes;
+                self.retained_bytes += channel_bytes;
                 receiver
             }
         }
     }
 
+    #[expect(clippy::expect_used, reason = "store-created event cursors must parse")]
     fn publish(&mut self, event: Arc<SessionObservationEvent>) {
         let Some(sender) = self.sender.as_ref() else {
             return;
         };
-        if sender.send(event).is_err() {
+        let position = event
+            .cursor
+            .parse()
+            .expect("store-created cursor must parse")
+            .live_position;
+        if sender
+            .send(ReplayNotification {
+                position,
+                event: Arc::downgrade(&event),
+            })
+            .is_err()
+        {
             self.sender = None;
+            self.retained_bytes -= self.channel_bytes;
+            self.channel_bytes = 0;
         }
     }
 
@@ -817,6 +871,8 @@ impl LiveReplaySessionBuffer {
 
 #[derive(Debug)]
 struct ReservedPublication {
+    retained_bytes: usize,
+    event_bytes: Vec<usize>,
     reservation_id: String,
     end_position: u64,
     state: ReservedPublicationState,
@@ -831,6 +887,7 @@ enum ReservedPublicationState {
 
 #[derive(Clone, Debug)]
 struct StoredObservationEvent {
+    retained_bytes: usize,
     position: u64,
     appended_at: Instant,
     event: Arc<SessionObservationEvent>,
@@ -859,7 +916,9 @@ impl InMemoryLiveReplayStore {
                     break;
                 }
                 ReservedPublicationState::Ready(events) => {
-                    for event in events {
+                    buffer.retained_bytes -= reservation.retained_bytes;
+                    for (event, retained_bytes) in events.into_iter().zip(reservation.event_bytes) {
+                        buffer.retained_bytes += retained_bytes;
                         let position = event
                             .cursor
                             .parse()
@@ -873,6 +932,7 @@ impl InMemoryLiveReplayStore {
                                 .insert(activity.id.clone(), position);
                         }
                         buffer.events.push_back(StoredObservationEvent {
+                            retained_bytes,
                             position,
                             appended_at: now,
                             event: clone_event(&event),
@@ -881,6 +941,7 @@ impl InMemoryLiveReplayStore {
                     }
                 }
                 ReservedPublicationState::Abandoned => {
+                    buffer.retained_bytes -= reservation.retained_bytes;
                     buffer.unavailable_through =
                         buffer.unavailable_through.max(reservation.end_position);
                     if buffer.tail_position == reservation.end_position {
@@ -914,13 +975,10 @@ impl InMemoryLiveReplayStore {
     }
 
     fn gap_reason_for_cursor(
-        buffer: Option<&LiveReplaySessionBuffer>,
+        buffer: &LiveReplaySessionBuffer,
         cursor_position: u64,
     ) -> Option<LiveReplayGapReason> {
-        let Some(buffer) = buffer else {
-            return (cursor_position > 0).then_some(LiveReplayGapReason::Unavailable);
-        };
-        if cursor_position > buffer.tail_position {
+        if cursor_position < buffer.first_position || cursor_position > buffer.tail_position {
             return Some(LiveReplayGapReason::Unavailable);
         }
         if buffer.unavailable_through > 0 && cursor_position <= buffer.unavailable_through {
@@ -938,21 +996,15 @@ impl InMemoryLiveReplayStore {
     }
 
     fn incarnation_gap_for_cursor(
-        &self,
+        buffer: Option<&LiveReplaySessionBuffer>,
         cursor: &ParsedSessionCursor,
     ) -> Option<LiveReplayGapReason> {
-        if cursor.replay_incarnation_id == self.replay_incarnation_id {
-            return None;
+        if buffer.is_some_and(|buffer| cursor.replay_incarnation_id == buffer.replay_incarnation_id)
+        {
+            None
+        } else {
+            Some(LiveReplayGapReason::Unavailable)
         }
-        tracing::info!(
-            event = "live_replay.incarnation_fence",
-            session_id = %cursor.session_id,
-            requested_replay_incarnation_id = %cursor.replay_incarnation_id,
-            current_replay_incarnation_id = %self.replay_incarnation_id,
-            outcome = "gap_unavailable",
-            "live replay cursor belongs to another incarnation; rerouting to snapshot recovery"
-        );
-        Some(LiveReplayGapReason::Unavailable)
     }
 }
 
@@ -968,85 +1020,125 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 "cannot reserve an empty live replay publication".to_string(),
             ));
         }
+        let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
-        let buffer = sessions
-            .entry(SessionId::from(session_id.to_string()))
-            .or_insert_with(LiveReplaySessionBuffer::new);
-        // A journaled step re-executed after a mid-run suspension, or a
-        // replayed drive region, re-publishes the turn activities its first
-        // attempt already delivered. The activity id is the observation's
-        // stable `(replay key, ordinal)` identity, so a redelivery - and a
-        // second copy inside one batch - collapses into the stored event
-        // instead of reaching observers twice (FIG-3753).
-        let mut claimed_activity_ids = HashSet::new();
-        let drafts = drafts
-            .into_iter()
-            .filter(|draft| {
-                let SessionObservationEventPayload::TurnActivity(activity) = &draft.payload else {
-                    return true;
-                };
-                claimed_activity_ids.insert(activity.id.clone())
-                    && !buffer.turn_activity_delivered(&activity.id)
+        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        sessions.ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)?;
+        let (drafts, start_position, end_position, incarnation) = sessions
+            .update(session_id, |buffer| {
+                Self::trim_locked(&self.config, buffer, now);
+                let mut claimed_activity_ids = HashSet::new();
+                let drafts = drafts
+                    .into_iter()
+                    .filter(|draft| {
+                        let SessionObservationEventPayload::TurnActivity(activity) = &draft.payload
+                        else {
+                            return true;
+                        };
+                        claimed_activity_ids.insert(activity.id.clone())
+                            && !buffer.turn_activity_delivered(&activity.id)
+                    })
+                    .collect::<Vec<_>>();
+                let start_position = buffer.tail_position.checked_add(1);
+                let end_position = u64::try_from(drafts.len())
+                    .ok()
+                    .and_then(|count| buffer.tail_position.checked_add(count));
+                (
+                    drafts,
+                    start_position,
+                    end_position,
+                    buffer.replay_incarnation_id.clone(),
+                )
             })
-            .collect::<Vec<_>>();
+            .ok_or_else(|| LiveReplayStoreError::Store("live replay session is missing".into()))?;
         if drafts.is_empty() {
             return Ok(PreparedLiveReplayPublication::noop());
         }
-        let start_position = buffer.tail_position.checked_add(1).ok_or_else(|| {
-            LiveReplayStoreError::Store("live replay position overflow".to_string())
-        })?;
-        let event_count = u64::try_from(drafts.len()).map_err(|_| {
-            LiveReplayStoreError::Store("live replay batch length overflow".to_string())
-        })?;
-        let end_position = buffer
-            .tail_position
-            .checked_add(event_count)
-            .ok_or_else(|| {
-                LiveReplayStoreError::Store("live replay position overflow".to_string())
-            })?;
+        let start_position = start_position
+            .ok_or_else(|| LiveReplayStoreError::Store("live replay position overflow".into()))?;
+        let end_position = end_position
+            .ok_or_else(|| LiveReplayStoreError::Store("live replay position overflow".into()))?;
         let events = drafts
             .into_iter()
             .enumerate()
             .map(|(offset, draft)| {
-                let position = start_position + offset as u64;
                 SessionObservationEvent::new(
                     draft.turn_id,
-                    SessionCursor::new(&self.replay_incarnation_id, session_id, revision, position),
+                    SessionCursor::new(
+                        &incarnation,
+                        session_id,
+                        revision,
+                        start_position + offset as u64,
+                    ),
                     draft.payload,
                 )
                 .map(Arc::new)
             })
             .collect::<Result<Vec<_>, SessionCursorError>>()?;
+        let event_bytes = match events
+            .iter()
+            .map(|event| bytes::event_bytes(event, self.config.max_retained_bytes))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                sessions.remove(session_id);
+                return Err(error);
+            }
+        };
         let reservation_id = uuid::Uuid::new_v4().to_string();
-        buffer.tail_position = end_position;
-        buffer.reservations.insert(
-            start_position,
-            ReservedPublication {
-                reservation_id: reservation_id.clone(),
-                end_position,
-                state: ReservedPublicationState::Pending(events.clone()),
-            },
-        );
+        let retained_bytes = event_bytes
+            .iter()
+            .try_fold(
+                std::mem::size_of::<ReservedPublication>() + reservation_id.len(),
+                |bytes, event| {
+                    bytes
+                        .checked_add(*event)?
+                        .checked_add(std::mem::size_of::<usize>())
+                },
+            )
+            .ok_or_else(|| LiveReplayStoreError::Store("live replay byte count overflow".into()))?;
+        if let Err(error) = sessions.reserve_bytes(&self.config, session_id, retained_bytes) {
+            sessions.remove(session_id);
+            return Err(error);
+        }
+        sessions.update(session_id, |buffer| {
+            buffer.tail_position = end_position;
+            buffer.retained_bytes += retained_bytes;
+            buffer.reservations.insert(
+                start_position,
+                ReservedPublication {
+                    retained_bytes,
+                    event_bytes,
+                    reservation_id: reservation_id.clone(),
+                    end_position,
+                    state: ReservedPublicationState::Pending(events.clone()),
+                },
+            );
+        });
         drop(sessions);
 
-        let sessions = Arc::clone(&self.sessions);
+        let sessions = Arc::downgrade(&self.sessions);
         let config = self.config.clone();
         let clock = Arc::clone(&self.clock);
-        let abandoned_session_id = SessionId::from(session_id.to_string());
+        let abandoned_session_id = session_id.clone();
         PreparedLiveReplayPublication::new(reservation_id, events, move |reservation_id| {
+            let Some(sessions) = sessions.upgrade() else {
+                return;
+            };
             let now = clock.now();
             let mut sessions = sessions.lock_recover();
-            let Some(buffer) = sessions.get_mut(&abandoned_session_id) else {
-                return;
-            };
-            let Some(reservation) = buffer.reservation_mut(reservation_id) else {
-                return;
-            };
-            reservation.state = ReservedPublicationState::Abandoned;
-            let notifications = InMemoryLiveReplayStore::settle_ready(&config, buffer, now);
-            for event in notifications {
-                buffer.publish(event);
-            }
+            sessions.expire(&config, now, EXPIRY_WORK_PER_CALL);
+            sessions.update(&abandoned_session_id, |buffer| {
+                let Some(reservation) = buffer.reservation_mut(reservation_id) else {
+                    return;
+                };
+                reservation.state = ReservedPublicationState::Abandoned;
+                let notifications = InMemoryLiveReplayStore::settle_ready(&config, buffer, now);
+                for event in notifications {
+                    buffer.publish(event);
+                }
+            });
         })
     }
 
@@ -1059,11 +1151,8 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         prepared: PreparedLiveReplayPublication,
     ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
         let now = self.clock.now();
-        let reservation_id = prepared.reservation_id.clone();
         let events = prepared.events.clone();
         if events.is_empty() {
-            // A fully redelivered batch reserved no positions; there is
-            // nothing to settle or announce.
             return Ok(events);
         }
         let session_id = events
@@ -1071,22 +1160,28 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             .expect("prepared publications are non-empty")
             .session_id();
         let mut sessions = self.sessions.lock_recover();
-        let buffer = sessions.get_mut(&session_id).ok_or_else(|| {
-            LiveReplayStoreError::Store("prepared live replay session is missing".to_string())
-        })?;
-        let reservation = buffer.reservation_mut(&reservation_id).ok_or_else(|| {
-            LiveReplayStoreError::Store(
-                "prepared live replay reservation is missing or retired".to_string(),
-            )
-        })?;
-        if !matches!(reservation.state, ReservedPublicationState::Pending(_)) {
-            return Err(LiveReplayStoreError::Store(
-                "prepared live replay reservation was already settled".to_string(),
-            ));
-        }
-        reservation.state = ReservedPublicationState::Ready(events.clone());
-        let notifications = Self::settle_ready(&self.config, buffer, now);
-
+        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        let notifications = sessions
+            .update(&session_id, |buffer| {
+                let reservation = buffer
+                    .reservation_mut(&prepared.reservation_id)
+                    .ok_or_else(|| {
+                        LiveReplayStoreError::Store(
+                            "prepared live replay reservation is missing or retired".into(),
+                        )
+                    })?;
+                if !matches!(reservation.state, ReservedPublicationState::Pending(_)) {
+                    return Err(LiveReplayStoreError::Store(
+                        "prepared live replay reservation was already settled".into(),
+                    ));
+                }
+                reservation.state = ReservedPublicationState::Ready(events.clone());
+                Ok(Self::settle_ready(&self.config, buffer, now))
+            })
+            .ok_or_else(|| {
+                LiveReplayStoreError::Store("prepared live replay session is missing".into())
+            })??;
+        sessions.touch(&session_id, now);
         #[cfg(any(test, feature = "testing"))]
         if let Some(gate) = self.before_notification_gate.as_ref()
             && !notifications.is_empty()
@@ -1094,21 +1189,27 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             drop(sessions);
             (gate.0)(&notifications);
             sessions = self.sessions.lock_recover();
-            let buffer = sessions.get_mut(&session_id).ok_or_else(|| {
+        }
+        sessions
+            .update(&session_id, |buffer| {
+                let position = events[0].cursor.parse()?.live_position;
+                if buffer.replay_incarnation_id != events[0].replay_incarnation_id()
+                    || position < buffer.first_position
+                {
+                    return Err(LiveReplayStoreError::Store(
+                        "published live replay session disappeared before notification".into(),
+                    ));
+                }
+                for event in notifications {
+                    buffer.publish(event);
+                }
+                Ok(())
+            })
+            .ok_or_else(|| {
                 LiveReplayStoreError::Store(
-                    "published live replay session disappeared before notification".to_string(),
+                    "published live replay session disappeared before notification".into(),
                 )
-            })?;
-            for event in notifications {
-                buffer.publish(event);
-            }
-            let _ = prepared.into_parts();
-            return Ok(events);
-        }
-
-        for event in notifications {
-            buffer.publish(event);
-        }
+            })??;
         let _ = prepared.into_parts();
         Ok(events)
     }
@@ -1118,17 +1219,20 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         cursor: &SessionCursor,
     ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
-        let _cursor_revision = parsed.revision;
-        if let Some(reason) = self.incarnation_gap_for_cursor(&parsed) {
-            return Ok(LiveReplayOutcome::Gap(reason));
-        }
+        let session_id = SessionId::from(parsed.session_id);
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
-        if let Some(buffer) = sessions.get_mut(parsed.session_id) {
-            Self::trim_locked(&self.config, buffer, now);
+        if Self::incarnation_gap_for_cursor(sessions.buffers.get(&session_id), &parsed).is_none() {
+            sessions.touch(&session_id, now);
+            sessions.update(&session_id, |buffer| {
+                Self::trim_locked(&self.config, buffer, now)
+            });
         }
-        let buffer = sessions.get(parsed.session_id);
-        if let Some(reason) = Self::gap_reason_for_cursor(buffer, parsed.live_position) {
+        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        let buffer = sessions.buffers.get(&session_id);
+        if let Some(reason) = Self::incarnation_gap_for_cursor(buffer, &parsed).or_else(|| {
+            buffer.and_then(|buffer| Self::gap_reason_for_cursor(buffer, parsed.live_position))
+        }) {
             return Ok(LiveReplayOutcome::Gap(reason));
         }
         let events = buffer
@@ -1149,81 +1253,104 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
-        let _cursor_revision = parsed.revision;
-        if let Some(reason) = self.incarnation_gap_for_cursor(&parsed) {
-            return Ok(LiveReplaySubscribeOutcome::Gap(reason));
-        }
+        let session_id = SessionId::from(parsed.session_id);
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
-        let buffer = sessions
-            .entry(SessionId::from(parsed.session_id.to_string()))
-            .or_insert_with(LiveReplaySessionBuffer::new);
-        Self::trim_locked(&self.config, buffer, now);
-        if let Some(reason) = Self::gap_reason_for_cursor(Some(buffer), parsed.live_position) {
+        if Self::incarnation_gap_for_cursor(sessions.buffers.get(&session_id), &parsed).is_none() {
+            sessions.touch(&session_id, now);
+            sessions.update(&session_id, |buffer| {
+                Self::trim_locked(&self.config, buffer, now)
+            });
+        }
+        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        let buffer = sessions.buffers.get(&session_id);
+        if let Some(reason) = Self::incarnation_gap_for_cursor(buffer, &parsed).or_else(|| {
+            buffer.and_then(|buffer| Self::gap_reason_for_cursor(buffer, parsed.live_position))
+        }) {
             return Ok(LiveReplaySubscribeOutcome::Gap(reason));
         }
-        let replay = buffer
-            .events
-            .iter()
-            .filter(|event| event.position > parsed.live_position)
-            .map(|event| clone_event(&event.event))
-            .collect();
-        let receiver = buffer.subscribe(self.config.max_events_per_session);
-        Ok(LiveReplaySubscribeOutcome::Subscribed(
-            LiveReplaySubscription::new(replay, receiver, parsed.live_position),
-        ))
+        let channel_bytes = if buffer.is_some_and(|buffer| buffer.sender.is_none()) {
+            retention::channel_bytes(self.config.max_events_per_session)?
+        } else {
+            0
+        };
+        if sessions
+            .reserve_bytes(&self.config, &session_id, channel_bytes)
+            .is_err()
+        {
+            sessions.remove(&session_id);
+            return Ok(LiveReplaySubscribeOutcome::Gap(
+                LiveReplayGapReason::Unavailable,
+            ));
+        }
+        Ok(sessions
+            .update(&session_id, |buffer| {
+                let replay = buffer
+                    .events
+                    .iter()
+                    .filter(|event| event.position > parsed.live_position)
+                    .map(|event| clone_event(&event.event))
+                    .collect();
+                let receiver = buffer.subscribe(self.config.max_events_per_session, channel_bytes);
+                LiveReplaySubscribeOutcome::Subscribed(LiveReplaySubscription::new(
+                    replay,
+                    receiver,
+                    parsed.live_position,
+                ))
+            })
+            .unwrap_or(LiveReplaySubscribeOutcome::Gap(
+                LiveReplayGapReason::Unavailable,
+            )))
     }
 
     fn current_cursor(&self, session_id: &SessionId, revision: SessionRevision) -> SessionCursor {
-        let live_position = self
-            .sessions
-            .lock_recover()
-            .get(session_id)
-            .map(|buffer| {
-                buffer
+        let now = self.clock.now();
+        let mut sessions = self.sessions.lock_recover();
+        sessions.touch(session_id, now);
+        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
+        if sessions
+            .ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)
+            .is_err()
+        {
+            return SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0);
+        }
+        sessions
+            .update(session_id, |buffer| {
+                Self::trim_locked(&self.config, buffer, now);
+                let live_position = buffer
                     .events
                     .iter()
                     .find(|stored| stored.event.revision() > revision)
                     .map_or(buffer.tail_position, |stored| {
                         stored.position.saturating_sub(1)
-                    })
+                    });
+                SessionCursor::new(
+                    &buffer.replay_incarnation_id,
+                    session_id,
+                    revision,
+                    live_position,
+                )
             })
-            .unwrap_or(0);
-        SessionCursor::new(
-            &self.replay_incarnation_id,
-            session_id,
-            revision,
-            live_position,
-        )
+            .unwrap_or_else(|| {
+                SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0)
+            })
     }
 
     fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         let mut sessions = self.sessions.lock_recover();
-        let buffer = sessions
-            .entry(session_id.clone())
-            .or_insert_with(LiveReplaySessionBuffer::new);
-        let unavailable_through = buffer.tail_position.checked_add(1).ok_or_else(|| {
-            LiveReplayStoreError::Store("live replay position overflow".to_string())
-        })?;
-        let recovered_position = unavailable_through.checked_add(1).ok_or_else(|| {
-            LiveReplayStoreError::Store("live replay position overflow".to_string())
-        })?;
-        buffer.events.clear();
-        buffer.delivered_activity_positions.clear();
-        buffer.reservations.clear();
-        buffer.unavailable_through = unavailable_through;
-        buffer.tail_position = recovered_position;
-        buffer.settled_position = recovered_position;
-        buffer.sender = None;
+        sessions.remove(session_id);
+        sessions.expire(&self.config, self.clock.now(), EXPIRY_WORK_PER_CALL);
         Ok(())
     }
 
     fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
-        if let Some(buffer) = sessions.get_mut(session_id) {
-            Self::trim_locked(&self.config, buffer, now);
-        }
+        sessions.touch(session_id, now);
+        sessions.update(session_id, |buffer| {
+            Self::trim_locked(&self.config, buffer, now)
+        });
+        sessions.expire(&self.config, now, EXPIRY_WORK_PER_CALL);
         Ok(())
     }
 }

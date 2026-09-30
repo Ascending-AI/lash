@@ -169,3 +169,12 @@ filters = ["tests::attachment_attach_redrive::live_restate_"]
 endpoints = ["AA"]
 shards = 1
 timeout_seconds = 120
+
+# Live replay eviction returns a snapshot gap on native Restate with both SQL stores.
+[suites.live-replay-bounds]
+label = "//crates/lash:facade_host_wrappers__test"
+cwd = "crates/lash"
+filters = ["live_replay_bounds::eviction_recovers_the_facade_on_native_restate_"]
+endpoints = ["REPLAY_BOUNDS"]
+shards = 1
+timeout_seconds = 120
