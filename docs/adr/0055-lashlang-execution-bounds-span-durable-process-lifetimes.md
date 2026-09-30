@@ -4,97 +4,87 @@
 
 Accepted.
 
-Amended 2026-09-25 (FIG-3672): the wall-clock deadline is deleted. Every
-proportional intrinsic now charges the instruction budget, so instructions
-alone bound what a cell can do and a host no longer chooses a second, less
-replay-stable meter. The `wall_clock` bound and its `WallClockBound` type are
-gone; the two remaining bounds and their metering are unchanged.
-
-Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
-surface. Every reference to "Lashlang" below names the IR and VM: these bounds
-are the VM's, and they apply to every program the TypeScript dialect lowers into
-it. The bounds themselves are unchanged.
-
 ## Context
 
-Lashlang can execute in a foreground RLM block or as a durable process whose VM
-parks at effects and resumes from persisted continuations. Hosts need protection
-from both runaway instruction streams and expensive individual builtins. They
-also need to know whether a configured limit applies to one foreground block,
-one durable segment, or the whole logical process.
+TypeScript lowers into the Lashlang IR and VM. Execution can be a foreground
+RLM cell or a durable process that parks at effects and resumes from persisted
+continuations. Hosts need bounds on instruction work and logical heap size,
+and those bounds need a defined lifetime across segment handovers.
 
 ## Decision
 
-Every RLM configuration must explicitly choose two independent bounds:
+RLM configuration explicitly supplies two independent bounds:
 
-- `instruction_limit: InstructionBound` limits VM instructions plus the work
-  charged by every intrinsic whose cost grows with its input or output; and
-- `memory_limit: MemoryBound` limits live logical heap bytes.
+- `instruction_limit: InstructionBound` covers VM instructions and charged
+  intrinsic work.
+- `memory_limit: MemoryBound` covers logical heap bytes.
 
-The engine's own `ExecutionBounds::new` takes both as well: a host that has
-not decided how much logical memory an execution may hold has not finished
-configuring it, and a silent default would be a bound nobody chose.
+`InstructionBound::instructions(n)` and `MemoryBound::logical_bytes(n)` or
+`MemoryBound::mebibytes(n)` construct nonzero bounds. Each type also has an
+explicit `unbounded()` opt-out. The distinct protocol types prevent supplying
+an instruction count as the memory argument.
 
-Each bound is its own Rust type, and each type carries only the constructors
-that make sense for its axis: `InstructionBound::instructions(n)` and
-`MemoryBound::logical_bytes(n)` / `MemoryBound::mebibytes(n)`, plus `unbounded()` on
-each for the explicit opt-out. Instructions and heap bytes share a nonzero
-integer representation but not a type, so a byte count can never be spent as an
-instruction budget. Hosts assemble a config through
-`RlmProtocolPluginConfig::builder()`, which names every bound at its call site
-and refuses to `build()` until both are set. Serialized RLM configuration
-must contain both fields and has no implicit memory limit. It uses
-`{"bounded": 1000000}` for instructions and bytes, or the string
-`"unbounded"`.
+`RlmProtocolPluginConfig::builder()` exposes `build()` only after the host
+supplies both bounds and its channel. Serialized configuration requires both
+bound fields. Their wire values are `{"bounded": 1000000}` or `"unbounded"`.
+The protocol's `ExecutionBounds::new` also requires both axes. The underlying
+VM host contract separately supplies a default logical-memory ceiling of
+512 MiB for a host that does not override `execution_bounds`.
 
-Memory is metered by Lashlang heap size schedule v1, never by allocator or RSS
-measurements. A heap object costs a 16-byte header; each value slot costs 16
-bytes plus its deterministic scalar payload; records additionally cost 8 bytes
-plus UTF-8 key bytes per field. References cost 8 payload bytes. Allocation
-charges the complete object and mark-sweep collection subtracts swept objects.
-The non-moving collector runs every 1,024 allocations, based only on the
-monotonic allocation counter, and additionally wherever a boundary needs the
-live set exactly: at a park, when a snapshot is captured, and when a batch of
-global patches commits. Test hosts can collect after every allocation to prove
-that collection timing does not change a program's result; every instruction
-runs inside an allocation scope so that stress mode never collects against an
-empty root set.
+### Heap accounting
 
-The memory limit bounds live plus not-yet-collected bytes, so it is the one
-place where collection timing is observable: a run that parks collects earlier
-than a run that does not, and can therefore survive a point at which the
-straight-through run would have exhausted the bound. The relation is one-way —
-parking never brings exhaustion forward — and results, instruction meters and
-reachable heap accounting are unaffected.
+The VM meters logical bytes under its registered heap-size schedule rather
+than allocator or RSS measurements. In the current production schedule, an
+object header costs 16 bytes, a value slot costs 64 bytes plus its scalar
+payload, and a record field additionally costs 8 bytes plus its UTF-8 key.
+A reference has an 8-byte payload. Object kinds account for their own fields,
+including closure metadata and exotic state.
 
-Foreground meters apply per executed Lashlang block. Durable-process meters are
-cumulative over the entire logical process lifetime and persist across every
-segment handover. This asymmetry is intentional and must inform the values a
-host chooses.
+Allocation precharges objects and collection subtracts swept objects. The
+non-moving mark-sweep collector runs every 1,024 allocations and at boundaries
+that need an exact live set, including parks and snapshot capture. Stress
+collection uses rooted allocation scopes.
 
-Bounds are checked on resume, after each intrinsic dispatch, before and after
-effect boundaries, at cooperative yields, and on every VM exit. Every intrinsic
-whose work grows with its input or output charges that work to the instruction
-budget — one unit per byte, UTF-16 unit or element, with sorting charging
-`n log n` — so enforcement has bounded overshoot rather than allowing one
-unbounded builtin to hide behind one bytecode instruction.
+The memory limit includes allocated bytes awaiting collection, so collection
+timing can affect when a memory bound fires. A park can remove unreachable
+objects sooner than straight-through execution. This does not reset reachable
+heap accounting or the instruction meter.
 
-Exhaustion is a typed terminal failure. Foreground confidence builds assert
-loudly; durable processes expose the stable
-`process_execution_bound_exhausted` failure code and confidence builds assert
-loudly there as well.
+### Lifetime and enforcement
 
-Adding the original instruction meter changed the continuation
-layout and raised `BYTECODE_FORMAT_VERSION` from v1 to v2. Adding heap identity,
-the allocation counter, live logical bytes, and size-schedule version raises it
-again from v2 to v3. Deployments must drain or recreate parked Lashlang
-processes before the cutover; older continuations are not migrated or decoded.
+Foreground instruction meters apply per executed cell. A durable process
+persists its execution counters and heap accounting across segment handovers;
+resuming does not grant a fresh process instruction budget.
 
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
+The VM checks bounds on resumed execution, after intrinsic dispatch, at effect
+boundaries, cooperative yields and terminal exits. Proportional intrinsic work
+charges the instruction meter, with bounded dispatch/check overshoot. A
+separate maximum frame depth limits call frames. No execution bound reads a
+wall-clock deadline.
+
+Exhaustion is a typed terminal failure. The durable engine exposes
+`process_execution_bound_exhausted`. Confidence assertions make exhausted
+bounds loud in the relevant harness paths.
+
+Format writers and readers use the registered versions and fleet read windows.
+`lash::formats` exposes the current format manifest. ADR 0115 governs upgrades
+and drain boundaries; the pre-1.0 freeze changes shapes in place without bumps
+or upcasters.
 
 ## Consequences
 
-- Durable segment handovers cannot reset any meter.
-- Every bound redrives deterministically: no meter reads the wall clock.
-- Bytecode-format rollouts are clean cutovers: drain or recreate parked
-  processes rather than attempting to migrate older continuations.
+- Hosts explicitly choose the RLM instruction and memory policy.
+- Durable handovers preserve cumulative instruction accounting.
+- Logical memory is a reproducible accounting schedule, not a promise about
+  physical resident memory.
+- Bound failures are terminal rather than requests to retry unchanged work.
+
+## Code evidence
+
+- [Protocol bounds](../../crates/lash-protocol-rlm/src/plugin/config_types.rs#L47) and
+  [required configuration](../../crates/lash-protocol-rlm/src/plugin/config.rs#L63).
+- [VM host bounds and default](../../crates/lashlang/src/runtime/host.rs#L387).
+- [Heap charges](../../crates/lashlang/src/runtime/heap/object.rs#L41) and
+  [schedule and collection interval](../../crates/lashlang/src/runtime/heap.rs#L50).
+- [Enforcement](../../crates/lashlang/src/runtime/vm/control.rs#L545).
+- [Durable failure code](../../crates/lash-lashlang-runtime/src/error.rs#L334).

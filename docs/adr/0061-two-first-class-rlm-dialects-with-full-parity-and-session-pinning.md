@@ -2,41 +2,53 @@
 
 ## Status
 
-Partially superseded by [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md).
-The parity, permanence, doubled-battery and session-pinning obligations are
-superseded. The multi-dialect architecture remains accepted, clarified by
-Sam's FIG-4276 ruling on 2026-09-30.
+Accepted.
 
 ## Retained architecture
 
-A dialect owns its source syntax and semantics and lowers into the shared
-Lashlang IR. One linker, compiler, heap VM, continuation format and durable
-runtime execute that IR. A dialect does not emulate another language.
+A dialect owns its syntax and semantics and lowers into the shared Lashlang IR.
+One linker, compiler, heap VM, continuation family and durable runtime execute
+that IR. A dialect does not emulate another language.
 
-TypeScript is the only shipped dialect today. Its language id is `typescript`,
-spelled out in prompts, execution telemetry and restored execution state.
-There is no current host selector or first-commit language pin. Adding a
-production dialect requires explicit selection at the front-end boundary,
-with consistent prompt, tool binding and session-state ownership. It does not
-require a source-language field on IR artifacts or compiled process bodies.
+TypeScript is the shipped dialect. Its language ID is `typescript`, used in
+prompt vocabulary, execution reporting and persisted RLM execution state.
+`rlm_dialect()` selects that front end directly. There is no host dialect
+selector or first-commit language pin.
 
-A new dialect supplies its own lowering and evidence for its accepted
-semantics. It has no obligation to reproduce another dialect's examples or
-judged scenarios. ADR 0096 describes the retained `Dialect` extension contract
-and the remaining registration work.
+The internal `Dialect` contract owns parsing, cell parsing, diagnostics, prompt
+vocabulary, cell tags, tool signatures and addressable tool paths. Shared
+execution-session services own artifact storage, resolvers, trace configuration,
+bounds and transport.
 
-The workflow-graph lens has a TypeScript canonical printer. Its laws and typed
-refusals apply to the IR that printer can spell; another dialect's printer
-would need its own evidence.
+A production dialect needs a front end and its own semantic evidence, selected
+consistently with prompt teaching, tool bindings and restored state. This does
+not require another dialect's examples or a source-language field on compiled
+IR artifacts. ADR 0096 owns shipped-dialect selection and extension work;
+ADR 0060 owns the machine/language separation.
 
-## Superseded history
+The workflow-graph lens has a TypeScript canonical printer. Its round-trip laws
+and typed refusals describe IR the printer can express. A printer for another
+language needs evidence for its own accepted representations.
 
-The 2026-09-13 decision required two permanent dialects at full parity, a
-`lashlang` default, a doubled release battery, first-commit session pins,
-reopen refusals and subagent pin inheritance. ADR 0096 retired the authored
-Lashlang language and those obligations. Their historical rationale is in
-this ADR's revision history; they are not requirements for a new dialect.
+## Why
 
-The earlier format-bump window is also historical. During the pre-1.0 version
-freeze, shapes change in place without bumps or compatibility readers
-(FIG-3846). ADR 0115 governs the 1.0 cut.
+Sharing the machine keeps durable state, metering and runtime operations under
+one contract. Independent front ends can define different source semantics
+without duplicating that execution machinery. Permanent parity between source
+languages is not required by the shared IR.
+
+## Consequences
+
+- A front end is selected at the source boundary, with coherent session state
+  and prompt vocabulary.
+- Each dialect proves its own accepted semantics.
+- Registered format windows and ADR 0115 govern upgrades. The pre-1.0 freeze
+  changes shapes in place without version bumps or upcasters.
+
+## Code evidence
+
+- [Dialect and direct selection](../../crates/lash-protocol-rlm/src/dialect.rs#L33).
+- [Shared services and session](../../crates/lash-protocol-rlm/src/dialect.rs#L82).
+- [TypeScript parse/lower/link path](../../crates/lash-typescript/src/lib.rs#L70).
+- [RLM engine identity in durable root](../../crates/lash-protocol-rlm/src/executor/state.rs#L891).
+- [Workflow-graph lens](../../crates/lash-typescript/src/workflow_graph/mod.rs).

@@ -96,9 +96,8 @@ The generated region below is checked against the live filenames and headings.
 | 0048 | [Checkpoint component identity is a backend contract](0048-checkpoint-component-identity-is-a-backend-contract.md) |
 | 0049 | [Session ids are used once](0049-session-ids-are-used-once.md) |
 | 0050 | [Behavior transcripts are one normalized vocabulary](0050-behavior-transcripts-are-one-normalized-vocabulary.md) |
-| 0051 | [The facade is the host API; lash-core's public surface is its integrator seams](0051-the-facade-is-the-host-api-core-is-integrator-seams.md) |
+| 0051 | [The facade is the host API; core exposes integrator seams](0051-the-facade-is-the-host-api-core-is-integrator-seams.md) |
 | 0052 | [The Postgres schema is a published artifact lash verifies at open](0052-the-postgres-schema-is-a-published-artifact-lash-verifies.md) |
-| 0053 | [Claim nonces scope session-lease lifecycle and execution fences, not commit authority](0053-claim-nonces-scope-session-lease-lifecycle.md) |
 | 0054 | [Host panics are contained and standard-lock poison is recovered](0054-host-panics-are-contained-and-lock-poison-is-recovered.md) |
 | 0055 | [Lashlang execution bounds span durable process lifetimes](0055-lashlang-execution-bounds-span-durable-process-lifetimes.md) |
 | 0056 | [Checkpoint components generalize to a keyed set](0056-checkpoint-components-generalize-to-a-keyed-set.md) |

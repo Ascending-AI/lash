@@ -29,11 +29,9 @@ impl CommitBudgetLimit {
 /// usage deltas, and the durable turn result. Nodes bound all rows the commit
 /// writes: graph nodes plus attachment-intent adoption rows. Hosts must choose
 /// bounded or unbounded behavior for both dimensions; this type deliberately
-/// has no `Default`. The reference curve in ADR 0058 recommends a 1 MiB
-/// logical-byte limit because its p95 physical commit interval stays below the
-/// named 60 ms target on both reference backends; 512 rows remains the separate
-/// starting-point node bound. Hosts should remeasure and tune both limits for
-/// their own backend envelope.
+/// has no `Default`. ADR 0058 documents 1 MiB and 512 recorded rows as
+/// starting points. Hosts measure their own byte and row curves, including
+/// the joint configured point, and tune both limits for their backend envelope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommitBudget {

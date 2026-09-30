@@ -1,22 +1,20 @@
 # 0057. History generations accelerate edge-authoritative reads
 
-Date: 2026-08-09
-Status: accepted
+## Status
+
+Accepted.
 
 ## Context
 
 The shared-history model in ADR 0047 makes a session head a root into an
-immutable parent-edge graph. SQL reads nevertheless rediscovered that ancestry
-with recursive CTEs. A runtime commit also loaded and decoded the complete
-active path merely to decide whether one requested ancestor was active. Those
-queries made ordinary reads and commits scale with history depth even though
-the graph is append-only and its ancestry cannot change.
+immutable parent-edge graph. Reads and commits need to decide whether a named
+node is an active ancestor without decoding the complete history. The graph is
+append-only, so generation facts can accelerate candidate selection.
 
 Storing a second reachability authority would be worse than the recursion.
-ADR 0024 removed a cached graph reference count because drift between the cache
-and parent edges could make reclamation delete live history or retain dead
-history. The same ruling applies to ancestry: edges and roots remain the only
-authority.
+A cached reachability authority can drift from parent edges and cause
+reclamation to delete live history or retain dead history. ADR 0024 makes
+edges and roots authoritative; the same rule applies to ancestry.
 
 ## Decision
 
@@ -45,7 +43,7 @@ its ancestry. Consequently a pinned node remains forkable after its owning
 session is deleted even when no descendant session exists to carry lineage.
 There is no carrier-row copy, carrier tie-break, or missing-owner fallback. A
 session that owns no node is absent from lineage, including repeated rewinds
-whose relation metadata names a superseded session. Copy-based child-session
+whose relation metadata names a session that owns no retained node. Copy-based child-session
 creation writes no lineage rows.
 
 The indexed read accelerator admits a node when either the session owns it or
@@ -70,11 +68,6 @@ selection and the confirmation inside one read transaction (or the commit's
 write transaction for the fence); PostgreSQL uses `REPEATABLE READ`.
 
 ### Edge authority
-
-Amended 2026-09-29 (FIG-4154). This section replaces the earlier argument that
-the requested-ancestor fence was shielded by a complete-history state load;
-ADR 0112 removed that load, and an inflated `B → A` ceiling then let B read,
-predicate as active, and append past a node A appended after B forked.
 
 The check is the head-path probe in
 `lash-core-store/src/store_backend_support/head_path.rs`, which both backends
@@ -116,26 +109,24 @@ transaction, under the head compare-and-swap, so no preceding state load is
 part of the argument. An anchor owned by the head leaf's owner costs one
 statement beyond the candidate read and no hop.
 
-Deriving frame facts also intentionally tightens `MissingFrameOpenAncestor`.
-For a root append, the first appended node must be `FrameOpen`; a later
-`FrameOpen` no longer rescues earlier root nodes. This replaces the former
-"last FrameOpen among the appends" behavior and is an intended contract change:
-every durable node must have a frame ancestor at the moment it is derived.
+For a root append, the first appended node must be `FrameOpen`. A later
+`FrameOpen` cannot supply an ancestor for an earlier node. Every durable node
+needs a frame ancestor when the planner derives it; absence is
+`MissingFrameOpenAncestor`.
 
-Reclamation is unchanged in authority and behavior. It derives liveness from
+Reclamation derives liveness from
 parent edges, heads, and anchors at every destructive step as required by ADR
 0024 and ADR 0047. Lineage rows do not retain graph nodes, and deleting an
 ancestor session does not invalidate descendant rows that name it. A lineage
 row dies only with its own session.
 
-The SQLite durable-core schema moves from 27 to 28 and the PostgreSQL component
-schema from 39 to 40. Both stores reject older schemas and require recreation;
-there is no backfill, migration, dual read, or compatibility path.
+Current schema and format admission comes from the compatibility registry and
+fleet windows. ADR 0115 governs upgrades; shape edits during the pre-1.0 freeze
+do not add version bumps or upcasters.
 
 ## Consequences
 
-- Active-path materialization and append-ancestor checks no longer execute
-  recursive SQL. The latter is one indexed candidate lookup plus the
+- Active-path materialization and append-ancestor checks use indexed reads. The latter is one indexed candidate lookup plus the
   head-path probe, at most one indexed lookup per owning session, under
   commit authority.
 - Deep fork reads carry one small lineage row per node-owning ancestor session,
@@ -153,3 +144,12 @@ there is no backfill, migration, dual read, or compatibility path.
   pins the inflated-ceiling case on every anchor, the predicate and the
   fence, and the session-graph property law generates inflated ceilings
   against its reachability model.
+
+## Code evidence
+
+- [Core reachability probe](../../crates/lash-core-store/src/store_backend_support/head_path.rs#L108).
+- [Node facts and commit plan](../../crates/lash-core-store/src/store/runtime_commit_plan.rs).
+- [Edge-derived fork plan](../../crates/lash-core-store/src/store/fork_plan.rs).
+- [SQLite history reads](../../crates/lash-sqlite-store/src/history.rs#L202) and
+  [PostgreSQL history reads](../../crates/lash-postgres-store/src/postgres/runtime_persistence/history.rs#L186).
+- [Conformance laws](../../crates/lash-conformance/src/conformance/session_history.rs).

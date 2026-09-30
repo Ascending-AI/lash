@@ -54,7 +54,7 @@ amendment below removes the durable claim token and the `queued_runs` ledger
 from selection and settlement. A fenced write under the session's drive fence
 binds each admitted row to its root (`admitted_root`, `admitted_by`), the
 engine journal records the root's selection, and settlement is keyed by the
-root and the turn. It supersedes ADR 0029 and ADR 0053.
+root and the turn. It supersedes ADR 0029.
 
 ## Context
 
@@ -1026,7 +1026,7 @@ deleted the `queued_runs` ledger and admits a queued-work head as an ordinary
 root; FIG-3946 replaced the claim columns with the admission binding, keyed
 settlement by root and deleted the claim, abandon and orphan-repair machinery;
 FIG-3947 closed it out. It amends §1 (the claim columns and claim type), §5.2, §7, §13, §16 laws 3 and 20,
-the FIG-3540 close-out, and ADR 0029 and ADR 0053, which it supersedes. Each
+the FIG-3540 close-out, and ADR 0029, which it supersedes. Each
 carries a note pointing here.
 
 **Decision.** No durable claim token takes part in selecting or settling a turn.

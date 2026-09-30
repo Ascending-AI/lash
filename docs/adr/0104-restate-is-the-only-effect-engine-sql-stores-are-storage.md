@@ -382,7 +382,6 @@ old decision as historical.
 | [0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) | the lease generation that authorizes a cancel closure, and lease renewal and takeover around it |
 | [0041](0041-child-turn-and-driver-stack-growth-have-canonical-seams.md) | session-execution leases and claims owned by a child runtime |
 | [0049](0049-session-ids-are-used-once.md) | SQL scope retirement of effect, group and promise rows, and the scope fence |
-| [0053](0053-claim-nonces-scope-session-lease-lifecycle.md) | claim nonces of the session-execution lease |
 | [0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) | the SQL tiers' group rows, finalization and drain |
 | [0067](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) | owners and reclaim triggers of the effect-replay, group and await-event rows, and lease-held repair |
 | [0068](0068-one-meaning-per-outcome-suffix.md) | `SessionExecutionLeaseClaimOutcome` |
