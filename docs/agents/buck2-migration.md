@@ -313,24 +313,76 @@ Focused fake-CLI contracts, duration parsing, release-fixture caller tests,
 Just parsing, shell syntax and pre-commit checks passed for these repairs. They
 did not invoke Buck2, Cargo compilation or NativeLink. The combined candidate
 now includes graph commit `e79c1a22bc46953134b4154776747e1547b648bb` and
-caller commit `fa173b178e3d57e3b5976af250b66b11acd6e64a`. No final native gate
-has completed against that combined tip yet.
+caller commit `fa173b178e3d57e3b5976af250b66b11acd6e64a`. The subsequent
+joined-source results below supersede that candidate's pending status.
+
+## Joined source and current client validation
+
+The migration was integrated with upstream
+`80c39f43b21a44087ea4097815753a264b9f2f02` in `9445ac6a52`. Cargo manifests,
+features, identities and the lockfile match that upstream revision except for
+a build-tool comment. The integration keeps upstream's registry-worker and
+explicit protocol-version changes and removes the retired VM fingerprint build
+scripts. It does not restore obsolete source behavior to match an earlier build.
+All 7,137 configured labels passed dependency analysis. Sync, 13 graph contracts,
+worker runfile/helper, Cargo binary, UI, confidence, packaging and Restate script
+contracts passed on the joined source.
+
+The named Cargo Git-consumer gate passed on exact `9445ac6a52` in 2m13s, with
+the normal sourced environment and shim admission, without a patch mirror.
+The current normal UI runner passed all 57 fixtures remotely after adding
+genuine per-case JUnit reporting. The normal UI label also includes the RLM-only
+store witness through Buck2's implicit test dependency contract; the combined
+57-plus-one execution on joined source remains in progress.
+
+Native link validation exposed missing Cargo build-script link directives.
+Fixups now forward `rustc_link_lib` and `rustc_link_search` for AWS-LC, Ring and
+SQLite through Reindeer's supported configuration. Earlier library compilation
+did not establish complete binary-link coverage. The joined Slack binary link
+is the current acceptance probe for this correction.
+
+Actual remote tests exposed two launcher argument-boundary failures, including
+the opaque Rust `RunInfo` environment-injection prefix. The corrected launcher
+preserves that supported command and separates libtest arguments with an explicit
+boundary. On `f5ca040a51`, all 31 SQL tests ran remotely and produced 31 passing
+JUnit cases. Repetition materialized the same 31 cases in a fresh directory with
+`cache=true` and the same action digest
+`4bf2d93345b7cbd6d87fb35bb8789c35bffb11dd02cdf702d68e67d578084fcc:147`.
+An exact filter ran one passing case remotely. Executable regression fixtures
+also cover injected commands and sharded selection.
+
+A whole-workspace metadata attempt encountered NativeLink's per-blob write
+deadlines during input uploads. Lash uses the stock client's supported
+`max_concurrent_uploads_per_action=1` as a conservative upload-burst limit.
+It limits uploads within each action, not total daemon or pool concurrency, and
+can reduce upload throughput. A later bounded pilot had no upload deadline
+errors, but caches and pool load differed; no causal benefit or performance
+improvement has been established for this setting. NativeLink is unchanged.
+
+The superseded pre-integration Clippy run was stopped by its owner after
+preserving partial evidence. It is not counted as a full pass. Final broad
+validation must run on the joined source through the complete CI profile.
 
 ## Remaining delivery gates
 
-- Run final generated-file, metadata, build, Clippy and unit/integration gates
-  against the combined candidate. A bounded two-slot native pilot was still in
-  progress when this report was updated; its result is not counted here.
-- Run the required feature, service, release and CI caller checks that are not
-  covered by the focused script contracts above.
+- Finish the joined native-link and normal-plus-store-witness UI probes.
+- Run full ordinary codegen with `kiln build //:workspace_compile`. CI checks
+  metadata, lint and test links but intentionally omits this 280-target request.
+- Run the exact-source full CI profile through `workflow_dispatch`. It covers
+  workspace Clippy, 906 feature metadata units, seven feature Clippy units,
+  61 feature test units, 118 core suite labels and 19 tail suite labels, together
+  with the required service, worker, heavy and functional gates. These inventory
+  counts do not describe executed compiler or test-case counts.
 - Confirm Kiln generation/dispatch for the final Lash revision while existing
   Figments worktrees continue using their current backend.
 - Link the Lash PR to Kiln PR #41. If it opens before the final gates finish,
   keep it in draft and record the pending results. Keep both PRs unmerged until
   the Kiln change is deployed first.
 
-The Kiln implementation at `08481af66c9ef822c760c883608bcf6c7ac2d43f` passed
-its four required batteries and independent review after correcting orphan
-cleanup fencing, failed recreation identity loss and external executable
-symlinks. Full Lash integration validation remains separate. Neither migration
-PR will be merged as part of this change.
+The final Kiln behavior at `94839828dd714d92e83d4ef31cfa43699b299abc` passed
+all four required batteries. It also refreshes renewed private identities and
+cleans the exact daemon metadata, refusing deletion if owned processes survive
+or lifecycle fencing cannot be acquired. Independent review exercised these
+guards without weakening assertions or signaling unrelated processes. Full Lash
+integration validation remains separate. Neither migration PR will be merged
+as part of this change.

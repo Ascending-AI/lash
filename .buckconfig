@@ -23,3 +23,4 @@ ignore = .git, buck-out, .buck2, vendor, tools/buck2/bin
 
 [buck2_re_client]
 execution_concurrency_limit = 2
+max_concurrent_uploads_per_action = 1
