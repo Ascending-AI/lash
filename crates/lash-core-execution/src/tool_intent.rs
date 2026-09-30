@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
-/// Maximum canonical JSON bytes accepted from one recorded intent batch.
+/// Maximum canonical JSON bytes one recorded intent batch may declare, as
+/// [`ToolIntents::declared_canonical_bytes`] measures them: the execution
+/// environment a declaration captured from its session is not counted
+/// (FIG-4255).
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
 pub const TOOL_INTENT_MAX_PER_KIND: usize = 16;
@@ -48,6 +51,41 @@ impl ToolIntents {
     /// This is an **integrator class 3: protocol and process-engine implementor** seam.
     pub fn is_empty(&self) -> bool {
         self.intents.is_empty()
+    }
+
+    /// The canonical JSON bytes of what the batch declares, the measure
+    /// [`TOOL_INTENT_MAX_CANONICAL_BYTES`] bounds: the batch with every
+    /// captured execution environment left out.
+    ///
+    /// A declaration that runs work carries the execution environment of the
+    /// session that declared it, so realization can publish it (FIG-2999).
+    /// That environment is the session's policy — its prompt layers among
+    /// it — and its size is the host's, not the attempt's: counting it made
+    /// every child start of a turn under large project instructions a
+    /// deterministic refusal (FIG-4255). The environment still travels with
+    /// the declaration; only the budget leaves it out.
+    pub fn declared_canonical_bytes(&self) -> Result<usize, serde_json::Error> {
+        let mut declared = self.clone();
+        for intent in &mut declared.intents {
+            intent.leave_out_captured_env();
+        }
+        serde_json::to_vec(&declared).map(|bytes| bytes.len())
+    }
+}
+
+impl ToolIntent {
+    /// Drops the execution environment this declaration captured from its
+    /// session. Exhaustive, so a new kind decides whether it captures one.
+    fn leave_out_captured_env(&mut self) {
+        match self {
+            Self::StartProcess(start) => start.declaration.env_spec = None,
+            Self::RegisterProcessDefinition(registration) => registration.env_spec = None,
+            Self::RegisterTrigger(registration) => registration.env_spec = None,
+            Self::SignalProcess(_)
+            | Self::CancelProcess(_)
+            | Self::EmitProcessEvent(_)
+            | Self::EmitTrigger(_) => {}
+        }
     }
 }
 

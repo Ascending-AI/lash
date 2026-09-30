@@ -196,6 +196,57 @@ impl ToolIntentRefusalReason {
             Self::DeclaredStartIdentityMismatch { .. } => "declared_start_identity_mismatch",
         }
     }
+
+    /// The refusal as the model reads it: its code and the facts that
+    /// decided it, so a declaration's failed call names why nothing was
+    /// realized (FIG-4255).
+    pub fn describe(&self) -> String {
+        let code = self.code();
+        match self {
+            Self::UnsupportedProtocolVersion { recorded } => {
+                format!("{code}: intent protocol version {recorded} is not this build's")
+            }
+            Self::IntentIndexOverflow => format!("{code}: the intent index does not fit in u32"),
+            Self::CountBudgetExceeded { actual, maximum } => {
+                format!(
+                    "{code}: the attempt declared {actual} intents; at most {maximum} are admitted"
+                )
+            }
+            Self::CanonicalByteBudgetExceeded { actual, maximum } => format!(
+                "{code}: the attempt declared {actual} canonical bytes of intents; at most {maximum} are admitted"
+            ),
+            Self::PerKindBudgetExceeded {
+                kind,
+                actual,
+                maximum,
+            } => format!(
+                "{code}: the attempt declared {actual} {} intents; at most {maximum} are admitted",
+                kind.as_str()
+            ),
+            Self::SessionMismatch { expected, recorded } => format!(
+                "{code}: the intent names session `{recorded}`; the attempt ran in session `{expected}`"
+            ),
+            Self::ForeignTriggerOwnerScope { expected, recorded } => format!(
+                "{code}: the registration names owner scope {recorded}; the attempt resolves {expected}"
+            ),
+            Self::ForeignTriggerActor { expected, recorded } => format!(
+                "{code}: the registration names actor {recorded}; the attempt resolves {expected}"
+            ),
+            Self::CommandFailed {
+                code: failed,
+                message,
+            } => {
+                format!("{code}: {failed}: {message}")
+            }
+            Self::MintingGroupChildCancelled => {
+                format!("{code}: the group child whose emission minted the intent was cancelled")
+            }
+            Self::DeclaredStartIdentityMismatch { expected, recorded } => format!(
+                "{code}: the start was declared as `{}`; its call derives `{}`",
+                recorded.replay_key, expected.replay_key
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

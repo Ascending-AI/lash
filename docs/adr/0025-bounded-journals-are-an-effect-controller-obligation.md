@@ -207,7 +207,12 @@ recover the ordered launch results and parent-end evidence without re-entering
 the batch interpreter. The same launch records are also present in their
 individual `ToolAttempt` entries. The intent portion has hard admission bounds:
 at most 32 declarations, at most 16 of one kind, and at most 64 KiB of canonical
-intent JSON per completed attempt. Tool output values have no core-wide byte
+intent JSON per completed attempt. *(Amended 2026-09-30 (FIG-4255): the 64 KiB
+bound measures what the attempt declares. The execution environment a start or
+registration captures from its session — the session policy, prompt layers
+included — travels with the declaration but is not counted: its size is the
+host's, and counting it refused every child start of a turn under large project
+instructions.)* Tool output values have no core-wide byte
 cap: standard protocol limits its model-facing projection through the recorded
 tool renderer, and provider or tool contracts may impose tighter limits, but
 those are host policy rather than a durability invariant. The complete tool

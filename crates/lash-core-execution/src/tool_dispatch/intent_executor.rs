@@ -234,7 +234,7 @@ fn admit_batch(
             maximum: crate::TOOL_INTENT_MAX_COUNT,
         });
     }
-    let canonical_bytes = serde_json::to_vec(intents).map_or(usize::MAX, |bytes| bytes.len());
+    let canonical_bytes = intents.declared_canonical_bytes().unwrap_or(usize::MAX);
     if canonical_bytes > crate::TOOL_INTENT_MAX_CANONICAL_BYTES {
         return Some(
             crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
@@ -979,6 +979,71 @@ mod tests {
         let intents = crate::ToolIntents::v3(vec![signal(
             &SessionId::from("session"),
             serde_json::json!({"payload": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
+        )]);
+        assert!(matches!(
+            admit_batch(&SessionId::from("session"), &intents),
+            Some(
+                crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
+                    maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                    ..
+                }
+            )
+        ));
+    }
+
+    /// A start carrying `payload` as its declared input under an execution
+    /// env captured from a session whose project instructions are `prompt`.
+    fn start_under_prompt(payload: serde_json::Value, prompt: String) -> crate::ToolIntent {
+        let policy = crate::SessionPolicy {
+            prompt: crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
+                crate::PromptSlot::ProjectInstructions,
+                "Synthetic load context",
+                prompt,
+            )),
+            ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        };
+        crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+            session_id: SessionId::from("session"),
+            declaration: crate::ProcessStartDeclaration::new(
+                crate::ProcessInput::Engine {
+                    kind: "lashlang".to_string(),
+                    payload,
+                },
+                crate::ProcessOriginator::host(),
+                crate::Lifetime::Detached,
+            )
+            .with_env_spec(crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                policy,
+            )),
+        }))
+    }
+
+    /// FIG-4255: the env a start captures from its session is the host's
+    /// policy, not the attempt's declaration. A turn whose project
+    /// instructions alone exceed the budget still starts its child.
+    #[test]
+    fn admission_leaves_the_captured_execution_env_out_of_the_byte_budget() {
+        let prompt = "x".repeat(2 * crate::TOOL_INTENT_MAX_CANONICAL_BYTES);
+        let intents = crate::ToolIntents::v3(vec![start_under_prompt(
+            serde_json::json!({"key": "child/0"}),
+            prompt,
+        )]);
+        assert!(
+            serde_json::to_vec(&intents).expect("encode").len()
+                > crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+            "the batch as recorded carries the whole captured env"
+        );
+        assert_eq!(admit_batch(&SessionId::from("session"), &intents), None);
+    }
+
+    /// The same bytes in what the start declares are the attempt's, and the
+    /// budget still refuses them.
+    #[test]
+    fn admission_still_bounds_what_a_start_declares() {
+        let intents = crate::ToolIntents::v3(vec![start_under_prompt(
+            serde_json::json!({"key": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
+            String::new(),
         )]);
         assert!(matches!(
             admit_batch(&SessionId::from("session"), &intents),

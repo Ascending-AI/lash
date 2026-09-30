@@ -772,25 +772,35 @@ fn project_recorded_intent_outcomes(
     // declared a start at that index answers a slot: the same spelling in any
     // other tool's output is that tool's own data and is left untouched.
     if let Some(intent_index) = lash_sansio::handle::process_start_slot(&value.to_json_value())
-        && outcomes
+        && let Some(start) = outcomes
             .iter()
-            .any(|outcome| declares_start_at(outcome, intent_index))
+            .find(|outcome| declares_start_at(outcome, intent_index))
     {
-        let realized = outcomes.iter().find_map(|outcome| match outcome {
-            crate::ToolIntentExecutionOutcome::Executed {
-                identity,
-                kind: crate::ToolIntentKind::StartProcess,
-                result,
-            } if identity.intent_index == intent_index => Some(result),
-            _ => None,
-        });
-        let Some(handle) = realized.and_then(realized_start_handle) else {
-            *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Unavailable,
-                "process_start_unrealized",
-                "the declared process start did not register a process",
-            ));
-            return;
+        let handle = match start {
+            crate::ToolIntentExecutionOutcome::Executed { result, .. } => {
+                realized_start_handle(result).ok_or_else(|| {
+                    format!(
+                        "the declared process start did not register a process: its realized \
+                         result names no process handle: {result}"
+                    )
+                })
+            }
+            crate::ToolIntentExecutionOutcome::Refused { refusal, .. }
+            | crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => Err(format!(
+                "the declared process start did not register a process: it was refused with {}",
+                refusal.describe()
+            )),
+        };
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(message) => {
+                *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Unavailable,
+                    "process_start_unrealized",
+                    message,
+                ));
+                return;
+            }
         };
         match serde_json::from_value(handle) {
             Ok(decoded) => *value = decoded,
@@ -808,7 +818,7 @@ fn project_recorded_intent_outcomes(
     // receipt — which alone carries the revision and fingerprint — replaces
     // the slot before the answer reaches a model or a cell (FIG-3116).
     if let Some(intent_index) = lash_sansio::handle::trigger_register_slot(&value.to_json_value())
-        && outcomes.iter().any(|outcome| {
+        && let Some(registration) = outcomes.iter().find(|outcome| {
             declares_at(
                 outcome,
                 crate::ToolIntentKind::RegisterTrigger,
@@ -816,21 +826,21 @@ fn project_recorded_intent_outcomes(
             )
         })
     {
-        let realized = outcomes.iter().find_map(|outcome| match outcome {
-            crate::ToolIntentExecutionOutcome::Executed {
-                identity,
-                kind: crate::ToolIntentKind::RegisterTrigger,
-                result,
-            } if identity.intent_index == intent_index => Some(result),
-            _ => None,
-        });
-        let Some(handle) = realized else {
-            *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Unavailable,
-                "trigger_register_unrealized",
-                "the declared trigger registration did not produce a subscription",
-            ));
-            return;
+        let handle = match registration {
+            crate::ToolIntentExecutionOutcome::Executed { result, .. } => result,
+            crate::ToolIntentExecutionOutcome::Refused { refusal, .. }
+            | crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => {
+                *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Unavailable,
+                    "trigger_register_unrealized",
+                    format!(
+                        "the declared trigger registration did not produce a subscription: it \
+                         was refused with {}",
+                        refusal.describe()
+                    ),
+                ));
+                return;
+            }
         };
         match serde_json::from_value(handle.clone()) {
             Ok(decoded) => *value = decoded,
@@ -1188,6 +1198,67 @@ mod projection_tests {
             panic!("an unrealized slot must not survive projection");
         };
         assert_eq!(failure.code, "process_start_unrealized");
+        assert_eq!(
+            failure.message,
+            "the declared process start did not register a process: it was refused with \
+             intent_index_overflow: the intent index does not fit in u32"
+        );
+    }
+
+    /// FIG-4255: the failed call names the refusal that kept the start from
+    /// registering, so the next occurrence diagnoses itself from the model
+    /// feedback alone.
+    #[test]
+    fn an_unrealized_start_names_the_refusal_that_decided_it() {
+        let mut output = crate::ToolCallOutput::success(start_slot(0));
+
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[crate::ToolIntentExecutionOutcome::Refused {
+                identity: None,
+                intent_index: 0,
+                kind: crate::ToolIntentKind::StartProcess,
+                refusal: crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
+                    actual: 139_000,
+                    maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                },
+            }],
+        );
+
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("an unrealized slot must not survive projection");
+        };
+        assert_eq!(failure.code, "process_start_unrealized");
+        assert_eq!(
+            failure.message,
+            "the declared process start did not register a process: it was refused with \
+             canonical_byte_budget_exceeded: the attempt declared 139000 canonical bytes of \
+             intents; at most 65536 are admitted"
+        );
+    }
+
+    #[test]
+    fn a_start_realized_without_a_handle_says_so() {
+        let mut output = crate::ToolCallOutput::success(start_slot(0));
+
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[executed_at(
+                crate::ToolIntentKind::StartProcess,
+                serde_json::json!({ "status": "running" }),
+                0,
+            )],
+        );
+
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("a handle-less realization must not survive projection");
+        };
+        assert_eq!(failure.code, "process_start_unrealized");
+        assert_eq!(
+            failure.message,
+            "the declared process start did not register a process: its realized result \
+             names no process handle: {\"status\":\"running\"}"
+        );
     }
 
     /// The slot spelling is only a slot where the attempt declared a start at
