@@ -11,8 +11,15 @@ Run the local proof in a build-enabled Kiln fork:
 
 ```sh
 . ./env.sh
-LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4167 -- just multi-node-load
+LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4171 -- just multi-node-load local
 ```
+
+`multi-node-load` is the named on-demand recipe: it installs the chart, runs
+the workload, collects and archives the results, then uninstalls. It takes a
+target, `local` or `scaleway`. `local` runs on kind; `scaleway` is PENDING
+until the Kapsule cluster, registry and operator credentials exist and exits
+with an explicit refusal today. The recipe is run on demand only and is never
+dispatched per PR.
 
 The foreground recipe builds the harness binaries on the shared pool, plus the
 synthetic N+1 worker and operator binary. It creates both generations'
@@ -52,6 +59,37 @@ kind cluster, including their volumes, and fails if they remain. It never
 changes the user's Kubernetes context. Credentials are generated for each local
 run and installed as a Kubernetes Secret. The chart contains no credentials and
 does not create a Secret.
+
+# Results archive and manifest
+
+After the workload drains, the recipe reconciles the measurements and archives
+the run under `results/fig-3790/<run-id>/` inside the run's evidence
+directory. The archive contains the versioned measurement files
+(`operations.jsonl`, `metrics.jsonl`, `samples.jsonl`, `faults.jsonl`,
+`histograms.json`, `sample_errors.jsonl`, `query_retries.jsonl`,
+`witness_evidence.jsonl`, `witness.json`, `collection.json` and
+`summary.json`), an `evidence/` directory with the topology, build and
+placement inputs (merged run values, rendered topology, kind config, image
+digests, source and hardware provenance, pod placement, Restate membership,
+replication, partition placement and raw fault rows), and a `manifest.json`.
+Every result file declares `schema_version: 1`; `SHA256SUMS` covers every
+archived file, and `<run-id>.tar.gz` beside the directory (with
+`<run-id>.tar.gz.sha256`) is the transport unit. The manifest builder validates
+the run identity across files, the workload hash against the run record, the
+required evidence set and every declared schema version, and it runs for
+failed or incomplete analyses so retained evidence stays self-describing.
+
+`manifest.json` records the run's source provenance (the lash SHA and dirty
+flag the images were built from, plus the workload's inventory lash and
+figments SHAs), the workload name/hash/format, the seed and generator, the
+built image digests and pinned Restate/kind images, host hardware, cluster and
+pod placement, the shaped link settings, the installed settings hash,
+warmup/prefill/session parameters, the reconciliation qualification and the
+baseline ID — null today, because no baseline exists. Set
+`LASH_LOADTEST_RESULTS` to a durable path to write the archive somewhere other
+than the run directory. A smoke archive establishes no baseline, saturation
+estimate or budgets; compare only runs with matching target, profile, hardware
+and settings.
 
 Override local resources through a values file with `LASH_LOADTEST_VALUES`.
 The v1 proof requires three Restate nodes, 24 partitions, replication two and run-owned Garage.
@@ -239,8 +277,9 @@ through the load, and after the drain. `just multi-node-load` reconciles its
 records and writes `results/fig-3790/<run-id>/` inside the run's evidence directory. It produces
 version 1 `operations.jsonl`, `metrics.jsonl`, `samples.jsonl`, `faults.jsonl`,
 `histograms.json`, `sample_errors.jsonl`, `query_retries.jsonl`,
-`witness_evidence.jsonl`, `witness.json`, `collection.json` and `summary.json`. L6 packaging can archive
-these files together with topology, build and placement evidence. A smoke
+`witness_evidence.jsonl`, `witness.json`, `collection.json` and `summary.json`,
+then archives them with topology, build and placement evidence under
+`evidence/` plus the versioned `manifest.json` described above. A smoke
 result has no baseline, saturation estimate or budgets.
 
 Each operation preserves the driver's monotonic scheduled, send, acceptance
@@ -355,4 +394,4 @@ The pinned counter and journal meanings follow the
 [journal schema](https://github.com/restatedev/restate/blob/v1.7.12/crates/storage-query-datafusion/src/journal/schema.rs)
 and [retry snapshot schema](https://github.com/restatedev/restate/blob/v1.7.12/crates/storage-query-datafusion/src/invocation_state/schema.rs).
 
-For the small L5 collection smoke, run `LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4170 -- just multi-node-load`. The default recipe preserves the L4 fault campaign. Campaigns retain the extra four fault witness classes, all six independent ledgers, and primary turns beyond the planned minimum. Raw L4 fault records use the PostgreSQL witness clock. They remain separate from driver-monotonic recovery inputs; a campaign without normalized recovery inputs is explicitly INCOMPLETE. No clock offset is guessed.
+For the small L5 collection smoke, run `LASH_LOADTEST_FAULT_CAMPAIGN=false kiln gate lash fig-4170 -- just multi-node-load local`. The default recipe preserves the L4 fault campaign. Campaigns retain the extra four fault witness classes, all six independent ledgers, and primary turns beyond the planned minimum. Raw L4 fault records use the PostgreSQL witness clock. They remain separate from driver-monotonic recovery inputs; a campaign without normalized recovery inputs is explicitly INCOMPLETE. No clock offset is guessed.

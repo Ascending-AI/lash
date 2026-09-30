@@ -722,12 +722,15 @@ publish-all *args:
 check-file-size:
   python3 scripts/check-production-file-size.py
 
-# Foreground local Kubernetes proof for the FIG-3790 topology.
-# Run through kiln gate so every cluster, namespace and artifact has an owner.
-multi-node-load:
-  bash "{{repo}}/scripts/multi-node-load.sh"
+# Foreground on-demand FIG-3790 load test: installs the chart, runs the
+# workload, collects and archives the results, then uninstalls. Run through
+# kiln gate so every cluster, namespace and artifact has an owner. The target
+# is local (kind) today; scaleway is PENDING credentials (FIG-4172).
+multi-node-load target="local":
+  bash "{{repo}}/scripts/multi-node-load.sh" "{{target}}"
 
 loadtest-chart-check:
   bash "{{repo}}/scripts/check-loadtest-chart.sh"
   python3 "{{repo}}/scripts/test_loadtest_topology.py"
   python3 "{{repo}}/scripts/test_loadtest_faults.py"
+  python3 "{{repo}}/scripts/test_loadtest_manifest.py"

@@ -16,6 +16,16 @@ if [[ "${1:-}" != --locked ]]; then
   exec flock --nonblock --close "$repo/target/loadtest-tools/$name.run.lock" bash "${BASH_SOURCE[0]}" --locked "$@"
 fi
 shift
+target="${1:-local}"
+if [[ $# -gt 1 ]] || [[ "$target" != local && "$target" != scaleway ]]; then
+  echo "usage: multi-node-load.sh [local|scaleway]" >&2; exit 2
+fi
+if [[ "$target" == scaleway ]]; then
+  echo "the scaleway load target is PENDING: it needs a provisioned Scaleway Kapsule cluster," >&2
+  echo "an image registry the cluster can pull from, and operator-supplied credentials" >&2
+  echo "(deploy/helm/lash-loadtest/README.md). Local runs use target 'local'." >&2
+  exit 2
+fi
 if kind get clusters | grep -Fx "$name"; then echo "refusing to reuse cluster $name" >&2; exit 1; fi
 # All calls name this run's kubeconfig. Never change the user's context.
 chart=deploy/helm/lash-loadtest
@@ -69,6 +79,20 @@ workers="${settings[2]}"
 generation="${settings[3]}"
 load_deadline="${settings[4]}"
 workload="${settings[5]}"
+# Source and host provenance for the results manifest (FIG-4171).
+python3 - "$run/sources.json" <<'PYSOURCES'
+import json, subprocess, sys
+json.dump({'lash_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+           'lash_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip())},
+          open(sys.argv[1], 'w'), indent=1)
+PYSOURCES
+python3 - "$run/hardware.json" "$repo" <<'PYHARDWARE'
+import json, os, platform, shutil, sys
+memory = int(next(line.split()[1] for line in open('/proc/meminfo') if line.startswith('MemTotal')))
+json.dump({'arch': platform.machine(), 'logical_cpus': os.cpu_count(), 'memory_kib': memory,
+           'kernel': platform.release(), 'workspace_capacity_bytes': shutil.disk_usage(sys.argv[2]).total},
+          open(sys.argv[1], 'w'), indent=1)
+PYHARDWARE
 export KUBECONFIG="$run/kubeconfig"
 k=(kubectl --kubeconfig "$KUBECONFIG" --namespace "$namespace")
 created=0
@@ -144,6 +168,15 @@ image_id="$(docker image inspect "$image" --format '{{.Id}}')"
 docker build --build-arg "RUNTIME_BASE=$runtime_base" --build-arg "RESTATE_IMAGE=$restate_image" --build-arg BIN_DIR=target/loadtest-image/bin-next \
   -t "$next_image" -f deploy/helm/lash-loadtest/Dockerfile . >> "$run/image-build.log" 2>&1
 next_image_id="$(docker image inspect "$next_image" --format '{{.Id}}')"
+python3 - "$run/image-digests.json" "$image" "$image_id" "$next_image" "$next_image_id" \
+  "$restate_image" "$runtime_base" "$node_image" <<'PYIMAGES'
+import json, sys
+out, image, image_id, next_image, next_image_id, restate, base, node = sys.argv[1:]
+json.dump({'runtime': {'reference': image, 'id': image_id},
+           'next_runtime': {'reference': next_image, 'id': next_image_id},
+           'restate': restate, 'runtime_base': base, 'node_image': node},
+          open(out, 'w'), indent=1)
+PYIMAGES
 created=1
 env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy kind create cluster --name "$name" --image "$node_image" --config "$run/kind.yaml" --kubeconfig "$KUBECONFIG" --wait 120s > "$run/kind.log" 2>&1
 load_image() {
@@ -204,6 +237,16 @@ for partition in $(seq 0 23); do ctl metadata get --key "pp_epoch_$partition" > 
 python3 scripts/check_loadtest_cluster.py placement "$run"/epochs/*.json > "$run/placement.txt"
 for index in $(seq 0 "$((workers - 1))"); do "${k[@]}" rollout status "deployment/${resource}-worker-$index-${generation}" --timeout=180s; done
 "${k[@]}" rollout status "deployment/${resource}-proxy-${generation}" --timeout=120s
+"${k[@]}" get pods -o json > "$run/pods-placement.json"
+python3 - "$run/placement.json" "$run/pods-placement.json" "$target" "$name" "$namespace" <<'PYPLACEMENT'
+import json, subprocess, sys
+out, pods_path, target, cluster, namespace = sys.argv[1:]
+document = json.load(open(pods_path))
+pods = {item['metadata']['name']: item['spec'].get('nodeName') for item in document['items']}
+kind_nodes = subprocess.check_output(['kind', 'get', 'nodes', '--name', cluster], text=True).split()
+json.dump({'target': target, 'cluster': f'kind:{cluster}', 'namespace': namespace,
+           'nodes': sorted(kind_nodes), 'pods': pods}, open(out, 'w'), indent=1)
+PYPLACEMENT
 # Hold one node down while new durable traffic runs. A replicas=2 scale-down
 # retains node 2's PVC/identity; the remaining two must commit fresh work.
 "${k[@]}" scale "statefulset/${resource}-restate" --replicas=2
@@ -287,12 +330,23 @@ for attempt in $(seq 1 "$load_deadline"); do
 done
 "${k[@]}" logs "job/${resource}-load" -c load > "$run/load.log"
 ((load_collected == 1))
-python3 scripts/loadtest_measurements.py "$run/measurements.log" "$run/results"
+# LASH_LOADTEST_RESULTS redirects the durable archive away from the run
+# directory. The manifest still runs for a failed or incomplete analysis so
+# the retained evidence stays self-describing.
+results_root="${LASH_LOADTEST_RESULTS:-$run/results}"
+measure_status=0
+python3 scripts/loadtest_measurements.py "$run/measurements.log" "$results_root" || measure_status=$?
+if [[ -d "$results_root/fig-3790/$load_run" ]]; then
+  python3 scripts/loadtest_manifest.py --run-dir "$run" --results "$results_root" \
+    --run-id "$load_run" --target "$target" --workload "crates/lash-perf/workloads/$workload.json"
+fi
+((measure_status == 0))
 grep '^load \|^load witness' "$run/load.log" > "$run/load-witness.txt" || true
 ((campaign_status == 0))
 grep -F 'load witness verdict=passed' "$run/load.log"
 [[ "$load_state" == 1/* ]]
 printf 'durable workload passed: fault_campaign=%s %s\n' "$fault_campaign" "$(grep -F 'load witness verdict=passed' "$run/load.log")" | tee -a "$run/result.txt"
+printf 'results archive: %s\n' "$results_root/fig-3790/$load_run" | tee -a "$run/result.txt"
 }
 
 main "$@"; exit "$?"
