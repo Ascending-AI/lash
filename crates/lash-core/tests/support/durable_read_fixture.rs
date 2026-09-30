@@ -74,8 +74,8 @@ use lash_core::runtime::{
     publish_process_execution_env,
 };
 use lash_core::{
-    AttachmentId, AttachmentIntent, AttachmentManifest, BoundaryReason, Clock, DeploymentStore,
-    ExecutionScope, LashSchema, MessageOrigin, MessageRole, OperationId, PartKind,
+    ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, BoundaryReason, Clock,
+    DeploymentStore, ExecutionScope, LashSchema, MessageOrigin, MessageRole, OperationId, PartKind,
     PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
     ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
     ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventLogTestSupport as _,
@@ -83,13 +83,14 @@ use lash_core::{
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SegmentHandover, SessionAppendNode,
-    SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand,
-    TriggerCommandOutcome, TriggerDeliveryReservation, TriggerDeliveryReservationOutcome,
-    TriggerInputBinding, TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest,
-    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TurnInput, TurnInputIngress, WaitKind, WaitState,
+    ProtocolTurnOptions, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SegmentHandover,
+    SessionAppendNode, SessionCreationHead, SessionNodePayload, SessionPolicy, SessionRelation,
+    SessionScope, SessionStoreCreateRequest, StoreError, TokenLedgerEntry, TokenUsage,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
+    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
+    WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -310,24 +311,31 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("commit identity-bearing fixture append");
 
     let attachment_id = AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id");
-    let attachment_intent = AttachmentIntent {
+    let attachment_write = AttachmentWrite {
         attachment_id: attachment_id.clone(),
-        session_id: SessionId::from(SESSION_ID.to_string()),
-        canonical_uri: "session:durable-read-fixture:sha256:durable-read-attachment".to_string(),
-        intent_at_epoch_ms: 100,
-        owner: None,
+        claim: ReferrerClaim::unguarded(ArtifactReferrer::Session(SessionId::from(SESSION_ID)))
+            .expect("fixture session attachment claim"),
     };
     let lash_core::AttachmentWriteFence::Granted(attachment_permit) = session
-        .begin_attachment_write(attachment_intent.clone())
+        .begin_attachment_write(&attachment_write)
         .await
         .expect("begin fixture attachment write")
     else {
         panic!("the fixture digest must grant its writer");
     };
     session
-        .complete_attachment_write(&attachment_intent, attachment_permit)
+        .complete_attachment_write(&attachment_write, attachment_permit)
         .await
         .expect("stamp fixture attachment upload");
+    // Keep an independent pending attempt for the fixture generators' token
+    // normalization and the durable pending-write shape, alongside the evidence.
+    assert!(matches!(
+        session
+            .begin_attachment_write(&attachment_write)
+            .await
+            .expect("begin fixture pending attachment write"),
+        lash_core::AttachmentWriteFence::Granted(_)
+    ));
 
     let mut loaded = load_fixture_state(&session).await;
     loaded.turn_index = 7;
@@ -777,12 +785,15 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         },
         "durable fixture semantic drift: usage ledger totals changed"
     );
-    assert!(
-        AttachmentManifest::list_all_refs(handles.store.as_ref())
-            .await
-            .expect("read fixture attachment manifest")
-            .contains(&AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id")),
-        "durable fixture semantic drift: committed attachment disappeared"
+    assert_eq!(
+        AttachmentReferrers::attachment_referrers(
+            handles.store.as_ref(),
+            &AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id"),
+        )
+        .await
+        .expect("read fixture attachment referrers"),
+        vec![ArtifactReferrer::Session(SessionId::from(SESSION_ID))],
+        "durable fixture semantic drift: committed session attachment edge disappeared"
     );
 
     let pinned = handles
