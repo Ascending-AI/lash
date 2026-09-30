@@ -70,10 +70,13 @@ bazel_test() {
   if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
     startup=(--output_user_root="${BAZEL_OUTPUT_USER_ROOT}")
   fi
+  # Keep JSON report URIs local even with a remote cache: the verifier reads
+  # the XML from the test executed on this runner.
   # shellcheck disable=SC2086
   bazel "${startup[@]}" test \
     ${BAZEL_SHARED_CACHE_FLAGS} \
     --build_event_json_file="$events" \
+    --build_event_json_file_path_conversion=false \
     --nocache_test_results \
     --modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache,TestRunner=+no-remote-exec \
     --local_test_jobs=1 \

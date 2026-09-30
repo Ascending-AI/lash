@@ -112,7 +112,10 @@ def check_bazel_events(path):
             raise ValueError("a test result has no unique test.xml execution report")
         uri = urlparse(reports[0].get("uri", ""))
         if uri.scheme != "file" or uri.netloc not in ("", "localhost"):
-            raise ValueError("the local store gate requires a local test.xml execution report")
+            raise ValueError(
+                "the local store gate requires a local test.xml execution report: "
+                + reports[0].get("uri", "")
+            )
         root = ET.parse(unquote(uri.path)).getroot()
         count += sum(execution_count(node.text or "") for node in root.iter("system-out"))
     if results == 0 or count == 0:

@@ -54,16 +54,19 @@ args = sys.argv[1:]
 filters = [a.split("=", 1)[1] for a in args if a.startswith("--test_arg=")]
 labels = [a for a in args if a.startswith("//crates/")]
 event_paths = [a.split("=", 1)[1] for a in args if a.startswith("--build_event_json_file=")]
+local_reports = "--build_event_json_file_path_conversion=false" in args
 events = []
 for label in labels:
     for shard in range(2):
         xml = pathlib.Path(os.environ["FIXTURE_ROOT"], f"{len(events)}.xml")
+        xml.unlink(missing_ok=True)
         env = dict(os.environ, XML_OUTPUT_FILE=str(xml), TEST_BINARY=label,
                    TEST_TOTAL_SHARDS="2", TEST_SHARD_INDEX=str(shard))
         code = subprocess.call(["bash", os.environ["FIXTURE_RUNNER"], os.environ["FIXTURE_MEMBER"], *filters], env=env)
         if code: sys.exit(code)
+        uri = xml.as_uri() if local_reports else "bytestream://fixture/kiln/blobs/report/0"
         events.append({"id": {"testResult": {"label": label, "shard": shard, "run": 1, "attempt": 1}},
-                       "testResult": {"testActionOutput": [{"name": "test.xml", "uri": xml.as_uri()}]}})
+                       "testResult": {"testActionOutput": [{"name": "test.xml", "uri": uri}]}})
 if event_paths and os.environ.get("FIXTURE_NO_EVENTS") != "1":
     pathlib.Path(event_paths[-1]).write_text("".join(json.dumps(e) + "\n" for e in events))
 '''
@@ -100,6 +103,9 @@ class Fixture(unittest.TestCase):
                         TEST_BINARY="fixture", TEST_TMPDIR=str(self.root))
         for key in ("TEST_TOTAL_SHARDS", "TEST_SHARD_INDEX", "TEST_SHARD_STATUS_FILE"):
             self.env.pop(key, None)
+        for key in tuple(self.env):
+            if key.startswith("FIXTURE_"):
+                self.env.pop(key)
 
     def run_command(self, argv):
         return subprocess.run(argv, env=self.env, capture_output=True, text=True, timeout=30)
@@ -120,7 +126,7 @@ class Fixture(unittest.TestCase):
                         LASH_BATCH_MANIFEST=str(manifest), LASH_BATCH_JOBS="1")
         return self.run_command(["bash", str(TOOLS / "test_batch_runner.sh"), *args])
 
-    def gate(self, suite, trusted=True):
+    def gate(self, suite, trusted=True, **cache_env):
         bazel = self.root / "bazel"
         bazel.write_text(BAZEL)
         bazel.chmod(0o755)
@@ -128,13 +134,18 @@ class Fixture(unittest.TestCase):
         cargo.write_text(CARGO)
         cargo.chmod(0o755)
         self.env.update(PATH=str(self.root) + os.pathsep + os.environ["PATH"],
-                        BAZEL_TRUSTED="true" if trusted else "false", BAZEL_SHARED_CACHE_FLAGS="",
+                        GITHUB_ACTIONS="true", BAZEL_TRUSTED="true" if trusted else "false",
+                        BAZEL_SHARED_CACHE_FLAGS="--config=fixture",
+                        BAZEL_OUTPUT_USER_ROOT=str(self.root / "bazel-output"),
                         FIXTURE_ROOT=str(self.root), FIXTURE_MEMBER=str(self.member),
                         FIXTURE_RUNNER=str(TOOLS / "test_xml_runner.sh"))
+        self.env.update(cache_env)
         return self.run_command(["bash", str(ROOT / "scripts/ci/store-tests.sh"), suite])
 
-    def assert_failed(self, result):
+    def assert_failed(self, result, reason=None):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        if reason is not None:
+            self.assertIn(reason, result.stdout + result.stderr)
 
     def assert_passed(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -230,31 +241,43 @@ class StoreGateTests(Fixture):
         "pg-rlm-frame-open": "restate_double_postgres::law",
     }
 
+    def test_ci_cache_configuration_is_required_on_both_trust_paths(self):
+        for trusted in (True, False):
+            for key in ("BAZEL_SHARED_CACHE_FLAGS", "BAZEL_OUTPUT_USER_ROOT"):
+                with self.subTest(trusted=trusted, key=key):
+                    self.assert_failed(self.gate("pg-pool-wait", trusted=trusted, **{key: ""}),
+                                       f"{key} must be set in CI")
+
     def test_pg_s3_restate_selector_rename_fails(self):
         for suite in self.SUITES:
             with self.subTest(suite=suite):
                 self.env["FIXTURE_CASES"] = '[["renamed_law", false]]'
-                self.assert_failed(self.gate(suite))
+                self.assert_failed(self.gate(suite), "no executable tests matched the runner arguments")
 
     def test_missing_bazel_execution_reports_fail(self):
         self.env.update(FIXTURE_CASES=json.dumps([[self.SUITES["pg-pool-wait"], False]]), FIXTURE_NO_EVENTS="1")
-        self.assert_failed(self.gate("pg-pool-wait"))
+        self.assert_failed(self.gate("pg-pool-wait"),
+                           "no non-ignored test execution observed in the selected shard union")
 
     def test_pg_ignored_only_selection_fails(self):
         self.env["FIXTURE_CASES"] = json.dumps([[self.SUITES["pg-pool-wait"], True]])
-        self.assert_failed(self.gate("pg-pool-wait"))
+        self.assert_failed(self.gate("pg-pool-wait"), "no executable tests matched the runner arguments")
 
     def test_pg_s3_restate_empty_shard_union_fails(self):
         for suite, name in self.SUITES.items():
             with self.subTest(suite=suite):
-                self.env.update(FIXTURE_CASES=json.dumps([[name, True]]), FIXTURE_EMPTY_EXECUTION="1")
-                self.assert_failed(self.gate(suite))
+                self.env.update(FIXTURE_CASES=json.dumps([[name, suite != "pg-pool-wait"]]),
+                                FIXTURE_EMPTY_EXECUTION="1")
+                self.assert_failed(self.gate(suite),
+                                   "no non-ignored test execution observed in the selected shard union")
 
     def test_pg_s3_restate_one_case_union_with_empty_shard_passes(self):
         for suite, name in self.SUITES.items():
             with self.subTest(suite=suite):
                 self.env["FIXTURE_CASES"] = json.dumps([[name, suite != "pg-pool-wait"]])
-                self.assert_passed(self.gate(suite))
+                result = self.gate(suite)
+                self.assert_passed(result)
+                self.assertIn("PASS: 1 non-ignored test executions across 2 test results", result.stdout)
 
 
 class CargoStoreGateTests(Fixture):
@@ -269,24 +292,71 @@ class CargoStoreGateTests(Fixture):
         for suite in self.SUITES:
             with self.subTest(suite=suite):
                 self.env["FIXTURE_CASES"] = '[["renamed_law", false]]'
-                self.assert_failed(self.gate(suite, trusted=False))
+                self.assert_failed(self.gate(suite, trusted=False),
+                                   "no executable tests matched the Cargo gate selection")
 
     def test_pg_untrusted_ignored_only_selection_fails(self):
         self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in self.SUITES["pg-catalog-compatibility"]])
-        self.assert_failed(self.gate("pg-catalog-compatibility", trusted=False))
+        self.assert_failed(self.gate("pg-catalog-compatibility", trusted=False),
+                           "no executable tests matched the Cargo gate selection")
 
     def test_pg_s3_restate_untrusted_empty_execution_fails(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
                 self.env.update(FIXTURE_CASES=json.dumps([[name, False] for name in names]),
                                 FIXTURE_EMPTY_EXECUTION="1")
-                self.assert_failed(self.gate(suite, trusted=False))
+                self.assert_failed(self.gate(suite, trusted=False),
+                                   "no non-ignored test execution observed in the selected union")
 
     def test_pg_s3_restate_untrusted_one_case_passes(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
                 self.env["FIXTURE_CASES"] = json.dumps([[name, suite != "pg-catalog-compatibility"] for name in names])
-                self.assert_passed(self.gate(suite, trusted=False))
+                result = self.gate(suite, trusted=False)
+                self.assert_passed(result)
+                for name in names:
+                    self.assertIn(f"test {name} ... ok", result.stdout)
+
+
+class BazelExecutionReportTests(Fixture):
+    def verify(self, outputs):
+        events = self.root / "events.json"
+        events.write_text(json.dumps({"testResult": {"testActionOutput": outputs}}) + "\n")
+        return self.run_command(["python3", str(TOOLS / "libtest_selection.py"), "bazel", str(events)])
+
+    def report(self):
+        return {"name": "test.xml", "uri": Path(self.env["XML_OUTPUT_FILE"]).as_uri()}
+
+    def test_local_report_counts_observed_execution(self):
+        self.env["XML_OUTPUT_FILE"] = str(self.root / "report with spaces.xml")
+        self.assert_passed(self.single("law"))
+        report = self.report()
+        for uri in (report["uri"], report["uri"].replace("file:///", "file://localhost/")):
+            with self.subTest(uri=uri):
+                result = self.verify([{**report, "uri": uri}])
+                self.assert_passed(result)
+                self.assertIn("PASS: 1 non-ignored test executions across 1 test results", result.stdout)
+
+    def test_remote_report_is_refused_with_its_uri(self):
+        uri = "bytestream://fixture/kiln/blobs/report/0"
+        self.assert_failed(self.verify([{"name": "test.xml", "uri": uri}]),
+                           f"requires a local test.xml execution report: {uri}")
+
+    def test_zero_execution_report_is_refused(self):
+        self.env["FIXTURE_CASES"] = "[]"
+        self.assert_passed(self.single())
+        self.assert_failed(self.verify([self.report()]),
+                           "no non-ignored test execution observed in the selected shard union")
+
+    def test_missing_report_entry_is_refused(self):
+        self.assert_failed(self.verify([]), "no unique test.xml execution report")
+
+    def test_missing_local_report_is_refused(self):
+        self.assert_failed(self.verify([self.report()]), "No such file or directory")
+
+    def test_duplicate_report_entries_are_refused(self):
+        self.assert_failed(self.verify([self.report(), self.report()]),
+                           "no unique test.xml execution report")
 
 
 if __name__ == "__main__":
