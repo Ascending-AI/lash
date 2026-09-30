@@ -7,7 +7,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     if cfg!(debug_assertions) {
-        anyhow::bail!("build this benchmark with kiln --compilation_mode=opt");
+        anyhow::bail!("build this benchmark with kiln build --config=optimized");
     }
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--verify") {

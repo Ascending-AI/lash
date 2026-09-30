@@ -193,6 +193,16 @@ class WorkflowTests(unittest.TestCase):
         cls.ci_text = (ROOT / ".github/workflows/ci.yml").read_text()
         cls.ci = workflow("ci.yml")
 
+    def test_filtered_selection_helper_is_in_every_remote_test_bundle(self) -> None:
+        rules = (ROOT / "tools/buck2/test_rules.bzl").read_text()
+        package = (ROOT / "tools/buck2/BUCK").read_text()
+        single = (ROOT / "tools/buck2/test_xml_runner.sh").read_text()
+        batch = (ROOT / "tools/buck2/test_batch_runner.sh").read_text()
+        self.assertIn('"libtest_selection.py": ctx.attrs.libtest_selection', rules)
+        self.assertIn('libtest_selection = "libtest_selection.py"', package)
+        self.assertIn('libtest_selection.py" runner', single)
+        self.assertIn('"$libtest_selection" batch-members', batch)
+
     def test_trust_decision_and_required_partition_ids_are_buck2_owned(self) -> None:
         outputs = self.ci["jobs"]["plan"]["outputs"]
         self.assertIn("buck2_trusted", outputs)

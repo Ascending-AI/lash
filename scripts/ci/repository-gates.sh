@@ -6,7 +6,7 @@
 #
 # One gate is skipped locally unless `--all` is passed:
 # `bash scripts/test-agent-workbench-dev-reset.sh` runs 170 s on the dev box
-# (measured 2026-09-22 on a `just floor` whose Buck2 leg had dropped to
+# (measured 2026-09-22 on a `just floor` whose build leg had dropped to
 # 90–105 s), so it alone set the floor's wall clock. It is named in the table
 # as skipped; CI's `Test repository scripts` job still runs the full list.
 set -euo pipefail
