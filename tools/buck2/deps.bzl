@@ -989,8 +989,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
-            "lashlang": "//crates/lashlang:lashlang",
-            "tempfile": "//third-party/rust:p0383"
+            "lashlang": "//crates/lashlang:lashlang"
         },
         "normal": {
             "blake3": "//third-party/rust:p0031",

@@ -388,6 +388,16 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
+      - name: Provision pinned Buck2 tools and vendored sources
+        run: |
+          set -euo pipefail
+          KILN_REAL_CARGO="$(command -v cargo)"
+          export KILN_REAL_CARGO
+          client="$(python3 tools/buck2/bootstrap.py)"
+          test -x "$client"
+          dirname "$client" >> "$GITHUB_PATH"
+          echo "KILN_REAL_CARGO=${KILN_REAL_CARGO}" >> "$GITHUB_ENV"
+
       - name: Check judged build geometry
         run: python3 scripts/check_judged_build_geometry.py
 

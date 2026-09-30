@@ -47802,8 +47802,7 @@
         "libc",
         "rmp-serde",
         "serde",
-        "serde_json",
-        "tempfile"
+        "serde_json"
       ],
       "doc": "//crates/lash-vm-worker:lash-vm-worker__doc",
       "manifest": "crates/lash-vm-worker/Cargo.toml",

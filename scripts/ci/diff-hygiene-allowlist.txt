@@ -8,3 +8,10 @@ third-party/Cargo.lock
 # test directory cut as deep as the tree is hot (FIG-3646, FIG-3727),
 # ratcheted by scripts/check_test262_ratchet.py.
 crates/lash-typescript/tests/test262/outcomes/*.tsv
+
+# sync.py generates the complete first-party Lash target and feature-lane graph.
+crates/lash/BUCK
+# sync.py emits Reindeer's pinned external-crate targets.
+third-party/rust/BUCK
+# sync.py records every Cargo target and resolved feature-lane unit.
+tools/buck2/target-inventory.json

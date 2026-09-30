@@ -47,7 +47,6 @@ serde_json = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }
 
