@@ -309,12 +309,24 @@ if grep -E 'ERROR|Failed|failed' "$run/snapshots.txt"; then exit 1; fi
 [[ $(grep -c 'Snapshot created for partition' "$run/snapshots.txt") -eq 24 ]]
 "${k[@]}" scale "statefulset/${resource}-restate" --replicas=3
 "${k[@]}" rollout status "statefulset/${resource}-restate" --timeout=180s
+# Recovered means every node's own failure detector sees the restarted node
+# alive: `ctl status` lists it earlier, and a census query it coordinates
+# before then loses its scanners.
+peer_views() {
+  for index in 0 1 2; do
+    "${k[@]}" exec "${resource}-restate-$index" -c restate -- restatectl sql --json \
+      'SELECT plain_node_id, gen_node_id, name, state FROM nodes' > "$run/peers-$index.txt" || return 1
+  done
+}
+peers=("$run/peers-0.txt" "$run/peers-1.txt" "$run/peers-2.txt")
 for attempt in $(seq 1 90); do
   if ctl status > "$run/recovered-status.txt" && \
-      python3 scripts/check_loadtest_cluster.py recovery "$run/nodes.json" "$run/recovered-status.txt" "$resource-restate-2" > "$run/recovery.txt"; then break; fi
+      python3 scripts/check_loadtest_cluster.py recovery "$run/nodes.json" "$run/recovered-status.txt" "$resource-restate-2" > "$run/recovery.txt" && \
+      peer_views && python3 scripts/check_loadtest_cluster.py peers "$run/nodes.json" "$resource-restate-2" "${peers[@]}" >> "$run/recovery.txt"; then break; fi
   sleep 2
 done
 python3 scripts/check_loadtest_cluster.py recovery "$run/nodes.json" "$run/recovered-status.txt" "$resource-restate-2"
+python3 scripts/check_loadtest_cluster.py peers "$run/nodes.json" "$resource-restate-2" "${peers[@]}"
 fi
 for attempt in $(seq 1 60); do
   "${k[@]}" exec "deployment/${resource}-proxy-${generation}" -- wget -qO- "http://${resource}-metrics:9090/api/v1/targets" > "$run/metrics-targets.json"

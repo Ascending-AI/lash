@@ -90,6 +90,29 @@ class ClusterEvidenceTests(unittest.TestCase):
             with self.subTest(status=changed), self.assertRaises(ValueError):
                 proof.recovery(self.nodes, changed, 'node-2')
 
+    def peer_views(self, changes=None):
+        """Each Restate node's own failure-detector view after node-2 restarted."""
+        self.recovery_fixture()
+        view = [{'plain_node_id': f'N{index}', 'gen_node_id': f'N{index}:{2 if index == 2 else 1}',
+                 'name': f'node-{index}', 'state': 'alive'} for index in range(3)]
+        views = [[dict(row) for row in view] for _ in range(3)]
+        for (viewer, name), update in (changes or {}).items():
+            views[viewer][int(name[-1])].update(update)
+        return views
+
+    def test_recovery_waits_until_every_peer_sees_the_restarted_node_alive(self):
+        self.assertEqual(proof.peers(self.nodes, self.peer_views(), 'node-2'),
+                         'peer_views=3 alive=3 restarted_node=node-2 generation=2')
+        # The first census query ran through a node its peers still suspected.
+        for views in [self.peer_views({(0, 'node-2'): {'state': 'suspect'}}),
+                      self.peer_views({(1, 'node-2'): {'gen_node_id': 'N2:1'}}),
+                      self.peer_views({(2, 'node-0'): {'gen_node_id': 'N0:2'}}),
+                      self.peer_views({(0, 'node-1'): {'plain_node_id': 'N7'}}),
+                      self.peer_views()[:2],
+                      [view[:2] for view in self.peer_views()]]:
+            with self.subTest(views=views), self.assertRaises(ValueError):
+                proof.peers(self.nodes, views, 'node-2')
+
     def availability_fixture(self):
         self.recovery_fixture()
         return 'N0:1 node-0 1m Member 12 12 24 12 worker\nN1:1 node-1 1m Member 12 12 24 12 worker\nN2 node-2 offline worker\n'

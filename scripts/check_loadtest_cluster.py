@@ -104,6 +104,35 @@ def recovery(node_document, status, restarted_name):
     return f'recovered_nodes=3 metadata_members=3 stable_node_ids=3 restarted_node={restarted_name} generation={restarted_generation}'
 
 
+def peers(node_document, views, restarted_name):
+    """Every node's own failure detector sees all three nodes alive, the
+    restarted one at its new generation. `ctl status` lists a restarted node
+    before its peers stop suspecting it, and a distributed query it
+    coordinates then loses its scanners."""
+    expected = {value['name']: (key, value['current_generation'][1])
+                for key, value in nodes(node_document)}
+    if len(views) != len(expected):
+        raise ValueError(f'expected {len(expected)} peer views, found {len(views)}')
+    generations = set()
+    for view in views:
+        if sorted(row['name'] for row in view) != sorted(expected):
+            raise ValueError('a peer view does not list all three original nodes')
+        for row in view:
+            node_id, generation = expected[row['name']]
+            if row['plain_node_id'] != f'N{node_id}' or row['state'] != 'alive':
+                raise ValueError(f"{row['name']} is {row['state']} as N{node_id} in a peer view")
+            seen = int(row['gen_node_id'].split(':')[1])
+            if row['name'] == restarted_name:
+                if seen <= generation:
+                    raise ValueError(f'a peer still sees {restarted_name} at its old generation')
+                generations.add(seen)
+            elif seen != generation:
+                raise ValueError(f"a peer sees {row['name']} restarted")
+    if len(generations) != 1:
+        raise ValueError(f'peers disagree on the generation of {restarted_name}')
+    return f'peer_views={len(views)} alive={len(expected)} restarted_node={restarted_name} generation={generations.pop()}'
+
+
 def metrics(document):
     targets = [target for target in document['data']['activeTargets'] if target['labels']['job'] == 'restate']
     if len(targets) != 3 or any(target['health'] != 'up' for target in targets):
@@ -201,6 +230,14 @@ def main():
         (suffix,) = paths
         documents = [document for document in yaml.safe_load_all(sys.stdin) if document]
         sys.stdout.write(json.dumps(job(documents, suffix)))
+        return
+    if mode == 'peers':
+        node_path, restarted_name, *view_paths = paths
+        views = []
+        for path in view_paths:
+            text = Path(path).read_text()
+            views.append(json.loads(text[text.index('['):]))  # restatectl may print a row count first
+        print(peers(json.loads(Path(node_path).read_text()), views, restarted_name))
         return
     if mode in {'availability', 'recovery'}:
         node_path, status_path, restarted_name = paths
