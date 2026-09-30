@@ -311,6 +311,12 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "subagents", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "typescript", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "http-transport", "--locked"],
+  # The figments facade request (FIG-4423): `rlm,testing` in one resolution,
+  # which compiles the `lash-seam-proof-worker` bin too and pairs the
+  # `lash-vm-worker?/testing` forward with the worker's own
+  # `lash-vm-client/testing` forward -- a testing worker with a testing
+  # client, the pairing FIG-4409's invariant checks.
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "rlm,testing", "--locked"],
 ]
 
 [[lane]]
