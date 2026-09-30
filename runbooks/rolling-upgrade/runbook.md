@@ -27,12 +27,10 @@ run. The node binaries are:
 - **N** is the default build.
 - **N+1** is the same tree with the `synthetic-next` Cargo feature. It moves
   the constants whose `#[cfg(feature = "synthetic-next")]` blocks sit beside
-  them. Today it moves `JOURNAL_LOGIC_EPOCH`, so N+1's drain generation `G`
-  and its generation lanes differ from N's. The PostgreSQL expand step, the
-  SQLite component bumps, `F`'s writable range, the remote protocol and
-  Restate wire ranges, the effect-group state format, the session node body,
-  and the VM continuation format join as their lanes land (ADR 0115 §9, lane
-  L8).
+  them. It moves `JOURNAL_LOGIC_EPOCH`, so N+1's drain generation `G`
+  and its generation lanes differ from N's. It also exercises PostgreSQL
+  expansion, SQLite component bumps, `F`'s writable range, remote and Restate
+  wire ranges, and durable surface writer pins and lifts (ADR 0115 §6).
 
 `lashctl version --json` reports the operator build's
 `cli_build_generation`, the store's `fleet_generations`, and declared ranges.

@@ -2,1238 +2,462 @@
 
 ## Status
 
-Accepted 2026-09-29 (FIG-3794). It pins lash 1.0's compatibility contract:
-what the 1.0 binary must already contain so that it can run beside 1.1 during
-a roll, and be rolled back to. Nothing below describes current behaviour
-unless it cites today's code. Eleven implementation lanes build it (§9).
-
-The frame is binding:
-
-- 1.0 is the clean-slate release. Every stored format is reset once at the
-  cut. Until then the version freeze holds (FIG-3846): shapes change in
-  place, with no version bumps and no upcasters.
-- After 1.0, every durable-format or wire change ships with a migration, an
-  upcaster or a controlled drain.
-- The 1.0 binary must already contain everything a 1.0 node needs to run
-  beside 1.1 during a roll, and to be rolled back to.
-
-Sam's earlier rulings stand: the Temporal model, automated finalize with a
-hold flag, the one-release compatibility window and a typed refusal of a
-skipped release ([ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md)
-*Rulings*), and `lashctl` as the operator binary, with no alias binaries,
-before the cut (FIG-3847, 2026-09-29).
-
-This record amends ADR 0106:
-
-- §2: `F` is the release compatibility epoch, and it moves at every
-  compatibility release's finalize (§2 here).
-- §3: one Restate wire version, carried per call, and a per-object `_compat`
-  record (§3 here).
-- §4: the table's rows are refined by §5 here.
-- §5: the stamp carries `min_reader` on both stores (§1 here).
-- §8: the order moves the writer fence, the remote-protocol negotiation, the
-  reader floor, the object wire contract and `lashctl` before the cut (§8
-  here).
-
-It also corrects two facts in ADR 0106. SQLite has three versioned databases,
-not four (`crates/lash-sqlite-store/src/schema.rs:41`). The deleted strict
-bump gate is recoverable from the parent of `7233634ca8` (FIG-3966), not from
-`932f652b45`, which is an unrelated FIG-3949 commit.
-
-The design it ratifies is astra's study,
-`/workspace/notes/lash/tasks/lanes/study-upgrade-arc.report.md`, which answers
-the review `/workspace/notes/lash/tasks/lanes/review-upgrade.report.md`. Where
-this record departs from the study, *Where the study is refined* says so and
-why.
+Accepted. The compatibility machinery supports a one-release rolling upgrade
+and rollback window. The pre-1.0 version freeze holds until the release cut;
+synthetic-next provides executable successor coverage without changing the
+default build's versions.
 
 ## Context
 
-Every citation below was read at `8dfa6894ca`. The study was written at
-`d1c9a8f2eb`. The one commit between them (FIG-4036) moved
-`crates/lash-restate/src/session_driver.rs`, so the study's `:701` and
-`:1162` are `:749` and `:1210` here. Every other citation of the study was
-re-read and holds.
+A rolling upgrade has two builds reading the same durable state and serving
+calls to one another. The older build needs compatibility stamps, writer
+fences, supported ranges and typed refusals before the newer build arrives.
+Finalizing a release ends rollback and permits new writes and contraction.
+A version stamp alone cannot protect an already-open writer or a journal
+pinned to another deployment.
 
-**The PostgreSQL stamp has no reader floor.** `lash_schema_versions` is
-`(component, version)` (`crates/lash-postgres-store/schema.sql:17-20`). Open
-admits a stamp only inside `[MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION]`
-(`crates/lash-postgres-store/src/postgres/schema.rs:35-37`), and the minimum
-is the latest (`crates/lash-postgres-store/src/lib.rs:633`). The shape check
-reports every column it does not expect
-(`crates/lash-postgres-store/src/postgres/schema_shape.rs:719-726`). So after
-1.1's expand, a restarting 1.0 pod refuses the store as a newer build's.
-
-**SQLite's stamp is `PRAGMA user_version` alone.** The versioned open compares
-it for equality (`crates/lash-sqlite-store/src/schema.rs:1619-1646`), and a
-single integer cannot carry a floor. The fleet-format row and the release
-stamp live only in the durable core
-(`crates/lash-sqlite-store/src/schema.rs:1655-1668`). The process registry
-and trigger databases are separate files with their own transactions.
-
-**`F` is read once, at open.** PostgreSQL reads it inside the open
-transaction (`crates/lash-postgres-store/src/postgres/schema.rs:124`), the
-handle keeps it (`crates/lash-postgres-store/src/postgres/fleet_format.rs:146`),
-and SQLite does the same (`crates/lash-sqlite-store/src/fleet_format.rs:145-147`).
-A finalize cannot reach a writer that is already open. The session commit
-encodes its payloads under that `F` before `BEGIN`
-(`crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:281-287`).
-PostgreSQL begins transactions at 112 sites in 31 files, and runs 73 more
-statements, reads and writes, straight on the pool. SQLite's write
-transactions go through `SqliteConnection::write` and `write_flow`, both
-`BEGIN IMMEDIATE`
-(`crates/lash-sqlite-store/src/conn.rs:389-417`, `:423-437`).
-
-**The read window forgets history.** A reader admits exactly the build's
-newest version or `F`'s recorded one
-(`crates/lash-core-store/src/store/fleet_format.rs:186-188`). After a
-finalize, N-1 history would be refused.
-
-**The remote protocol is exact-match.** Decode refuses any version other than
-`REMOTE_PROTOCOL_VERSION`, which is 100
-(`crates/lash-remote-protocol/src/lib.rs:313`, `:446-451`). The refusal
-carries `{actual, expected}`, so a newer peer cannot learn a range.
-
-**Restate calls cross builds without a version.** Restate pins an invocation
-to the deployment it started on, sends each new invocation to the newest
-deployment that serves its name, and shares object state across deployments.
-`EFFECT_GROUP_WIRE_VERSION` is not transmitted: no request field carries it
-(`crates/lash-restate/src/effect_group/protocol.rs:18-34`). Object values are
-always written under the build's current format, whatever `F` says
-(`crates/lash-restate/src/object_state.rs:201-217`). `LashTurn` keeps its
-`RootOutcome` as a bare value (`crates/lash-restate/src/session_driver.rs:930`,
-`:1210`), and a pinned drive of one build reads it through the stable lane,
-which the newest build serves (`:1035-1068`).
-
-**Two findings the study does not name.**
-
-- *A pinned drive's root dies when the drive version moves.* Both session
-  handlers refuse a request whose `drive_version` differs from their own
-  (`crates/lash-restate/src/session_driver.rs:880`, `:906`). A drive pinned
-  to N sends its admitted root to the stable `LashTurn`, which N+1 serves. If
-  N+1 bumped `LASH_SESSION_DRIVE_VERSION`, the call is refused, the drive
-  attaches to an outcome that was never recorded, and the root is `Released`
-  (`:1057-1080`). The lost-run pass then ends it `SubstrateLost`. The request
-  crosses builds, so its stamp must not act as a drain gate.
-- *Registration overwrites any deployment at the same URI.* The admin call
-  always sends `force: true` (`crates/lash-restate/src/ingress.rs:1216-1219`).
-  The name guard lets through a deployment "held by a deployment at the same
-  `uri`" ([ADR 0111](0111-a-deployment-namespace-prefixes-every-restate-name.md)
-  §4). A host that rolls pods behind one stable URI would re-register N+1
-  over N's deployment, and N's pinned journals would then reach N+1's code.
-
-**Surfaces with no version.** Module artifacts have no envelope, and `verify`
-recomputes the identity with today's hashing
-(`crates/lashlang/src/artifact.rs:331-341`, `:457-460`). SQLite's blob
-envelope `{compression, content}` is unversioned and unregistered
-(`crates/lash-sqlite-store/src/lib.rs:645-649`,
-`crates/lash-sqlite-store/src/codec.rs:84-111`). An unknown obligation state
-is `StoreError::Backend` (`crates/lash-core-store/src/store/obligation.rs:386-391`).
-An unknown attachment owner kind is `StoredDataCorrupt`
-(`crates/lash-core-store/src/store/attachment_referrers.rs:145-150`).
-`lash-migrate drain-status --json` prints an internal status type
-(`crates/lash-postgres-store/src/bin/lash_migrate.rs:287-288`).
-
-**The registry.** `scripts/versioned-surfaces.toml` registers 71 surfaces and
-21 unregistered constants. One exclusion is stale:
-`QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION` names a constant that FIG-3946
-deleted.
+The implementation separates component compatibility, fleet writer formats,
+wire negotiation and journal routing
+(`crates/lash-core-store/src/compat.rs:54`,
+`crates/lash-core-store/src/store/fleet_format.rs:30`,
+`crates/lash-restate/src/compat.rs:41`,
+`crates/lash-restate/src/engine.rs:263`).
 
 ## Decision
 
-Four numbers stay distinct, as ADR 0106 has them:
-
-| Number | What it versions | Where it lives |
+| Number | Meaning | Authority |
 |---|---|---|
-| A component version and its `min_reader` | one stored schema (PostgreSQL, each SQLite database) or one Restate object family | the store's stamp row; the object's `_compat` record |
-| `F`, the fleet epoch | which version of every format the fleet writes | `lash_fleet_format` (PostgreSQL); each SQLite database's `lash_compat` row |
-| A wire version | a message shape two builds exchange | negotiated per connection (remote protocol) or per call (Restate) |
-| `G`, the drain generation | the meaning of a journal | the deployment's generation lane and the records that route to it |
+| Component version and reader floor | The schema or object family a build can open | PostgreSQL compatibility row, each SQLite compatibility row, each Restate object's `_compat` |
+| `F` | The release compatibility epoch that selects durable writer formats | PostgreSQL `lash_fleet_format`; each SQLite database's `lash_compat` |
+| Wire version | The message shape peers exchange | Remote negotiation or Restate's per-call envelope |
+| `G` | The replay-equivalent generation that serves a journal | Recorded generation routes and deployment lanes |
 
-One law covers every surface that more than one build reads:
-
-> **Before finalize, N+1 writes only what N reads.** Every stored value, row,
-> object value, cursor and request that N+1 writes while `F` is N's epoch is
-> in N's shape and has N's semantics. That includes retention and delivery
-> semantics: no new referrer or obligation kinds, no new identity families,
-> no new required behaviour, and no new column that N would lose on
-> rewrite. N+1 stamping N's number on a new shape breaks the law.
-
-So the 1.0 binary never needs to read a 1.1 shape before finalize, and
-after finalize no 1.0 code runs. What 1.0 must carry is the machinery that
-lets 1.1 keep that law: stamps it honours, a fence it obeys, ranges it
-declares and refusals that 1.1 can read.
+Before finalize, N+1 writes only what N reads. This includes semantics as well
+as shape: retention, delivery, identity and ownership cannot require behavior
+that N cannot preserve. A new build stamping an old number on incompatible
+content violates the contract. Writer pins, admission and the synthetic
+successor laws enforce the versioned parts of this rule
+(`crates/lash-core-store/src/store/fleet_format.rs:196`,
+`crates/lash-core-store/src/store/synthetic_next.rs:1`).
 
 ### 1. The component compatibility descriptor
 
 #### 1.1 Types
 
-```rust
-// crates/lash-sansio/src/compat.rs (new)
-/// A non-empty inclusive range of versions of one surface. JSON
-/// `{"min":1,"max":1}`, frozen: every build parses every range.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(try_from = "RawVersionRange", into = "RawVersionRange")]
-pub struct VersionRange { min: u32, max: u32 }
+`VersionRange` is a non-empty inclusive range. Construction and deserialization
+reject zero and reversed bounds. Its frozen JSON shape is `{ "min": 1,
+"max": 1 }`; `select` chooses the highest common version
+(`crates/lash-sansio/src/compat.rs:20`, `:63`, `:111`).
 
-impl VersionRange {
-    pub const fn exactly(version: u32) -> Self;
-    /// Refuses `min == 0` and `min > max`.
-    pub fn new(min: u32, max: u32) -> Result<Self, VersionRangeError>;
-    pub const fn min(self) -> u32;
-    pub const fn max(self) -> u32;
-    pub const fn contains(self, version: u32) -> bool;
-    /// The highest version both ranges contain; `None` when disjoint.
-    pub fn select(self, peer: Self) -> Option<u32>;
-}
-```
-
-```rust
-// crates/lash-core-store/src/compat.rs (new)
-/// One versioned stored component: a PostgreSQL schema, one SQLite
-/// database, or one Restate object family.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ComponentId(&'static str);
-
-/// What this build declares about one component.
-#[derive(Clone, Copy, Debug)]
-pub struct CompatDescriptor {
-    pub component: ComponentId,
-    /// The stamps this build opens: `[oldest it still reads, newest it knows]`.
-    pub reads: VersionRange,
-    /// The versions its migrations or encoders can produce.
-    pub writes: VersionRange,
-}
-
-/// A durable stamp.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct CompatStamp { pub version: u32, pub min_reader: u32 }
-
-pub enum CompatAdmission {
-    /// The stamp is inside `reads`.
-    Native,
-    /// A newer release expanded the component, and its floor still admits
-    /// this build. The shape check runs in tolerant mode (§1.4).
-    Expanded { version: u32 },
-}
-
-/// The admission rule of §1.3.
-pub fn admit(
-    descriptor: &CompatDescriptor,
-    stamp: StampRead,
-) -> Result<CompatAdmission, CompatRefusal>;
-
-pub enum StampRead { Absent { populated: bool }, Present(CompatStamp), Unreadable(String) }
-```
-
-`lash_core_store::compat::DESCRIPTORS` lists every component this build
-declares, and `lashctl version --json` prints them beside `G`, `F`'s writable
-range and every wire range (§4, §5).
-
-The components at 1.0:
-
-| `ComponentId` | Stamp lives in | `reads` / `writes` at the cut |
-|---|---|---|
-| `postgres` | `lash_schema_versions` row `lash-postgres-store` | `[1,1]` / `[1,1]` |
-| `sqlite-core` | durable-core database, `lash_compat` | `[1,1]` / `[1,1]` |
-| `sqlite-registry` | process-registry database, `lash_compat` | `[1,1]` / `[1,1]` |
-| `sqlite-triggers` | trigger database, `lash_compat` | `[1,1]` / `[1,1]` |
-| `restate-effect-group-state` | each `EffectGroupIndex` object's `_compat` | `[1,1]` / `[1,1]` |
-| `restate-effect-group-payload` | each `EffectGroupPayload` object's `_compat` | `[1,1]` / `[1,1]` |
-| `restate-durable-wait-registry` | each `LashDurableWaitIndex` object's `_compat` | `[1,1]` / `[1,1]` |
+A `CompatDescriptor` names a component and its read and write ranges.
+`CompatStamp` carries `version` and `min_reader`. `DESCRIPTORS` lists
+PostgreSQL, SQLite core, process registry and triggers, and the three Restate
+object families. Default component ranges are `[1,1]`. Synthetic-next database
+components read `[1,2]` and write version 2; object families read and write
+`[1,2]` (`crates/lash-core-store/src/compat.rs:54`, `:67`, `:151`).
+`lashctl version --json` exposes these declarations.
 
 #### 1.2 Where the stamps live
 
-**PostgreSQL.** The existing table gains the floor:
+PostgreSQL stores `(component, version, min_reader)` in
+`lash_schema_versions` and `F` in `lash_fleet_format`. A release stamp is
+operator evidence, rather than an admission input
+(`crates/lash-postgres-store/schema.sql:17`,
+`crates/lash-postgres-store/src/postgres/schema.rs:30`, `:92`).
 
-```sql
-CREATE TABLE IF NOT EXISTS lash_schema_versions (
-    component TEXT PRIMARY KEY,
-    version INTEGER NOT NULL,
-    min_reader INTEGER NOT NULL,
-    CONSTRAINT ck_lash_schema_versions_stamp
-        CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version)
-);
-```
-
-`F` stays in `lash_fleet_format` (`crates/lash-postgres-store/schema.sql:49-53`).
-`lash_release_stamp` keeps naming the release that last wrote the database;
-it is evidence for operators, never an admission input.
-
-**SQLite.** Every one of the three databases gets the same row:
-
-```sql
-CREATE TABLE IF NOT EXISTS lash_compat (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    component TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    min_reader INTEGER NOT NULL,
-    fleet_format INTEGER NOT NULL,
-    CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version
-           AND fleet_format >= 1)
-);
-```
-
-`F` is replicated into each database because each database is its own
-transaction domain, and the fence (§2) must read it inside the writer's own
-transaction. The durable core's `fleet_format` table is deleted, and so is
-the rule that `PRAGMA user_version` is the stamp. Open never reads
-`user_version` again. The row is the only authority.
-
-**Restate.** §3.2 gives each object a `_compat` record.
+Each SQLite database stores `component`, `version`, `min_reader` and
+`fleet_format` in its singleton `lash_compat` row. The three databases are
+separate transaction domains, so each needs its own writer fence and epoch.
+`lash_compat` is the admission authority
+(`crates/lash-sqlite-store/src/schema.rs:41`, `:725`, `:1116`,
+`crates/lash-sqlite-store/src/compat.rs:55`).
+Restate object stamps use `_compat` (§3.2).
 
 #### 1.3 The admission rule
 
-`admit` answers in this order:
+`admit` checks in this order:
 
-1. **Absent.** An empty store (no lash objects) is provisioned by the
-   component's installer, which writes the stamp. A populated store without
-   a stamp is `Unstamped`. A stamp is never defaulted to the current version.
-2. **Unreadable or malformed.** A stamp that does not decode, or whose
-   `min_reader` is 0 or above its `version`, is `MalformedStamp`.
-3. **Too old.** `version < reads.min` is `TooOld`: an older or skipped
-   release wrote it. Stepping through the intermediate release is the remedy
-   (ADR 0106 Q3).
-4. **Floor passed.** `min_reader > reads.max` is `ReaderFloorAbove`: a newer
-   release contracted past this build.
-5. **Admitted.** Otherwise `Native` when `version <= reads.max`, else
-   `Expanded`.
+1. An unstamped empty component returns `Provision`; an unstamped populated
+   component refuses `Unstamped`.
+2. An unreadable stamp, zero floor or floor above its version refuses
+   `MalformedStamp`.
+3. A version below the declared read range refuses `TooOld`.
+4. A floor above the range's maximum refuses `ReaderFloorAbove`.
+5. A version inside the range is `Native`. A higher version with an admitted
+   floor is `Expanded`.
 
-Every store open runs it before it takes traffic. `F` is admitted separately
-(§2.1), and a skipped compatibility release is refused there too.
-
-Expand keeps `min_reader`. Only a contract step raises it, and only to a
-component version whose release has been finalized. So N admits every store
-N+1 expanded, and refuses one that N+2 contracted.
+The implementation is `crates/lash-core-store/src/compat.rs:391`.
+PostgreSQL open verifies provisioning and refuses a `Provision` result;
+workers apply no schema DDL. SQLite's whole-store open provisions or migrates
+before component admission, and a component opened independently refuses a
+pending migration
+(`crates/lash-postgres-store/src/postgres/schema.rs:74`, `:117`,
+`crates/lash-sqlite-store/src/backend.rs:244`,
+`crates/lash-sqlite-store/src/compat.rs:316`).
+`F` has separate admission against the build's writable range (§2.1).
 
 #### 1.4 The shape check tolerates safe additions
 
-`Native` runs today's exact shape check. `Expanded` runs a tolerant one:
+An expanded catalog must preserve every definition the older build requires.
+Additional tables, views and non-unique indexes are tolerable. An added column
+on an expected table is tolerable when it is nullable or has a default and
+has no extra write constraint. Additional required columns, checks, unique
+constraints, foreign keys, exclusion constraints and triggers refuse
+`ShapeRefused`. PostgreSQL's `NOT VALID` constraints still constrain new
+writes, so they are unsafe additions.
 
-- **Required:** every object this build expects is present and satisfies
-  its expected definition, exactly as today.
-- **Tolerated:** a table this build does not name; a view; a non-unique
-  index; a column that is nullable or has a default and carries no
-  constraint beyond its type.
-- **Refused as `ShapeRefused`:** on any table this build expects, a NOT NULL
-  column without a default, a CHECK, UNIQUE, FOREIGN KEY or EXCLUDE
-  constraint, or a trigger this build does not expect. A `NOT VALID`
-  constraint counts: PostgreSQL still enforces it on new rows, so it would
-  reject N's writes.
-
-On PostgreSQL this is a classification step in
-`crates/lash-postgres-store/src/postgres/schema_shape.rs` over the findings
-the comparison already produces. SQLite gains the same check for `Expanded`
-databases, read from `sqlite_schema`, `pragma_table_info` and
-`pragma_index_list`. `Native` SQLite databases keep today's no-introspection
-fast path.
-
-The migration catalog enforces the other side. An expand step may add only
-tolerated objects. A unit test in `migrate.rs` applies each expand step to
-the previous component's catalog and runs the previous component's tolerant
-check on the result.
+PostgreSQL classifies the catalog findings for expanded admission; native
+admission applies its configured shape check. `SchemaCheck::WarnOnly` can
+relax native structural enforcement, but not compatibility or required seed
+data (`crates/lash-postgres-store/src/postgres/schema.rs:128`, `:151`, `:174`,
+`crates/lash-postgres-store/src/postgres/schema_shape.rs:86`).
+SQLite checks expanded catalogs with `verify_tolerant`, while native
+components need no additional expanded-catalog introspection
+(`crates/lash-sqlite-store/src/compat.rs:460`).
 
 #### 1.5 Typed refusals
 
-`StoreError` changes in place. `SchemaVersionOutOfRange` and
-`FleetFormatOutsideWritableRange` fold into one variant, and the fence adds
-one:
-
-```rust
-// crates/lash-core-store/src/store/error.rs
-Incompatible { refusal: CompatRefusal },
-WriterFenced { recorded: u32, writable: VersionRange },
-
-// crates/lash-core-store/src/compat.rs
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "refusal", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum CompatRefusal {
-    Unstamped { component: String },
-    MalformedStamp { component: String, detail: String },
-    TooOld { component: String, found: u32, reads: VersionRange },
-    ReaderFloorAbove { component: String, found: u32, min_reader: u32, reads: VersionRange },
-    ShapeRefused { component: String, findings: Vec<String> },
-    /// `F` at open: below the writable range (a skipped release) or above it
-    /// (a newer fleet).
-    FleetOutsideWritable { recorded: u32, writable: VersionRange },
-    /// The SQLite databases of one store disagree on their stamps or `F`.
-    PartiallyAdvanced { databases: Vec<(String, CompatStamp, u32)> },
-    /// A stored label this build has no name for (an obligation state or
-    /// kind, an attachment owner kind, a referrer kind): a newer build wrote
-    /// it. Classified apart from corruption so no pass treats it as absent.
-    UnknownVocabulary { surface: String, label: String },
-}
-```
-
-Each refusal's message names its remedy with a `lashctl` command. The
-FIG-3796 text that names `lash admin finalize-upgrade`
-(`crates/lash-core-store/src/store/error.rs:148`) goes.
+Store compatibility errors use `StoreError::Incompatible { refusal }`.
+Writer rejection uses `WriterFenced { recorded, writable }`.
+`CompatRefusal` distinguishes absent or malformed stamps, old versions,
+reader and writer floors, shape refusal, missing or unwritable fleet epochs,
+pending SQLite migration, partial store advancement and unknown vocabulary.
+Messages name operator remedies. Readable release evidence accompanies
+applicable refusals
+(`crates/lash-core-store/src/compat.rs:189`, `:335`,
+`crates/lash-core-store/src/store/error.rs:90`).
 
 ### 2. The fleet epoch `F` and the writer fence
 
 #### 2.1 `F` is the release compatibility epoch
 
-`F` is 1 at the cut. Every compatibility release declares a writable range
-`[F_prev, F_self]`, and its finalize moves `F` to `F_self`. It moves even
-when no format changed, because moving it is what fences the old release's
-writers. `FleetFormat::writer_version(surface)` maps `(F, surface)` to the
-version the fleet writes, through the build's `WRITER_PINS`
-(`crates/lash-core-store/src/store/fleet_format.rs:268`). An open admits
-`F` against the writable range. Below it is a skipped release, and above it
-is a newer fleet; both are `FleetOutsideWritable`.
+The default build writes epoch 1; synthetic-next writes under `[1,2]` and
+owns epoch 2. Provisioning seeds the writable range's floor. Opening a store
+never chooses or advances its epoch. An absent epoch is `FleetUnrecorded`;
+an epoch outside the range is `FleetOutsideWritable`. Finalize moves `F` to
+the finalizing build's own epoch, including a release without format changes
+(`crates/lash-core-store/src/store/fleet_format.rs:30`, `:45`, `:123`,
+`:143`, `:166`).
+
+`FleetFormat::writer_version` resolves the surface through `WRITER_PINS`.
+Without a matching pin it uses the build's newest version. A finalize moves
+the epoch rather than individually selecting every format (`:196`).
 
 #### 2.2 The guarded transaction entry
 
-Every mutation checks `F` inside its own transaction. That covers session
-commits, admission, turn inputs and queued work, relay claims and
-settlements, the leader lease, process registry and trigger writes,
-attachments, artifact publication and cleanup, retention, GC, deletes, the
-definition registry, drain marks and the migrations ledger. Reads are not
-fenced: a stale reader meets stamps it refuses, typed.
+Ordinary PostgreSQL mutations begin through `begin_guarded`. Its first
+statement reads the fleet row `FOR SHARE`, before session and row locks.
+Finalize locks the same row `FOR UPDATE`. A writer already holding the shared
+lock finishes before finalize; a later writer reads the moved epoch and
+refuses before mutation if it cannot write it
+(`crates/lash-postgres-store/src/postgres/guarded_tx.rs:149`, `:185`,
+`crates/lash-postgres-store/src/postgres/finalize.rs:105`).
 
-**PostgreSQL.** A new `crates/lash-postgres-store/src/postgres/guarded_tx.rs`
-is the only place a mutating transaction begins:
+Schema provisioning, migration and fleet-row control have explicit transaction
+entries for their own lock order. The guarded-transactions check recognizes
+these entries and the documented read-only exceptions
+(`scripts/check-guarded-transactions.py`,
+`crates/lash-postgres-store/src/postgres/migrate.rs:1568`).
+The fence's PostgreSQL row lock needs `UPDATE` privilege on the fleet row.
 
-```rust
-pub(crate) struct GuardedTx<'c> { /* the transaction and the F it read */ }
+SQLite's `write` and `write_flow` run the component stamp and epoch fence
+as the first statement after `BEGIN IMMEDIATE`. Its reserved writer lock
+prevents another writer or finalize from changing that row until commit.
+The same read re-admits a component that another process can migrate
+(`crates/lash-sqlite-store/src/conn.rs:783`, `:808`, `:841`,
+`crates/lash-sqlite-store/src/compat.rs:144`).
 
-impl GuardedTx<'_> {
-    /// The epoch this transaction runs under.
-    pub(crate) fn fleet(&self) -> FleetFormat;
-    /// Refuses with `FleetMoved` when payloads encoded before BEGIN were
-    /// encoded under another epoch.
-    pub(crate) fn require_encoded_under(&self, fleet: FleetFormat) -> Result<(), StoreError>;
-}
-
-/// BEGIN, then the fence as the transaction's first statement.
-pub(crate) async fn begin_guarded(pool: &PgPool, fence: &WriterFence) -> Result<GuardedTx<'static>, StoreError>;
-
-/// `f` in a guarded transaction, retried per §2.4.
-pub(crate) async fn guarded<T, F>(pool: &PgPool, fence: &WriterFence, f: F) -> Result<T, StoreError>;
-```
-
-The fence is one indexed statement, and it runs before anything else,
-including the session advisory lock and every row lock:
-
-```sql
-SELECT format_version FROM lash_fleet_format WHERE singleton FOR SHARE;
-```
-
-Finalize reads the same row `FOR UPDATE` and then updates it, in one
-transaction that takes no other row lock. The ordering follows from
-PostgreSQL's row locks:
-
-- A writer that holds the row `FOR SHARE` makes finalize wait. The writer
-  commits first under the old `F`, which is still correct.
-- A writer whose `FOR SHARE` waits behind finalize re-reads the row once
-  finalize commits. Under `READ COMMITTED` it sees the new `F`. Under
-  `REPEATABLE READ` it fails `40001` and is retried. Either way it is fenced
-  before it writes anything.
-- A writer never holds another lock while it waits on `F`, and finalize
-  takes no lock a writer holds. So the two cannot deadlock.
-
-The cost is one round trip and one shared row lock per mutating
-transaction. Writers stay concurrent with each other. An unlocked `SELECT`
-would not do: a writer could read the old `F`, finalize could commit, and
-the writer could then commit rows under a retired epoch. A row lock needs
-`UPDATE` privilege, so a writing role needs it on `lash_fleet_format`, and
-the host-provisioned grant list (`runbooks/host-provisioned-schema/`) gains
-it. A role with only `SELECT` never mutates, so it never runs the fence.
-
-**SQLite.** The fence runs inside `SqliteConnection::write` and `write_flow`
-(`crates/lash-sqlite-store/src/conn.rs:389`, `:423`), as the first statement
-after `BEGIN IMMEDIATE`:
-
-```sql
-SELECT component, version, min_reader, fleet_format FROM lash_compat WHERE singleton = 1;
-```
-
-It is a local read with no network round trip. `BEGIN IMMEDIATE` holds the
-database's reserved lock, so no other writer (and no finalize) can change the
-row until this transaction ends. SQLite also re-admits the component stamp
-here (§1.3), because another process can migrate a shared database on open
-while this one holds a connection. That costs nothing extra: it is the same
-row.
-
-A SQLite migration or finalize owns the whole store. It takes
-`BEGIN EXCLUSIVE` on every database in `SqliteDatabase::ALL` order, rewrites
-each `lash_compat` row, and commits in the same order. A crash between those
-commits leaves the databases disagreeing. On reopen, a build whose
-migrations cover the gap completes the set forward. Any other build refuses
-it with `PartiallyAdvanced`.
+A whole-store migration or finalize acquires `BEGIN EXCLUSIVE` on every
+SQLite database in `SqliteDatabase::ALL` order, then rewrites and commits in
+that order. Partial commits are detectable as a disagreeing set
+(`crates/lash-sqlite-store/src/compat.rs:204`, `:215`).
 
 #### 2.3 Pre-encoded commits
 
-A commit's payloads are encoded before `BEGIN` under the handle's last
-observed `F`, which is the value the most recent fence read. Inside the
-transaction, the guard compares the `F` it just read with the encoding
-epoch:
+A commit encodes under the handle's last observed epoch. The transaction
+compares that encoding epoch with its fence. A writable move rolls back,
+rebuilds the plan and retries once; an unwritable move refuses `WriterFenced`.
+The internal `FleetMoved` does not escape the store call
+(`crates/lash-postgres-store/src/postgres/guarded_tx.rs:218`, `:236`,
+`crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:1`).
+The handle reports the epoch its fences observe, rather than only its opening
+epoch (`guarded_tx.rs:99`, `crates/lash-sqlite-store/src/conn.rs:722`).
 
-- Equal: proceed.
-- Different and writable: roll back with the internal `FleetMoved`. The
-  store encodes again under the new `F` and retries once.
-- Not writable: `WriterFenced`.
+#### 2.4 Retry classes and whole-store recovery
 
-`F` moves at most once per release, so this costs nothing until 1.1's
-finalize and adds one retry to at most one transaction per writer after it.
-`FleetMoved` never escapes a store call.
+| Failure | Action |
+|---|---|
+| Transaction contention | Retry the whole transaction, including admission and the fence. PostgreSQL's guarded helper bounds its local attempts. |
+| A moved writable encoding epoch | Roll back, encode under the new epoch and retry once. |
+| An unwritable epoch | Return terminal `WriterFenced` with no mutation. |
+| Missing or malformed fence | Return a typed incompatibility and fail closed. |
+| Partial SQLite migration | Resume the manifested catalog transition or finish its restore. |
+| Partial SQLite finalize | Complete the sealed authorized transition; refuse an inconsistent set without that intent. |
 
-The handle's `FleetFormatStore::fleet_format()` answers the last `F` the
-fence observed, not the open-time value. The Restate object encoders read it
-too (§3.3).
-
-#### 2.4 Retry classes
-
-| Failure | Error | Action |
-|---|---|---|
-| `40001`, `40P01`, `55P03`; `SQLITE_BUSY`, `SQLITE_LOCKED` | `StoreError::Contended` (today's class, `crates/lash-postgres-store/src/postgres/support.rs:267-278`) | retry the whole transaction, fence included |
-| `F` moved to a writable epoch | `FleetMoved` (internal) | encode again under the new `F`, retry once |
-| `F` outside the writable range | `StoreError::WriterFenced` | terminal, no retry; the deployment reports itself fenced and takes no more work |
-| fence row missing or malformed | `StoreError::Incompatible` | terminal; fail closed |
-| connection or I/O | `StorageFailure` | as today |
-
-A fenced transaction wrote nothing, because the fence is its first
-statement and the rollback takes the rest.
+PostgreSQL's fence and retry implementation is
+`crates/lash-postgres-store/src/postgres/guarded_tx.rs:50`, `:149`, `:218`.
+SQLite whole-store migration takes a migrator lock, checkpoints and closes
+all components, durably backs up every file, then applies the catalog under
+exclusive locks. An interrupted migration resumes from its manifest. A failure after any
+component commits restores the whole original backup, including when the
+failure occurs during a resumed migration; open reports the failure. An
+interrupted restore completes on the next open. A component open never migrates independently
+(`crates/lash-sqlite-store/src/migration.rs:1`,
+`crates/lash-sqlite-store/src/backend.rs:244`,
+`crates/lash-sqlite-store/src/compat.rs:316`).
 
 **SQLite finalize recovery.** `SqliteStoreSet::finalize` checks generation
-drain and deployment retirement under exclusive store ownership. Before the
-first database commit it durably seals an intent naming the store, checked
-retirement, source and target epochs and all three schema stamps. A fresh
-`SqliteStoreSet::open` whose build can write the target epoch completes that
-authorized transition before migration or ordinary set admission, under the
-ownership lock shared with migration and all three exclusive database locks.
-Recovery requires no retained store handle. It checks the recorded stamps
-and accepts only the source or target epoch in each database; arbitrary
-inconsistent sets without that intent remain refused. The intent is removed
-only after every epoch commit completes. SQLite has no finalize hold because
-no fleet-wide automatic finalize reaches a SQLite store.
-
-A lint (`scripts/check-guarded-transactions.py`) keeps the entry total. It
-fails on any `.begin()`, `pool.begin()` or mutating statement run straight on
-a pool under `crates/lash-postgres-store/src/`, and on any rusqlite write
-transaction under `crates/lash-sqlite-store/src/`, outside the guard and an
-allowlist of read-only sites (`scripts/guarded-transaction-readonly.txt`).
-Each allowlist entry says why it only reads.
+drain and deployment retirement under exclusive store ownership. For a
+file-backed store, before the first database commit it durably seals an intent
+naming the store, checked retirement, source and target epochs and all three
+schema stamps. A fresh `SqliteStoreSet::open` whose build can write the target
+epoch completes that authorized transition before migration or ordinary set
+admission, under the ownership lock shared with migration and all three
+exclusive database locks. Recovery requires no retained store handle. It
+checks the recorded stamps and accepts only the source or target epoch in
+each database; arbitrary inconsistent sets without that intent remain
+refused. The intent is removed only after every epoch commit completes.
+SQLite has no finalize hold because no fleet-wide automatic finalize reaches
+a SQLite store
+(`crates/lash-sqlite-store/src/backend.rs:234`, `:372`, `:382`,
+`crates/lash-sqlite-store/src/finalize.rs:25`, `:49`, `:85`, `:147`, `:180`).
 
 ### 3. Restate
 
-SQL fencing cannot fence Restate atomically: no SQL transaction spans a
-Restate call. Restate state is instead protected by four rules:
-
-- the law above (N+1 writes N's shape until finalize);
-- per-call wire ranges;
-- a per-object floor;
-- finalize's precondition that the old generation is drained **and** its
-  deployment removed (ADR 0106 §2).
+SQL cannot fence a Restate invocation atomically. Restate compatibility uses
+per-call wire ranges, per-object floors, fleet-selected encoders and recorded
+generation routes. Finalize also requires drain and deployment retirement.
 
 #### 3.1 Every cross-build call carries the caller's range
 
-One wire version, `RESTATE_WIRE_VERSION`, covers every Lash handler that a
-build other than the caller's can serve. It replaces
-`EFFECT_GROUP_WIRE_VERSION`. That covers:
+Every Lash handler takes `Call<T> { wire, body }` and answers
+`Reply<T> { wire, body }`. The frozen request range selects the highest
+common `RESTATE_WIRE` version before typed body decoding; a disjoint range
+refuses `lash.wire_unsupported` with both ranges. Replies carry the selected
+version (`crates/lash-restate/src/compat.rs:41`, `:127`,
+`crates/lash-restate/src/wire.rs:33`, `:137`).
 
-- every handler of `EffectGroupIndex`, `EffectGroupPayload` and
-  `LashDurableWaitIndex`;
-- the shared handlers of `LashDurableWaitWorkflow`, `LashProcessWorkflow`
-  and `EffectGroupDispatch`;
-- `LashSession.drive`, `LashTurn.run` and `LashTurn.outcome`;
-- `LashProcessAttach.run`.
-
-Generation-lane handlers are served only by their own `G`, but they use the
-same envelope so that one handler body serves both lanes.
-
-```rust
-// crates/lash-restate/src/compat.rs (new)
-pub const RESTATE_WIRE_VERSION: u32 = 1;
-pub const RESTATE_WIRE: VersionRange = VersionRange::exactly(RESTATE_WIRE_VERSION);
-
-/// Every cross-build request. JSON `{"wire":{"min":1,"max":1},"body":…}`;
-/// the outer shape is frozen.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Call<T> { pub wire: VersionRange, pub body: T }
-
-/// Every cross-build reply. JSON `{"wire":1,"body":…}`; frozen.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Reply<T> { pub wire: u32, pub body: T }
-```
-
-- **Requests** are encoded at the caller's `F`-selected wire version, so any
-  build in the window can read them. `wire` states every version the caller
-  reads.
-- **A call a handler journals** states only the version its fleet epoch
-  selects, `[v, v]` for `v = F.writer_version(RESTATE_WIRE_VERSION)`. Its
-  bytes sit in the caller's journal, which another build of the window may
-  replay (§3.5), so they never carry the caller's own range: every build
-  selects the same `v` under one `F`. Ingress requests journal nothing and
-  state the full range.
-- **The handler** selects `RESTATE_WIRE.select(call.wire)` before it reads
-  or writes any state. A disjoint range is a terminal
-  `lash.wire_unsupported` error that carries both ranges, with nothing
-  changed.
-- **Replies** use the selected version. So an old pinned caller gets an old
-  reply from a new handler, and a new caller gets a reply it reads from an
-  old handler after a rollback.
-- **A request's stamp is not a drain gate.** `drive_version` leaves
-  `RestateSessionDriveRequest` and `RestateTurnDriveRequest`
-  (`crates/lash-restate/src/session_driver.rs:135-153`). Its check at `:880`
-  and `:906` is deleted. The journal a stable-lane call starts is the serving
-  build's, and the generation sentinel already guards replay.
-  `LASH_SESSION_DRIVE_VERSION` stays a D surface, as an input to `G`.
+Ingress may state the full readable range. A journaled call states exactly
+the wire version its deployment's fleet epoch selects, so replay-equivalent
+builds record the same call under that epoch
+(`crates/lash-restate/src/compat.rs:49`, `:82`).
+Session and turn requests rely on this wire contract rather than a request
+`drive_version` gate (`crates/lash-restate/src/session_driver.rs:787`, `:795`).
+Journal generation remains a separate routing concern.
 
 #### 3.2 The per-object `_compat` record
 
-Every Lash object carries one record under the key `_compat`:
+The effect-group index, effect-group payload and durable-wait index carry
+`{ "format": 1, "min_reader": 1, "min_writer": 1 }` under `_compat`.
+The record is separate from each value's `{format, body}` envelope
+(`crates/lash-restate/src/compat.rs:140`, `:149`,
+`crates/lash-restate/src/object_state.rs:53`, `:70`).
 
-```json
-{"format": 1, "min_reader": 1, "min_writer": 1}
-```
+Handlers select wire compatibility before object admission. Reads check the
+reader floor; mutations also check the writer floor. A fresh exclusive write
+installs the record at its fleet-selected family format. A populated object
+without it refuses `Unstamped`. Clear and retirement preserve the record,
+so stale code cannot recreate state without admission
+(`crates/lash-restate/src/object_state.rs:144`, `:170`, `:225`, `:277`).
 
-Its shape is frozen and never enveloped. `format` is the oldest family
-format any value in the object may carry. `min_reader` and `min_writer` are
-the oldest family formats a build must support to read, or to mutate, the
-object.
-
-- **Every handler reads `_compat` first**, after the wire selection and
-  before any other state. A shared handler requires
-  `min_reader <= reads.max`. An exclusive handler also requires
-  `min_writer <= writes.max`. A failure is a terminal `lash.incompatible`
-  error carrying the `CompatRefusal`, with nothing changed.
-- **Absent `_compat`.** On an object with no other keys, the first exclusive
-  handler writes it at the selected format. On a populated object it is
-  `Unstamped`. At the cut every object is fresh, so this only catches state
-  from before the cut.
-- **Clear and retire keep it.** `retire`, `finish_retirement`, `cancel_all`,
-  `revoke_all` and the payload's `delete_bytes` check `_compat` like every
-  other exclusive handler, and they never delete it. A retired object's
-  `_compat` is what fences a stale handler from recreating its state.
-- **Only the next release raises it.** Its `upgrade` handler (FIG-4041,
-  post-1.0) rewrites the object's values, then raises all three fields in
-  the same exclusive invocation. After finalize this fences any leftover N
-  handler, even one an operator kept by force-removing a deployment.
-
-Introspection (Restate SQL over state) measures sweep progress by `format`.
-It never fences.
+An exclusive `upgrade` is `not_finalized` while the fleet selects an older
+family writer format. Once it selects the newest format, the handler lifts
+and rewrites older family values and raises `_compat` in the same invocation. Preflight and sweep find the
+remaining object records through Restate SQL; another sweep resumes an
+interrupted one without an external cursor
+(`crates/lash-restate/src/object_state.rs:489`, `:542`,
+`crates/lash-restate/src/object_upgrade.rs:175`, `:211`).
 
 #### 3.3 The selected encoder
 
-`set_stamped` stops writing `formats.current`
-(`crates/lash-restate/src/object_state.rs:213`). It takes the writer the
-fleet selects:
-
-```rust
-pub(crate) fn set_stamped<T: Serialize + 'static>(
-    ctx: &ObjectContext<'_>, key: &str, writer: StoredValueWriter, body: T,
-) -> Result<(), TerminalError>;
-
-impl StoredValueFormats {
-    /// `fleet.writer_version(surface)`, with the family's down-converters
-    /// (none at 1.0).
-    pub(crate) fn writer(&'static self, fleet: FleetFormat) -> StoredValueWriter;
-}
-```
-
-`fleet` is the deployment store's `fleet_format()` (§2.3). A stale view is
-safe in one direction only, and that is the direction it can be stale in.
-Before finalize every build sees N's epoch. After finalize, a build that has
-not yet observed the move writes N's format, which N+1 reads. The
-`{format, body}` envelope (`object_state.rs:29-35`) is kept as it is.
+`StoredValueFormats::writer(fleet)` chooses the family writer from `F`.
+`set_stamped` writes `{format, body}` at that chosen format. Readers admit
+the recorded stamp through the supported lift chain and decode the lifted
+body (`crates/lash-restate/src/object_state.rs:81`, `:368`, `:386`).
+A stale epoch view writes the older readable format rather than advancing
+formats before the SQL fence observes finalize.
 
 #### 3.4 The versioned `RootOutcome`
 
-`LashTurn`'s `outcome` state is stored as `{format, body}` under a new
-registered format, `LASH_TURN_OUTCOME_FORMAT_VERSION` (M). Its readers
-dispatch on the stamp, like the object families. The `run` reply, the
-`outcome` reply and `LashSession.drive`'s `DriveOutcome` travel in `Reply`
-at the selected wire version. Pinning the run protects only the run itself;
-the stamp and the wire protect the readers that come later.
+`LashTurn` records its outcome under `LASH_TURN_OUTCOME_FORMAT_VERSION` in
+the same stamped envelope. It is immutable history and has no object sweep.
+The run, outcome and session-drive replies use the selected wire version
+(`crates/lash-restate/src/session_driver.rs:70`, `:152`, `:787`, `:795`,
+`crates/lash-core-store/src/store/fleet_format.rs:464`).
 
 #### 3.5 Deployment and rollback routing
 
-1. **Immutable endpoints.** Each build registers at a URI that no deployment
-   of another `G` holds. `register_deployment` stops forcing blindly. It
-   reads the deployment at the URI and then acts on what it finds:
-   - none: register without force;
-   - one that serves this build's generation names (`…_g<G>`): register with
-     force, because builds sharing G promise replay-equivalent journals;
-   - any other: refuse with
-     `RestateRegistrationError::EndpointServesAnotherGeneration { uri, held, local }`.
-2. **One namespace across the roll.** N and N+1 bind under the same ADR 0111
-   namespace. Moving namespace is a new deployment, not an upgrade.
-3. **Stable names.** Object and state-holding service names never split by
-   `G` (ADR 0106 §1). Their state is shared, and §3.2 and §3.3 protect it.
-4. **Recorded routes are data.** A redrive, a group child or a refused
-   successor goes to the generation the record names, never to one
-   recomputed from the caller's `G`. The generation sentinel
-   (`crates/lash-restate/src/process/workflow.rs:1031`), unreadable-input
-   routing (`crates/lash-restate/src/process/mod.rs:1261`) and the
-   successor-window check (`crates/lash-restate/src/process/workflow/lanes.rs:93`)
-   stay as they are.
-5. **A journal stays within its replay-equivalent generation.** Any build
-   sharing `G` must replay the same recorded steps identically. A change to
-   recorded step logic, order, names or effects bumps `JOURNAL_LOGIC_EPOCH`;
-   `G` is not a binary fingerprint. A continuation, parked turn or segment
-   state outside the serving build's read range parks and routes to its
-   writer's `G`. The VM fence
-   (`crates/lashlang/src/runtime/vm/continuation.rs:1511`) is never relaxed.
-6. **Rollback.** Register N's build at a fresh URI, which makes it the
-   newest deployment for new invocations. N+1's deployment stays registered,
-   never overwritten and never removed, until its own pinned invocations
-   drain. `lashctl drain <G_N+1>` runs the drain in reverse. N serves
-   everything N+1 wrote, because of the law. A continuation N+1 parked that N
-   cannot decode routes to `G_N+1`, which N+1's deployment still serves.
-7. **Retirement is by deployment, not heartbeat.** Finalize requires that no
-   registered deployment serves `G_N`'s generation names, and that
-   `drain_status(G_N)` reads drained. The drain counts every invocation
-   pinned to a deployment of that generation, whatever its handler kind.
-   Inboxed object calls are not pinned yet; they start on the newest
-   deployment.
+Each generation uses an immutable endpoint URI. Registration reads the
+server's deployments: an unused URI registers without force; a held URI
+serving this build's generation can redeploy with force; another generation
+refuses `EndpointServesAnotherGeneration`
+(`crates/lash-restate/src/engine.rs:263`, `:308`).
+N and N+1 retain one namespace. Stable state-holding names share state;
+generation names serve replay-equivalent journals. Recorded routes determine
+where recovery goes. A generation sentinel guards a foreign journal before
+execution (`crates/lash-restate/src/services.rs:44`,
+`crates/lash-restate/src/process/workflow.rs:1075`).
 
-**Amendment, 2026-09-29 (FIG-4076).** Stalled obligations do not hold
-`drain_status(G)`. `G` reads drained when it is marked and nothing left needs
-its deployment: no live or parked process, no parked or in-flight turn, and
-no closing session. No obligation is pinned to a generation. Whichever build
-leads recovery delivers a re-armed one, and one stalled `undecodable` (§5) is
-one no build of the window can decode, so keeping the deployment settles
-none of them, and a drain that waited on them never finished. `lashctl
-drain-status` counts them per kind and lists each one by kind, obligation
-id, typed reason and row, for the operator to settle before retirement.
-This amends ADR 0109 §1.5, which gave the generation drain the deployment
-drain's rule. The deployment drain status keeps that rule.
+Builds sharing `G` must replay the same journal steps. A change to their
+logic, order, names or effects changes `JOURNAL_LOGIC_EPOCH`; `G` is not a
+binary fingerprint. Opaque VM handover checks bytecode, continuation,
+snapshot, accounting, heap schedule and ABI against component read ranges.
+An unsupported component refuses with its name and range before decoding
+VM bytes. Continuation, snapshot and heap ranges follow their actual decoders
+(`crates/lash-vm-protocol/src/contract.rs:60`, `:71`,
+`crates/lashlang/src/vm_contract.rs:13`, `:46`).
+Work outside a receiving build's range retains its recorded generation route.
+
+Rollback registers N at a fresh URI for new invocations and retains N+1's
+pinned deployments until they drain. Generation drain requires its mark,
+no live or parked processes, no parked or in-flight turns and no closing
+sessions. Stalled obligations do not hold that generation drain; the operator
+can inspect and resolve them separately. Finalize also refuses while any
+registered deployment serves the retired generation. An unreadable deployment
+registry fails closed
+(`crates/lash-core-store/src/store/generation_drain.rs:214`,
+`crates/lash-core-store/src/store/fleet_finalize.rs:182`).
 
 ### 4. Remote protocol negotiation
 
-`crates/lash-remote-protocol/src/negotiation.rs` (new) holds the bootstrap.
-Its three messages carry no `protocol_version`. They precede selection, and
-their JSON is frozen forever, so every build parses every peer's.
+`Negotiation` carries unversioned, frozen `Hello`, `Accept` and `Unsupported`
+messages. Peers select the highest common version; a disjoint range refuses
+before executable message decoding. `Negotiated::from_accept` validates the
+selection against both ranges
+(`crates/lash-remote-protocol/src/negotiation.rs:41`, `:63`, `:96`).
 
-```rust
-pub const REMOTE_PROTOCOL: VersionRange; // [1,1] at the cut
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(tag = "negotiation", rename_all = "snake_case")]
-pub enum Negotiation {
-    Hello { supported: VersionRange },
-    Accept { supported: VersionRange, selected: u32 },
-    Unsupported { local: VersionRange, peer: VersionRange },
-}
-
-/// A server's answer to a `Hello`.
-pub fn answer(local: VersionRange, hello: &Negotiation) -> Negotiation;
-
-/// A connection's selected version. Built only from an `Accept` that this
-/// side validated: `selected` is inside both ranges.
-pub struct Negotiated { selected: u32 }
-impl Negotiated {
-    pub fn from_accept(local: VersionRange, accept: &Negotiation) -> Result<Self, RemoteProtocolError>;
-    pub fn selected(&self) -> u32;
-}
-```
-
-- **Selection.** The highest version in both ranges. A 1.1 peer offering
-  `[1,2]` and a 1.0 peer offering `[1,1]` select 1.
-- **No intersection.** The answer is `Unsupported`, and nothing runs.
-- **Every message names its version.** `Envelope::new` (always current) is
-  deleted. `Envelope::at(&Negotiated, body)` encodes a request.
-  `Envelope::decode_json(bytes, local)` accepts any `protocol_version`
-  inside `local`, and it checks the version before it decodes the body. A
-  responder answers with `Envelope::reply_to(&request, body)`. Responses,
-  errors and stream events use the request's version.
-- **Out of range.** A version outside `local` is
-  `RemoteProtocolError::Unsupported { local, peer }`, replacing
-  `UnsupportedProtocolVersion { actual, expected }`
-  (`crates/lash-remote-protocol/src/registry_errors.rs:63`). It is refused
-  before any decode or effect.
-- **Load-balanced peers.** Each connection negotiates, and every request
-  carries its version. A peer behind a load balancer that did not see the
-  `Hello` validates each request by itself.
-- **Encoders per version.** A DTO is encoded at the selected version. 1.0
-  has only version 1. 1.1 adds version 2 and keeps the version-1 encoder as
-  a down-conversion.
-
-Hosts own their transports, and lash owns the messages and the rule.
-`REMOTE_PROTOCOL_VERSION` resets from 100 to 1 at the cut.
-
-Shared Restate calls use the same `VersionRange` and the same selection rule
-(§3.1), carried per call rather than per connection.
+`Envelope::at` uses that selection. `reply_to` preserves the request version.
+`decode_json(bytes, local)` checks the envelope version before decoding its
+typed body. Unsupported versions carry local and peer ranges, so each request
+can be validated even by a peer that did not see the connection bootstrap
+(`crates/lash-remote-protocol/src/lib.rs:332`, `:340`, `:442`, `:454`).
+Hosts own transport establishment and negotiation. The default protocol
+version is 100; synthetic-next exposes its successor range
+(`crates/lash-remote-protocol/src/lib.rs:315`,
+`crates/lash-remote-protocol/src/negotiation.rs:24`).
 
 ### 5. Per-surface obligations
 
-The obligations are:
+`GUARDED_SURFACES` records owner and lifetime policy for each guarded stored
+format. `RECORD_UPCASTERS` has JSON tree lifts and `Decoder` markers for native
+older-version decoders. A read window extends only through an unbroken lift
+chain; it also admits the current fleet's pinned writer version. `F` does not
+narrow supported history or mutable reads at finalize
+(`crates/lash-core-store/src/store/fleet_format.rs:215`, `:258`, `:297`,
+`:358`, `:481`, `:491`).
 
-- **tolerate:** read an older or expanded shape;
-- **preserve:** keep bytes and identities exactly as stored;
-- **refuse typed:** name the version and the remedy, keep the bytes, and
-  change nothing;
-- **route:** send the work to the build that wrote it.
-
-| Surface | Registered as | 1.0 obligation |
-|---|---|---|
-| PostgreSQL schema | `SCHEMA_VERSION` (pg), M | Admit per §1.3. Tolerate safe additions (§1.4). Refuse typed. |
-| SQLite databases | the three `*SCHEMA_VERSION`, M | Admit per §1.3 at open **and** in every write transaction. Refuse a partially advanced set. |
-| `F` | `FLEET_FORMAT_VERSION`, M | Admit at open, fence every mutation (§2), and write only `F`-selected versions. |
-| Mutable rows (`SESSION_HEAD_META`, `PROTOCOL_TURN_OPTIONS`, `SCOPE_STORAGE_PAYLOAD`, `PROCESS_WAKE_DELIVERY_FORMAT`, `NATIVE_DRIVER_STATE`, `CURRENT_SESSION_STATE`) | M | Write at `F`. Refuse a newer stamp typed. N+1 never emits a field N would drop on rewrite before finalize (the law), so 1.0 carries no unknown-field preservation. |
-| Session checkpoints and immutable history (`SESSION_NODE_BODY`, `SESSION_CHECKPOINT`, `CHECKPOINT_COMPONENT_ENCODING`, `RUNTIME_COMMIT_RECEIPT`, `RLM_SNAPSHOT`, `LASHLANG_SNAPSHOT`, `HEAP_SIZE_SCHEDULE`, `NATIVE_TRANSPORT`, `PROCESS_EVENT_VOCABULARY`) | M, read-only | Preserve bytes and hashes, and never rewrite. Refuse an unsupported encoding typed. The read window gains a permanent history floor that `F` does not move: `ReadWindow` admits `[history_floor, newest]` for these surfaces instead of `{recorded, newest}` (`fleet_format.rs:186`). At 1.0 the floor is 1, and FIG-3802 fills in the upcasters. |
-| VM continuations, parked turns, segment state (`VM_CONTINUATION_FORMAT`, `TURN_CHECKPOINT_SCHEMA`, `LASHLANG_SEGMENT_STATE`) | D | Decode only what this build supports. Otherwise park and route to the recorded `G` (§3.5). N+1 supplies the conversion at the segment boundary. A full rollback never kills N+1's remaining pinned work. |
-| Semantic hashes and identity families (`LASHLANG_SEMANTIC_HASH`, `BYTECODE_FORMAT`, `*_FAMILY_VERSION`, `FRAME_KEY`, `JOURNAL_IDENTITY`, the four request-identity encodings) | C | Verify a stored identity under the family it names. Never recompute it under new rules. A new family is minted only after finalize. |
-| Module artifacts | new: `MODULE_ARTIFACT_ENVELOPE_VERSION`, C | Stored artifacts gain an envelope `{"family": …, "encoding": …, "artifact": …}`. `verify` checks the stored `module_ref` under the family the envelope names, never under today's hashing. An unknown family or encoding is refused typed (`ModuleArtifactError::UnsupportedFamily`), not `HashMismatch`. |
-| SQLite blob envelope | new: `SQLITE_BLOB_ENVELOPE_VERSION`, M | `StoredBlobEnvelope` gains `version`. An unknown version or compression is refused typed and the bytes are kept. The old compression codecs stay while `F` is N. PostgreSQL and S3 store raw bytes and are unchanged. |
-| Attachments | (store rows) | Preserve bytes and digest equality. An unknown owner kind is `Incompatible(UnknownVocabulary)`, not `StoredDataCorrupt`. GC treats an owner it cannot decode as referenced: it never deletes because it failed to read. |
-| ADR 0113 referrers and fences | new: `ARTIFACT_REFERRER_KINDS_VERSION`, C | The referrer kinds and their canonical ids are the 1.0 baseline. An unknown kind is `Incompatible(UnknownVocabulary)`; ADR 0113 §1 defines the canonical encodings and typed decode refusals. The cleanup executor stops its pass at an edge or fence it cannot decode, with the obligation stalled `undecodable`; it never counts that edge as absent. No new kind before finalize. |
-| Obligations and outboxes (ADR 0109) | new: `OBLIGATION_LEDGER_VOCABULARY_VERSION`, M | Old states, kinds, payloads and idempotency keys stay while `F` is N. An unknown state or kind label is `Incompatible(UnknownVocabulary)`, not today's `Backend` (`obligation.rs:386`). The relay stalls a row whose kind it cannot decode `undecodable`, as ADR 0109 §1.3 already does for a key that does not decode. The row stays outstanding and visible, and it is never acknowledged or discarded. A state label no build of this window wrote is never selected by the due read, so it is left untouched. |
-| Restate object state (three families) | M | §3.2 and §3.3. |
-| `LashTurn` outcome | new: `LASH_TURN_OUTCOME_FORMAT_VERSION`, M | §3.4. |
-| Restate journals and inputs (`EFFECT_JOURNAL`, `RESTATE_PROCESS_JOURNAL`, `LASH_SESSION_DRIVE`, `JOURNAL_LOGIC_EPOCH`, and the other D rows) | D | Route to the writer. The sentinel parks a foreign journal before any effect. |
-| Restate handler wire | `RESTATE_WIRE_VERSION`, C | §3.1. |
-| Remote protocol | `REMOTE_PROTOCOL_VERSION`, C | §4. |
-| Trace JSONL | `TRACE_SCHEMA_VERSION`, C | Every record carries its version. A sink writes its own build's version; lash-trace can read JSONL back. Readers accept every version they know, ignore unknown optional fields and skip unknown event kinds, counting them: trace is observational and carries no executable variant. |
-| Process cursors | `PROCESS_CURSOR_VERSION`, C (registered at the cut) | Minted at the `F`-selected version, so a cursor survives rollback. A cursor outside the read range is refused typed, and the host contract is to list again from a fresh cursor. |
-| `lashctl --json` | new: `LASHCTL_JSON_SCHEMA_VERSION`, C | Every command prints `{"schema_version":1,"command":…,"result":…,"error":…}` and exits with a pinned code: 0 done, 1 unexpected failure, 2 usage, 3 refused precondition, 4 incompatible store, 5 not yet (a drain still pending, or a wait timed out). `result` shapes are DTOs owned by `lashctl`, never internal status types. |
-| Derived projections (`WORKFLOW_GRAPH_SCHEMA`, `WORKFLOW_TYPE_FACET`) | M | Regenerate from the module. Refuse a newer stamp typed. |
-| `PRODUCT_EVENT_LOG_FORMAT` | M | Owned by the agent-workbench example. It is not part of lash's contract. |
-
-**Unknown fields.** No blanket tolerance applies:
-
-- Observational records (trace, stream events, preflight and status
-  reports) ignore unknown optional fields.
-- Records that carry effects, ownership or identity admit only what they
-  can type, and refuse the rest.
-- Mutable records need no preservation, because the law forbids emitting
-  what N cannot carry until N is retired.
-
-### 6. Phase A: the synthetic N+1 gates
-
-Phase A (FIG-3805 A) is a release gate for the cut. Head is built twice:
-
-- **N** is the default build.
-- **N+1** is the same tree with the `synthetic-next` Cargo feature. The
-  feature bumps the PostgreSQL component (one expand step adds a nullable
-  column, a table and a non-unique index), every SQLite component, `F`'s
-  writable range to `[1,2]` with one writer pin, the remote protocol to
-  `[1,2]` with one added field, `RESTATE_WIRE_VERSION` to 2,
-  `EFFECT_GROUP_STATE_FORMAT_VERSION` to 2 (with its N-1 upcaster and a
-  synthetic `upgrade` handler), `SESSION_NODE_BODY_SCHEMA_VERSION` (with its
-  permanent history upcaster), `VM_CONTINUATION_FORMAT_VERSION`, and
-  `JOURNAL_LOGIC_EPOCH`, so `G` changes.
-
-The feature lives only as `#[cfg(feature = "synthetic-next")]` blocks beside
-the constants it moves. The facade forwards it. No production build enables
-it.
-
-Both builds are the `lash-upgrade-node` binary of the new crate
-`crates/lash-upgrade-harness`. Its tests run the two binaries as separate
-processes against real PostgreSQL and a real multi-node Restate, plus SQLite
-reopen cases. They live in `crates/lash-upgrade-harness/tests/phase_a/`:
-
-| Test | What it proves |
+| Kind | Rule and implementation |
 |---|---|
-| `expanded_store_rollback` | N+1's migrate expands PostgreSQL and every SQLite database. N restarts, opens `Expanded`, writes, and N+1 reads N's rows. Raising `min_reader` makes N refuse `ReaderFloorAbove` on both backends. Each unsafe addition of §1.4 makes N refuse `ShapeRefused`. A populated store with its stamp deleted refuses `Unstamped`. |
-| `skipped_compatibility_release_refused` | A build whose writable range starts above the recorded `F` refuses at open with `FleetOutsideWritable`, before it takes traffic. So does one whose component range starts above the stamp. |
-| `finalize_races_every_writer` | For every mutation class of §2.2, N pauses a transaction after its fence (the `AfterFence` fault seam). N+1's finalize waits, and the paused writer commits. A writer that begins after finalize fails `WriterFenced` with zero rows written. A pre-encoded commit that straddles finalize is encoded again under N+1's `F`. Runs on PostgreSQL and on SQLite (each database). |
-| `negotiated_wire_both_directions` | Remote protocol: N+1 to N and N to N+1 select 1, including requests, replies, errors and streams. A synthetic `[2,2]` peer against `[1,1]` gets `Unsupported`, with zero effects. Restate: an N caller reaches N+1's handlers and gets version-1 replies. After a rollback an N+1 caller reaches N's handlers. A disjoint call changes nothing. |
-| `object_sweep_crash_resume` | Objects and `LashTurn` outcomes written by N and by N+1 before finalize are all in N's format, and N reads them all. After finalize the synthetic sweep converts objects and survives a crash mid-sweep. Preflight lists the objects still at format 1. A kept N handler is refused typed by `_compat`. |
-| `generation_handoff_rollback` | A foreign-`G` journal dispatches zero effects and parks. Signals that race a hand-off are delivered exactly once. A root admitted by a drive pinned to N runs on N+1, with no refusal and no `SubstrateLost`. A continuation N cannot decode keeps N+1's deployment and routes there. Rollback registers N at a fresh URI. Registering at a URI that serves another generation is refused. |
-| `retention_delivery_rollback` | Checkpoints, attachments, referrer edges and fences, and obligations written by N+1 before finalize survive N's rollback, N's retention and GC, and a return to N+1: nothing is lost or delivered twice. A row with an unknown obligation kind stays outstanding and typed under N. |
-| `history_after_finalize` | After finalize, N+1 still reads the history N wrote, through the permanent floor and not through `{F, newest}`. |
-| `operator_json_contract` | Golden `--json` output and exit codes for every `lashctl` command, success and refusal. It is a single-binary test in `crates/lashctl/tests/`. |
+| Immutable history | Preserve bytes and hashes; retain the lift chain to its permanent floor. History includes checkpoints, session nodes, snapshots and LashTurn outcomes (`fleet_format.rs:358`, `:464`). |
+| Mutable rows and objects | Write the fleet-selected format; keep reading old values during backfill and sweep (`fleet_format.rs:310`, `:358`). |
+| Derived workflow graph | Admit newest or fleet-pinned projection; regenerate an unsupported older projection from the module. It has no lift (`fleet_format.rs:234`, `:316`, `:424`). |
+| Module artifacts | Store family and encoding in an envelope; verify under the stored supported family. Unknown family or encoding is `UnsupportedFamily`, rather than a hash mismatch (`crates/lashlang/src/artifact.rs:364`, `:410`, `:457`). |
+| SQLite blobs | Store a versioned compression envelope. Unknown version or compression refuses without rewriting the bytes (`crates/lash-sqlite-store/src/codec.rs:110`, `:141`). |
+| Artifact and attachment referrers | Preserve canonical identities. Unknown kind is `Incompatible(UnknownVocabulary)`; malformed known identity is corruption (`crates/lash-core-store/src/artifact_referrer.rs:1`, `crates/lash-core-store/src/store/attachment_referrers.rs:321`). |
+| Obligation vocabulary | Unknown state or kind is typed incompatibility. Delivery stalls undecodable work and keeps its row for inspection (`crates/lash-core-store/src/store/obligation.rs:529`, `crates/lash-core-execution/src/runtime/drive/relay.rs:288`). |
+| Trace JSONL | Count and skip unknown event kinds. Malformed known events and unsupported schema versions refuse (`crates/lash-trace/src/jsonl_records.rs:84`). |
+| Process cursors | Cursor minting uses the fleet-selected writer version; parsing rejects versions outside its readable range (`crates/lash-sansio/src/process_cursor.rs:25`, `:142`, `:167`, `crates/lash/src/process_observation.rs:911`). |
+| Operator JSON | `lashctl` owns command DTOs and the `{schema_version, command, result, error}` envelope (`crates/lashctl/src/main.rs:26`, `:874`). |
 
-`just e2e-rolling` runs the ADR 0106 §6 choreography over the same two
-binaries: migrate, half roll, rollback, roll, drain, retire and finalize,
-with zero refusals and zero duplicate effects. The judged runbook is
-`runbooks/rolling-upgrade/`. CI requires the gate on every PR that touches a
-registered surface.
+Format stamps are write metadata outside request-identity preimages.
+Turn options project to their payload; checkpoint component content hashes
+remain identity inputs. The commit planner stamps turn options under the
+encoding epoch before hashing the commit. Heap writers choose their schedule
+stamp at encoding. Pinning identity to the first attempt's generation would
+require a retry to discover that generation
+(`crates/lash-core-store/src/store/identity_projection.rs:1`,
+`crates/lash-core-store/src/store/runtime_commit_plan.rs:146`,
+`crates/lash-core-store/src/store/runtime_commit.rs:1158`,
+`crates/lashlang/src/runtime/heap.rs:57`).
 
-### 7. What FIG-3846's cut checklist adds
+There is no universal unknown-field policy. Observational optional data can
+be ignored where its decoder permits it; effect, ownership and identity
+records use their typed admission rules. The compatibility window forbids
+emitting semantics N cannot carry before finalize.
 
-ADR 0106 §8's five cut steps stand, with the corrected pointer for the bump
-gate. The cut commit also:
+### 6. The synthetic N+1 gates
 
-1. **Resets every descriptor.** The PostgreSQL component goes to 1 with
-   `min_reader` 1. The three SQLite components go to 1/1. `F` goes to 1 with
-   writable `[1,1]`. `REMOTE_PROTOCOL_VERSION` goes from 100 to 1.
-   `RESTATE_WIRE_VERSION`, every object family format, every `_compat`
-   baseline, `LASH_TURN_OUTCOME_FORMAT_VERSION`,
-   `MODULE_ARTIFACT_ENVELOPE_VERSION`, `SQLITE_BLOB_ENVELOPE_VERSION`,
-   `ARTIFACT_REFERRER_KINDS_VERSION`, `OBLIGATION_LEDGER_VOCABULARY_VERSION`,
-   `TRACE_SCHEMA_VERSION` and `LASHCTL_JSON_SCHEMA_VERSION` all go to 1.
-   `PROCESS_CURSOR_VERSION` becomes `lashpc1`.
-2. **Removes every pre-cut path.** It deletes the retired-version lists
-   (`RETIRED_PROCESS_CURSOR_VERSIONS` and its kin), every `RECORD_UPCASTERS`
-   and object `upcast_n1` row, every `WRITER_PINS` row, and every expand step
-   in `EXPAND_MIGRATIONS`.
-3. **Resets `G`'s inputs.** Every D row and `JOURNAL_LOGIC_EPOCH` go to 1.
-   The commit recomputes `G`, and a check asserts that every `_g<G>` name
-   the build binds derives from the new `G`.
-4. **Registers every surface.** It adds §5's new rows, registers
-   `PROCESS_CURSOR_VERSION` (now C), deletes the stale
-   `QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION` exclusion, and makes
-   `scripts/check_format_registry.py` strict.
-5. **Restores the strict gates.** It brings back the version-bump gate and
-   the upgrade-path declaration from `7233634ca8^`, with empty baselines,
-   and makes `scripts/check-guarded-transactions.py` required.
-6. **Captures after the reset.** `capture_release_fixtures.py --tag v1.0.0`
-   also captures a PostgreSQL catalog, each SQLite database, the Restate
-   object and outcome corpus, the remote-protocol message corpus, and the
-   `lashctl --json` goldens.
-7. **Proves the cut.** Phase A (§6) and `just e2e-rolling` pass on the cut
-   commit itself, and FIG-3806's guide passes its command coverage check.
-8. **Waits for the in-place changes.** The cut waits for ADR 0112's,
-   ADR 0113's integrations and for every lane of §9. All of
-   them change stored shapes in place under the freeze. FIG-3946 has landed
-   (`671a616419`).
+The upgrade harness builds the default and synthetic-next variants from one
+tree. Synthetic-next moves every guarded surface, the component and fleet
+ranges, wire ranges, cursor and journal generation, with old-format writer
+pins and decoder coverage. Derived projections use regeneration instead of
+lifts (`crates/lash-core-store/src/store/synthetic_next.rs:1`).
 
-### 8. Before 1.0 and after 1.0
+`crates/lash-upgrade-harness/tests/phase_a/main.rs:13` registers expanded-store
+rollback, skipped-release refusal, writer/finalize races, wire negotiation,
+object-sweep recovery, generation handover and rollback, retention and
+delivery rollback, history after finalize, and workflow-graph range checks.
+`operator_json_contract` lives in `crates/lashctl/tests/`.
 
-The study's split is confirmed, with three corrections: two additions and
-one move.
+The store matrix is SQLite file, SQLite memory and PostgreSQL. Hosts are the
+in-process Restate server double, live Restate and lash-sim's in-process effect
+host. Upgrade proofs use the synthetic-next tier. Phase A and rolling runs use
+the two node builds against live services plus SQLite reopen cases; the
+operator JSON proof needs one binary. `just phase-a` and `just e2e-rolling`
+run the service proofs (`justfile:434`, `runbooks/rolling-upgrade/runbook.md:43`).
+Each law's registration supplies its supported store and host combination.
 
-**In the 1.0 binary, before the cut:**
+### 7. Release-cut guardrails
 
-- the descriptor, the stamps, admission, the tolerant shape check and the
-  typed refusals (FIG-4043, extended to SQLite and to Restate objects);
-- the writer fence (FIG-3800 part A);
-- the Restate call envelope, `_compat`, the selected encoder and the
-  versioned `RootOutcome` (FIG-4041's 1.0 half);
-- **added:** removing the `drive_version` gate (§3.1) and the registration
-  guard (§3.5);
-- remote-protocol negotiation (FIG-3804);
-- the per-surface obligations of §5 that change 1.0 code;
-- `lashctl` with pinned JSON and exit codes (FIG-3847);
-- Phase A (FIG-3805 A);
-- the cut (FIG-3846).
+Default versions stay frozen until the 1.0 cut. Pre-1.0 shape changes keep
+the current numbers. Compatibility descriptors and refusal machinery are
+part of the binary; numeric schema, protocol, cursor and VM constants retain
+their current default values
+(`crates/lash-sqlite-store/src/schema.rs:1109`, `:1616`, `:1652`,
+`crates/lash-remote-protocol/src/lib.rs:315`,
+`crates/lash-sansio/src/process_cursor.rs:25`).
+Synthetic-only changes do not advance those default versions.
 
-**Alongside 1.0:** the operator guide (FIG-3806).
+### 8. Upgrade operations
 
-**After 1.0, each before its first use:**
+The operator sequence is expand, roll, drain, retire, finalize, then finish
+backfills, sweeps and contract. `lashctl` provides migrate, drain,
+drain-status, end-drain, finalize, finalize-hold, object preflight and sweep,
+preflight and version. Its exit codes are 0 done, 1 failure, 2 usage,
+3 refused precondition, 4 incompatible store and 5 pending
+(`crates/lashctl/src/main.rs:31`, `:107`, `:874`).
 
-- FIG-3800 B: `lashctl finalize`, the retired-deployment check and the hold
-  flag;
-- FIG-3801: SQLite migrate-on-open after a backup;
-- FIG-3802: decoder coverage, the permanent history upcasters and the
-  registry gate;
-- FIG-3817: backfill and contract;
-- FIG-4041's second half: the `upgrade` handlers, the sweep and the
-  preflight;
-- FIG-3805 B: the rolling E2E on the real `v1.0.0` image.
+Finalize verifies the drain and live deployment registry, admits the epoch
+under lock and moves it to `F_self`. PostgreSQL stores the operator hold on
+the same fleet row. Automatic mode refuses a hold; `--override-hold` requests
+manual mode. Rerunning a completed flip reports `already_finalized`
+(`crates/lash-core-store/src/store/fleet_finalize.rs:182`,
+`crates/lash-postgres-store/src/postgres/finalize.rs:105`).
+SQLite finalizes the whole database set under exclusive locks and has no
+fleet-wide automatic hold (`crates/lash-sqlite-store/src/backend.rs:340`).
 
-**Moved:** the study lists the object sweep proof under the object wire
-contract. The sweep itself is N+1's code. Only its synthetic form, in
-Phase A, is pre-cut.
+Backfills require their declared finalized epoch. A batch advances its cursor
+and rewritten rows in one guarded commit. Contract requires its epoch and
+completed prerequisite backfills before it raises the reader floor
+(`crates/lash-postgres-store/src/postgres/migrate.rs:267`, `:303`, `:1128`,
+`:1151`, `:1516`). Object sweeps convert each family only when its newest writer format is
+selected and commit each object's conversion independently (§3.2).
 
-Finalize commits the irreversible `F` boundary after the drain and the
-retirement. Object sweeps and backfills then run to completion, and contract
-waits for their ledger. Nothing rewrites an incompatible object while
-rollback is still promised.
+## Alternatives and rationale
 
-### 9. Lanes and file ownership
+An unlocked epoch read permits a writer to commit after finalize under an
+old format. The shared row lock closes that race. Checking PostgreSQL's reader
+floor on every ordinary write adds another row read: contract requires
+finalize, which already fences the excluded writers. SQLite checks the floor
+at every write because it shares the epoch's local row.
 
-Eleven lanes. Each lands on `main` by itself when its done-when holds. There
-is no integration branch, because every lane keeps the workspace compiling.
-A lane edits only the files it owns and the regions it names in shared files.
-A change another lane needs goes to that lane's owner. Each lane
-regenerates the BUILD files of the crates whose files it adds.
+A second SQLite stamp or an epoch inside `_compat` adds another authority.
+SQLite has one compatibility row per transaction domain, and an object
+versions its own family while SQL owns fleet format selection.
 
-**In-flight cutovers.** ADR 0112 (`fig-1628/cutover`, C0 at `a34c38117e`)
-assigns whole crates by glob. Artifact storage follows ADR 0113 §1–§3. This record does the same, with one difference. The PostgreSQL
-and SQLite crates are being restructured by ADR 0112's store lanes right now,
-so before those lanes land this arc claims only regions in them, never whole
-files. Elsewhere, a file a lane below owns outright is carved out of ADR
-0112's globs, and ADR 0112's lanes do not edit it. For a shared file, the
-in-flight lane stays the owner, this arc's lane writes only its named region,
-and whichever change lands later rebases and resolves.
-
-**Contract first.** Lane **C0** lands first, and every other lane stacks on
-it. It holds every shared type and constant:
-
-- `VersionRange`;
-- `ComponentId`, `CompatDescriptor`, `CompatStamp`, `admit`,
-  `CompatRefusal` and `DESCRIPTORS`;
-- the `StoreError::Incompatible` and `WriterFenced` variants (added beside
-  the old variants, which the owning lanes delete);
-- the `F`-epoch API in `fleet_format.rs`, and `ReadWindow`'s permanent
-  history floor (§5);
-- `Negotiation`, `answer` and `Negotiated`;
-- `Call`, `Reply`, `RESTATE_WIRE_VERSION` and the `_compat` record type;
-- their registry rows.
-
-| Lane | Scope | Owns | Done when | Edges |
-|---|---|---|---|---|
-| **C0** contract | §1.1, §1.5, §2.1 and the history floor of §5, §3.1–3.2 types, §4 types | new `crates/lash-sansio/src/compat.rs`; new `crates/lash-core-store/src/compat.rs`; `crates/lash-core-store/src/store/fleet_format.rs`; new `crates/lash-remote-protocol/src/negotiation.rs`; new `crates/lash-restate/src/compat.rs`. Regions: the `mod` and re-export lines of `lash-sansio`, `lash-core-store`, `lash-remote-protocol` and `lash-restate`; `crates/lash-core-store/src/store/error.rs` (the two variants); `scripts/versioned-surfaces.toml` (its rows) | `kiln clippy` green for the whole workspace; unit tests `version_range_select_is_the_highest_common_version`, `version_range_refuses_empty_and_zero`, `admit_truth_table` (every §1.3 arm), `negotiation_bootstrap_json_is_frozen`, `restate_call_and_reply_json_is_frozen` pass | SOFT on ADR 0112 C0, ADR 0113 (`error.rs` and `lib.rs` regions; rebase) |
-| **L1** store descriptor | §1.2–1.5 on both stores (FIG-4043) | New `crates/lash-sqlite-store/src/compat.rs` and `crates/lash-postgres-store/src/postgres/schema_compat_tests.rs`. Regions: `crates/lash-postgres-store/schema.sql` (the `lash_schema_versions` and `lash_fleet_format` blocks and the seed rows); `crates/lash-postgres-store/src/postgres/schema.rs` (the version gate in `ensure_schema`, `supported_version`, `version_mismatch_error`); `crates/lash-postgres-store/src/postgres/schema_shape.rs` (the classification of unexpected objects); `crates/lash-postgres-store/src/postgres/fleet_format.rs` (admission); `crates/lash-postgres-store/src/postgres/migrate.rs` (stamp writes carry `min_reader`; the expand-safety test); `crates/lash-postgres-store/src/lib.rs` (the component descriptor); `crates/lash-sqlite-store/src/schema.rs` (`apply_versioned_schema_tx`, `stamp_deployment_metadata`, the `lash_compat` DDL in each database, the `fleet_format` DDL deleted); `crates/lash-sqlite-store/src/fleet_format.rs` (deleted into `compat.rs`); `crates/lash-sqlite-store/src/lib.rs` (`mod` line); `crates/lash-core-store/src/store/error.rs` (delete `SchemaVersionOutOfRange` and `FleetFormatOutsideWritableRange`) | tests `postgres_opens_an_expanded_catalog_under_its_floor`, `postgres_refuses_a_raised_floor_typed`, `postgres_refuses_each_unsafe_addition`, `postgres_refuses_a_populated_catalog_without_a_stamp`, `sqlite_opens_each_expanded_database_under_its_floor`, `sqlite_refuses_a_raised_floor_typed`, `sqlite_refuses_a_partially_advanced_set`, `every_expand_step_passes_the_previous_tolerant_check` pass; `rg 'user_version' crates/lash-sqlite-store/src` finds no admission read; `kiln clippy` green | HARD on C0. SOFT on ADR 0112's PostgreSQL and SQLite lanes, ADR 0113 (every file above is a region; the later landing rebases) |
-| **L2** PostgreSQL writer fence | §2.2–2.4 on PostgreSQL (FIG-3800 A) | new `crates/lash-postgres-store/src/postgres/guarded_tx.rs`; the transaction-entry lines of every mutating site under `crates/lash-postgres-store/src/`; the `AfterFence` seam in `crates/lash-postgres-store/src/testing.rs`; new `scripts/check-guarded-transactions.py` and `scripts/guarded-transaction-readonly.txt`; the check's wiring in `scripts/ci_plan.py` | the lint passes with zero unguarded mutation sites; tests `pg_fence_orders_a_writer_before_finalize`, `pg_fence_refuses_a_writer_after_finalize_with_zero_writes`, `pg_fence_encodes_again_when_f_moves`, `pg_fence_retries_contended_with_a_fresh_read` pass; `scripts/perf_guard_budgets.json` budgets hold; `kiln clippy` green | HARD on L1. HARD on ADR 0112's and ADR 0113's integrations landing on `main`: they restructure the crate and add transaction sites the fence must cover |
-| **L3** SQLite writer fence | §2.2–2.4 on SQLite (FIG-3800 A) | `crates/lash-sqlite-store/src/conn.rs`; the fence half of `crates/lash-sqlite-store/src/compat.rs`; the SQLite half of the lint | tests `sqlite_fence_refuses_a_writer_after_finalize_in_each_database`, `sqlite_fence_readmits_a_stamp_migrated_by_another_process`, `sqlite_migration_takes_every_database_exclusively_in_order` pass; the lint passes; `kiln clippy` green | HARD on L1 and on ADR 0112's integration (its SQLite lane rebuilds connection ownership). SOFT on ADR 0113 (its writes go through `write`) |
-| **L4** Restate compatibility | §3 | `crates/lash-restate/src/{object_state.rs,effect_group.rs,durable_wait.rs,process_attach.rs,engine.rs,ingress.rs}`; `crates/lash-restate/src/effect_group/{protocol.rs,payload.rs}`; `crates/lash-restate/src/process/{workflow.rs,mod.rs}`; new `crates/lash-restate/src/tests/compat_on_the_double.rs`. Regions: `crates/lash-restate/src/session_driver.rs` (request and reply types, the two `drive_version` gates, the `outcome` state); `crates/lash-restate/src/effect_group/dispatch.rs` (shared-handler request types); `scripts/versioned-surfaces.toml` (its rows) | a test enumerates every handler the binder binds and asserts it takes `Call` and answers `Reply`; per family, a test shows `_compat` refusal with zero state change; `rg 'formats\.current' crates/lash-restate/src` finds no write; `pinned_older_drive_root_runs_on_the_newer_build` and `registration_refuses_an_endpoint_serving_another_generation` pass on the multi-deployment double; `kiln clippy` green | HARD on C0. SOFT on ADR 0112's runtime lane (`session_driver.rs` and `dispatch.rs` regions), on ADR 0113, and on L2 and L3 (the fresh `F` view) |
-| **L5** remote negotiation | §4 (FIG-3804) | `crates/lash-remote-protocol/src/negotiation.rs` (logic); new `crates/lash-remote-protocol/src/negotiation_tests.rs`. Regions: `crates/lash-remote-protocol/src/lib.rs` (`Envelope`, decode, the constants); `crates/lash-remote-protocol/src/registry_errors.rs` (the refusal); every `Envelope::new` caller (`crates/lash-remote-protocol/src/{turn_input.rs,core_conversions/observations.rs}`, `examples/agent-workbench/src/main_sections/routes/host_streams.rs`) | tests `hello_answer_selects_the_highest_common_version`, `disjoint_ranges_answer_unsupported_before_any_decode`, `each_request_is_validated_against_the_local_range`, `replies_errors_and_streams_use_the_request_version` pass; `rg 'Envelope::new\b' crates examples` is empty; `kiln clippy` green, with `//crates/lash:ui_fixtures` if facade exports change | HARD on C0. SOFT on ADR 0112's runtime lane (glob owner) |
-| **L6** `lashctl` | the operator CLI and §5's JSON contract (FIG-3847) | new `crates/lashctl/**`; `crates/lash-postgres-store/src/bin/lash_migrate.rs` (deleted). Regions: `crates/lash-postgres-store/BUILD.bazel` and `Cargo.toml` (the binary target deleted); `crates/lash-core-store/src/store/error.rs` (remedy texts); every `lash-migrate` spelling in `justfile`, `scripts/` and `runbooks/` | `lashctl` serves `migrate`, `drain`, `drain-status`, `end-drain`, `preflight` and `version`; `operator_json_contract` passes; `bazel query 'attr(name, "lash_migrate", //...)'` and `rg -w 'lash-migrate' crates scripts runbooks justfile` are empty; `kiln clippy` green | HARD on C0 (`version` prints the descriptors). SOFT on L1 (descriptor values), ADR 0112 (it re-homes the store ports the drain verbs call) and ADR 0113 (it deletes the session-delete drain count, which re-blesses the goldens) |
-| **L7a** surfaces now | §5 rows that no in-flight cutover owns: the SQLite blob envelope, attachment owners, trace readers, process cursors | Regions: `crates/lash-sqlite-store/src/{codec.rs,lib.rs}` (`StoredBlobEnvelope`); `crates/lash-core-store/src/store/attachment_referrers.rs`; the GC call sites in `crates/lash-{sqlite,postgres}-store/src/**/attachments.rs`; `crates/lash-trace/src/**`; `crates/lash-sansio/src/process_cursor.rs`; `scripts/versioned-surfaces.toml` (its rows) | tests `blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes`, `gc_keeps_an_attachment_whose_owner_does_not_decode`, `trace_reader_skips_unknown_kinds_and_counts_them`, `cursor_is_minted_at_the_fleet_version` pass; `kiln clippy` green | HARD on C0. SOFT on ADR 0112's SQLite, PostgreSQL and runtime lanes (regions) |
-| **L7b** surfaces after ADR 0113 | §5 rows in files ADR 0113 owns: the module artifact envelope, the obligation vocabulary, referrer GC | `crates/lashlang/src/artifact.rs` (the envelope region); `crates/lash-core-store/src/store/obligation.rs` (`from_label` and kind decode); `crates/lash-core-execution/src/runtime/drive/relay.rs` (stall, never settle, an unknown kind); `crates/lash-core/src/runtime/artifact_cleanup.rs` (stop at an undecodable edge) | tests `artifact_verifies_under_its_stored_family`, `artifact_refuses_an_unknown_family_typed`, `relay_stalls_an_unknown_obligation_kind_without_settling_it`, `cleanup_never_counts_an_undecodable_edge_as_absent` pass; `kiln clippy` green | HARD on C0 and on ADR 0113's integration landing on `main` |
-| **L8** Phase A | §6 (FIG-3805 A) | new `crates/lash-upgrade-harness/**`; `runbooks/rolling-upgrade/**`; the `e2e-rolling` recipe in `justfile`; its wiring in `scripts/ci_plan.py`. Regions: the `synthetic-next` blocks beside the moved constants in `crates/lash-postgres-store/src/{lib.rs,postgres/migrate.rs}`, `crates/lash-sqlite-store/src/schema.rs`, `crates/lash-core-store/src/store/fleet_format.rs`, `crates/lash-core-store/src/session_graph.rs`, `crates/lash-remote-protocol/src/negotiation.rs`, `crates/lash-restate/src/{compat.rs,effect_group/protocol.rs,process/admission.rs}` and `crates/lashlang/src/runtime/vm/continuation.rs`, and the feature lines of those crates' `Cargo.toml` and BUILD files | the eight `phase_a` tests and `just e2e-rolling` pass; CI requires them on registered-surface PRs | SOFT to start (harness, node binary, bring-up). Each leg is HARD on its lane: `expanded_store_rollback` and `skipped_compatibility_release_refused` on L1; `finalize_races_every_writer` on L2 and L3; `negotiated_wire_both_directions` on L4 and L5; `object_sweep_crash_resume` and `generation_handoff_rollback` on L4; `retention_delivery_rollback` on L7a and L7b; `history_after_finalize` on L1 |
-| **L9** operator guide | FIG-3806 | new `docs/operations/deploying-and-upgrading.md`; a coverage check that every command the guide names runs in `runbooks/rolling-upgrade/` | the guide exists and the check passes | HARD on L6 (command names). SOFT on L8 |
-
-**The cut** (FIG-3846, §7) is not a lane. It is the orchestrator's
-release-gate commit, and it is HARD on every lane above and on the three
-cutover integrations.
-
-**Which lanes wait.**
-
-- **Now,** from `main`: C0, then L1, L4, L5, L6 and L7a in parallel, and
-  L8's harness skeleton.
-- **After ADR 0112's integration:** L3.
-- **After ADR 0112's and ADR 0113's integrations:** L2.
-- **After ADR 0113's integration:** L7b.
-- **After L6:** L9.
-
-## Where the study is refined
-
-- **Schema floors are checked at open, and on SQLite at every write.** The
-  study checks the stamp at open and at transaction admission. On PostgreSQL
-  the per-transaction fence reads only `F`. A floor rises only in a contract
-  step, which runs only after the release below the floor has been
-  finalized. That finalize already moved `F` and fenced every writer the
-  floor would exclude. So the extra check would buy nothing and cost a
-  second row read. SQLite checks both, because it is the same local row.
-- **`F` moves at every compatibility release.** The study keeps `F` as the
-  release compatibility epoch. This record adds that it moves even when no
-  format changed. Otherwise a release with only schema and wire changes
-  would have no fence for the old release's writers.
-- **`_compat` drops `epoch` and `writer_format`.** An object versions only
-  its own family. `F` lives in SQL, and the build maps `F` to the family's
-  format through `WRITER_PINS`, so an epoch stored in the object would be a
-  second source of truth. `format` is kept as the floor of the formats
-  present, which is what sweep progress and the preflight measure.
-- **One Restate wire version.** The study speaks of wire ranges on "shared
-  object requests". One invocation calls several services: a drive calls
-  `LashTurn`, `EffectGroupIndex` and `LashDurableWaitIndex`. So one
-  negotiated number per call is what a caller can state.
-  `EFFECT_GROUP_WIRE_VERSION` is subsumed. The envelope also covers the
-  workflows' shared handlers and the session handlers, which the study's
-  table reaches only through `RootOutcome`.
-- **No unknown-field preservation in 1.0.** The study allows either
-  preserving unfamiliar optional data on rewrite or forbidding its emission
-  under the old format. This record picks forbidding, by the law. 1.0 then
-  carries no round-trip machinery, and after finalize no 1.0 code runs.
-- **SQLite's `user_version` stops being the stamp.** The study keeps it
-  beside a new record. A second stamp would be a second source of truth, so
-  `lash_compat` replaces it.
-- **Two findings are added:** the cross-build `drive_version` gate (§3.1)
-  and the forced registration (§3.5). Both would break a roll before any
-  format changed.
-- **Two retry classes are distinguished.** The study retries contention with
-  a fresh check. This record also separates a moved-but-writable `F` (encode
-  again, retry once) from a fenced one (terminal).
-- **The history floor lands before the cut.** The study leaves permanent
-  history reads to FIG-3802 after 1.0, and the 1.0 binary itself reads only
-  version 1. But Phase A's `history_after_finalize` runs a synthetic N+1
-  built from the 1.0 tree, so the read window's history floor must exist in
-  that tree. It is a small change to C0's file. The upcasters stay post-1.0.
+One Restate wire version covers calls across all Lash handlers. A request's
+drive stamp cannot replace journal routing: a stable handler can legitimately
+serve a caller from another build. Mutable unknown-field preservation is also
+insufficient for new semantics; writer pins must keep N's semantics before
+finalize. Immutable history needs permanent decoders because no backfill can
+rewrite its identity-bearing bytes.
 
 ## Consequences
 
-- Every mutating transaction pays one fence. On PostgreSQL that is one
-  round trip and one shared row lock; on SQLite it is one local read. Until
-  1.1's finalize, the fence never refuses and never re-encodes.
-- A 1.0 pod survives a 1.1 expand, a 1.1 roll and a rollback to itself. It
-  stops writing the moment 1.1 finalizes, with `WriterFenced`, and it never
-  writes a row after that.
-- Every Restate handler reads one more key and pays one more envelope. The
-  envelope's outer shape and `_compat`'s shape are frozen forever.
-- Operators have one binary, `lashctl`, whose `--json` output and exit codes
-  are a public contract from 1.0.
-- `REMOTE_PROTOCOL_VERSION` restarts at 1. Hosts perform a `Hello` on every
-  connection.
-- A host must serve each build at its own Restate endpoint URI. Rolling pods
-  behind one URI is refused at registration.
-- The cut gains a strict gate set: the bump gate, the upgrade-path
-  declaration, the registry and the guarded-transaction lint. It also gains
-  a two-binary release gate that runs on every registered-surface PR.
-- Stored shapes change in place under the freeze: `lash_schema_versions`
-  gains `min_reader`, SQLite gains `lash_compat` and loses `fleet_format`,
-  Restate objects gain `_compat`, `LashTurn`'s outcome is stamped, and
-  SQLite blobs and module artifacts gain envelopes. Old stores are refused
-  and recreated. A journal in flight at the deploy drains on the build that
-  wrote it (ADR 0106).
-
-## Amendment (FIG-4125, 2026-09-29)
-
-Items 4 and 27; G1: Builds sharing drain generation G must replay each other's
-journals identically. G is not a binary fingerprint. A change to recorded step
-logic, order, names or effects bumps `JOURNAL_LOGIC_EPOCH`. During the pre-1.0
-freeze, shapes change in place. The CI replay check enforcing the same-G
-contract is built and enabled at the 1.0 cut (FIG-4097). Lash-trace reads JSONL
-back, as reflected in the trace row above.
-
-## Amendment (FIG-3800 B and FIG-3817, 2026-09-30)
-
-Sam ruled (2026-09-29) that the upgrade-from-1.0 operations stay in the 1.0
-milestone, so §8 moves `lashctl finalize`, the retired-deployment check, the
-hold flag, and the backfill and contract runner before the cut. They are
-built now and proved against Phase A's synthetic successor; the first real
-successor reuses them unchanged. The decisions the lane took:
-
-- **Retirement is read, never assumed.** Finalize names the retired
-  generation and the Restate admin API. It refuses `generation_not_drained`
-  (exit 5) unless `drain_status(G_N)` reads drained, which needs the drain
-  mark, and `deployments_retained` (exit 3) while the server holds any
-  deployment serving a lane `…_g<G_N>`, in any namespace. A registry that
-  cannot be read fails closed. So the order is drain, retire, finalize,
-  end-drain.
-- **The hold lives on the fleet-format row.** `lash_fleet_format` gains
-  `finalize_hold_reason` and `finalize_held_at_ms`. Finalize reads the row
-  `FOR UPDATE` before it moves `F`, so it reads the hold in the same
-  transaction. The automatic finalize refuses `held` (exit 3), and
-  `--override-hold` finalizes by hand. Setting or clearing the hold is fenced
-  like any writer.
-- **Finalize moves `F` to the finalizing build's `F_self`.** It admits the
-  recorded `F` against that build's writable range first, so a build a newer
-  release fenced cannot finalize. A rerun answers `already_finalized`.
-- **Backfills run at finalize, in batches.** `lash_migrations` gains
-  `backfill_cursor` and `backfill_rows`. A backfill starts in one migration
-  transaction under the exclusive schema lock, taken before the fence as in
-  every migrate step, which runs its `NOT VALID` constraint and records the
-  row `running`. Each batch is one guarded transaction that rewrites the rows
-  after the cursor that are still in the old shape and moves the cursor in
-  the same commit. A backfill is refused `backfill_before_finalize` until `F`
-  reaches the epoch that releases it.
-- **Contract waits for the ledger.** A contract step names its epoch and
-  its backfills. It is refused `contract_before_finalize` or
-  `contract_before_backfills` until both hold, and it raises the component's
-  `min_reader` in its own commit.
-- **SQLite finalizes through the store set.** `SqliteStoreSet::finalize`
-  applies the same drain and retirement checks and moves `F` in all three
-  databases under `BEGIN EXCLUSIVE`, completing a partial set forward. It
-  has no hold, because no fleet-wide automatic finalize reaches a SQLite
-  store.
-
-## Amendment (FIG-3802 and FIG-4041, 2026-09-30)
-
-The same ruling moves FIG-3802 and the second half of FIG-4041 before the
-cut. The version freeze still holds, so each is proved against Phase A's
-synthetic successor, whose tables live in
-`crates/lash-core-store/src/store/synthetic_next.rs`. The decisions the lane
-took:
-
-- **One registry of guarded surfaces.** `GUARDED_SURFACES` in
-  `fleet_format.rs` names each guarded surface, the crate that owns its
-  decoders, and how its records live. **History** is immutable: its window
-  reaches down to a floor that `F` never moves. **Mutable** state is rows
-  and Restate objects that a later release rewrites; `F` does not narrow its
-  window either, so N+1 still reads N's mutable records after finalize,
-  until a backfill or sweep moves them. **Derived** projections admit only
-  their newest version and regenerate from their source, so the
-  workflow-graph schema is Derived and the type facet is not guarded. Every
-  `upgrade = "migrate"` surface in `scripts/versioned-surfaces.toml` is
-  either a row or states `unguarded` with a reason.
-  `scripts/check_format_registry.py` also requires each owner crate to run
-  the three guarded-surface laws under its own name.
-- **One lift table, both kinds.** `RECORD_UPCASTERS` holds every lift. A
-  row is either a tree lift over the record's JSON or a `Decoder` marker,
-  where the surface's own decoder reads the older version natively. The
-  Restate object families lift through the same table, and the separate
-  object upcast table is gone. A window's oldest version is the lowest,
-  at or above the floor, from which the chain reaches the newest. A version
-  outside the window is refused typed, and nothing is written.
-- **Three surfaces stay at N in the synthetic successor.** The heap size
-  schedule is stamped when a heap is born, without consulting `F`. The
-  protocol turn-options stamp is part of the request identity and
-  intent-hash preimages, so bumping it would change identities rather than
-  formats. Derived workflow projections regenerate. Each is named in the
-  module doc of `synthetic_next.rs`.
-- **Objects upgrade through their own handler.** Each object family binds
-  an `upgrade` handler in every build. It is a no-op before finalize, which
-  answers `not_finalized`. After finalize it lifts every value, rewrites it,
-  and raises `_compat`, all in one exclusive invocation. The LashTurn
-  outcome is history and is never swept. `lashctl objects-preflight` and
-  `lashctl objects-sweep` read `_compat` through Restate SQL and call
-  `upgrade` through ingress. The object state is the only cursor, so an
-  interrupted sweep resumes by being run again.
-
-## Amendment (FIG-4261, 2026-09-30)
-
-A segment handover admits each VM contract component against the receiving
-build's declared read range. Opaque state carries the bytecode, continuation,
-snapshot, instruction-accounting, heap-size-schedule and ABI versions as
-separate numbers. Whole-contract string equality is removed. A component
-outside its range is refused with its name, version and supported range,
-before the worker decodes the state. The state's outer format stamp must also
-agree with its continuation or snapshot component. Owner, kind, size and hash
-checks still apply.
-
-The continuation range is the same range the worker's continuation decoder
-uses. The snapshot range comes from the FIG-3802 guarded read window and its
-upcaster chain. Admission does not itself decode or rewrite VM bytes; the
-worker decodes admitted state through these existing decoders.
-
-In the synthetic tier, N reads continuation `[29,29]` and snapshot `[14,14]`;
-N+1 reads continuation `[29,30]` and snapshot `[14,15]`. The other components
-remain exact ranges at their current versions. N's parked state therefore
-resumes on N+1. A state N+1 writes with continuation 30 or snapshot 15 is
-outside N's ranges and N refuses it typed. Such a continuation remains routed
-to N+1's recorded generation, whose deployment must remain until it drains
-(§3.5). A state N+1 writes wholly within N's ranges is admitted on rollback.
-These are synthetic bumps only; the pre-1.0 version freeze still holds.
-
-## Amendment (FIG-4262, 2026-09-30)
-
-The synthetic successor now moves every guarded surface, which supersedes
-the FIG-3802 amendment's "three surfaces stay at N". The version freeze
-still holds: each move is synthetic-only (`synthetic-next`), and N's
-constants are unchanged. The decisions the lane took:
-
-- **Request identities exclude format-version stamps.** This is option (a)
-  of FIG-4262. A request retried across a rolling upgrade (first attempted
-  by N, or by N+1 before finalize, and retried by N+1 after it) carries the
-  turn-options stamp its writer's `F` selected on each attempt. The
-  semantic-boundary request identities and the whole-commit intent hash
-  therefore cover the protocol turn options as their payload alone, in the
-  config, the checkpoint's turn state and each opened frame. They drop the
-  checkpoint component's encoding stamp too and keep its content hash. The
-  projections live in `crates/lash-core-store/src/store/identity_projection.rs`,
-  and each one lists its record's fields explicitly. Nothing depends on the
-  stamps being in a preimage: the receipt decision compares only hashes and
-  encoding versions of the identity families themselves. The identity-family
-  versions (`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION` and the others)
-  do not move. Under the freeze, the golden corpora were re-blessed in place.
-  Option (b), identities that pin the minting generation's version, was
-  rejected: a retry would have to know which generation minted its first
-  attempt.
-- **The turn-options stamp is chosen by the store's commit plan.**
-  `RuntimeCommitPlanner::prepare`, which runs under the `F` a commit is
-  encoded under and again when a fence finds `F` moved, restamps every
-  turn-options value the commit writes. A value minted where no store's `F`
-  is known carries the version of the writable range's floor, `F_prev`, which
-  every build of the range reads. The synthetic successor moves
-  `PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION` to 2, with a `Decoder` lift and a
-  writer pin.
-- **The heap size schedule is stamped where a heap is encoded.** A heap no
-  longer carries a schedule stamp from its birth. The snapshot and durable
-  writers stamp what `F` assigns the surface, and their fixed-point reads
-  re-encode at the recorded stamps. The readers admit the surface's window. A
-  continuation carries its own epoch's schedule, because it resumes on the
-  generation that parked it (§3.5). The synthetic successor moves
-  `HEAP_SIZE_SCHEDULE_VERSION` to 4, with a `Decoder` lift and a writer pin.
-  The FIG-4261 handover admits the VM contract's heap component against
-  that same window, so it is no longer an exact range. N+1 reads schedules
-  `[3,4]` and N's parked state still resumes on it. A state N+1 writes with
-  schedule 4 is outside N's `[3,3]`, and N refuses it typed.
-- **A derived projection moves without a lift.** The synthetic successor
-  moves `WORKFLOW_GRAPH_SCHEMA_VERSION` to 22 and pins its projector to 21
-  while `F` is N's epoch. The graph decoder admits the surface's read window,
-  so N+1 reads the documents N projected until finalize. After finalize, it
-  refuses them typed and regenerates from the module.
-- **A law per surface.** `n_written_records_read_across_the_roll` in
-  `lash-core-store`'s testing laws checks each writer's stamp under N's
-  epoch, under this build's own epoch and under any pinned version. It then
-  reads N's record under every epoch the build writes, and for the derived
-  projection it regenerates where N's record is refused. The heap and graph
-  laws run in `lashlang`, and the turn-options law runs in
-  `lash-core-store` through the commit plan.
-  `a_request_retried_across_the_roll_keeps_its_identity` proves the
-  identity decision. The shared `unknown_version_is_refused_with_zero_mutation`
-  law no longer counts the version `F` pins as unknown.
-- **The synthetic tier's store suites run.** The SQLite integration,
-  conformance and fixture suites derive their expectations from the active
-  tier: component descriptors, the seeded epoch, and the store's own `F`. The
-  synthetic lane's `cargo test` of the SQLite store puts them in
-  `//:feature_lane_tests`, which `just floor` runs. A feature lane's
-  `cargo test` of a service package adds its variants to that service's
-  generated label file, so `scripts/ci/store-tests.sh pg-store` runs the
-  synthetic PostgreSQL suites beside the default ones.
+PostgreSQL runtime mutations pay an epoch read and shared row lock. SQLite
+mutations pay a local compatibility read. Restate values and calls carry
+explicit compatibility metadata. An expanded compatible store remains
+readable by the older build, while finalize fences its writers. Rollback
+retains deployments needed by recorded routes. Operators use one binary with
+stable DTOs and exit codes. A compatibility release carries its predecessor's
+readers, writer pins and recovery operations before it uses newer formats.

@@ -186,7 +186,7 @@ pub(crate) async fn realize_declared_start(
 
 /// A declared start's error the call cannot settle as its result: a replay
 /// divergence, a cancel decided before the launch or during it, or a live
-/// fault, which the engine's redelivery retries (ADR 0116 §3.2 rule 7). Every
+/// fault, which the engine's redelivery retries (ADR 0116 §3.2). Every
 /// other error is the start's typed refusal — among them a terminal
 /// controller error such as a closed scope's `ParentEnded`, which a retry
 /// would only meet again.
