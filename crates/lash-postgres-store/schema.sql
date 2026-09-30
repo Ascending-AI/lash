@@ -483,6 +483,9 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_stalled
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_open_state
     ON lash_pending_turn_inputs(session_id, enqueue_seq)
     WHERE state IN ('pending_active', 'deferred_next_turn');
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_accepted_state
+    ON lash_pending_turn_inputs(session_id, enqueue_seq)
+    WHERE state IN ('accepted');
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_bound_root
     ON lash_pending_turn_inputs(session_id, admitted_root)
     WHERE admitted_root IS NOT NULL;

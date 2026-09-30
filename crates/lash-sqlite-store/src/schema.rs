@@ -528,6 +528,10 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_open_state
     ON pending_turn_inputs(session_id, enqueue_seq)
     WHERE state IN ('pending_active', 'deferred_next_turn');
 
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_accepted_state
+    ON pending_turn_inputs(session_id, enqueue_seq)
+    WHERE state IN ('accepted');
+
 DROP INDEX IF EXISTS idx_pending_turn_inputs_admitted;
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_root
     ON pending_turn_inputs(session_id, admitted_root)

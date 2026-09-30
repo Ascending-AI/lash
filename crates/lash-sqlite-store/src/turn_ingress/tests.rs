@@ -79,6 +79,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.select_by_id.sql(),
         sql.pending_inputs.select_by_source_key.sql(),
         sql.pending_inputs.list_undelivered.sql(),
+        sql.pending_inputs.list_accepted.sql(),
         sql.pending_inputs.cancel.sql(),
         sql.pending_inputs.defer_to_next_turn.sql(),
         sql.pending_inputs.earliest_next_turn_candidate_seq.sql(),
@@ -207,6 +208,16 @@ fn every_open_input_read_seeks_the_state_index() {
     ] {
         assert_uses(&conn, statement, "idx_pending_turn_inputs_open_state");
     }
+}
+
+#[test]
+fn accepted_input_read_seeks_its_state_index() {
+    let conn = catalog();
+    assert_uses(
+        &conn,
+        &turn_ingress_sql().pending_inputs.list_accepted,
+        "idx_pending_turn_inputs_accepted_state",
+    );
 }
 
 #[test]

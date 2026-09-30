@@ -66,6 +66,17 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     .await
     .expect("seed open inputs");
     sqlx::query(
+        "INSERT INTO lash_pending_turn_inputs
+            (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+             submitted_ingress_json, submission_digest, enqueued_at_ms,
+             admitted_root, admitted_by)
+         VALUES (10003, 'accepted', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
+                 'accepted', '{}', '{}', 'digest', 0, 'root', 'checkpoint')",
+    )
+    .execute(&mut *connection)
+    .await
+    .expect("seed checkpoint-accepted input");
+    sqlx::query(
         "INSERT INTO lash_queued_work_batches
             (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
              authority_json, enqueued_at_ms, admitted_root, admitted_by)
@@ -168,6 +179,16 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
             statement.name(),
         );
     }
+    let accepted_plan = explain(
+        &mut connection,
+        sql.pending_inputs.list_accepted.sql(),
+        &[PlanParam::Text("history")],
+    )
+    .await;
+    assert!(
+        accepted_plan.contains("idx_lash_pending_turn_inputs_accepted_state"),
+        "`list_accepted` reads settled input history:\n{accepted_plan}",
+    );
     let queued_reads = [
         (
             &sql.queued_batches.list_open,
