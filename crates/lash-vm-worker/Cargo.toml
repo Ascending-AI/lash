@@ -31,6 +31,11 @@ test = false
 [lints]
 workspace = true
 
+# build.rs and tests/build_identity_laws.rs import build/fingerprint.rs by
+# #[path]. That module uses sha2 and toml, which cargo-shear cannot follow.
+[package.metadata.cargo-shear]
+ignored = ["sha2", "toml"]
+
 [dependencies]
 lash-vm-protocol = { workspace = true }
 lashlang = { workspace = true }
