@@ -196,6 +196,7 @@ mod restate_double_postgres {
         let double = lash_restate_test::backend_with_store_set(
             (nonce & u128::from(u64::MAX)) as u64,
             lash_restate_test::ServerConfig::default(),
+            lash_restate_test::DeploymentHooks::default(),
             move |clock| async move {
                 let storage = lash_postgres_store::PostgresStorage::connect(&url)
                     .await

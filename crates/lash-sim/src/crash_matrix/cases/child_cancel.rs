@@ -322,3 +322,60 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         origin_ms,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_crashed_deployment_cannot_replay_a_tool_before_restart() {
+        let executions = Arc::new(AtomicUsize::new(0));
+        let world = CrashWorld::new(
+            0x56ac_1fc6_bba1_deb2,
+            tool_core(Arc::clone(&executions)),
+            false,
+        )
+        .await
+        .expect("build the world");
+        world.restart().await.expect("start the deployment");
+        let session = session_name(Seam::ChildCancel, world.seed());
+        send(&world, &session, ROOT).await.expect("start the root");
+        let child = running_child(&world, &executions)
+            .await
+            .expect("running child");
+        stored_through_attempt(&world, &child.id)
+            .await
+            .expect("stored attempt");
+        let lane = child.target.split('/').next().expect("child service");
+        world.crash_on(
+            CrashRule::new(EngineCut::BeforeRunResult { name: None })
+                .service(lane)
+                .handler("child"),
+        );
+        cancel_root(&world, &session, ROOT)
+            .await
+            .expect("cancel the root");
+        assert!(
+            world.trip().wait(TRIP_WAIT).await.is_some(),
+            "the crash fired"
+        );
+        // Keep the host between its crash notification and restart long enough
+        // for the server to try replaying the unrecorded attempt.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            1,
+            "a dead deployment ran the tool again"
+        );
+        world
+            .crash_and_restart()
+            .await
+            .expect("restart the deployment");
+        world.quiesce().await;
+        assert!(
+            child_settled(session, child.id, executions, 2)(&world)
+                .await
+                .is_empty()
+        );
+    }
+}

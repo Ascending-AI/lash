@@ -141,31 +141,36 @@ impl DoubleBackend {
         }
     }
 
-    async fn start(seed: u64, config: lash_restate_test::ServerConfig) -> Result<Self, String> {
+    async fn start(
+        seed: u64,
+        config: lash_restate_test::ServerConfig,
+        hooks: lash_restate_test::DeploymentHooks,
+    ) -> Result<Self, String> {
         if let Some(database) = crate::postgres_test_isolation::isolated_database().await {
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
                 .map_err(|error| error.to_string())?;
             let attachments = tempfile::tempdir().map_err(|error| error.to_string())?;
-            let backend = lash_restate_test::backend_with_store_set(seed, config, |clock| async {
-                Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
-                    &storage,
-                    Arc::new(lash::persistence::FileAttachmentStore::new(
-                        attachments.path(),
-                    )),
-                    lash_core::WakeDeliveryConfig::default(),
-                    clock,
-                )) as Arc<dyn lash_core::StoreSet>)
-            })
-            .await
-            .map_err(|error| error.to_string())?;
+            let backend =
+                lash_restate_test::backend_with_store_set(seed, config, hooks, |clock| async {
+                    Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                        &storage,
+                        Arc::new(lash::persistence::FileAttachmentStore::new(
+                            attachments.path(),
+                        )),
+                        lash_core::WakeDeliveryConfig::default(),
+                        clock,
+                    )) as Arc<dyn lash_core::StoreSet>)
+                })
+                .await
+                .map_err(|error| error.to_string())?;
             Ok(Self {
                 backend,
                 sqlite_stores: None,
                 _resources: Some(Arc::new((database, attachments))),
             })
         } else {
-            lash_restate_test::backend(seed, config)
+            lash_restate_test::backend_with_build(seed, config, "crash-world", hooks)
                 .await
                 .map(Self::sqlite)
                 .map_err(|error| error.to_string())
@@ -203,7 +208,11 @@ fn run_tag(seed: u64) -> String {
 
 impl Engine {
     /// A fresh engine for one world under `seed`.
-    pub async fn start(kind: &EngineKind, seed: u64) -> Result<Self, String> {
+    pub async fn start(
+        kind: &EngineKind,
+        seed: u64,
+        hooks: lash_restate_test::DeploymentHooks,
+    ) -> Result<Self, String> {
         match kind {
             EngineKind::Double => {
                 let mut config = lash_restate_test::ServerConfig::default();
@@ -212,7 +221,7 @@ impl Engine {
                 // every cut.
                 config.retry.initial_interval = Duration::from_millis(1);
                 config.retry.max_interval = Duration::from_millis(10);
-                DoubleBackend::start(seed, config)
+                DoubleBackend::start(seed, config, hooks)
                     .await
                     .map(Self::Double)
                     .map_err(|error| format!("build the Restate test backend: {error}"))

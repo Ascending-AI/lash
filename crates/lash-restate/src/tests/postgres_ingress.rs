@@ -174,6 +174,7 @@ async fn process_start_store_refusals_and_transient_faults_on_postgres() {
                 let backend = lash_restate_test::backend_with_store_set(
                     seed,
                     server_config(),
+                    lash_restate_test::DeploymentHooks::default(),
                     |clock| async {
                         Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
                             &storage,

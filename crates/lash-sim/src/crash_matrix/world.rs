@@ -113,6 +113,7 @@ pub struct CrashWorld {
     faults: Arc<HostFaults>,
     trip: Arc<Trip>,
     killing: Arc<AtomicBool>,
+    available: Arc<AtomicBool>,
     build: CoreBuild,
     serve_processes: bool,
     live: Mutex<Option<Deployment>>,
@@ -146,17 +147,29 @@ impl std::fmt::Debug for CrashWorld {
     }
 }
 
+fn deployment_hooks(available: &Arc<AtomicBool>) -> lash_restate_test::DeploymentHooks {
+    let available = Arc::clone(available);
+    lash_restate_test::DeploymentHooks {
+        refuse: Some(Arc::new(move |_| {
+            (!available.load(Ordering::SeqCst)).then_some(lash_restate_test::Refusal::Retryable)
+        })),
+        ..Default::default()
+    }
+}
+
 impl CrashWorld {
     /// A world under `seed` whose deployments `build` builds, on the engine
     /// the environment names ([`EngineKind::from_env`]). No deployment is up
     /// until [`restart`](Self::restart). `serve_processes` installs each
     /// deployment's durable process worker on the engine's endpoint.
     pub async fn new(seed: u64, build: CoreBuild, serve_processes: bool) -> Result<Self, String> {
+        let available = Arc::new(AtomicBool::new(false));
         Self::on_engine(
             seed,
-            Engine::start(&EngineKind::from_env()?, seed).await?,
+            Engine::start(&EngineKind::from_env()?, seed, deployment_hooks(&available)).await?,
             build,
             serve_processes,
+            available,
         )
         .await
     }
@@ -170,11 +183,17 @@ impl CrashWorld {
         serve_processes: bool,
         config: lash_restate_test::ServerConfig,
     ) -> Result<Self, String> {
-        let engine = lash_restate_test::backend(seed, config)
-            .await
-            .map(|backend| Engine::Double(super::engine::DoubleBackend::sqlite(backend)))
-            .map_err(|error| format!("build the Restate test backend: {error}"))?;
-        Self::on_engine(seed, engine, build, serve_processes).await
+        let available = Arc::new(AtomicBool::new(false));
+        let engine = lash_restate_test::backend_with_build(
+            seed,
+            config,
+            "crash-world",
+            deployment_hooks(&available),
+        )
+        .await
+        .map(|backend| Engine::Double(super::engine::DoubleBackend::sqlite(backend)))
+        .map_err(|error| format!("build the Restate test backend: {error}"))?;
+        Self::on_engine(seed, engine, build, serve_processes, available).await
     }
 
     async fn on_engine(
@@ -182,6 +201,7 @@ impl CrashWorld {
         engine: Engine,
         build: CoreBuild,
         serve_processes: bool,
+        available: Arc<AtomicBool>,
     ) -> Result<Self, String> {
         let clock: Arc<dyn lash_core::Clock> = engine.clock();
         let trip = Arc::new(Trip::new(clock));
@@ -203,10 +223,12 @@ impl CrashWorld {
             let trip: Weak<Trip> = Arc::downgrade(&trip);
             let proxy: Weak<DriverProxy> = Arc::downgrade(&proxy);
             let killing = Arc::clone(&killing);
+            let available = Arc::clone(&available);
             engine.on_crash(Arc::new(move |target| {
                 if killing.load(Ordering::SeqCst) {
                     return;
                 }
+                available.store(false, Ordering::SeqCst);
                 if let Some(trip) = trip.upgrade() {
                     trip.fire(format!("engine:{target}"));
                 }
@@ -227,6 +249,7 @@ impl CrashWorld {
             faults,
             trip,
             killing,
+            available,
             build,
             serve_processes,
             live: Mutex::new(None),
@@ -356,11 +379,7 @@ impl CrashWorld {
     ) -> Result<lash_restate_test::DeploymentId, String> {
         let double = self.double()?;
         let deployment = double
-            .add_build(
-                generation.clone(),
-                label,
-                lash_restate_test::DeploymentHooks::default(),
-            )
+            .add_build(generation.clone(), label, deployment_hooks(&self.available))
             .await
             .map_err(|error| format!("register the build of `{generation}`: {error}"))?;
         let engine = Backend::new(Arc::new(double.restate().sibling_build(generation)));
@@ -423,6 +442,7 @@ impl CrashWorld {
             core,
             tasks: Vec::new(),
         });
+        self.available.store(true, Ordering::SeqCst);
         self.engine.revive_deployment().await
     }
 
@@ -475,6 +495,7 @@ impl CrashWorld {
     /// dies — a lash invocation is replayed, a host's own handler job is not.
     pub async fn kill(&self) {
         self.killing.store(true, Ordering::SeqCst);
+        self.available.store(false, Ordering::SeqCst);
         self.proxy.down();
         self.cores.send_replace(None);
         let deployment = self.live.lock_recover().take();

@@ -43,16 +43,21 @@ impl Fixture {
                 .await
                 .expect("open provisioned PostgreSQL storage");
             let attachments = tempfile::tempdir().expect("attachment directory");
-            let double = backend_with_store_set(seed, config, |clock| async {
-                Ok(Arc::new(PostgresStoreSet::with_clock(
-                    &storage,
-                    Arc::new(lash::persistence::FileAttachmentStore::new(
-                        attachments.path(),
-                    )),
-                    lash_core::WakeDeliveryConfig::default(),
-                    clock,
-                )) as Arc<dyn StoreSet>)
-            })
+            let double = backend_with_store_set(
+                seed,
+                config,
+                lash_restate_test::DeploymentHooks::default(),
+                |clock| async {
+                    Ok(Arc::new(PostgresStoreSet::with_clock(
+                        &storage,
+                        Arc::new(lash::persistence::FileAttachmentStore::new(
+                            attachments.path(),
+                        )),
+                        lash_core::WakeDeliveryConfig::default(),
+                        clock,
+                    )) as Arc<dyn StoreSet>)
+                },
+            )
             .await
             .expect("PostgreSQL Restate double");
             Self {
@@ -65,21 +70,26 @@ impl Fixture {
             }
         } else {
             let mut uri = None;
-            let double = backend_with_store_set(seed, config, |clock| async {
-                let stores = Arc::new(
-                    SqliteStoreSet::memory_with_options_and_clock(
-                        SqliteStoreSetOptions {
-                            process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
-                            ..SqliteStoreSetOptions::memory()
-                        },
-                        clock,
-                    )
-                    .await
-                    .expect("SQLite stores"),
-                );
-                uri = Some(stores.database_uri(SqliteDatabase::DurableCore).to_owned());
-                Ok(stores as Arc<dyn StoreSet>)
-            })
+            let double = backend_with_store_set(
+                seed,
+                config,
+                lash_restate_test::DeploymentHooks::default(),
+                |clock| async {
+                    let stores = Arc::new(
+                        SqliteStoreSet::memory_with_options_and_clock(
+                            SqliteStoreSetOptions {
+                                process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
+                                ..SqliteStoreSetOptions::memory()
+                            },
+                            clock,
+                        )
+                        .await
+                        .expect("SQLite stores"),
+                    );
+                    uri = Some(stores.database_uri(SqliteDatabase::DurableCore).to_owned());
+                    Ok(stores as Arc<dyn StoreSet>)
+                },
+            )
             .await
             .expect("SQLite Restate double");
             Self {

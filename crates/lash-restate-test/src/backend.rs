@@ -209,9 +209,11 @@ pub async fn backend_with_segment_budget(
 /// The factory receives the clock moved by the server, so every storage port
 /// uses the same clock as the SQLite fixtures. Provision external storage
 /// before calling this constructor; opening the engine does not run DDL.
+/// `hooks` apply to its first deployment, just as in [`backend_with_build`].
 pub async fn backend_with_store_set<StoreFuture>(
     seed: u64,
     config: ServerConfig,
+    hooks: DeploymentHooks,
     make_stores: impl FnOnce(Arc<dyn lash_core::Clock>) -> StoreFuture,
 ) -> Result<RestateTestBackend<dyn StoreSet>, BackendError>
 where
@@ -221,7 +223,7 @@ where
         config.with_seed(seed),
         None,
         "",
-        DeploymentHooks::default(),
+        hooks,
         |clock| async {
             let stores = make_stores(clock).await?;
             Ok((Arc::clone(&stores), stores))
