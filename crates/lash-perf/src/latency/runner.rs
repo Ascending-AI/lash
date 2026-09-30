@@ -1204,7 +1204,7 @@ mod tests {
         let root = lash_core::TurnId::from("latency-probe-root");
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("open the in-memory store set");
+            .expect("open the SQLite in-memory store set");
         let factory = stores.session_store_factory();
         factory
             .admit_session(&lash_core::SessionStoreCreateRequest {

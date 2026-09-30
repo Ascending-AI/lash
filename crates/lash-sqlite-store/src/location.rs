@@ -239,7 +239,7 @@ pub(crate) fn validate_file_database_path(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
                 Some(format!(
                     "{component} requires a file-backed database path, got `{rendered}`; \
-                     use SqliteStoreSet::memory() for an in-memory store set"
+                     use SqliteStoreSet::memory() for a SQLite in-memory store set"
                 )),
             ),
         ));

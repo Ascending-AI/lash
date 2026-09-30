@@ -4,6 +4,10 @@ The norms file for how work in this repo is planned, tracked, decided, validated
 
 These files are repo-internal process guidance.
 
+[The test backend matrix](test-backends.md) names the current store and engine
+law targets, service recipes, upgrade tier and retirement commits. Consult it
+before writing acceptance criteria against a backend or host.
+
 ## The model in one paragraph
 
 Planning, tracking, and everything in-flight live in **Linear** (team `figments`, project `lash`; issues keyed `FIG-<n>`). The repo holds only **durable, code-facing artifacts**: decisions (`docs/adr/`), vocabulary (root `CONTEXT.md`), and agent-driven runbooks (`runbooks/`). The test for "belongs in the repo": *an agent needs it while touching code, at HEAD, offline.* Anything narrative, exploratory, or transient (research reports, plans, decision debates, status) belongs on a Linear issue, not in a repo file.

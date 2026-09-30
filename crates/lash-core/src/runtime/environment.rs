@@ -276,7 +276,7 @@ mod tests {
 
     /// An environment has no store port of its own: every port a runtime
     /// built from it reaches is its config's backend's (ADR 0102, D2), and
-    /// nothing falls back to an in-memory store.
+    /// every persistence port comes from the selected store set.
     #[tokio::test]
     async fn every_store_port_is_the_config_backends() {
         let backend = crate::testing::memory_store_backend().await;

@@ -57,7 +57,7 @@ async fn run_task_with_shutdown_witness(
     #[cfg(test)] recorder_origin: Option<String>,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
-    // Every run owns its world, telemetry, provider and in-memory stores. No
+    // Every run owns its world, telemetry, provider and SQLite memory stores. No
     // process environment is mutated; the HTTP recorder owns a task-local listener.
     let telemetry = Arc::new(crate::telemetry::Telemetry::default());
     let safe = |s: &str| {

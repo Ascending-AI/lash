@@ -521,16 +521,9 @@ pub trait DeploymentStore:
     /// and after receipt pruning. The permanent identity tombstone is exempt.
     /// No daemon, clock read or live policy lookup runs this operation.
     ///
-    /// The sweep is also the durable owner of deferred effect-scope
-    /// retirement (ADR 0049, ADR 0067): every session-free runtime-operation
-    /// scope whose operation has recorded its receipt and under which nothing
-    /// is live any more (no effect in progress, no group still waiting on a
-    /// child, no unresolved promise) is retired under the same fence the
-    /// receipt-time retirement takes, in this same transaction. A receipt
-    /// whose scope is still live is retained past the horizon so the proof
-    /// survives until the scope can go. Stores whose effect journal lives
-    /// elsewhere (the in-memory store, or a host that keeps its journal in
-    /// its own engine) retire nothing here.
+    /// SQL stores reclaim their retained storage evidence here. Effect scopes,
+    /// journal entries, groups and promises belong to Restate, so this sweep
+    /// does not retire engine scopes or decide whether an invocation is live.
     async fn reclaim_retained_evidence(
         &self,
         bound: crate::store::RetentionBound,

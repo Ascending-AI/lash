@@ -332,7 +332,7 @@ pub mod tools {
         facade_support::ToolSourcePolicy, facade_support::ToolStateEntry,
         facade_support::ToolSurfaceOpenMode,
     };
-    /// Runtime-owned tool-intent admission records used by process-registry integrators.
+    /// Engine-owned tool-intent admission records used by process-registry integrators.
     pub use lash_core::{ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord};
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{

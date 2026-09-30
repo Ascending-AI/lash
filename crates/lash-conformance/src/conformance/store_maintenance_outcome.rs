@@ -4,7 +4,7 @@
 //! pass, a *witnessed* nothing-to-do, a refusal that hands back its partial
 //! report, and a failure that is never laundered into a clean empty report.
 //!
-//! These laws exist because the four backends used to answer four different
+//! Historical, retired in 60e0e86b2a: these laws exist because the four backends used to answer four different
 //! ways: SQLite absorbed every error into a zero [`GcReport`], the in-memory
 //! store returned a zero report unconditionally, `lash-perf` returned a typed
 //! error, and Postgres propagated. All four were indistinguishable to a caller

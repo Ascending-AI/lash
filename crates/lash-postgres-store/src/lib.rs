@@ -216,7 +216,8 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // lease term to session lease rows. Older stores are rejected and recreated;
 // there is no compatibility read path.
 // Version 48 remains reserved by FIG-1133.
-// Version 51 adds durable runtime-owned tool-intent first-submission rows and
+// Historical, retired in 0417b7f48b: version 51 added runtime-owned
+// tool-intent first-submission rows and
 // process-parent teardown retention. Lash-managed version-50 stores take the
 // explicit 50 -> 51 creation-only migration at open.
 // Version 52 adds the attachment GC fence's per-digest condemnation table.
@@ -515,7 +516,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // whose redrive the session-state generation gate refused, which an older
 // build cannot decode. No relation changes; component-130 catalogs are
 // rejected and recreated.
-// Version 132 (FIG-3667) deletes the PostgreSQL effect engine: the eight
+// Retired in 4f03596847: version 132 (FIG-3667) deletes the PostgreSQL effect engine: the eight
 // engine tables (`lash_runtime_effect_group`, `lash_runtime_effect_group_child`,
 // `lash_runtime_effect_replay`, `lash_await_event_meta`,
 // `lash_await_event_waits`, `lash_await_event_revoked_sessions`,

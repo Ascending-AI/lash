@@ -940,8 +940,8 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
 }
 
 // ADR 0069: direct turns enter through the same durable acceptance the queued
-// ingress uses, so the in-memory store owes the same laws the durable backends
-// do.
+// ingress uses, so the Restate server double over SQLite memory
+// owes the same acceptance laws as the service-backed fixtures.
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {

@@ -533,8 +533,8 @@ mod tests {
         assert!(listed.contains(&first.id));
     }
 
-    // The same suite runs against the in-memory store, so both backends are held to one
-    // contract.
+    // The shared attachment-store suite also registers on SQLite and S3, so
+    // those implementations and the file store obey the same contract.
 
     /// The escape canary: a traversal id never reaches the store because it
     /// never becomes an `AttachmentId` in the first place. The canary file

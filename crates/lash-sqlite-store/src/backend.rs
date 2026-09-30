@@ -172,17 +172,17 @@ impl SqliteStoreSet {
         Self::assemble(location, identity, None, options, clock).await
     }
 
-    /// A fresh named in-memory store set. SQLite caps each memdb at 1 GiB.
+    /// A fresh named SQLite in-memory store set. SQLite caps each memdb at 1 GiB.
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
         Self::memory_with_clock(system_clock()).await
     }
 
-    /// A fresh named in-memory store set on `clock`.
+    /// A fresh named SQLite in-memory store set on `clock`.
     pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options_and_clock(SqliteStoreSetOptions::memory(), clock).await
     }
 
-    /// A fresh named in-memory store set with explicit options and clock.
+    /// A fresh named SQLite in-memory store set with explicit options and clock.
     pub async fn memory_with_options_and_clock(
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,

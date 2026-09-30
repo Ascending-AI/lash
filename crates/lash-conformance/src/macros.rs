@@ -699,8 +699,8 @@ macro_rules! effect_group_cancelled_child_terminal_tests {
 
 /// The fixture yields `(guard, make, witness, make_foreign)`: the witness is
 /// how this host proves its active-wait registration before the quiescence
-/// law asks for retirement (`effect_host_journaled_wait_registration_witness`
-/// for a store journal), and `make_foreign` builds a host over another
+/// law asks for retirement, through the server double's wait registration
+/// or a live Restate handler, and `make_foreign` builds a host over another
 /// substrate, whose registry did not mint this host's keys.
 #[macro_export]
 macro_rules! effect_host_await_event_tests {

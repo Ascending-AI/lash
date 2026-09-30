@@ -471,6 +471,8 @@ jobs:
           python3 scripts/test_bazel_source_ownership.py
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
+          python3 scripts/check_retired_terms.py
+          python3 scripts/test_check_retired_terms.py
           python3 scripts/check_outcome_suffixes.py
           python3 scripts/test_check_outcome_suffixes.py
           python3 scripts/check_adr_current.py

@@ -68,7 +68,8 @@ or Restate `scope_effect_begin`. The graph test must produce distinct addresses 
 local replay keys in different scopes. The header tests must show a required `address` and no
 universal `subject` or optional duplicate `replay` slot, while refusing the old shape.
 
-Run the durable host contracts against fresh storage. Since the SQL effect engine's removal
+Run the durable host contracts against fresh storage. The SQL effect engine was
+retired in `476264fbea`; since its removal
 the shared `effect_controller_` conformance family mounts only on Restate's in-process
 recording context; the SQLite conformance binary keeps no effect-controller laws:
 

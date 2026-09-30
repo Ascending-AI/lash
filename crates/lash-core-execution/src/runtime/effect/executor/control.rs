@@ -699,9 +699,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// Drains are admitted in final-commit order, so the caller emits its
     /// nested semantic commands only once this resolves. The barrier is
     /// lifted by a sibling's drain, never by time, and the wait is the
-    /// host's: a store-backed host parks on its journal's change
-    /// notification for the group, and an engine-backed host on the engine's
-    /// own durable wake for each blocking sibling's seat. Nothing here sleeps
+    /// engine's durable wake for the blocking sibling seats. Nothing here sleeps
     /// on a clock. The default refuses on the same grounds as
     /// [`commit_group_child_final`](Self::commit_group_child_final): a
     /// controller that cannot answer the durable barrier cannot order drains

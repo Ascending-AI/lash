@@ -290,9 +290,8 @@ where
 /// context before an AwaitEvent can be awaited.
 ///
 /// The witness establishes the active-wait law's registration boundary the
-/// way the host can prove it: [`effect_host_journaled_wait_registration_witness`]
-/// for a store journal, the scheduler for the in-process host, and an engine
-/// marker for a durable engine, where starting an ingress task does not
+/// way the host can prove it: a server-double wait-registration witness or
+/// a live Restate handler marker, where starting an ingress task does not
 /// itself prove that the remote wait registration committed. The witness must
 /// establish that registration through the implementation's real await path
 /// before asserting the shared retirement behavior.
@@ -1327,9 +1326,9 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
 /// scope. That is the one memory-versus-durable differential in quiescence
 /// (ADR 0049), and a law over the dropped case would assert two answers.
 ///
-/// This is the in-process host's witness: its waiter parks in memory on its
-/// first poll, with no I/O to wait for. A host that journals the wait uses
-/// [`effect_host_journaled_wait_registration_witness`].
+/// This helper holds a live waiter for a recording fixture. A Restate
+/// fixture supplies its wait-registration witness through
+/// `effect_host_await_events_with_active_wait_witness`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

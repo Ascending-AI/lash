@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{InMemoryLiveReplayStore, SessionObservationEvent};
 
 impl InMemoryLiveReplayStore {
-    /// Reopen this in-memory store over the same preserved replay history.
+    /// Reopen this process-local observation buffer over the same preserved replay history.
     ///
     /// The returned handle deliberately keeps both the replay incarnation and
     /// shared event buffers. Test and conformance code must construct a fresh

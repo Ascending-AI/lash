@@ -1022,7 +1022,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// `attempts` — and the catalog gains `turn_park_clock`, the feed's sequence
 /// row, and `turn_park_events`, the durable ledger of park transitions. A
 /// pre-87 database is rejected at open and recreated.
-/// Bumped to 88 for FIG-3585: the durable `RuntimeErrorCode` vocabulary drops
+/// Historical, retired in 60e0e86b2a: bumped to 88 for FIG-3585: the durable `RuntimeErrorCode` vocabulary drops
 /// `runtime_perf_start_gate_retry` and `tool_completion_key_process_lifetime`,
 /// and the durable core no longer carries the await-event tables that
 /// store-delegated turn control used (the effect-replay database keeps its

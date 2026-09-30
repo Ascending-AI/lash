@@ -4,7 +4,7 @@ use lash_core::testing::TestTurnDrive as _;
 const SEED: u64 = 0x5_c0aa;
 
 /// A layer whose controllers own commit backpressure exactly when `ENGINE`,
-/// the way an engine-backed controller does, over a store-journaled host.
+/// the way an engine-backed controller does, over the Restate server double.
 struct JournaledCommitController<const ENGINE: bool>;
 
 impl<const ENGINE: bool> lash_core::testing::EffectLayer for JournaledCommitController<ENGINE> {

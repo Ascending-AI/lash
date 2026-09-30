@@ -18,8 +18,8 @@ impl SimulationTrace {
     /// The projection intentionally omits provider-wire `ProviderEvent`
     /// fragments; those remain in `SimulationTrace::events`. Durable-write lines
     /// cover commits made through observed session-store factories. Lash-core's
-    /// `DurableProcessWorker` task body uses a bare in-memory store, so its
-    /// internal checkpoint commits are not represented here.
+    /// `DurableProcessWorker` uses the engine's SQLite memory store set directly,
+    /// so commits that bypass the observed factory are not represented here.
     pub fn render_transcript(&self) -> String {
         build(self, None).render()
     }

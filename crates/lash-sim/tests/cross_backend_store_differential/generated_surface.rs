@@ -1,11 +1,10 @@
 //! The generated cross-backend store differential: a fixed operation stream
-//! is applied to a SQLite file store and a PostgreSQL store, and their
+//! is applied to SQLite memory, SQLite file and PostgreSQL stores, and their
 //! durable storage rows are compared after every step.
 //!
 //! It compares storage surfaces only. Under ADR 0104 (FIG-3664) Restate is
-//! the only effect engine: the PostgreSQL engine is deleted (FIG-3667) and the
-//! SQLite engine is being deleted (FIG-3668), so the SQL effect-engine
-//! operations — effect
+//! the only effect engine. The SQL effect-engine path was retired in
+//! 476264fbea, after the PostgreSQL engine deletion in 4f03596847. Effect
 //! records, tool-intent batches, await-event resolution and revocation,
 //! runtime-operation journaling and retirement, and the whole effect-group
 //! lifecycle — are not part of this surface.
