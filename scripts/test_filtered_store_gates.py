@@ -236,9 +236,11 @@ class FilteredRunnerTests(Fixture):
 
 class StoreGateTests(Fixture):
     SUITES = {
-        "pg-pool-wait": "postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads",
-        "s3-attachment-differential": "attachment_blob_store_differential_agrees",
-        "pg-rlm-frame-open": "restate_double_postgres::law",
+        "pg-catalog-compatibility": ["committed_shape_artifact_matches_the_ddl_artifact",
+                                     "a_compatible_expansion_still_reports_column_drift"],
+        "pg-pool-wait": ["postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads"],
+        "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
+        "pg-rlm-frame-open": ["restate_double_postgres::law"],
     }
 
     def test_ci_cache_configuration_is_required_on_both_trust_paths(self):
@@ -255,26 +257,29 @@ class StoreGateTests(Fixture):
                 self.assert_failed(self.gate(suite), "no executable tests matched the runner arguments")
 
     def test_missing_bazel_execution_reports_fail(self):
-        self.env.update(FIXTURE_CASES=json.dumps([[self.SUITES["pg-pool-wait"], False]]), FIXTURE_NO_EVENTS="1")
+        self.env.update(FIXTURE_CASES=json.dumps([[name, False] for name in self.SUITES["pg-pool-wait"]]),
+                        FIXTURE_NO_EVENTS="1")
         self.assert_failed(self.gate("pg-pool-wait"),
                            "no non-ignored test execution observed in the selected shard union")
 
     def test_pg_ignored_only_selection_fails(self):
-        self.env["FIXTURE_CASES"] = json.dumps([[self.SUITES["pg-pool-wait"], True]])
+        self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in self.SUITES["pg-pool-wait"]])
         self.assert_failed(self.gate("pg-pool-wait"), "no executable tests matched the runner arguments")
 
     def test_pg_s3_restate_empty_shard_union_fails(self):
-        for suite, name in self.SUITES.items():
+        for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                self.env.update(FIXTURE_CASES=json.dumps([[name, suite != "pg-pool-wait"]]),
+                ignored = suite not in ("pg-pool-wait", "pg-catalog-compatibility")
+                self.env.update(FIXTURE_CASES=json.dumps([[name, ignored] for name in names]),
                                 FIXTURE_EMPTY_EXECUTION="1")
                 self.assert_failed(self.gate(suite),
                                    "no non-ignored test execution observed in the selected shard union")
 
     def test_pg_s3_restate_one_case_union_with_empty_shard_passes(self):
-        for suite, name in self.SUITES.items():
+        for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                self.env["FIXTURE_CASES"] = json.dumps([[name, suite != "pg-pool-wait"]])
+                ignored = suite not in ("pg-pool-wait", "pg-catalog-compatibility")
+                self.env["FIXTURE_CASES"] = json.dumps([[name, ignored] for name in names])
                 result = self.gate(suite)
                 self.assert_passed(result)
                 self.assertIn("PASS: 1 non-ignored test executions across 2 test results", result.stdout)
@@ -283,7 +288,7 @@ class StoreGateTests(Fixture):
 class CargoStoreGateTests(Fixture):
     SUITES = {
         "pg-catalog-compatibility": ["committed_shape_artifact_matches_the_ddl_artifact",
-                                     "a_mismatched_version_stamp_is_reported_without_a_column_diff"],
+                                     "a_compatible_expansion_still_reports_column_drift"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
         "pg-rlm-frame-open": ["restate_double_postgres::law"],
     }

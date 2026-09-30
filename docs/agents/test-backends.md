@@ -19,7 +19,7 @@ when naming the gates for a new law.
 PostgreSQL 16 is the primary law lane. PostgreSQL 14 and 18 bracket catalog
 compatibility; they run `pg-catalog-compatibility`, which selects
 `committed_shape_artifact_matches_the_ddl_artifact` and
-`a_mismatched_version_stamp_is_reported_without_a_column_diff`, rather than
+`a_compatible_expansion_still_reports_column_drift`, rather than
 repeating every law.
 `scripts/ci_plan.py` selects these additional majors for schema changes on merge
 groups and for dispatches. The commands and test selection live in
