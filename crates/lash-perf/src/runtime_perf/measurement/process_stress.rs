@@ -175,17 +175,15 @@ pub(super) async fn run_once_process_list_stress(
                     registry
                         .append_event(
                             &signal_process_id,
-                            lash_core::ProcessEventAppendRequest::new(
-                                signal_event_type.clone(),
-                                serde_json::json!({ "turn": turn_index, "n": signal_index }),
-                            )
-                            .with_replay_key(
-                                lash_core::facade_support::process_signal_wait_key(
-                                    &signal_process_id,
+                            lash_core::ProcessSignal::new(
+                                lash_core::ProcessSignalIdentity::new(
+                                    signal_process_id.clone(),
                                     "stress",
                                     format!("{turn_index}:{signal_index}"),
-                                ),
-                            ),
+                                )?,
+                                serde_json::json!({ "turn": turn_index, "n": signal_index }),
+                            )
+                            .append_request(),
                         )
                         .await?;
                 }

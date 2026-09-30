@@ -19,6 +19,7 @@ use super::model::{
 pub fn validate_generic_process_event_append(
     request: &ProcessEventAppendRequest,
 ) -> Result<(), PluginError> {
+    validate_process_signal_append(request)?;
     // The effect summary is runtime-owned: only an execution-authority append
     // may write it, so a host cannot pre-empt the runtime's replay key.
     if matches!(
@@ -39,6 +40,24 @@ pub fn validate_generic_process_event_append(
             | "process.parked"
             | "process.park_rerun_began"
     ) {
+        return Err(PluginError::ReservedProcessEvent {
+            event_type: request.event_type.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_process_signal_append(request: &ProcessEventAppendRequest) -> Result<(), PluginError> {
+    let valid = match &request.signal_identity {
+        Some(identity) => {
+            request.event_type == identity.event_type()
+                && request.replay.as_ref().map(|replay| replay.key.as_str())
+                    == Some(identity.append_key().as_str())
+                && !request.wake_suppressed
+        }
+        None => !request.event_type.starts_with("signal."),
+    };
+    if !valid {
         return Err(PluginError::ReservedProcessEvent {
             event_type: request.event_type.clone(),
         });
@@ -725,6 +744,16 @@ pub fn prepare_process_event_append(
     fleet_format: crate::FleetFormat,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = &record.id;
+    validate_process_signal_append(&request)?;
+    if request
+        .signal_identity
+        .as_ref()
+        .is_some_and(|identity| identity.process_id() != process_id)
+    {
+        return Err(PluginError::ReservedProcessEvent {
+            event_type: request.event_type.clone(),
+        });
+    }
     let wake_suppressed = request.wake_suppressed;
     if ProcessEventKind::from_event_type(&request.event_type) == ProcessEventKind::UnknownRuntime {
         return Err(PluginError::ReservedProcessEvent {

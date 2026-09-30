@@ -2492,14 +2492,12 @@ impl crate::ProcessService for MockSessionManager {
         payload: serde_json::Value,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, PluginError> {
-        let event_type = crate::process_signal_event_type(&signal_name)?;
+        let signal = crate::ProcessSignal::new(
+            crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
+            payload,
+        );
         self.registry()?
-            .append_event(
-                process_id,
-                crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-                    crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
-                ),
-            )
+            .append_event(process_id, signal.append_request())
             .await
             .map(|result| result.event)
     }

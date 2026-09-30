@@ -16,6 +16,28 @@ mod observer_transfer;
 mod parent_end;
 mod registration;
 mod signal_admission;
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture uses valid signal identities"
+)]
+fn signal_request(
+    process_id: &ProcessId,
+    name: &str,
+    signal_id: &str,
+    payload: serde_json::Value,
+) -> ProcessEventAppendRequest {
+    lash_core::ProcessSignal::new(
+        lash_core::ProcessSignalIdentity::new(process_id.clone(), name, signal_id)
+            .expect("valid fixture signal identity"),
+        payload,
+    )
+    .append_request()
+}
+
+pub async fn raw_signal_appends_are_refused(registry: Arc<dyn ProcessRegistry>) {
+    signal_admission::raw_signal_appends_are_refused(registry).await;
+}
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
 pub use registration::{
@@ -1172,11 +1194,12 @@ async fn refolded_process_record_matches_stored_projection(
         .await
         .expect("set refold external reference");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "external ref set").await;
-    let signal =
-        ProcessEventAppendRequest::new("signal.ready", serde_json::json!({"signal": "ready"}))
-            .with_replay_key(lash_core::runtime::process_signal_wait_key(
-                process_id, "ready", 1,
-            ));
+    let signal = signal_request(
+        process_id,
+        "ready",
+        "1",
+        serde_json::json!({"signal": "ready"}),
+    );
     let first_signal = writer
         .append_event(process_id, signal.clone())
         .await
@@ -1194,7 +1217,12 @@ async fn refolded_process_record_matches_stored_projection(
     writer
         .append_event_with_authority(
             process_id,
-            ProcessEventAppendRequest::new("signal.ready", serde_json::json!("authorized append")),
+            signal_request(
+                process_id,
+                "ready",
+                "authorized",
+                serde_json::json!("authorized append"),
+            ),
             &authority,
         )
         .await
@@ -1204,8 +1232,18 @@ async fn refolded_process_record_matches_stored_projection(
         .append_events(
             process_id,
             vec![
-                ProcessEventAppendRequest::new("signal.ready", serde_json::json!("batch first")),
-                ProcessEventAppendRequest::new("signal.ready", serde_json::json!("batch second")),
+                signal_request(
+                    process_id,
+                    "ready",
+                    "batch-first",
+                    serde_json::json!("batch first"),
+                ),
+                signal_request(
+                    process_id,
+                    "ready",
+                    "batch-second",
+                    serde_json::json!("batch second"),
+                ),
             ],
             &authority,
         )
@@ -1284,7 +1322,7 @@ async fn refolded_process_record_matches_stored_projection(
             .registry()
             .append_event(
                 process_id,
-                ProcessEventAppendRequest::new("signal.ready", serde_json::json!("failed"))
+                signal_request(process_id, "ready", "failed", serde_json::json!("failed"))
             )
             .await
             .is_err()
@@ -1308,7 +1346,12 @@ async fn refolded_process_record_matches_stored_projection(
         .registry()
         .append_event(
             process_id,
-            ProcessEventAppendRequest::new("signal.ready", serde_json::json!("committed")),
+            signal_request(
+                process_id,
+                "ready",
+                "committed",
+                serde_json::json!("committed"),
+            ),
         )
         .await
         .expect("positive publication control");
@@ -1318,8 +1361,10 @@ async fn refolded_process_record_matches_stored_projection(
         .complete_process_with_prelude(
             process_id,
             settled_success(serde_json::json!({"refolded": true})),
-            vec![ProcessEventAppendRequest::new(
-                "signal.ready",
+            vec![signal_request(
+                process_id,
+                "ready",
+                "terminal-prelude",
                 serde_json::json!("terminal prelude"),
             )],
             ProcessCompletionAuthority::workflow_key(format!("refold:{process_id}")),
@@ -1841,7 +1886,7 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         registry
             .append_event(
                 &process_id,
-                ProcessEventAppendRequest::new("signal.after-prune", serde_json::Value::Null,),
+                signal_request(&process_id, "after-prune", "1", serde_json::Value::Null),
             )
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
@@ -2203,11 +2248,11 @@ pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
         .await
         .expect("register typed signal");
     for (name, payload, reason) in [
-        ("signal.missing", serde_json::json!(1), "undeclared"),
-        ("signal.ready", serde_json::json!("invalid"), "invalid"),
+        ("missing", serde_json::json!(1), "undeclared"),
+        ("ready", serde_json::json!("invalid"), "invalid"),
     ] {
         let error = registry
-            .append_event(&base.id, ProcessEventAppendRequest::new(name, payload))
+            .append_event(&base.id, signal_request(&base.id, name, "refused", payload))
             .await
             .expect_err("signal refused");
         assert!(
@@ -2229,9 +2274,7 @@ pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
                 .is_empty()
         );
     }
-    let key = lash_core::runtime::process_signal_wait_key(&base.id, "ready", 1);
-    let request =
-        ProcessEventAppendRequest::new("signal.ready", serde_json::json!(7)).with_replay_key(key);
+    let request = signal_request(&base.id, "ready", "1", serde_json::json!(7));
     let first = registry
         .append_event(&base.id, request.clone())
         .await
@@ -2267,10 +2310,7 @@ pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
         registry
             .append_event(
                 &base.id,
-                ProcessEventAppendRequest::new("signal.ready", serde_json::json!(8))
-                    .with_replay_key(lash_core::runtime::process_signal_wait_key(
-                        &base.id, "ready", 2
-                    ))
+                signal_request(&base.id, "ready", "2", serde_json::json!(8))
             )
             .await,
         Err(PluginError::ProcessAlreadyTerminal {

@@ -666,8 +666,11 @@ impl ProcessSignal {
     /// append key its identity derives. A signal is news to the process's
     /// session, so its wake is never suppressed.
     pub fn append_request(&self) -> ProcessEventAppendRequest {
-        ProcessEventAppendRequest::new(self.identity.event_type(), self.payload.clone())
-            .with_replay_key(self.identity.append_key())
+        let mut request =
+            ProcessEventAppendRequest::new(self.identity.event_type(), self.payload.clone())
+                .with_replay_key(self.identity.append_key());
+        request.signal_identity = Some(self.identity.clone());
+        request
     }
 }
 
@@ -881,6 +884,10 @@ pub struct ProcessEventAppendRequest {
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<crate::RuntimeReplay>,
+    /// Retained by `ProcessSignal::append_request` so every store append can
+    /// validate the signal's target, event type and identity-derived key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) signal_identity: Option<ProcessSignalIdentity>,
     /// A wake is what a process *says to the session*, and the default is to
     /// say it. An append sets this when the fact it records is not news to the
     /// session: the runtime's own announcement of a call the session is already
@@ -908,6 +915,7 @@ impl ProcessEventAppendRequest {
             event_type: event_type.into(),
             payload,
             replay: None,
+            signal_identity: None,
             wake_suppressed: false,
         }
     }

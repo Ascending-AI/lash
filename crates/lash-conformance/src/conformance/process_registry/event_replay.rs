@@ -14,20 +14,17 @@ pub(super) async fn canonical_process_event_payload_replay(registry: Arc<dyn Pro
         .await
         .expect("register canonical-payload process")
         .id;
-    let replay_key = lash_core::runtime::process_signal_wait_key(&process_id, "zero", 1);
     let first = registry
         .append_event(
             &process_id,
-            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": -0.0}))
-                .with_replay_key(&replay_key),
+            signal_request(&process_id, "zero", "1", serde_json::json!({"value": -0.0})),
         )
         .await
         .expect("append negative-zero payload");
     let replay = registry
         .append_event(
             &process_id,
-            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": 0.0}))
-                .with_replay_key(replay_key),
+            signal_request(&process_id, "zero", "1", serde_json::json!({"value": 0.0})),
         )
         .await
         .expect("canonical positive-zero retry must be idempotent");
