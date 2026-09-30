@@ -322,7 +322,13 @@ def cancellation_census(samples, owned, disappeared):
 
 
 def collection_gaps(run, sample_errors, normalized_faults):
-    """Attribute only failed periodic observations definitely inside a matching fault."""
+    """Attribute only periodic gaps definitely inside a matching fault.
+
+    A failed observation happened at its instant, which must lie in the window.
+    A counter epoch transition happened at an unknown point after the last
+    old-epoch observation and no later than the first new-epoch one; that
+    interval must meet the window, so a reset first seen after recovery is
+    still the fault's, and one wholly before or after it is not."""
     phases = defaultdict(dict)
     for row in normalized_faults:
         if row['kind'] != 'campaign':
@@ -347,9 +353,16 @@ def collection_gaps(run, sample_errors, normalized_faults):
         require(row['run'] == run['run'], 'mixed sample error run identities')
         require(type(row['monotonic_ns']) is int and row['monotonic_ns'] >= 0,
                 'invalid sample error timestamp')
+        if row['record'] == 'counter_gap':
+            require(type(row['previous_observed_ns']) is int
+                    and 0 <= row['previous_observed_ns'] < row['monotonic_ns'],
+                    'invalid counter gap interval')
+            inside = lambda start, end: row['previous_observed_ns'] < end and start <= row['monotonic_ns']
+        else:
+            inside = lambda start, end: start <= row['monotonic_ns'] <= end
         matches = [window for window in windows
                    if run.get('fault_campaign', False) and row.get('sample_kind') == 'periodic'
-                   and window['window_ns'][0] <= row['monotonic_ns'] <= window['window_ns'][1]
+                   and inside(*window['window_ns'])
                    and row.get('target') in window['targets']]
         attribution = {'status': 'UNATTRIBUTED'}
         if len(matches) == 1:

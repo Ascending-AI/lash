@@ -712,14 +712,49 @@ class MeasurementsTests(unittest.TestCase):
         self.assertEqual(result['counters']['worker_usage_usec']['epoch_gaps'], 1)
         self.assertEqual(result['counters']['worker_usage_usec']['fault_attributed_epoch_gaps'], 1)
 
+    def test_counter_epoch_reset_first_observed_after_its_window_is_attributed(self):
+        # The restart resets the counter inside the window; the first sample of
+        # the new epoch lands after recovery. The unobserved interval, not the
+        # observation instant, is when the transition happened.
+        fixture = self.epoch_campaign()
+        fixture[2][1].update(monotonic_ns=120000, collection_finished_ns=125000)
+        fixture[2][1]['workers'][0]['observed_ns'] = 108001
+        fixture[2][-1].update(monotonic_ns=130000, collection_finished_ns=135000)
+        result = self.gap_summary(fixture)
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        gaps = [row for row in result['collection_gaps'] if row['record'] == 'counter_gap']
+        self.assertEqual(len(gaps), 4)
+        for gap in gaps:
+            self.assertEqual((gap['previous_observed_ns'], gap['monotonic_ns']), (5000, 108001))
+            self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
+            self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+            self.assertEqual(gap['attribution']['window_ns'], [52000, 108000])
+            self.assertIsNone(gap['unobserved_delta'])
+            self.assertFalse(gap['complete'])
+
     def test_unfaulted_or_outside_counter_epoch_gap_raises_with_evidence(self):
-        for outside in [True, False]:
-            with self.subTest(outside=outside):
+        for case in ['after', 'before', 'target']:
+            with self.subTest(case=case):
                 fixture = self.epoch_campaign()
-                if outside:
-                    fixture[2][1].update(monotonic_ns=120000, collection_finished_ns=125000)
-                    fixture[2][1]['workers'][0]['observed_ns'] = 121000
-                    fixture[2][-1].update(monotonic_ns=130000, collection_finished_ns=135000)
+                samples = fixture[2]
+                if case == 'after':
+                    # The old epoch is still observed at the window's end, so
+                    # the reset happened after recovery.
+                    seen = copy.deepcopy(samples[0])
+                    seen.update(monotonic_ns=100000, collection_finished_ns=101000)
+                    seen['workers'][0]['observed_ns'] = 108000
+                    for node in seen['restate']:
+                        node['metrics_observed_ns'] = 100000
+                    samples.insert(1, seen)
+                    samples[2].update(monotonic_ns=120000, collection_finished_ns=125000)
+                    samples[2]['workers'][0]['observed_ns'] = 121000
+                    for node in samples[2]['restate']:
+                        node['metrics_observed_ns'] = 122000
+                    samples[-1].update(monotonic_ns=130000, collection_finished_ns=135000)
+                elif case == 'before':
+                    # The new epoch is already observed before injection.
+                    samples[1].update(monotonic_ns=50000, collection_finished_ns=51000)
+                    samples[1]['workers'][0]['observed_ns'] = 51999
                 else:
                     fixture[-3][0]['detail_json'] = json.dumps({'collection_targets': [
                         {'component': 'worker', 'endpoint': 'other-worker'}]})
