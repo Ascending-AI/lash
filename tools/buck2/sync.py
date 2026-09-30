@@ -128,6 +128,13 @@ def git_blob_identity(path: pathlib.Path) -> str:
     return "git:" + hashlib.sha1(header + content).hexdigest()
 
 
+def rust_generation_identity(path: pathlib.Path) -> str:
+    # Cargo discovers targets from paths, not Rust bodies. The generator reads
+    # bodies only to supply CARGO_BIN_EXE_* inputs to target entry points.
+    markers = sorted(set(re.findall(r"CARGO_BIN_EXE_[A-Za-z0-9_-]+", path.read_text())))
+    return "cargo-bin-env:" + digest_bytes("\0".join(markers).encode())
+
+
 def is_content_input(relative: str) -> bool:
     return (
         relative.rsplit("/", 1)[-1] in {"Cargo.toml", "Cargo.lock", "clippy.toml"}
@@ -168,7 +175,9 @@ def input_identity(generated_paths: set[str]) -> dict[str, str]:
     indexed = index_blobs()
     changed = worktree_changes()
     result = {
-        relative: indexed[relative]
+        relative: rust_generation_identity(ROOT / relative)
+        if relative.endswith(".rs")
+        else indexed[relative]
         if relative in indexed and relative not in changed
         else git_blob_identity(ROOT / relative)
         for relative in relatives
@@ -195,7 +204,7 @@ def receipt_payload(outputs: dict[pathlib.Path, str]) -> dict:
 
 
 def receipt_is_current() -> bool:
-    """Accept the fast path only when every input and output is byte-exact."""
+    """Accept only unchanged generator inputs and byte-exact outputs."""
     try:
         receipt = json.loads(RECEIPT.read_text(encoding="utf-8"))
         if receipt.get("schema") != 1:
