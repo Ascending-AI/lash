@@ -75,7 +75,7 @@ impl Witness {
 }
 
 /// `put_blob({ text })` stores `text` as an attachment and returns it;
-/// `hold({})` parks the cell until the law releases it;
+/// `hold({})` parks the cell until released or cooperatively cancelled;
 /// `declare_external({})` declares one externally owned child and parks on
 /// its terminal; `start_turn_child({ text })` stores `text` and starts a
 /// detached SessionTurn child whose turn input carries it, answering only
@@ -318,12 +318,20 @@ impl ToolProvider for BlobTools {
             HOLD => {
                 self.witness.holds.fetch_add(1, Ordering::SeqCst);
                 self.witness.held.notify_waiters();
-                self.witness
-                    .release
-                    .acquire()
-                    .await
-                    .expect("the release semaphore stays open")
-                    .forget();
+                let release = self.witness.release.acquire();
+                let permit = if let Some(stop) = call.context.cancellation_token() {
+                    tokio::select! {
+                        biased;
+                        _ = stop.cancelled() => {
+                            return lash_core::ToolOutcome::cancelled("the held tool was cancelled")
+                                .into();
+                        }
+                        permit = release => permit,
+                    }
+                } else {
+                    release.await
+                };
+                permit.expect("the release semaphore stays open").forget();
                 lash_core::ToolOutcome::ok(serde_json::json!({ "released": true }))
             }
             other => lash_core::ToolOutcome::err_fmt(format!("unknown law tool `{other}`")),
@@ -1313,6 +1321,15 @@ finish(handle.process_id);"
 /// while it runs keeps its record's edges until it is terminal and pruned.
 #[tokio::test]
 async fn a_cancelled_child_keeps_its_puts_until_pruned() {
+    cancelled_child_keeps_its_puts_until_pruned(false).await;
+}
+
+#[tokio::test]
+async fn a_cancelled_child_keeps_its_puts_until_pruned_with_cancel_contention() {
+    cancelled_child_keeps_its_puts_until_pruned(true).await;
+}
+
+async fn cancelled_child_keeps_its_puts_until_pruned(delay_cancellation: bool) {
     let fixture = Fixture::new(0x4215_0102).await;
     let witness = Witness::new();
     let text = "cancelled-child-put";
@@ -1344,25 +1361,58 @@ finish(handle.process_id);"
 finish(cancelled.status);",
         engine.to_string()
     )));
-    // The cancel is requested while the child still holds; the hold is
-    // released after, so the child ends through its cancellation.
-    let cancelling = {
-        let session = session.clone();
-        tokio::spawn(async move {
-            session
-                .send(TurnInput::text("cancel the running child"))
-                .output()
-                .await
-        })
+    let cancellation_hold = if delay_cancellation {
+        Some(
+            fixture
+                .double
+                .server()
+                .hold_service(&fixture.double.service_name("LashTurn"))
+                .await,
+        )
+    } else {
+        None
     };
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    witness.release_one();
-    let cancelling = cancelling
+    let cancelling = session
+        .send(TurnInput::text("cancel the running child"))
         .await
-        .expect("the cancelling task")
-        .expect("the cancelling turn");
+        .expect("accept the cancelling input");
+    if let Some(hold) = cancellation_hold {
+        let held = core
+            .process_registry()
+            .get_process(&engine)
+            .await
+            .expect("read the held child")
+            .expect("the child is retained");
+        assert!(held.status.is_live(), "held child: {held:?}");
+        assert!(held.cancel_request.is_none(), "held child: {held:?}");
+        assert_eq!(referrers(&fixture, &id).await, vec![record.clone()]);
+        hold.release();
+    }
+    // The turn proves durable cancel admission; the terminal below proves the
+    // held tool observed cancellation before the law releases it.
+    let cancelling = cancelling.output().await.expect("the cancelling turn");
     assert!(cancelling.is_success(), "cancelling turn: {cancelling:?}");
+    let admitted = core
+        .process_registry()
+        .get_process(&engine)
+        .await
+        .expect("read the cancellation")
+        .expect("the child is retained");
+    assert!(admitted.cancel_request.is_some(), "child: {admitted:?}");
     process_terminal(&core, &engine).await;
+    let terminal = core
+        .process_registry()
+        .get_process(&engine)
+        .await
+        .expect("read the terminal child")
+        .expect("the child is retained until prune");
+    assert_eq!(terminal.status, lash_core::ProcessStatus::Cancelled);
+    witness.release_one();
+    assert!(blob_present(&fixture, &id).await);
+    eprintln!(
+        "seed=0x4215_0102, cancel_contention={delay_cancellation}, child={:?}",
+        terminal.status
+    );
     assert_eq!(
         referrers(&fixture, &id).await,
         vec![record],
