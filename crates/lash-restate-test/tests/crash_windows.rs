@@ -197,7 +197,7 @@ impl Engine {
         }
     }
 
-    /// Wait until the server has nothing left to run.
+    /// Wait until the server is quiescent, including invocations blocked on a wait.
     async fn settle(&self) {
         match self {
             Self::Double(backend) => backend.server().settle().await,
@@ -207,6 +207,31 @@ impl Engine {
                     .await;
             }
         }
+    }
+
+    /// Terminal publication precedes the final segment's journaled acknowledgment.
+    async fn completed_process_invocations(&self, id: &ProcessId) -> Vec<Invocation> {
+        let target = format!("{PROCESS_WORKFLOW}/{id}");
+        let mut invocations = Vec::new();
+        let completed = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                invocations = self.invocations(&target).await;
+                if !invocations.is_empty()
+                    && invocations
+                        .iter()
+                        .all(|invocation| invocation.status == "completed")
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        })
+        .await;
+        assert!(
+            completed.is_ok(),
+            "process {id}'s invocations did not complete: {invocations:?}"
+        );
+        invocations
     }
 
     /// Every invocation whose target contains `needle`.

@@ -287,15 +287,8 @@ async fn across_wait(
         settled.first_started, at_wait.first_started,
         "recovery keeps the original process owner and start marker"
     );
-    engine.settle().await;
-    let runs = engine
-        .invocations(&format!("{PROCESS_WORKFLOW}/{id}"))
-        .await;
+    let runs = engine.completed_process_invocations(&id).await;
     let segments = runs.iter().filter(|i| i.target.ends_with("/run")).count();
-    assert!(
-        runs.iter().all(|i| i.status == "completed"),
-        "all process work settles: {runs:?}"
-    );
     terminal_fact_is_settled(&engine, &id).await;
     engine.finish().await;
     lash_conformance::SegmentBudgetObservation {
@@ -357,6 +350,120 @@ async fn live_restate_segment_budget_and_continuation_preserve_results_across_wa
         },
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_completion_wait_tracks_only_owned_invocations() {
+    use std::future::{Future as _, poll_fn};
+    use std::task::Poll;
+
+    for replay in [false, true] {
+        let blocked = Arc::new(Mutex::new(None::<String>));
+        let refuses = Arc::clone(&blocked);
+        let backend = lash_restate_test::backend_with_build(
+            0x4243,
+            ServerConfig::default()
+                .always_replay(replay)
+                .time(lash_restate_test::TimeMode::Manual),
+            "publication-cut",
+            lash_restate_test::DeploymentHooks {
+                served: None,
+                refuse: Some(Arc::new(move |dispatch| {
+                    (dispatch.service == PROCESS_WORKFLOW
+                        && dispatch.handler == "run"
+                        && refuses.lock().unwrap().as_deref() == dispatch.key.as_deref())
+                    .then_some(lash_restate_test::Refusal::Retryable)
+                })),
+            },
+        )
+        .await
+        .expect("manual recovery backend");
+        let on_crash = Arc::clone(&blocked);
+        assert!(backend.server().on_crash(Arc::new(move |target| {
+            *on_crash.lock().unwrap() = Some(
+                target
+                    .strip_prefix(&format!("{PROCESS_WORKFLOW}/"))
+                    .and_then(|target| target.strip_suffix("/run"))
+                    .expect("the cut targets a process run")
+                    .to_owned(),
+            );
+        })));
+        let engine = Engine::Double(backend.clone());
+        let executions = Arc::new(AtomicUsize::new(0));
+        let core = process_core(&engine, &executions);
+        engine.install_process_worker(worker(&core));
+        engine.crash_on(
+            CrashRule::new(CrashPoint::BeforeRun {
+                name: "lash.process.terminal.published".to_owned(),
+            })
+            .service(PROCESS_WORKFLOW)
+            .handler("run"),
+        );
+        let request = publish_process(&engine).await;
+        let id = start(&engine, &core, request).await;
+        let output = tokio::time::timeout(BOUND, core.processes().await_output(&id))
+            .await
+            .expect("terminal resolves before the final publication acknowledgment")
+            .expect("terminal output");
+        assert!(matches!(
+            output,
+            lash_core::ProcessAwaitOutput::Settled { .. }
+        ));
+        engine.settle().await;
+        assert_eq!(engine.crashes(), 1, "the publication cut was reached");
+        let before = engine
+            .invocations(&format!("{PROCESS_WORKFLOW}/{id}"))
+            .await;
+        assert!(before.iter().any(|invocation| {
+            invocation.target == format!("{PROCESS_WORKFLOW}/{id}/await_terminal")
+                && invocation.status == "completed"
+        }));
+        assert!(before.iter().any(|invocation| {
+            invocation.target == format!("{PROCESS_WORKFLOW}/{id}/run")
+                && invocation.status != "completed"
+        }));
+
+        let request = waiting_request(&engine, 32).await;
+        let unrelated = start(&engine, &core, request).await;
+        engine.settle().await;
+        let completion = engine.completed_process_invocations(&id);
+        tokio::pin!(completion);
+        poll_fn(|cx| {
+            assert!(
+                completion.as_mut().poll(cx).is_pending(),
+                "quiescence must not pass for completion of the owned continuation"
+            );
+            Poll::Ready(())
+        })
+        .await;
+
+        *blocked.lock().unwrap() = None;
+        backend.server().advance(Duration::from_secs(1));
+        engine.settle().await;
+        let completed = tokio::time::timeout(BOUND, completion)
+            .await
+            .expect("the owned continuation completes after its retry");
+        assert!(
+            completed
+                .iter()
+                .all(|invocation| invocation.status == "completed")
+        );
+        assert!(
+            engine
+                .invocations(&format!("{PROCESS_WORKFLOW}/{unrelated}"))
+                .await
+                .iter()
+                .any(|invocation| invocation.status != "completed"),
+            "an unrelated process's pending wait does not block owned completion"
+        );
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            3,
+            "recovery reuses the two owned effects"
+        );
+        terminal_fact_is_settled(&engine, &id).await;
+        engine.finish().await;
+    }
 }
 
 async fn terminal_fact_is_settled(engine: &Engine, id: &lash_core::ProcessId) {
