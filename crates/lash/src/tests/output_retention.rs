@@ -198,7 +198,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
         lash_core::plugin::PluginSpec::new().with_presentation_step(appendix_step()),
     )))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).open().await?;
+    let session = core.session(SESSION).created().await.open().await?;
     let output = session
         .send(TurnInput::text("call the tools"))
         .output()
@@ -265,7 +265,7 @@ finish({ rows });"#,
         )]))
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(SESSION).open().await?;
+    let session = core.session(SESSION).created().await.open().await?;
     let output = session
         .send(TurnInput::text("print the rows"))
         .output()
