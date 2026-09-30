@@ -17,3 +17,5 @@ crates/lash-core-store/src/store/window_load.rs  |  let Some(read) = store.load_
 crates/lash-core-store/src/store/window_load.rs  |  let Some(read) = store.load_session_window(WindowSelector::Current).await? else {  |  2  # WINDOW read-view and refresh loaders read current frame
 examples/agent-workbench/src/main_sections/routes.rs  |  .load_ancestors(  |  1  # PAGED state projection reconciles committed input ancestry
 examples/agent-workbench/src/main_sections/state_reads.rs  |  .load_failure_evidence_page(  |  1  # PAGED state projection reads failure evidence in bounded pages
+crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs  |  .load_ancestors(session_id, lash_core::store::HistoryAnchor::Head, one_node)  |  1  # PAGED hardening measurement reads one node from the head
+crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs  |  .load_ancestors(  |  2  # PAGED hardening measurement reads one node at cursor and fork anchors
