@@ -476,11 +476,11 @@ impl Migration<'_> {
     }
 
     fn run(&self) -> Result<(), Stop> {
-        // The migration needs the whole store; a store missing a database is
-        // not one an older build finished opening, so its installers decide.
+        // Store-set open already refused partial sets. Only a fresh root
+        // skips migration so the component installers can create it.
         if SqliteDatabase::ALL
             .into_iter()
-            .any(|database| !self.live(database).exists())
+            .all(|database| !self.live(database).exists())
         {
             return Ok(());
         }

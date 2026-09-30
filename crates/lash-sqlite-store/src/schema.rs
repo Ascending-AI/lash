@@ -1683,7 +1683,7 @@ pub(crate) async fn ensure_versioned_schema_with_writable(
 }
 
 #[cfg(test)]
-fn prepare_versioned_schema<'connection>(
+pub(crate) fn prepare_versioned_schema<'connection>(
     connection: &'connection mut Connection,
     database: SqliteDatabase,
 ) -> rusqlite::Result<Transaction<'connection>> {
@@ -1834,10 +1834,18 @@ mod compat_tests {
     #[test]
     fn sqlite_refuses_a_raised_floor_typed() {
         for database in SqliteDatabase::ALL {
+            let above = lash_core_execution::compat::descriptor(database.component())
+                .expect("database descriptor")
+                .reads
+                .max()
+                + 1;
             let mut connection = Connection::open_in_memory().expect("open database");
             provision(&mut connection, database);
             connection
-                .execute("UPDATE lash_compat SET version = 2, min_reader = 2", [])
+                .execute(
+                    "UPDATE lash_compat SET version = ?1, min_reader = ?1",
+                    [above],
+                )
                 .expect("raise floor");
             let error = crate::sqlite_error(
                 apply_versioned_schema_tx(
@@ -1851,8 +1859,8 @@ mod compat_tests {
             assert!(matches!(
                 error,
                 StoreError::Incompatible {
-                    refusal: CompatRefusal::ReaderFloorAbove { min_reader: 2, .. }
-                }
+                    refusal: CompatRefusal::ReaderFloorAbove { min_reader, .. }
+                } if min_reader == above
             ));
         }
     }
@@ -1871,7 +1879,10 @@ mod compat_tests {
         let connection = Connection::open(root.path().join(SqliteDatabase::Triggers.file_name()))
             .expect("open trigger database");
         connection
-            .execute("UPDATE lash_compat SET version = 2", [])
+            .execute(
+                "UPDATE lash_compat SET version = ?1",
+                [SqliteDatabase::Triggers.expected_version() + 1],
+            )
             .expect("advance one database");
         let error =
             crate::sqlite_error(crate::compat::check_set(&location).expect_err("set must refuse"));

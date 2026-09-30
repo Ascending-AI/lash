@@ -149,7 +149,7 @@ mod triggers;
 mod turn_ingress;
 
 pub use attachment_store::SqliteAttachmentStore;
-pub use backend::{SqliteStoreSet, SqliteStoreSetOptions};
+pub use backend::{IncompleteSqliteStoreSet, SqliteStoreSet, SqliteStoreSetOptions};
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 pub use location::SqliteLocation;
 use location::{DatabaseLocation, DatabaseTarget};

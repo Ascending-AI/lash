@@ -367,16 +367,43 @@ pub(crate) fn read_fleet_state(conn: &Connection) -> rusqlite::Result<FleetForma
     }
 }
 
+/// Answer whether every database file is absent. A partially present set
+/// refuses before any migration or component installer can mutate it.
+pub(crate) fn check_set_files(location: &SqliteLocation) -> rusqlite::Result<bool> {
+    let SqliteLocation::File { root } = location else {
+        return Ok(false);
+    };
+    let mut missing = Vec::new();
+    for database in SqliteDatabase::ALL {
+        if !root
+            .join(database.file_name())
+            .try_exists()
+            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
+        {
+            missing.push(database);
+        }
+    }
+    if missing.is_empty() {
+        Ok(false)
+    } else if missing.len() == SqliteDatabase::ALL.len() {
+        Ok(true)
+    } else {
+        Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+            crate::IncompleteSqliteStoreSet { missing },
+        )))
+    }
+}
+
 /// Detect a crash between the three independent database commits before any
 /// component open can mistake the set for a consistent fleet epoch.
 pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
+    if check_set_files(location)? {
+        return Ok(());
+    }
     let mut rows = Vec::new();
     let mut release = None;
     for database in SqliteDatabase::ALL {
         let target = location.target(database);
-        if target.file_path().is_some_and(|path| !path.exists()) {
-            return Ok(());
-        }
         let conn = Connection::open_with_flags(
             target.uri(),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,

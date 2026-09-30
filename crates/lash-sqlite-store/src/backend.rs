@@ -18,6 +18,34 @@ use crate::{
     SqliteProcessRegistry, SqliteStore, SqliteTriggerStore, StoreOptions,
 };
 
+/// A file store set has some of its databases, but cannot open until all
+/// three are present. Opening it creates no missing database and migrates
+/// none of the surviving databases.
+///
+/// Returned through the open error's source chain. The
+/// `rusqlite::Error::ToSqlConversionFailure` source can be downcast to this
+/// type without parsing the refusal message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IncompleteSqliteStoreSet {
+    /// Every absent database, in the store set's database order.
+    pub missing: Vec<SqliteDatabase>,
+}
+
+impl std::fmt::Display for IncompleteSqliteStoreSet {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("incomplete SQLite store set; missing databases: ")?;
+        for (index, database) in self.missing.iter().enumerate() {
+            if index != 0 {
+                formatter.write_str(", ")?;
+            }
+            write!(formatter, "{} ({})", database.name(), database.file_name())?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for IncompleteSqliteStoreSet {}
+
 /// Construction-time choices for a [`SqliteStoreSet`], which opens no effect
 /// journal and so has no effect-replay options.
 #[derive(Clone, Debug, Default)]
@@ -115,7 +143,9 @@ fn system_clock() -> Arc<dyn Clock> {
 }
 
 impl SqliteStoreSet {
-    /// The file store set under `root`, created if absent.
+    /// The file store set under `root`, created if all databases are absent.
+    /// A root containing only some databases refuses with
+    /// [`IncompleteSqliteStoreSet`] in the error's source chain.
     pub async fn open(root: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
         Self::open_with_clock(root, system_clock()).await
     }
@@ -197,6 +227,7 @@ impl SqliteStoreSet {
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
+        crate::compat::check_set_files(&location).map_err(tokio_rusqlite::Error::Error)?;
         // A store older than this build is backed up whole and migrated
         // before any component opens it; a set an interrupted migration left
         // part way is completed or restored first.
@@ -536,6 +567,71 @@ impl std::fmt::Debug for SqliteStoreSet {
 mod tests {
     use super::*;
     use lash_core_execution::SessionCatalogStore as _;
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test fixture: compare host database bytes before and after a refused open"
+    )]
+    async fn an_incomplete_store_set_refuses_without_changing_its_databases() {
+        // Exercise every one- and two-file omission at the current tier and
+        // its oldest readable tier. An old partial set must not report a
+        // migration that cannot run, nor provision empty replacement files.
+        let mut versions = vec![
+            SqliteDatabase::DurableCore.expected_version(),
+            i64::from(
+                lash_core_execution::compat::descriptor(SqliteDatabase::DurableCore.component())
+                    .expect("core descriptor")
+                    .reads
+                    .min(),
+            ),
+        ];
+        versions.dedup();
+        for version in versions {
+            for mask in 1..7 {
+                let root = tempfile::tempdir().expect("store root");
+                let mut missing = Vec::new();
+                let mut surviving = Vec::new();
+                for (index, database) in SqliteDatabase::ALL.into_iter().enumerate() {
+                    let path = root.path().join(database.file_name());
+                    if mask & (1 << index) != 0 {
+                        missing.push(database);
+                        continue;
+                    }
+                    let mut connection = rusqlite::Connection::open(&path).expect("database");
+                    let tx = crate::schema::prepare_versioned_schema(&mut connection, database)
+                        .expect("provision the surviving database");
+                    tx.execute("UPDATE lash_compat SET version = ?1", [version])
+                        .expect("select the fixture tier");
+                    tx.commit().expect("commit fixture");
+                    drop(connection);
+                    surviving.push((path.clone(), std::fs::read(&path).expect("fixture bytes")));
+                }
+
+                let error = SqliteStoreSet::open(root.path())
+                    .await
+                    .expect_err("a partial set must refuse");
+                let tokio_rusqlite::Error::Error(rusqlite::Error::ToSqlConversionFailure(source)) =
+                    &error
+                else {
+                    panic!("the refusal must preserve its typed source: {error:?}");
+                };
+                let refusal = source
+                    .downcast_ref::<IncompleteSqliteStoreSet>()
+                    .unwrap_or_else(|| panic!("expected an incomplete set refusal: {error:?}"));
+                assert_eq!(refusal.missing, missing, "fixture version {version}");
+                for database in missing {
+                    assert!(error.to_string().contains(database.name()), "{error}");
+                    assert!(error.to_string().contains(database.file_name()), "{error}");
+                    assert!(!root.path().join(database.file_name()).exists());
+                }
+                for (path, before) in surviving {
+                    assert_eq!(std::fs::read(path).expect("surviving bytes"), before);
+                }
+                assert!(!root.path().join("migration-backups").exists());
+            }
+        }
+    }
 
     fn catalog_table_count(uri: &str) -> i64 {
         rusqlite::Connection::open(uri)

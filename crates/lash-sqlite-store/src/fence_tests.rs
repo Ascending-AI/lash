@@ -137,11 +137,12 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
         writers.push((database, writer(&location, database).await));
     }
 
-    let next = FLEET_FORMAT_VERSION + 1;
+    let writable = FleetFormat::writable();
+    let next = writable.max() + 1;
     crate::compat::finalize(
         &location,
         Duration::from_secs(5),
-        VersionRange::new(FLEET_FORMAT_VERSION, next).expect("writable range"),
+        VersionRange::new(writable.min(), next).expect("writable range"),
     )
     .expect("finalize");
 
@@ -386,14 +387,15 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
     });
     pause.wait_until_reached().await;
 
-    let next = FLEET_FORMAT_VERSION + 1;
+    let writable = FleetFormat::writable();
+    let next = writable.max() + 1;
     let finalize = tokio::task::spawn_blocking({
         let location = location.clone();
         move || {
             crate::compat::finalize(
                 &location,
                 Duration::from_secs(10),
-                VersionRange::new(FLEET_FORMAT_VERSION, next).expect("writable range"),
+                VersionRange::new(writable.min(), next).expect("writable range"),
             )
         }
     });
@@ -466,7 +468,8 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
         .save_session_meta(session_meta(session.as_str()))
         .await
         .expect("save session");
-    crate::testing::finalize_fleet_format(set.location(), 2).expect("finalize");
+    let next = FleetFormat::writable().max() + 1;
+    crate::testing::finalize_fleet_format(set.location(), next).expect("finalize");
     let error = factory
         .delete_session(&session)
         .await
@@ -475,9 +478,9 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
         matches!(
             error.stop,
             lash_core_execution::MaintenanceStop::Failed(StoreError::WriterFenced {
-                recorded: 2,
+                recorded,
                 ..
-            })
+            }) if recorded == next
         ),
         "{error:?}"
     );
@@ -568,8 +571,9 @@ impl DeploymentRegistry for Deployments {
 async fn a_stale_writer_is_fenced_after_finalize() {
     let (_root, set) = file_set().await;
     let location = set.location().clone();
-    let next = FLEET_FORMAT_VERSION + 1;
-    let successor = VersionRange::new(FLEET_FORMAT_VERSION, next).expect("writable range");
+    let writable = FleetFormat::writable();
+    let next = writable.max() + 1;
+    let successor = VersionRange::new(writable.min(), next).expect("writable range");
     let retired = BuildGeneration::for_test("sqlite-finalize-old");
     let deployments = Deployments::default();
     let fleet = |database| {
@@ -601,11 +605,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         other => panic!("a retained deployment must refuse finalize: {other:?}"),
     }
     for database in SqliteDatabase::ALL {
-        assert_eq!(
-            fleet(database),
-            i64::from(FLEET_FORMAT_VERSION),
-            "{database:?}"
-        );
+        assert_eq!(fleet(database), i64::from(writable.min()), "{database:?}");
     }
     let core = set.process_env_store();
     core.save_session_meta(session_meta("before-finalize"))
@@ -624,7 +624,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
     assert_eq!(
         flip,
         FleetEpochFlip::Finalized {
-            from: FLEET_FORMAT_VERSION,
+            from: writable.min(),
             to: next
         }
     );

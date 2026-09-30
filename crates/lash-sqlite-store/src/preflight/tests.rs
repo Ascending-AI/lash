@@ -63,30 +63,13 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
         .await
         .expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
-    // Component 45 introduced BLAKE3 identities, 46 the durable vocabulary
-    // CHECKs, 47 the all-or-none session lease identity, 48 the queued-work
-    // vocabulary and claim correlation, 49 the pending-input checks and
-    // owner-liveness removal, 50 the checked durable frame key, and 51 the
-    // semantic-boundary receipt identity, 52 mediated plugin state, 53 the
-    // persisted usage disposition, 54 preserves reclaimed attachment bytes,
-    // 55 preserves the phase across restoring writes, 56 persists full effect
-    // addresses, 57 pairs pending-input claim ids with their tokens, 58
-    // retains exact process artifact-cleanup evidence until acknowledgement,
-    // 59 qualifies process attachment owners by incarnation, 60 adds durable
-    // cancellation authority, exact closure authorization, retired scopes and
-    // the intent ABA fence, and 61 gates attachment adoption on recorded
-    // upload evidence, 62 makes the parent scope a registration fact and
-    // settles child lifecycle from one scope-keyed parent-end ledger, and 63
-    // replaces the boolean cancel-requested fold with the instant the cancel
-    // was requested, and 64 requires every trigger subscription to carry the
-    // source contract and provider route it was admitted against.
-    // All are reject-and-recreate
-    // boundaries, so the pin tracks the
-    // current target while the refusal below still names a SHA-256-era
-    // generation: nothing older than 45 may ever open, whatever the target is.
-    // The 43→44 in-place upgrade arm is deleted, so a generation-43 stamp is
-    // refused outright rather than folded forward first.
-    assert_eq!(expected, 1, "the 1.0 compatibility version changed");
+    // Component 43 is a pre-1.0 SHA-256-era catalog. Both active tiers
+    // refuse that retired stamp rather than running the deleted 43-to-44
+    // upgrade. The reported target belongs to the opening build's tier.
+    let descriptor =
+        lash_core_execution::compat::descriptor(SqliteDatabase::DurableCore.component())
+            .expect("core descriptor");
+    assert_eq!(expected, i64::from(descriptor.writes.max()));
 
     stamp_compat(&path, 43, 43);
 
@@ -111,7 +94,12 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
-    stamp_compat(&path, 2, 2);
+    let above = lash_core_execution::compat::descriptor(SqliteDatabase::DurableCore.component())
+        .expect("core descriptor")
+        .reads
+        .max()
+        + 1;
+    stamp_compat(&path, i64::from(above), i64::from(above));
 
     let holder = rusqlite::Connection::open(&path).expect("open holder connection");
     holder
@@ -144,8 +132,8 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     assert!(matches!(
         answered.verdict,
         StoreSchemaVerdict::Refused {
-            refusal: lash_core_execution::compat::CompatRefusal::ReaderFloorAbove { found: 2, .. }
-        }
+            refusal: lash_core_execution::compat::CompatRefusal::ReaderFloorAbove { found, .. }
+        } if found == above
     ));
 
     holder.execute_batch("ROLLBACK").expect("release the lock");
@@ -279,10 +267,26 @@ async fn a_preflight_connection_refuses_to_write_even_if_asked() {
     );
 }
 
-#[test]
-fn every_database_publishes_the_version_its_open_enforces() {
+#[tokio::test]
+async fn every_database_publishes_the_version_its_open_enforces() {
+    let root = temp_root();
     for database in SqliteDatabase::ALL {
-        assert_eq!(database.expected_version(), 1);
+        let path = root.path().join(database.file_name());
+        let mut connection = rusqlite::Connection::open(&path).expect("open database");
+        let tx = crate::schema::prepare_versioned_schema(&mut connection, database)
+            .expect("provision database");
+        tx.commit().expect("commit provision");
+        let (stamp, _) = crate::compat::read(&connection, database)
+            .expect("read the provisioned stamp")
+            .expect("provisioning records a stamp");
+        let descriptor = lash_core_execution::compat::descriptor(database.component())
+            .expect("database descriptor");
+        assert_eq!(stamp.version, descriptor.writes.max());
+        assert_eq!(database.expected_version(), i64::from(stamp.version));
+        drop(connection);
+        let found = verify_schema_at(&path, database).await;
+        assert_eq!(found.expected, i64::from(stamp.version));
+        assert_eq!(found.verdict, StoreSchemaVerdict::Matches);
     }
 }
 
