@@ -4,6 +4,13 @@ use lash_sansio::SessionId;
 
 use crate::process_sql::process_sql;
 
+fn decode_process_record(json: &str) -> Result<ProcessRecord, PluginError> {
+    serde_json::from_str(json).map_err(|error| PluginError::StoredDataCorrupt {
+        record_kind: "process_registry".to_string(),
+        message: error.to_string(),
+    })
+}
+
 pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
@@ -52,8 +59,7 @@ pub(crate) async fn load_process_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
-    json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-        .transpose()
+    json.map(|json| decode_process_record(&json)).transpose()
 }
 
 /// The retained process registered under `start_key`, if any, locked for the
@@ -68,8 +74,7 @@ pub(crate) async fn load_process_by_start_key_tx(
             .fetch_optional(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
-    json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-        .transpose()
+    json.map(|json| decode_process_record(&json)).transpose()
 }
 
 pub(crate) async fn load_process(
@@ -82,8 +87,7 @@ pub(crate) async fn load_process(
             .fetch_optional(pool)
             .await
             .map_err(plugin_sqlx_error)?;
-    json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-        .transpose()
+    json.map(|json| decode_process_record(&json)).transpose()
 }
 
 pub(crate) async fn require_process_tx(

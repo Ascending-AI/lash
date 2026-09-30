@@ -20,7 +20,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_wake_for_a_pruned_process_is_refused_before_enqueueing() {
+    async fn a_stale_wake_for_a_pruned_process_does_not_abort_delivery() {
         let backend = memory_store_set().await;
         let registry = Arc::new(ProcessRegistryFaults::new(backend.process_registry()));
         let old = registry
@@ -70,21 +70,32 @@ mod tests {
             })
             .expect("inject the pruned process's wake");
 
-        let result = WakeDeliveryDriver::drive_pending_once(
-            registry,
+        let report = WakeDeliveryDriver::drive_pending_once(
+            registry.clone(),
             backend.session_store_factory(),
             Arc::new(crate::NoSessionWork::new()),
             Arc::new(crate::SystemClock),
             1,
         )
-        .await;
+        .await
+        .expect("a stale delivery must not abort the claimed page");
 
-        assert!(
-            matches!(
-                result,
-                Err(crate::PluginError::ProcessNoLongerRetained { .. })
-            ),
-            "a pruned process's wake must refuse, got {result:?}"
+        assert_eq!(report.inspected, 1);
+        assert_eq!(report.enqueued, 0);
+        assert_eq!(
+            report.retryable_failures, 1,
+            "the pruned delivery has no durable row left to settle"
+        );
+        assert!(matches!(
+            registry.get_process(&old.id).await,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ));
+        assert_eq!(
+            registry
+                .get_process(&current.id)
+                .await
+                .expect("read the later process"),
+            Some(current)
         );
     }
 

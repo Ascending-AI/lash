@@ -61,6 +61,18 @@ while a reclaimed in-flight delivery retains its original target. A stale
 claimant cannot settle a successor's delivery. Typed delivery reports and
 explicit redrive preserve host decisions about discarded ordering barriers.
 
+Each claimed wake is attempted independently. Expiry is checked before reading
+its source process, so an unreadable source cannot prevent expiry or a sibling's
+delivery. A permanent source-read failure records the typed `source_unreadable`
+discard. A transient failure releases its claim with bounded backoff; the next
+attempt never moves beyond the original expiry. If a settlement write fails,
+only that row waits for claim lapse, and the rest of the claimed page continues.
+These delivery outcomes do not change the source process's lifecycle.
+
+A `SourceUnreadable` head remains an ordering barrier. After repairing the
+source, the host calls `redrive_wake_delivery` with the delivery id named by
+`wake_delivery_report`.
+
 Pruning and tombstone compaction require an explicit
 `ProjectionWatermark::{UpTo, NoProjector}` choice. Session deletion does not
 implicitly cancel processes; hosts compose cancellation policy explicitly.

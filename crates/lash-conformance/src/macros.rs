@@ -2150,3 +2150,27 @@ macro_rules! checkpoint_profile_tests {
         }
     };
 }
+
+/// Register the claimed-page wake isolation laws on a backend.
+#[macro_export]
+macro_rules! wake_delivery_isolation_tests {
+    ($fixture:block) => {
+        $crate::wake_delivery_isolation_tests!(@laws $fixture; [
+            bad_wake_source_does_not_strand_claimed_siblings,
+            expired_wakes_settle_without_reading_bad_sources,
+            transient_wake_source_retries_release_claims_and_keep_expiry,
+            wake_defer_failure_does_not_strand_claimed_siblings,
+            bad_wake_source_page_recovers_after_restart,
+            lost_bad_source_claim_does_not_settle_the_new_owner,
+        ]);
+    };
+    (@laws $fixture:block; [$($law:ident),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, factory, registry, clock, backend) = $fixture;
+                $crate::registration_macro_support::$law(factory, registry, clock, backend).await;
+            }
+        )*
+    };
+}

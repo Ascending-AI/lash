@@ -400,6 +400,17 @@ impl SqliteProcessRegistry {
         self
     }
 
+    fn decode_process_record(
+        json: &str,
+    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
+        serde_json::from_str(json).map_err(|error| {
+            lash_core_execution::PluginError::StoredDataCorrupt {
+                record_kind: "process_registry".to_string(),
+                message: error.to_string(),
+            }
+        })
+    }
+
     /// The retained process registered under `start_key`, if any.
     pub(crate) fn load_process_by_start_key_conn(
         conn: &Connection,
@@ -413,7 +424,7 @@ impl SqliteProcessRegistry {
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+        json.map(|json| Self::decode_process_record(&json))
             .transpose()
     }
 
@@ -429,7 +440,7 @@ impl SqliteProcessRegistry {
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+        json.map(|json| Self::decode_process_record(&json))
             .transpose()
     }
 
