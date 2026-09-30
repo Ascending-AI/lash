@@ -1,0 +1,173 @@
+# Architecture decisions
+
+ADRs describe the current design on main. History lives in git. Keep one numbered
+file per decision and rewrite that file in place. The convention applies to
+every ADR, including decisions maintained by implementation tickets.
+
+## Convention
+
+- State the problem the design solves, the decision, its rules and guarantees, its consequences, and the reasons for rejecting alternatives that remain plausible today. Use present tense.
+- Do not add amendment sections or blocks, superseded-by or supersedes notes, previously/formerly/used-to/no-longer/was-retired/originally narration, dated change notes, or ticket-by-ticket history.
+- Ticket IDs may appear only as pointers to executable evidence such as tests and gates, or to open work that the ADR explicitly depends on.
+- Delete an ADR when its decision is entirely retired. Never reuse its number. Update every citation in code, tests, scripts and docs to the ADR that owns the behaviour, or remove the citation when no ADR owns it.
+- Preserve section headings and section numbers that code cites when their content survives. Update every affected citation in the same change when a cited section is removed or renumbered.
+- Code on main is the truth. Verify retained claims against the code. If a claim and the code disagree, record both file:line references in the lane report and state which you think is right. Do not silently choose a design or mark the ADR. The orchestrator decides whether the code needs a bug ticket or the text needs a correction.
+- Keep this convention and the live index in this README. Each index row gives a decision's number and title.
+
+## Repository check
+
+Run `python3 scripts/check_adr_current.py` and its self-tests with
+`python3 scripts/test_check_adr_current.py`. CI's repository script gates run
+both commands. `scripts/ci/repository-gates.sh` reads the same command list
+for local validation. These commands need only Python's standard library.
+
+The check scans text in `crates/`, `scripts/`, `runbooks/`, `examples/`, `docs/`
+and `tests/`. It resolves numbered ADR citations, linked citations and their
+section numbers. Within an ADR, a bare section reference names that ADR's own
+heading; an explicit "its" or "there" can refer to a nearby cited ADR in the
+same paragraph. Section numbers must appear in Markdown headings outside code fences.
+
+Narration and citation findings are report-only while the FIG-4326 rewrite
+batches are open. Index mismatches fail immediately. The check's small allowlist
+names exact exceptions with reasons: the convention's list of prohibited words
+and a present-tense size comparison. It does not exempt entire ADRs.
+
+After all 11 rewrite batches are Done, set `ENFORCE_NARRATION` and
+`ENFORCE_CITATIONS` in the script to `True`, run the check and land the
+enforcement change. The explicit `--enforce-narration` and `--enforce-citations`
+options let a batch validate its changes before that switch.
+
+Run `python3 scripts/check_adr_current.py --write-index` after changing a title,
+adding a decision or deleting one. Commit the README change with the ADR change.
+The generated region below is checked against the live filenames and headings.
+
+## Live decisions
+
+<!-- adr-index:start -->
+| Number | Decision |
+| --- | --- |
+| 0001 | [Context Management Uses Views Or Frames](0001-context-management-uses-views-or-frames.md) |
+| 0002 | [Session Observation Uses Cursors And Bounded Live Replay](0002-session-observation-uses-cursors-and-bounded-live-replay.md) |
+| 0003 | [Durable Waits are scoped and resolved by the EffectHost](0003-keyed-promise-is-scope-agnostic.md) |
+| 0004 | [Process Environments Carry Plugin Options, Not Product Metadata](0004-process-environments-carry-plugin-options-not-product-metadata.md) |
+| 0005 | [Tool Catalog Membership Replaces Availability Tiers](0005-tool-catalog-membership-replaces-availability-tiers.md) |
+| 0006 | [RLM History Renders in the Emission Format](0006-rlm-history-renders-in-emission-format.md) |
+| 0007 | [Four Layer Scenario Harnesses](0007-four-layer-scenario-harnesses.md) |
+| 0008 | [Confidence Gate](0008-confidence-gate.md) |
+| 0009 | [Randomised simulation harness](0009-deterministic-simulation-harness.md) |
+| 0010 | [Pending Turn Input Is Admission Evidence](0010-pending-turn-input-is-admission-evidence.md) |
+| 0011 | [Self-contained processes: capture-at-creation, no session binding, host-policy lifecycle](0011-self-contained-processes.md) |
+| 0012 | [Durable waits lean on effect-host engines; substrates own their journals](0012-durable-waits-via-effect-host-engines.md) |
+| 0013 | [Protocol Capabilities Enter Through the Plugin Contract](0013-protocol-capabilities-enter-through-the-plugin-contract.md) |
+| 0014 | [Operational Policy Stays With the Host; Lash Exposes Levers](0014-operational-policy-stays-with-the-host.md) |
+| 0015 | [Admission Control Lives in Provider Decorators](0015-admission-control-lives-in-provider-decorators.md) |
+| 0016 | [Process waits live on the work-driver seam](0016-process-waits-live-on-the-work-driver-seam.md) |
+| 0017 | [Process observation is best-effort push over state truth](0017-process-observation-is-best-effort-push-over-state-truth.md) |
+| 0018 | [Per-tool telemetry emits from one shared seam and consumers derive from the typed model](0018-per-tool-telemetry-emits-from-one-shared-seam.md) |
+| 0019 | [Process recovery obeys declared disposition; abandonment is a written fact](0019-process-recovery-obeys-declared-disposition.md) |
+| 0020 | [Process change feed is a record-level cursor read](0020-process-change-feed-is-a-record-cursor-read.md) |
+| 0021 | [Trigger deliveries are first-class and recoverable](0021-trigger-deliveries-are-first-class-and-recoverable.md) |
+| 0022 | [Host originators carry named scopes](0022-host-originators-carry-named-scopes.md) |
+| 0023 | [Retention stays a parameterized host lever](0023-retention-stays-a-parameterized-host-lever.md) |
+| 0024 | [Drainage reads over artifact refcounts](0024-drainage-reads-over-artifact-refcounts.md) |
+| 0025 | [Bounded journals are an effect-controller obligation](0025-bounded-journals-are-an-effect-controller-obligation.md) |
+| 0026 | [Model capability is host-supplied data; providers are executors](0026-model-capability-is-host-supplied-data.md) |
+| 0027 | [Process completion carries explicit authority](0027-unleased-completion-carries-explicit-authority.md) |
+| 0028 | [Attachments are three layers: dumb blob storage, lash-owned references, host lifecycle policy](0028-attachments-are-three-layers-blob-reference-lifecycle.md) |
+| 0029 | [Claim supersession is reclaim-mediated under the session lease](0029-claims-are-generation-fenced-under-the-session-lease.md) |
+| 0030 | [The session model is resolved once, at session construction](0030-the-session-model-is-resolved-once-at-open.md) |
+| 0031 | [Execution evidence is provider-reported fact, never echoed intent](0031-execution-evidence-is-provider-reported-fact.md) |
+| 0032 | [Attempt history rides inside the result, not a separate journal](0032-attempt-history-rides-inside-the-result.md) |
+| 0033 | [A turn has no single producing model; attribution is host policy](0033-final-output-attribution-is-host-policy.md) |
+| 0034 | [Harness evolution lives outside the runtime repository](0034-harness-evolution-lives-outside-the-runtime-repository.md) |
+| 0035 | [Frontends are independent Host Applications](0035-frontends-are-independent-host-applications.md) |
+| 0036 | [Stream termination is explicit dialect policy](0036-stream-termination-is-explicit-dialect-policy.md) |
+| 0037 | [Lashlang workflows use a code-graph-code lens](0037-lashlang-workflows-use-a-code-graph-code-lens.md) |
+| 0038 | [Response metadata is allowlisted host-supplied capture](0038-response-metadata-is-allowlisted-host-supplied-capture.md) |
+| 0039 | [Turn cancellation is a first-party work-driver primitive on the keyed-promise seam](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) |
+| 0040 | [Retried model attempts retract live text by correlation](0040-retried-model-attempts-retract-live-text-by-correlation.md) |
+| 0041 | [Child-turn and driver stack growth have canonical seams](0041-child-turn-and-driver-stack-growth-have-canonical-seams.md) |
+| 0042 | [Tool attempts are atomic](0042-tool-attempts-are-atomic.md) |
+| 0043 | [Hosts register immutable deployments](0043-hosts-register-immutable-deployments.md) |
+| 0044 | [Tests must be independent of what they test](0044-tests-must-be-independent-of-what-they-test.md) |
+| 0045 | [Services are stateless; substrates own continuation](0045-services-are-stateless-substrates-own-continuation.md) |
+| 0046 | [Process transitions are events; the record is a fold](0046-process-transitions-are-events-record-is-a-fold.md) |
+| 0047 | [History is shared; branches are sessions](0047-history-is-shared-branches-are-sessions.md) |
+| 0048 | [Checkpoint component identity is a backend contract](0048-checkpoint-component-identity-is-a-backend-contract.md) |
+| 0049 | [Session ids are used once](0049-session-ids-are-used-once.md) |
+| 0050 | [Behavior transcripts are one normalized vocabulary](0050-behavior-transcripts-are-one-normalized-vocabulary.md) |
+| 0051 | [The facade is the host API; lash-core's public surface is its integrator seams](0051-the-facade-is-the-host-api-core-is-integrator-seams.md) |
+| 0052 | [The Postgres schema is a published artifact lash verifies at open](0052-the-postgres-schema-is-a-published-artifact-lash-verifies.md) |
+| 0053 | [Claim nonces scope session-lease lifecycle and execution fences, not commit authority](0053-claim-nonces-scope-session-lease-lifecycle.md) |
+| 0054 | [Host panics are contained and standard-lock poison is recovered](0054-host-panics-are-contained-and-lock-poison-is-recovered.md) |
+| 0055 | [Lashlang execution bounds span durable process lifetimes](0055-lashlang-execution-bounds-span-durable-process-lifetimes.md) |
+| 0056 | [Checkpoint components generalize to a keyed set](0056-checkpoint-components-generalize-to-a-keyed-set.md) |
+| 0057 | [History generations accelerate edge-authoritative reads](0057-history-generations-accelerate-edge-authoritative-reads.md) |
+| 0058 | [Runtime commit budgets are explicit host policy](0058-runtime-commit-budgets-are-explicit-host-policy.md) |
+| 0059 | [Tool-call directives compose monotonically](0059-before-tool-call-directives-compose-monotonically.md) |
+| 0060 | [The lashlang VM is a heap substrate with dialect-lowered value semantics](0060-the-lashlang-vm-is-a-heap-substrate-with-dialect-lowered-value-semantics.md) |
+| 0061 | [RLM dialects share one IR and VM](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md) |
+| 0062 | [The TypeScript dialect is an exact ECMA-262 subset](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md) |
+| 0063 | [One RLM turn is prompted in its dialect](0063-one-rlm-turn-is-prompted-in-one-dialect.md) |
+| 0064 | [The TypeScript dialect is broad, and every gap is an explicit ruling](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md) |
+| 0065 | [Concurrent settlement is a durable group at the effect-host seam](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) |
+| 0066 | [Durable session facts are a typed read and a guarded set-if-unset write](0066-durable-session-facts-are-a-typed-read-and-a-guarded-write.md) |
+| 0067 | [Every durable row names one owner and one reclaim trigger](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) |
+| 0068 | [One meaning per outcome-type suffix](0068-one-meaning-per-outcome-suffix.md) |
+| 0069 | [Durable acceptance is the sole turn ingress](0069-durable-acceptance-is-the-sole-turn-ingress.md) |
+| 0070 | [Cache capabilities are host-supplied data, not URL or model-name inference](0070-cache-capabilities-are-host-supplied-data.md) |
+| 0071 | [Engines emit unified tool-call accounting outside model projection](0071-engines-emit-unified-tool-call-accounting.md) |
+| 0072 | [Reasoning wire encoding is pluggable dialect policy](0072-reasoning-wire-encoding-is-pluggable-dialect-policy.md) |
+| 0073 | [0073 — Gradual value types through to the workflow editor](0073-gradual-value-types-through-to-the-workflow-editor.md) |
+| 0074 | [Generation intent is session policy, and its fate on the wire is reported](0074-generation-intent-is-session-policy-and-its-fate-is-reported.md) |
+| 0075 | [Host prompt presence controls reopen authority](0075-host-prompt-presence-controls-reopen-authority.md) |
+| 0076 | [Lashlang durable stores hold exclusively owned copies](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md) |
+| 0077 | [Session state migrates totally at admission](0077-session-state-migrates-totally-at-admission.md) |
+| 0078 | [Plugin state is a lash-mediated per-plugin store](0078-plugin-state-is-a-lash-mediated-per-plugin-store.md) |
+| 0079 | [One promised package: the facade owns the API; internals are lash-internal-*](0079-one-promised-package-facade-owns-the-api.md) |
+| 0080 | [Substrate attestation is not a lease short-circuit; failover waits the lease TTL](0080-substrate-attestation-is-not-a-lease-short-circuit.md) |
+| 0081 | [Destructive schema changes are currently reject-and-recreate](0081-destructive-schema-changes-are-currently-reject-and-recreate.md) |
+| 0082 | [0082 — The process registry is composed from narrow concern traits](0082-process-registry-is-composed-from-narrow-concern-traits.md) |
+| 0083 | [0083 — RLM channels are pinned when a session materializes](0083-rlm-native-tool-channel.md) |
+| 0084 | [Separate initial instructions from positional runtime feedback](0084-runtime-feedback-position.md) |
+| 0085 | [RLM prompts teach only enabled capabilities](0085-rlm-prompt-teaches-only-enabled-capabilities.md) |
+| 0086 | [Aggregate await shapes and `?` placement](0086-aggregate-await-shapes-and-question-placement.md) |
+| 0087 | [TypeScript aggregates evaluate runtime arrays](0087-typescript-runtime-promise-arrays.md) |
+| 0088 | [Facade sessions bind storage and lifecycle owners](0088-facade-sessions-bind-storage-and-lifecycle-owners.md) |
+| 0089 | [Parent relationships do not define a second session model](0089-parent-relationships-do-not-define-a-second-session-model.md) |
+| 0090 | [Named process signatures are authoritative](0090-named-process-signatures-are-authoritative.md) |
+| 0091 | [One lowering walk owns expression semantics](0091-one-lowering-walk-owns-expression-semantics.md) |
+| 0092 | [Agent frame scope is explicit and resolvable](0092-explicit-agent-frame-scope.md) |
+| 0093 | [Artifact lifetimes use exact owner edges](0093-artifact-lifetimes-use-exact-owner-edges.md) |
+| 0094 | [Child lifecycle is a registration fact settled by scope end](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md) |
+| 0095 | [Processes are values, process controls are tools, one handle kind](0095-processes-are-values-and-process-controls-are-tools.md) |
+| 0096 | [One IR and VM, extensible dialects, TypeScript today](0096-typescript-is-the-sole-rlm-dialect.md) |
+| 0097 | [Commit-identity families mint frozen unframed preimages](0097-commit-identity-families-mint-frozen-unframed-preimages.md) |
+| 0098 | [One owner per SQL table across both stores](0098-one-owner-per-sql-table-across-both-stores.md) |
+| 0099 | [Tool children of effect groups have one lifecycle — live, closing, settled](0099-tool-children-of-effect-groups-are-live-closing-settled.md) |
+| 0100 | [The run-observation contract](0100-the-run-observation-contract.md) |
+| 0101 | [One session ingress carries every admitted item](0101-one-session-ingress-carries-every-admitted-item.md) |
+| 0102 | [Zero-infra is a SQLite in-memory backend; every host journals; one substrate per backend](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |
+| 0103 | [Code cells replay by re-execution on every host](0103-code-cells-replay-by-re-execution-on-every-host.md) |
+| 0104 | [Restate is the only effect engine; SQL stores are storage](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md) |
+| 0105 | [The drive is deterministic workflow code](0105-the-drive-is-deterministic-workflow-code.md) |
+| 0106 | [Durable formats upgrade by migration or drain after the clean-slate release](0106-durable-formats-upgrade-by-migration-or-drain.md) |
+| 0107 | [A process is named by a minted id, a start by its key](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) |
+| 0108 | [A process lives until a scope its start could reach](0108-a-process-lives-until-a-scope-its-start-could-reach.md) |
+| 0109 | [Store→engine delivery is an outbox of obligations](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md) |
+| 0110 | [The engine owns process recovery; lash never re-runs started work](0110-the-engine-owns-process-recovery.md) |
+| 0111 | [A deployment namespace prefixes every Restate name lash binds or calls](0111-a-deployment-namespace-prefixes-every-restate-name.md) |
+| 0112 | [The store is multi-session, and a session is resident from its current frame](0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md) |
+| 0113 | [Artifacts are kept alive only by their referrers](0113-artifacts-are-kept-alive-only-by-their-referrers.md) |
+| 0114 | [A stopped turn's partial output is sealed durably and returned to the host](0114-a-stopped-turns-partial-output-is-sealed-durably-and-returned-to-the-host.md) |
+| 0115 | [The 1.0 binary carries its half of every upgrade](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) |
+| 0116 | [Tools are opaque, batch is sugar, and a spawn is a declared start](0116-tools-are-opaque.md) |
+| 0117 | [Lash names every tool call](0117-lash-names-every-tool-call.md) |
+| 0118 | [Native reasoning retention is frame-scoped](0118-native-reasoning-retention-is-frame-scoped.md) |
+| 0119 | [Durable Session and live session are two authorities](0119-durable-session-and-live-session-are-two-authorities.md) |
+| 0120 | [Tool presentation is a recorded, composable step](0120-tool-presentation-is-a-recorded-composable-step.md) |
+| 0121 | [Host generation settings are sent or refused](0121-host-generation-settings-are-sent-or-refused.md) |
+| 0122 | [A stopped turn's uncommitted tail lives only on the live stream](0122-a-stopped-turns-uncommitted-tail-lives-only-on-the-live-stream.md) |
+| 0123 | [Model code runs in resettable worker processes](0123-model-code-runs-in-resettable-worker-processes.md) |
+| 0124 | [Attachments are kept alive only by their referrers](0124-attachments-are-kept-alive-only-by-their-referrers.md) |
+<!-- adr-index:end -->
