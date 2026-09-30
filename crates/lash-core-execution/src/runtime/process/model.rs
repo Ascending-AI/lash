@@ -1042,8 +1042,9 @@ pub struct ProcessIdentity {
     /// The definition reference this row pins, for the engine starts that have
     /// one. It is the whole reference, not a bare blob: the engine kind that
     /// owns the definition, the definition value, and the signature claimed for
-    /// it when the row was created.
-    #[serde(skip)]
+    /// it when the row was created. These admission facts persist independently
+    /// of the immutable definition id, including in historical trigger receipts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<ProcessDefinitionRef>,
     /// The immutable definition a start by id admitted this row from
     /// (ADR 0113 §3.6): the row's `ProcessRecord` holds its descriptor and
