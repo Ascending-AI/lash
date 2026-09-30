@@ -1246,6 +1246,7 @@ macro_rules! process_prune_start_staging_tests {
     ($fixture:block) => {
         $crate::process_prune_start_staging_tests!(@catalogue $fixture; [
             (prune_and_late_transfer_fences, "process-prune-referrer-fence"),
+            (two_starts_share_one_captured_environment, "shared-captured-environment"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1395,6 +1396,7 @@ macro_rules! artifact_referrer_tests {
         $crate::artifact_referrer_tests!(@catalogue $fixture; [
             (publication_racing_frame_end_is_fenced, "artifact-referrer-publication-race"),
             (host_pins_reclaim_and_fence, "artifact-referrer-host-pins"),
+            (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
             (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);

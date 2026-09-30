@@ -424,10 +424,6 @@ impl Processes {
         {
             self.require_live_session(session_id).await?;
         }
-        // Publication belongs inside the replayable process effect. Publishing here
-        // would revisit the permanently retired staging owner before the executor can
-        // discover the already-transferred process edge on an exact replay.
-        let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
@@ -435,12 +431,31 @@ impl Processes {
         let registration = request
             .keyed_in(&scoped_effect_controller)
             .map_err(EmbedError::Plugin)?
-            .into_registration(None);
+            .into_registration();
+        if let Some(env_ref) = registration.env_ref.as_ref() {
+            let claim = lash_core::ReferrerClaim::guarded(
+                lash_core::ArtifactReferrer::Execution(
+                    scoped_effect_controller
+                        .execution_scope()
+                        .journal_identity()
+                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+                ),
+                lash_core::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            self.core
+                .env
+                .core
+                .durability
+                .process_env_store
+                .acquire_process_execution_env(&claim, env_ref)
+                .await
+                .map_err(lash_core::PluginError::from)?;
+        }
         let start_key = registration.start_key.clone();
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,
-            env_spec,
             execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
         };
         let outcome = self

@@ -99,34 +99,13 @@ fn main() {
         input: lash::remote::processes::RemoteProcessInput::External {
             metadata: serde_json::json!({}),
         },
-        env_spec: Some(lash::remote::processes::RemoteProcessExecutionEnvSpec {
-            render: None,
-            plugin_options: lash::remote::processes::RemoteProcessPluginOptions::default(),
-            policy: lash::remote::processes::RemoteProcessExecutionPolicy {
-                provider_id: "provider".to_string(),
-                model: lash::remote::processes::RemoteProcessModelSpec {
-                    id: "model".to_string(),
-                    extra_body: Default::default(),
-                    variant: Default::default(),
-                    capability: Default::default(),
-                    limits: lash::remote::processes::RemoteProcessModelLimits {
-                        context_window_tokens: 10,
-                        output_token_capacity: Some(1),
-                    },
-                },
-                generation: lash::remote::llm::RemoteGenerationOptions {
-                    output_token_cap: Some(256),
-                    temperature: None,
-                    seed: Some(7),
-                    stop_sequences: Vec::new(),
-                    parallel_tool_calls: None,
-                },
-                session_id: None,
-                autonomous: false,
-                turn_budget: lash::remote::processes::RemoteTurnBudget::Unbounded,
-                prompt: lash::remote::prompt::RemotePromptLayer::default(),
-            },
-        }),
+        env_ref: Some(
+            lash::remote::processes::RemoteProcessExecutionEnvRef::parse(format!(
+                "process-env:v6:blake3:{}",
+                "a".repeat(64)
+            ))
+            .expect("environment digest"),
+        ),
         originator: lash::remote::processes::RemoteProcessOriginator::Host { scope: None },
         identity: None,
         wake_session_id: None,

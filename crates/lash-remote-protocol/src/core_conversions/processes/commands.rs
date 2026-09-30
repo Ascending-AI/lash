@@ -13,7 +13,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             start_key,
             input,
             lifetime,
-            env_spec,
+            env_ref,
             originator,
             identity,
             wake_session_id,
@@ -50,7 +50,8 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
         if let Some(identity) = identity {
             request = request.with_declared_identity(identity.into());
         }
-        request.env_spec = env_spec.map(TryInto::try_into).transpose()?;
+        request.env_ref =
+            env_ref.map(|reference| lash_core::ProcessExecutionEnvRef::new(reference.as_str()));
         Ok(request)
     }
 }
@@ -72,7 +73,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
         let lash_core::ProcessStartRequest {
             input,
             lifetime,
-            env_spec,
+            env_ref,
             originator,
             identity,
             wake_session_id,
@@ -84,7 +85,9 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             start_key: None,
             input: input.try_into()?,
             lifetime: lifetime.try_into()?,
-            env_spec: env_spec.map(Into::into),
+            env_ref: env_ref
+                .map(|reference| RemoteProcessExecutionEnvRef::parse(reference.as_str()))
+                .transpose()?,
             originator: originator.into(),
             identity: identity.map(Into::into),
             wake_session_id,

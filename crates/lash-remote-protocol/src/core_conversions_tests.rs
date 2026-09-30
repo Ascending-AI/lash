@@ -641,42 +641,42 @@ fn process_start_requests_round_trip_core_values() {
         );
     }
 
-    let mut lashlang = lash_core::ProcessStartRequest::new(
+    let lashlang = lash_core::ProcessStartRequest::new(
         engine_process_input("main", serde_json::json!({ "event": true })),
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a")),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::typed(
-            "snapshot-tools",
-            serde_json::json!({ "snapshot_ref": "tool-authority:sha256:abc" }),
-        )
-        .expect("plugin options"),
-        lash_core::SessionPolicy {
-            provider_id: "process-provider".to_string(),
-            model: lash_core::ModelSpec::builder("process-model")
-                .context_window_tokens(4096)
-                .output_token_capacity(512)
-                .build()
-                .expect("model"),
-            generation: lash_core::GenerationOptions {
-                output_token_cap: std::num::NonZeroUsize::new(256),
-                temperature: Some(
-                    lash_core::NonNegativeFiniteF64::new(0.25).expect("finite temperature"),
-                ),
-                seed: Some(4242),
-                stop_sequences: Vec::new(),
-                parallel_tool_calls: None,
-                projection_provenance: Default::default(),
+    .with_env_ref(
+        (lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::typed(
+                "snapshot-tools",
+                serde_json::json!({ "snapshot_ref": "tool-authority:sha256:abc" }),
+            )
+            .expect("plugin options"),
+            lash_core::SessionPolicy {
+                provider_id: "process-provider".to_string(),
+                model: lash_core::ModelSpec::builder("process-model")
+                    .context_window_tokens(4096)
+                    .output_token_capacity(512)
+                    .build()
+                    .expect("model"),
+                generation: lash_core::GenerationOptions {
+                    output_token_cap: std::num::NonZeroUsize::new(256),
+                    temperature: Some(
+                        lash_core::NonNegativeFiniteF64::new(0.25).expect("finite temperature"),
+                    ),
+                    seed: Some(4242),
+                    stop_sequences: Vec::new(),
+                    parallel_tool_calls: None,
+                    projection_provenance: Default::default(),
+                },
+                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             },
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-    ))
+        ))
+        .stable_ref()
+        .expect("captured environment digest"),
+    )
     .with_event_types([process_event_type()]);
-    lashlang.env_spec.as_mut().expect("env spec").render = Some(lash_core::RecordedRender {
-        renderer_id: "lash.ax.v1".into(),
-        params: serde_json::json!({"print": {"max_chars": 8000}, "preview": {"max_chars": 1000}}),
-    });
     assert_process_start_roundtrip(lashlang);
 
     let session_turn = lash_core::ProcessStartRequest::new(

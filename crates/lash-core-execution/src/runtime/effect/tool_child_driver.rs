@@ -1187,11 +1187,9 @@ async fn run_tool_child<'run>(
     })
 }
 
-/// The environment the child was admitted under, read through a recorded
-/// step on its own controller (FIG-3683): the store is read once, and every
-/// replay of the child executes under the recorded spec instead of reading it
-/// again. A store that did not answer is not recorded; the engine runs the
-/// step again (see `ExecutionEnvLoadExecution`).
+/// Validate and acquire the child's environment in a recorded step, then
+/// resolve its immutable bytes. The child's execution referrer keeps them
+/// available across replay; no journal copies the captured policy.
 async fn load_execution_env(
     host: &ToolChildHost,
     request: &ToolChildRequest,
@@ -1205,7 +1203,7 @@ async fn load_execution_env(
         .session_id()
         .map(crate::RuntimeAttribution::for_session)
         .unwrap_or_else(crate::RuntimeAttribution::none);
-    controller
+    let env_ref = controller
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(address, attribution, replay_key),
@@ -1214,12 +1212,21 @@ async fn load_execution_env(
                 },
             ),
             RuntimeEffectLocalExecutor::execution_env_load(
-                store,
+                Arc::clone(&store),
                 format!("tool child `{}`", request.call.call_id),
             ),
         )
+        .await?
+        .into_execution_env_ref()?;
+    crate::runtime::load_process_execution_env(store.as_ref(), &env_ref)
         .await
-        .and_then(RuntimeEffectOutcome::into_execution_env)
+        .map_err(|error| {
+            super::executor::unresolved_execution_env(
+                &format!("tool child `{}`", request.call.call_id),
+                &env_ref,
+                error,
+            )
+        })
 }
 
 /// Authenticates the recorded authority set against this host before any key

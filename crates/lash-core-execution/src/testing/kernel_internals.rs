@@ -87,17 +87,12 @@ pub fn emit_tool_call_completed(
     tracing.emit_tool_call_completed(record, attempts, issuing_node_id, duration_ms, clock);
 }
 
-/// `RuntimeExecutionContext::process_start_execution_env`: the reference and
-/// spec a process start carries into its journaled command, which the
-/// publish-ordering laws read before the effect runs.
-pub fn process_start_execution_env(
+/// The digest-only start registration after its execution holds the environment.
+pub async fn process_start_execution_env(
     context: &crate::RuntimeExecutionContext<'_>,
     registration: crate::ProcessRegistration,
-) -> (
-    crate::ProcessRegistration,
-    Option<crate::ProcessExecutionEnvSpec>,
-) {
-    context.process_start_execution_env(registration)
+) -> Result<crate::ProcessRegistration, crate::PluginError> {
+    context.process_start_execution_env(registration).await
 }
 
 /// `ToolChildHost::child_controller`: the group-child-bound controller a

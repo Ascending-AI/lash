@@ -271,7 +271,6 @@ where
         ProcessCommand::Start {
             registration,
             observers,
-            env_spec,
             execution_context,
         } => {
             // A start is addressed by its key, never by the id it will be
@@ -346,7 +345,6 @@ where
                         &stores,
                         stored_registration,
                         &observers,
-                        env_spec.as_ref(),
                     )
                     .await
                     {

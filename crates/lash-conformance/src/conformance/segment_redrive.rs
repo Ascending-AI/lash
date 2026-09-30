@@ -301,12 +301,10 @@ impl Scenario {
             self.invocation(CHILD),
             RuntimeEffectCommand::Process {
                 command: Box::new(crate::ProcessCommand::Start {
-                    registration: self.child_registration(),
-                    observers: Vec::new(),
-                    env_spec: Some(crate::ProcessExecutionEnvSpec::new(
-                        crate::PluginOptions::default(),
-                        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                    registration: self.child_registration().with_execution_env_ref(Some(
+                        crate::testing::process_execution_env_fixture_ref(),
                     )),
+                    observers: Vec::new(),
                     execution_context: Box::default(),
                 }),
             },
@@ -712,6 +710,7 @@ async fn run_scenario(
         case.label(),
         recovery_label(recovery)
     );
+    crate::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let registry = stores.process_registry();
     let registration = segment_registration();
     let process_id = registry

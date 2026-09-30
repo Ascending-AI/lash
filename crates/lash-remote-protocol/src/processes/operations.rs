@@ -215,6 +215,7 @@ impl RemoteProcessEventsResponse {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessStartRequest {
     /// The caller's idempotency key (ADR 0107): while the process started
     /// under it is retained, a retry returns that process. Absent, every
@@ -225,7 +226,7 @@ pub struct RemoteProcessStartRequest {
     pub input: RemoteProcessInput,
     pub lifetime: RemoteStartLifetime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_spec: Option<RemoteProcessExecutionEnvSpec>,
+    pub env_ref: Option<RemoteProcessExecutionEnvRef>,
     pub originator: RemoteProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<RemoteDeclaredProcessIdentity>,
@@ -244,8 +245,8 @@ impl RemoteProcessStartRequest {
         }
         self.lifetime.validate("RemoteProcessStartRequest")?;
         self.input.validate("RemoteProcessStartRequest")?;
-        if let Some(env_spec) = &self.env_spec {
-            env_spec.validate("RemoteProcessStartRequest")?;
+        if let Some(env_ref) = &self.env_ref {
+            env_ref.validate("RemoteProcessStartRequest")?;
         }
         if let Some(identity) = &self.identity {
             identity.validate("RemoteProcessStartRequest")?;

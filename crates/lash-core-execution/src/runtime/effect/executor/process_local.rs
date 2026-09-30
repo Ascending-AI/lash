@@ -103,7 +103,6 @@ impl ProcessLocalExecution {
             ProcessCommand::Start {
                 registration,
                 observers,
-                env_spec,
                 execution_context,
             } => {
                 let starter = process_start_starter(&registration, &execution_context)?;
@@ -123,7 +122,6 @@ impl ProcessLocalExecution {
                     },
                     registration,
                     &observers,
-                    env_spec.as_ref(),
                 )
                 .await?;
                 let realization = started.realization();

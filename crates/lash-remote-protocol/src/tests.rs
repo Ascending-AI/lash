@@ -1197,30 +1197,13 @@ fn remote_process_dtos_json_round_trip() {
         input: RemoteProcessInput::External {
             metadata: serde_json::json!({ "label": "Import" }),
         },
-        env_spec: Some(RemoteProcessExecutionEnvSpec {
-            render: Some(RemoteRecordedRender {
-                renderer_id: "lash.ax.v1".to_string(),
-                params: serde_json::json!({"print": {"max_chars": 8000}, "preview": {"max_chars": 1000}}),
-            }),
-            plugin_options: RemoteProcessPluginOptions {
-                plugins: BTreeMap::from([(
-                    "snapshot-tools".to_string(),
-                    serde_json::json!({ "snapshot_ref": "tool-authority:sha256:abc" }),
-                )]),
-            },
-            policy: RemoteProcessExecutionPolicy {
-                provider_id: "remote-provider".to_string(),
-                model: RemoteProcessModelSpec {
-                    id: "remote-model".to_string(),
-                    limits: RemoteProcessModelLimits {
-                        context_window_tokens: 4096,
-                        output_token_capacity: Some(1024),
-                    },
-                    ..Default::default()
-                },
-                ..RemoteProcessExecutionPolicy::new(RemoteTurnBudget::Unbounded)
-            },
-        }),
+        env_ref: Some(
+            RemoteProcessExecutionEnvRef::parse(format!(
+                "process-env:v6:blake3:{}",
+                "a".repeat(64)
+            ))
+            .expect("environment digest"),
+        ),
         originator: RemoteProcessOriginator::Session {
             session_id: SessionId::from("session"),
             agent_frame_id: Some("frame-a".to_string()),
@@ -1262,10 +1245,7 @@ fn remote_process_dtos_json_round_trip() {
         serde_json::from_value(serde_json::to_value(&start).expect("serialize start"))
             .expect("deserialize start");
     assert_eq!(decoded.start_key.as_deref(), Some("host-start-1"));
-    assert_eq!(
-        decoded.env_spec.as_ref().unwrap().plugin_options.plugins["snapshot-tools"]["snapshot_ref"],
-        "tool-authority:sha256:abc"
-    );
+    assert_eq!(decoded.env_ref, start.env_ref);
 
     let record = remote_process_record();
     record
@@ -1444,27 +1424,27 @@ fn retired_unbounded_process_event_request_is_refused() {
 #[test]
 fn remote_process_env_spec_rejects_unknown_product_metadata_fields() {
     for field in ["tool_grants", "resolved_tool_bindings"] {
-        let request = serde_json::json!({
-            "protocol_version": REMOTE_PROTOCOL_VERSION,
-            "id": "process:1",
-            "input": {
-                "type": "external",
-                "metadata": {}
-            },
-            "env_spec": {
-                field: []
-            },
-            "originator": {
-                "type": "host"
-            }
-        });
-        let err = serde_json::from_value::<RemoteProcessStartRequest>(request)
-            .expect_err("loose process env fields must be rejected");
+        let request = serde_json::json!({"env_spec": {field: []}});
+        let err = serde_json::from_value::<RemotePersistProcessEnvRequest>(request)
+            .expect_err("loose process env fields must be rejected at publication");
         assert!(
             err.to_string().contains(field),
             "error should name rejected field `{field}`: {err}"
         );
     }
+}
+
+#[test]
+fn remote_process_starts_reject_inline_environment_specs() {
+    let request = serde_json::json!({
+        "input": {"type": "external", "metadata": {}},
+        "lifetime": {"type": "detached"},
+        "originator": {"type": "host"},
+        "env_spec": {},
+    });
+    let error = serde_json::from_value::<RemoteProcessStartRequest>(request)
+        .expect_err("the inline predecessor shape has no compatibility path");
+    assert!(error.to_string().contains("env_spec"), "{error}");
 }
 
 #[test]

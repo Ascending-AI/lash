@@ -142,7 +142,6 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
             owner: crate::RuntimeOwner::Session(session_id.clone()),
             owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
             actor: crate::ProcessOriginator::session(crate::SessionScope::new(session_id.clone())),
-            env_spec: None,
             draft: crate::TriggerSubscriptionDraft::for_process(
                 "law",
                 scenario.env_ref.clone(),

@@ -65,6 +65,18 @@ async fn ingress_core_over(
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
+    core.host_artifacts()
+        .publish_process_env(
+            &lash_core::HostArtifactPin::mint(),
+            &lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                },
+            ),
+        )
+        .await?;
     let _session = core.session(SESSION).created().await.open().await?;
     Ok((core, registry, process))
 }
@@ -126,6 +138,18 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
+    core.host_artifacts()
+        .publish_process_env(
+            &lash_core::HostArtifactPin::mint(),
+            &lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                },
+            ),
+        )
+        .await?;
     let _session = core.session(SESSION).created().await.open().await?;
     Ok(core)
 }
@@ -199,6 +223,18 @@ async fn ingress_core_with_trigger_store(
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
+    core.host_artifacts()
+        .publish_process_env(
+            &lash_core::HostArtifactPin::mint(),
+            &lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                },
+            ),
+        )
+        .await?;
     let _session = core.session(SESSION).created().await.open().await?;
     Ok((core, store, subscription, registry))
 }
@@ -233,7 +269,6 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
             owner: crate::RuntimeOwner::Session(SessionId::from(SESSION)),
             owner_scope: lash_core::TriggerOwnerScope::session(SESSION),
             actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(SESSION)),
-            env_spec: None,
             draft: lash_core::TriggerSubscriptionDraft::for_process(
                 "test/host-ingress-registration",
                 env_ref,
@@ -479,6 +514,18 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
     .model(mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
+    core.host_artifacts()
+        .publish_process_env(
+            &lash_core::HostArtifactPin::mint(),
+            &lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                },
+            ),
+        )
+        .await?;
     let _session = core.session(SESSION).created().await.open().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
@@ -505,7 +552,6 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
             owner: crate::RuntimeOwner::Session(session_id.clone()),
             owner_scope,
             actor,
-            env_spec: None,
             draft: draft(),
         }))
     };
@@ -697,10 +743,10 @@ async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Resul
     Ok(())
 }
 
-/// The backend's process-env store, counting and optionally failing puts.
+/// The backend's process-env store, counting publications and optionally failing acquisitions.
 struct ProbeProcessEnvStore {
     puts: std::sync::atomic::AtomicUsize,
-    fail_put: std::sync::atomic::AtomicBool,
+    fail_acquire: std::sync::atomic::AtomicBool,
     inner: Arc<dyn lash_core::ProcessExecutionEnvStore>,
 }
 
@@ -708,7 +754,7 @@ impl ProbeProcessEnvStore {
     fn over(inner: Arc<dyn lash_core::ProcessExecutionEnvStore>) -> Self {
         Self {
             puts: std::sync::atomic::AtomicUsize::new(0),
-            fail_put: std::sync::atomic::AtomicBool::new(false),
+            fail_acquire: std::sync::atomic::AtomicBool::new(false),
             inner,
         }
     }
@@ -723,11 +769,6 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
         bytes: &[u8],
     ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
         self.puts.fetch_add(1, Ordering::SeqCst);
-        if self.fail_put.load(Ordering::SeqCst) {
-            return Err(lash_core::ArtifactStoreError::Backend(
-                "injected process env persist failure".to_string(),
-            ));
-        }
         self.inner
             .publish_process_execution_env(claim, env_ref, bytes)
             .await
@@ -738,6 +779,11 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
         claim: &lash_core::ReferrerClaim,
         env_ref: &lash_core::ProcessExecutionEnvRef,
     ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        if self.fail_acquire.load(Ordering::SeqCst) {
+            return Err(lash_core::ArtifactStoreError::Backend(
+                "injected process env acquisition failure".to_string(),
+            ));
+        }
         self.inner
             .acquire_process_execution_env(claim, env_ref)
             .await
@@ -1082,13 +1128,17 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
-        .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
-            lash_core::SessionPolicy {
-                model: mock_model_spec(),
-                ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
-            },
-        )),
+        .with_env_ref(
+            (lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                },
+            ))
+            .stable_ref()
+            .expect("captured environment digest"),
+        ),
     }))
 }
 
@@ -1657,7 +1707,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
 }
 
 #[tokio::test]
-async fn start_env_is_persisted_after_admission_and_matching_redrive_completes() -> Result<()> {
+async fn a_digest_only_start_redrives_without_republishing_its_environment() -> Result<()> {
     let controller = Arc::new(AdmissionCrashController::default());
     let backend = memory_store_backend().await;
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
@@ -1685,8 +1735,8 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     controller.admitted.notified().await;
     assert_eq!(
         env_store.puts.load(Ordering::SeqCst),
-        0,
-        "journal admission must precede every durable env-store mutation"
+        1,
+        "the host published the environment once before submitting its digest"
     );
     crashed.abort();
     assert!(crashed.await.expect_err("injected crash").is_cancelled());
@@ -1730,7 +1780,7 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
 async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()> {
     let backend = double_backend().await;
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
-    env_store.fail_put.store(true, Ordering::SeqCst);
+    env_store.fail_acquire.store(true, Ordering::SeqCst);
     let (core, registry, _process) = ingress_core_over(
         backend,
         None,
@@ -1764,7 +1814,7 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
         1,
         "only the fixture process is registered"
     );
-    // The failed put is a live fault, not a recorded outcome: a resubmission
+    // The failed acquisition is a live fault, not a recorded outcome: a resubmission
     // of the same identity retries it, meets the same fault, and still
     // registers nothing.
     let resubmitted = ingress
@@ -1946,6 +1996,18 @@ async fn ingress_engine_core(
     .model(mock_model_spec())
     .plugin(Arc::new(IngressAdmissionEngineFactory))
     .build(crate::testing::runtime_lease_owner())?;
+    core.host_artifacts()
+        .publish_process_env(
+            &lash_core::HostArtifactPin::mint(),
+            &lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                },
+            ),
+        )
+        .await?;
     let _session = core.session(SESSION).created().await.open().await?;
     Ok((core, registry))
 }
@@ -1961,13 +2023,17 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
-        .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::default(),
-            lash_core::SessionPolicy {
-                model: mock_model_spec(),
-                ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
-            },
-        )),
+        .with_env_ref(
+            (lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                },
+            ))
+            .stable_ref()
+            .expect("captured environment digest"),
+        ),
     }))
 }
 

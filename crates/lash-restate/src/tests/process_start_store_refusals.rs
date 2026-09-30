@@ -201,7 +201,7 @@ pub(super) async fn start_store_fault_law<S: lash_core::StoreSet + ?Sized>(
                 );
                 let result = scoped
                     .execute_effect(
-                        start_recovery_effect("start-store-fault", &spec),
+                        start_recovery_effect(env_store.as_ref(), "start-store-fault", &spec).await,
                         registry_local_executor(registry)
                             .with_process_env_store(env_store)
                             .with_process_starts(

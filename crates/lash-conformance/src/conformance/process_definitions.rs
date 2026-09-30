@@ -342,8 +342,22 @@ impl World {
             lash_core::Lifetime::Detached,
         )
         .with_start_key(Some(key.clone()));
-        crate::register_process_start(&self.stores(starter), registration, &[], Some(&env_spec()))
-            .await
+        let env_ref = crate::publish_process_execution_env(
+            self.ports.env().as_ref(),
+            &crate::ReferrerClaim::guarded(
+                crate::ArtifactReferrer::Execution(starter.clone()),
+                crate::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?,
+            &env_spec(),
+        )
+        .await?;
+        crate::register_process_start(
+            &self.stores(starter),
+            registration.with_execution_env_ref(Some(env_ref)),
+            &[],
+        )
+        .await
     }
 
     async fn processes_under(&self, key: &crate::StartKey) -> Option<crate::ProcessId> {

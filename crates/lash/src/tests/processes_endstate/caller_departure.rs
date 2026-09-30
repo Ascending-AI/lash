@@ -12,7 +12,7 @@ use super::*;
 async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     let backend = double_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
 
     let mut registered = Vec::new();
     for _ in 0..2 {

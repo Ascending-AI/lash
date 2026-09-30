@@ -845,6 +845,25 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
     ) -> crate::Result<(RealizedIntent, bool)> {
+        if let Some(env_ref) = intent.execution_env_ref() {
+            let claim = lash_core::ReferrerClaim::guarded(
+                lash_core::ArtifactReferrer::Execution(
+                    self.scope
+                        .journal_identity()
+                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+                ),
+                lash_core::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            self.core
+                .env
+                .core
+                .durability
+                .process_env_store
+                .acquire_process_execution_env(&claim, env_ref)
+                .await
+                .map_err(lash_core::PluginError::from)?;
+        }
         let command = match intent {
             lash_core::ToolIntent::StartProcess(intent) => {
                 // The declaration carries no id. The replay key is the process
@@ -862,15 +881,24 @@ impl ToolIntentIngress {
                 {
                     self.core.processes().session_scope(session_id).await?;
                 }
-                let env_spec = request.env_spec.clone();
+                let env_spec = match request.env_ref.as_ref() {
+                    Some(env_ref) => Some(
+                        lash_core::runtime::load_process_execution_env(
+                            self.core.env.core.durability.process_env_store.as_ref(),
+                            env_ref,
+                        )
+                        .await
+                        .map_err(lash_core::PluginError::from)?,
+                    ),
+                    None => None,
+                };
                 let observers = request.observers.clone();
                 let registration = self
-                    .admit_engine_start(request.into_registration(None), env_spec.as_ref())
+                    .admit_engine_start(request.into_registration(), env_spec.as_ref())
                     .await?;
                 lash_core::ProcessCommand::Start {
                     registration,
                     observers,
-                    env_spec,
                     execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
                 }
             }
@@ -991,27 +1019,7 @@ impl ToolIntentIngress {
                 self.core.host_process_engines.clone(),
                 creator.clone(),
             ));
-        let mut draft = intent.draft;
-        if let Some(env_spec) = intent.env_spec.as_ref() {
-            // The declaring attempt carries the env spec; publication lands
-            // here, under the realizing execution's journal referrer (FIG-3116).
-            // The draft's env ref is content-addressed, so the published
-            // reference is the one it already names.
-            let claim = lash_core::ReferrerClaim::guarded(
-                lash_core::ArtifactReferrer::Execution(creator),
-                lash_core::ArtifactCleanupPlan::AwaitJournal,
-            )
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-            })?;
-            draft.env_ref = lash_core::publish_process_execution_env(
-                self.core.env.core.durability.process_env_store.as_ref(),
-                &claim,
-                env_spec,
-            )
-            .await
-            .map_err(crate::EmbedError::Plugin)?;
-        }
+        let draft = intent.draft;
         let invocation = lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 scoped.execution_scope().clone(),
@@ -1061,7 +1069,6 @@ impl ToolIntentIngress {
         }
     }
 
-    /// Install one recorded process-definition registration through the
     async fn emit_recorded_trigger(
         &self,
         request: lash_core::TriggerOccurrenceRequest,

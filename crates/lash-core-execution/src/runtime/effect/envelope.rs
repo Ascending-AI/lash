@@ -500,12 +500,12 @@ pub enum RuntimeEffectCommand {
     /// call runs under (FIG-3538); every sync carries it, the protocol-start
     /// one included (FIG-3587).
     SyncExecutionEnvironment,
-    /// Read the execution environment a tool child's request records
-    /// (ADR 0099 §3, FIG-3683): a recorded step, so the store is read once
-    /// and every replay serves the recorded spec.
+    /// Validate and hold the environment a tool child's request names
+    /// (ADR 0099 §3, FIG-3683). The recorded outcome carries its digest,
+    /// whose immutable bytes the execution referrer keeps available to replay.
     ///
-    /// Only a deterministic answer is its outcome: the spec, or the refusal
-    /// of an environment the store holds but this build cannot reconstruct.
+    /// The outcome is that reference, or the refusal of an environment the
+    /// store holds but this build cannot reconstruct.
     /// A store that did not answer is a fault of this attempt, never the
     /// step's outcome: the executor marks it retryable (see
     /// [`RuntimeEffectControllerError::retryable_uncommitted_derivation`]),
@@ -619,10 +619,6 @@ pub enum ProcessCommand {
         registration: ProcessRegistration,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         observers: Vec<SessionId>,
-        /// Captured environment carried inside the journal admission and
-        /// persisted by the local executor before process registration.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        env_spec: Option<crate::ProcessExecutionEnvSpec>,
         #[serde(
             default,
             skip_serializing_if = "boxed_process_execution_context_is_empty"
@@ -706,7 +702,7 @@ pub enum ProcessCommand {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 // justification: the decode shape mirrors ProcessCommand, whose Start payload is not boxed for the same reason.
 #[allow(clippy::large_enum_variant)]
 enum ProcessCommandDecode {
@@ -714,8 +710,6 @@ enum ProcessCommandDecode {
         registration: ProcessRegistration,
         #[serde(default)]
         observers: Vec<SessionId>,
-        #[serde(default)]
-        env_spec: Box<Option<crate::ProcessExecutionEnvSpec>>,
         #[serde(default)]
         execution_context: Box<ProcessExecutionContext>,
     },
@@ -797,12 +791,10 @@ impl<'de> Deserialize<'de> for ProcessCommand {
             ProcessCommandDecode::Start {
                 registration,
                 observers,
-                env_spec,
                 execution_context,
             } => Self::Start {
                 registration,
                 observers,
-                env_spec: *env_spec,
                 execution_context,
             },
             ProcessCommandDecode::List {
@@ -1337,11 +1329,10 @@ pub enum RuntimeEffectOutcome {
         /// P7b). Empty when the sync failed.
         tool_surface: Vec<crate::ToolDefinition>,
     },
-    /// The environment a [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv)
-    /// step read, recorded so a replay executes under the same spec without
-    /// reading the store again.
+    /// The environment a load validated and acquired under its execution.
+    /// Replay resolves the same immutable bytes from this recorded digest.
     LoadExecutionEnv {
-        spec: Box<crate::ProcessExecutionEnvSpec>,
+        env: crate::ProcessExecutionEnvRef,
     },
     Sleep,
     AwaitEvent {
@@ -1716,12 +1707,12 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// The execution environment a recorded load read.
-    pub fn into_execution_env(
+    /// The immutable environment a recorded load holds.
+    pub fn into_execution_env_ref(
         self,
-    ) -> Result<crate::ProcessExecutionEnvSpec, RuntimeEffectControllerError> {
+    ) -> Result<crate::ProcessExecutionEnvRef, RuntimeEffectControllerError> {
         match self {
-            Self::LoadExecutionEnv { spec } => Ok(*spec),
+            Self::LoadExecutionEnv { env } => Ok(env),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::LoadExecutionEnv,
                 other.kind(),

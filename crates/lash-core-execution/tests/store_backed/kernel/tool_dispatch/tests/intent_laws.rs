@@ -856,7 +856,6 @@ async fn register_trigger_intent_refuses_foreign_authority_before_installing() {
                 "session",
                 crate::FrameNodeId::new("test-frame").expect("test frame id"),
             )),
-            env_spec: None,
             draft,
         };
         if foreign_field == "owner_scope" {
@@ -1409,4 +1408,60 @@ async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_ou
         }]),
         "the recorded outcome states what every drive did, not which drive reserved first"
     );
+}
+
+#[tokio::test]
+async fn an_attempt_holds_its_large_captured_environment_before_realizing_a_start() {
+    let world = intent_law_world().await;
+    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    policy.prompt = crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
+        crate::PromptSlot::ProjectInstructions,
+        "instructions",
+        "x".repeat(128 * 1024),
+    ));
+    let spec = crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+    let env_ref = spec.stable_ref().expect("captured digest");
+    let intent = crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+        owner: crate::RuntimeOwner::Session(SessionId::from("session")),
+        declaration: crate::ProcessStartDeclaration::new(
+            crate::ProcessInput::Engine {
+                kind: "testing-fixture".to_owned(),
+                payload: serde_json::Value::Null,
+            },
+            crate::ProcessOriginator::host(),
+            crate::Lifetime::Detached,
+        )
+        .with_env_ref(env_ref.clone()),
+    }));
+    let mut context = fixed_intent_dispatch_context(
+        Arc::new(IntentReplayController::new(None).await),
+        &world,
+        crate::ToolIntents::v3(vec![intent]),
+        Arc::new(AtomicUsize::new(0)),
+    )
+    .await;
+    context.execution_env_spec = spec.clone();
+    assert_eq!(
+        world
+            .env_store
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("initial read"),
+        None
+    );
+    let outcome = run_fixed_intent_attempt(&context).await;
+    assert!(
+        matches!(
+            outcome.intent_outcomes.as_slice(),
+            [crate::ToolIntentExecutionOutcome::Executed {
+                kind: crate::ToolIntentKind::StartProcess,
+                ..
+            }]
+        ),
+        "{outcome:?}"
+    );
+    let loaded = crate::load_process_execution_env(world.env_store.as_ref(), &env_ref)
+        .await
+        .expect("the attempt published its capture before realization");
+    assert_eq!(loaded, spec);
 }

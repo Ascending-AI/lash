@@ -192,16 +192,13 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
-        let registration = request.into_registration(None);
+        let registration = request.into_registration();
         let record = self
             .start(
                 session_id,
                 registration,
-                crate::ProcessStartOptions::new()
-                    .with_initial_observers(observers)
-                    .with_env_spec(env_spec),
+                crate::ProcessStartOptions::new().with_initial_observers(observers),
                 scope,
             )
             .await?;

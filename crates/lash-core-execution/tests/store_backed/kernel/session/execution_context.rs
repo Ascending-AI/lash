@@ -48,43 +48,119 @@ mod tests {
         }
     }
 
-    /// The session path publishes nothing before the process-start effect is journaled.
-    ///
-    /// This is the FIG-3028 / #1390 regression, re-pointed at the journaled
-    /// publish (FIG-3050). The spec travels in the command; no artifact is
-    /// published before that command is journaled. The process-local replay
-    /// test exercises the start referrer's later carry to the process record.
-    #[tokio::test]
-    async fn a_session_path_process_start_publishes_no_environment_before_its_journal() {
-        let backend = crate::support::memory_store_backend().await;
-        let env_store = backend.process_env_store();
-        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
-            .session_id("session")
-            .build()
-            .into_runtime();
-        let registration = crate::ProcessRegistration::new(
+    fn engine_start() -> crate::ProcessRegistration {
+        crate::ProcessRegistration::new(
             crate::ProcessInput::Engine {
                 kind: "test-engine".to_string(),
                 payload: serde_json::json!({"program": "probe"}),
             },
             crate::ProcessProvenance::host(),
             crate::Lifetime::Detached,
-        );
+        )
+    }
 
-        let (prepared, env_spec) = crate::process_start_execution_env(&context, registration);
+    #[tokio::test]
+    async fn a_session_path_start_holds_its_environment_before_journaling_its_digest() {
+        let backend = crate::support::memory_store_backend().await;
+        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+            .session_id("session")
+            .build()
+            .into_runtime();
+        let prepared = crate::process_start_execution_env(&context, engine_start())
+            .await
+            .expect("capture");
+        let env_ref = prepared
+            .env_ref
+            .expect("the command carries the published digest");
+        crate::load_process_execution_env(backend.process_env_store().as_ref(), &env_ref)
+            .await
+            .expect("the execution holds durable bytes before journaling");
+        backend
+            .process_env_store()
+            .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+                referrer: context
+                    .execution_claim()
+                    .expect("execution claim")
+                    .referrer()
+                    .clone(),
+                carries: Vec::new(),
+            })
+            .await
+            .expect("journal ends");
         assert_eq!(
-            prepared.env_ref, None,
-            "a session-path start must not carry a reference its journal has not produced"
-        );
-        let env_spec = env_spec.expect("the captured spec rides the process-start command");
-        let staged_ref = env_spec.stable_ref().expect("stable environment reference");
-        assert_eq!(
-            env_store
-                .get_process_execution_env(&staged_ref)
+            backend
+                .process_env_store()
+                .get_process_execution_env(&env_ref)
                 .await
-                .expect("read the environment store"),
-            None,
-            "nothing is published before the process-start effect runs"
+                .expect("read"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
+        let backend = crate::support::memory_store_backend().await;
+        let spec = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        );
+        let pin = crate::testing::host_pin_claim_for_testing();
+        let inherited =
+            crate::publish_process_execution_env(backend.process_env_store().as_ref(), &pin, &spec)
+                .await
+                .expect("parent's environment");
+        let parent = engine_start().with_execution_env_ref(Some(inherited.clone()));
+        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+            .session_id("session")
+            .build()
+            .into_runtime()
+            .with_process_execution(crate::ProcessId::fixture("parent"), &parent, None);
+        let prepared = crate::process_start_execution_env(&context, engine_start())
+            .await
+            .expect("capture child");
+        assert_eq!(prepared.env_ref, Some(inherited.clone()));
+        backend
+            .process_env_store()
+            .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
+                referrer: pin.referrer().clone(),
+                carries: Vec::new(),
+            })
+            .await
+            .expect("parent's pin ends");
+        crate::load_process_execution_env(backend.process_env_store().as_ref(), &inherited)
+            .await
+            .expect("child declaration holds inherited bytes independently");
+    }
+
+    #[tokio::test]
+    async fn detached_child_start_carries_the_parents_recorded_render() {
+        let backend = crate::support::memory_store_backend().await;
+        let render = crate::RecordedRender {
+            renderer_id: "parent.renderer".to_string(),
+            params: serde_json::json!({"print": {"max_chars": 37}}),
+        };
+        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+            .session_id("session")
+            .build()
+            .into_runtime()
+            .with_recorded_render(render.clone());
+        let prepared = crate::process_start_execution_env(&context, engine_start())
+            .await
+            .expect("capture child");
+        let spec = crate::load_process_execution_env(
+            backend.process_env_store().as_ref(),
+            &prepared.env_ref.expect("digest"),
+        )
+        .await
+        .expect("load captured render");
+        assert_eq!(spec.render, Some(render.clone()));
+        assert_eq!(
+            crate::RecordedRender::require_available(spec.render.as_ref(), "parent.renderer"),
+            Ok(&render)
+        );
+        assert_eq!(
+            crate::RecordedRender::require_available(spec.render.as_ref(), "another.renderer"),
+            Err(crate::RuntimeErrorCode::RecordedRendererUnavailable)
         );
     }
 

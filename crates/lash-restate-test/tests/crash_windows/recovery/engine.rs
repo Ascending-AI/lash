@@ -602,7 +602,15 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         )
         .unwrap(),
     });
-    let request = waiting_request(&engine, 32).await.with_env_spec(env);
+    let request = waiting_request(&engine, 32).await.with_env_ref(
+        lash_core::publish_process_execution_env(
+            engine.lash_backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(env),
+        )
+        .await
+        .expect("publish captured environment"),
+    );
     let id = start(&engine, &core, request).await;
     record_where(&engine, &id, signal_wait).await;
     let key = promise_key(&engine, "attach-process").await;

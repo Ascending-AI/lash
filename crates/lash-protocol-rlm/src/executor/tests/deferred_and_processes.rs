@@ -1812,19 +1812,14 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         {
             observers.push(session_id.clone());
         }
-        let request_env_spec = request.env_spec.clone();
-        let env_ref = match request.env_spec.clone() {
-            Some(spec) => Some(
-                lash_core::testing::publish_process_execution_env_for_testing(
-                    self.env_store.as_ref(),
-                    &fixture_start_claim(),
-                    &spec,
-                )
-                .await?,
+        let request_env_spec = match request.env_ref.as_ref() {
+            Some(env_ref) => Some(
+                lash_core::runtime::load_process_execution_env(self.env_store.as_ref(), env_ref)
+                    .await?,
             ),
             None => None,
         };
-        let registration = request.into_registration(env_ref);
+        let registration = request.into_registration();
         // The runtime's recorded-intent route admits an engine start against
         // the env its own record carries and stamps the identity the engine
         // resolved, which is where the process's signal event types come from.
@@ -1942,21 +1937,6 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         registration = registration
             .with_process_provenance(lash_core::ProcessProvenance::new(originator))
             .with_wake_session_id(wake_session_id);
-        // This fixture's `start` registers directly, so it performs the
-        // journaled effect's env publish itself: a spec-carrying start is
-        // staged under its start-scoped owner and stamped with the reference
-        // the publish produced.
-        if registration.env_ref.is_none()
-            && let Some(spec) = options.env_spec.as_ref()
-        {
-            let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
-                self.env_store.as_ref(),
-                &fixture_start_claim(),
-                spec,
-            )
-            .await?;
-            registration = registration.with_execution_env_ref(Some(env_ref));
-        }
         if matches!(
             registration.input.as_ref(),
             lash_core::ProcessInput::Definition { .. }
@@ -1977,7 +1957,6 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                 },
                 registration,
                 &options.initial_observers,
-                options.env_spec.as_ref(),
             )
             .await
             .map(|started| started.record)
@@ -2505,15 +2484,4 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         .expect("inspected process id");
     assert_eq!(finish_id, recorded_pid);
     handler.close().await.expect("close the cell handler");
-}
-
-/// The claim a fixture that registers directly publishes a start's
-/// environment under. It stands in for the journaled start's own `Start`
-/// referrer, which only the runtime's start command arms, so it is a host
-/// pin the fixture never releases.
-fn fixture_start_claim() -> lash_core::ReferrerClaim {
-    lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-        lash_core::HostArtifactPin::mint(),
-    ))
-    .expect("a host pin is an unguarded referrer")
 }

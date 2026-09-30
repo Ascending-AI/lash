@@ -128,7 +128,6 @@ mod tests {
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration,
                 observers: Vec::new(),
-                env_spec: None,
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
         );
@@ -196,6 +195,30 @@ mod tests {
         assert_eq!(
             batch.calls[1].call.call_id,
             crate::ToolCallId::fixture("call-2")
+        );
+    }
+}
+
+#[cfg(test)]
+mod captured_environment_row_tests {
+    #[test]
+    fn an_environment_load_journal_row_stays_under_the_intent_budget() {
+        let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+        policy.prompt =
+            crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
+                crate::PromptSlot::ProjectInstructions,
+                "instructions",
+                "x".repeat(128 * 1024),
+            ));
+        let spec = crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
+        let outcome = crate::RuntimeEffectOutcome::LoadExecutionEnv {
+            env: spec.stable_ref().expect("environment digest"),
+        };
+        let bytes = serde_json::to_vec(&outcome).expect("load journal outcome");
+        assert!(
+            bytes.len() < crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+            "environment load journals {} bytes for 128 KiB of instructions",
+            bytes.len()
         );
     }
 }

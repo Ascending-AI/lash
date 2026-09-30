@@ -115,7 +115,6 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: Vec::new(),
-                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),

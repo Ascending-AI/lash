@@ -2026,3 +2026,16 @@ async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms
     reset(storage.pool()).await;
     lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(Arc::new(storage.lashlang_artifact_store())).await;
 }
+
+lash_conformance::process_prune_start_staging_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres environment-start conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
+    (database_lock, registry, env_store)
+});

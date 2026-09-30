@@ -114,21 +114,9 @@ pub async fn execute_register_trigger_tool_call(
         .and_then(|spawn| spawn.wake_session_id.as_ref())
         .map(|session| lash_core::SessionScope::new(session.clone()))
         .or(session_scope);
-    // A process's env is already durable, so the draft names its reference
-    // verbatim and the intent publishes nothing. A session's env is not, so
-    // the draft names the content-addressed reference and the intent carries
-    // the spec for realization to publish under its own artifact owner.
-    let (env_ref, env_spec) = match context.inherited_process_execution_env_ref() {
-        Some(env_ref) => (env_ref, None),
-        None => {
-            let env_spec = context.process_execution_env_spec();
-            match env_spec.stable_ref() {
-                Ok(env_ref) => (env_ref, Some(env_spec)),
-                Err(error) => {
-                    return refuse(format!("failed to encode process execution env: {error}"));
-                }
-            }
-        }
+    let env_ref = match context.process_execution_env_ref() {
+        Ok(env_ref) => env_ref,
+        Err(error) => return refuse(error.to_string()),
     };
     let draft = match prepared.into_draft(env_ref, wake_target) {
         Ok(draft) => draft,
@@ -144,7 +132,6 @@ pub async fn execute_register_trigger_tool_call(
                 owner,
                 owner_scope,
                 actor,
-                env_spec,
                 draft,
             },
         ))]),

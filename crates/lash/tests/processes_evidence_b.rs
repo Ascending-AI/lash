@@ -1011,12 +1011,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessRunOutcome::is_terminal;
     // W0687: lash::plugins::ProcessRunOutcome::terminal_output [function]
     let _ = lash::plugins::ProcessRunOutcome::terminal_output;
-    // W0690: lash::runtime::ProcessCommand::Start::env_spec [field]
-    field_witness(|value: &lash::runtime::ProcessCommand| {
-        if let lash::runtime::ProcessCommand::Start { env_spec, .. } = value {
-            let _ = env_spec;
-        }
-    });
     // W0691: lash::runtime::RuntimeEffectLocalExecutor::with_process_env_store [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_env_store;
     // W0692: lash::durability::ProcessLocalExecution::process_env_store [field]

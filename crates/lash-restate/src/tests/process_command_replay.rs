@@ -235,7 +235,6 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
                 registration: external_registration()
                     .with_start_key(Some(lash_core::StartKey::for_host("fig3827-started-child"))),
                 observers: Vec::new(),
-                env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         )

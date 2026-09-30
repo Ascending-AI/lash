@@ -855,7 +855,7 @@ async fn the_cancel_wait_observes_the_admitted_scope() {
 /// would act on is `observe_turn_cancel`, so asserting the shape is asserting
 /// the gate was never attached.
 /// A process-execution-env store that fails every read with `error`.
-struct FailingEnvStore(fn() -> crate::ArtifactStoreError);
+struct FailingEnvStore(fn() -> Result<Option<Vec<u8>>, crate::ArtifactStoreError>);
 
 #[async_trait::async_trait]
 impl crate::ProcessExecutionEnvStore for FailingEnvStore {
@@ -887,7 +887,7 @@ impl crate::ProcessExecutionEnvStore for FailingEnvStore {
         &self,
         _env_ref: &ProcessExecutionEnvRef,
     ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
-        Err((self.0)())
+        (self.0)()
     }
 }
 
@@ -932,9 +932,9 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let timed_out = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::ArtifactStoreError::Backend(
+            Err(crate::ArtifactStoreError::Backend(
                 "pool timed out while waiting for an open connection".into(),
-            )
+            ))
         })),
     )
     .await;
@@ -954,9 +954,9 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let missing_bytes = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::ArtifactStoreError::ArtifactMissing {
+            Err(crate::ArtifactStoreError::ArtifactMissing {
                 artifact_ref: "env".into(),
-            }
+            })
         })),
     )
     .await;
@@ -975,9 +975,9 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let invalid = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::ArtifactStoreError::Decode(
+            Err(crate::ArtifactStoreError::Decode(
                 "invalid process execution environment reference".into(),
-            )
+            ))
         })),
     )
     .await;
@@ -991,11 +991,7 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     );
 
     // Nothing stored under the reference: the request's outcome.
-    let missing = settle(
-        &request,
-        Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
-    )
-    .await;
+    let missing = settle(&request, Arc::new(FailingEnvStore(|| Ok(None)))).await;
     assert!(!retried(&missing), "a missing environment is recorded");
     assert_eq!(
         missing.code,
@@ -1006,6 +1002,20 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
         crate::TurnFailureCause::Outcome
     );
     assert!(missing.message.contains("missing process execution env"));
+
+    let unavailable = settle(
+        &request,
+        Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
+    )
+    .await;
+    assert_eq!(
+        unavailable.turn_failure_cause(),
+        crate::TurnFailureCause::LiveFault
+    );
+    assert!(
+        retried(&unavailable),
+        "a failed acquisition is retried before journaling"
+    );
 }
 
 /// A child whose presentation effect a controller refused — a replay

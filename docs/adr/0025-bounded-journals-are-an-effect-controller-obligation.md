@@ -40,7 +40,14 @@ Group admission bounds retained work per exact logical opener, including settled
 
 ## Payload and lifecycle consequences
 
-Segmentation bounds completed effect count, not the byte size of every result. Tool children journal their own outcomes. Intent admission bounds declarations and canonical declared-intent bytes; captured host environments travel with declarations but are outside that byte count. Tool output values have no universal core byte cap. Hosts size their engine entry limits and apply tool/provider output policy.
+Segmentation bounds completed effect count, not the byte size of every result.
+Tool children journal their own outcomes. Intent admission allows at most 32
+declarations, 16 of one kind, and 64 KiB of canonical intent JSON per completed
+attempt. The byte bound measures the complete declaration, including its
+captured environment's digest. The capture lives once in the content-addressed
+process environment store and durable referrers keep it available for replay
+and realization (ADR 0113). Tool output values have no universal core byte cap.
+Hosts size their engine entry limits and apply tool/provider output policy.
 
 Restate owns invocation-journal retention. Domain-store maintenance does not manage SQL replay rows. Author-visible chaining and a generic store incarnation mechanism are rejected because they expose an engine limit to every author and host instead of keeping it with the controller.
 

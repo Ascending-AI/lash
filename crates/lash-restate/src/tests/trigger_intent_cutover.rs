@@ -243,7 +243,6 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
                 TRIGGER_INTENT_CUTOVER_SESSION,
                 lash_core::FrameNodeId::new("test-frame").expect("test frame id"),
             )),
-            env_spec: None,
             draft: lash_core::TriggerSubscriptionDraft::for_process(
                 format!("test/restate-foreign-{foreign_field}"),
                 env_ref,

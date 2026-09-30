@@ -320,7 +320,6 @@ pub async fn register_process_start(
     stores: &ProcessStartStores<'_>,
     registration: ProcessRegistration,
     observers: &[SessionId],
-    env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
     let Some(start_key) = registration.start_key.clone() else {
         return Err(RuntimeEffectControllerError::foreign(
@@ -329,7 +328,7 @@ pub async fn register_process_start(
             "a journaled process start must carry its start key",
         ));
     };
-    match stage_and_register(stores, &start_key, registration, observers, env_spec).await {
+    match stage_and_register(stores, &start_key, registration, observers).await {
         Ok(registered) => {
             if let Some(ports) = stores.ports() {
                 ports.nudge(&ArtifactReferrer::Start(start_key)).await;
@@ -381,7 +380,6 @@ async fn stage_and_register(
     start_key: &StartKey,
     mut registration: ProcessRegistration,
     observers: &[SessionId],
-    env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
     let claim = ReferrerClaim::guarded(
         ArtifactReferrer::Start(start_key.clone()),
@@ -390,8 +388,26 @@ async fn stage_and_register(
         },
     )
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    let definition = stage_definition(stores, &claim, &mut registration, env_spec).await?;
-    let env = stage_env(stores, &claim, &mut registration, env_spec).await?;
+    let env = stage_env(stores, &claim, &registration).await?;
+    let env_spec = match env.as_ref() {
+        Some(env) => Some(
+            super::load_process_execution_env(
+                stores
+                    .env_store
+                    .ok_or_else(|| {
+                        crate::PluginError::Session(
+                            "process environment store is unavailable".to_string(),
+                        )
+                    })?
+                    .as_ref(),
+                &env.env_ref,
+            )
+            .await
+            .map_err(crate::PluginError::from)?,
+        ),
+        None => None,
+    };
+    let definition = stage_definition(stores, &claim, &mut registration, env_spec.as_ref()).await?;
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
     let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
@@ -493,12 +509,7 @@ async fn start_ended_after_staging(
         && env.staged
     {
         // The bytes are stored: acquire the reference, publish nothing.
-        let probe = StagedEnv {
-            env_ref: env.env_ref.clone(),
-            bytes: None,
-            staged: true,
-        };
-        return Ok(!acquire_env(env_store.as_ref(), claim, &probe).await?);
+        return Ok(!acquire_env(env_store.as_ref(), claim, env).await?);
     }
     if let Some(engine) = engine
         && engine.staged
@@ -518,71 +529,29 @@ async fn acquire_env(
     claim: &ReferrerClaim,
     env: &StagedEnv,
 ) -> Result<bool, RuntimeEffectControllerError> {
-    let acquired = match &env.bytes {
-        Some(bytes) => {
-            env_store
-                .publish_process_execution_env(claim, &env.env_ref, bytes)
-                .await
-        }
-        None => {
-            env_store
-                .acquire_process_execution_env(claim, &env.env_ref)
-                .await
-        }
-    };
+    let acquired = env_store
+        .acquire_process_execution_env(claim, &env.env_ref)
+        .await;
     Ok(held_or_ended(claim, acquired.map_err(crate::PluginError::from))?.is_none())
 }
 
 async fn stage_env(
     stores: &ProcessStartStores<'_>,
     claim: &ReferrerClaim,
-    registration: &mut ProcessRegistration,
-    env_spec: Option<&ProcessExecutionEnvSpec>,
+    registration: &ProcessRegistration,
 ) -> Result<Option<StagedEnv>, RuntimeEffectControllerError> {
-    let missing_store = |what: &str| {
-        RuntimeEffectControllerError::foreign(
-            "process_env_store_unavailable",
-            TurnFailureCause::Outcome,
-            format!(
-                "admitted {} {what} an execution environment but the executor has no environment store",
-                stores.executor
-            ),
-        )
-    };
-    let mut env = if let Some(env_spec) = env_spec {
-        let encode_error = |error: serde_json::Error| {
-            crate::PluginError::Session(format!(
-                "failed to encode process execution environment: {error}"
-            ))
-        };
-        let env_ref = env_spec.stable_ref().map_err(encode_error)?;
-        let bytes = env_spec.to_store_bytes().map_err(encode_error)?;
-        *registration = registration
-            .clone()
-            .with_execution_env_ref(Some(env_ref.clone()));
-        StagedEnv {
-            env_ref,
-            bytes: Some(bytes),
-            staged: false,
-        }
-    } else if let Some(env_ref) = registration.env_ref.clone() {
-        // An existing or inherited environment is acquired, never borrowed:
-        // the start's own edge is what keeps it alive (ADR 0113 §3.3).
-        StagedEnv {
-            env_ref,
-            bytes: None,
-            staged: false,
-        }
-    } else {
+    let Some(env_ref) = registration.env_ref.clone() else {
         return Ok(None);
     };
-    let env_store = stores.env_store.ok_or_else(|| {
-        missing_store(if env.bytes.is_some() {
-            "carries"
-        } else {
-            "references"
-        })
-    })?;
+    let env_store = stores.env_store.ok_or_else(|| RuntimeEffectControllerError::foreign(
+        "process_env_store_unavailable",
+        TurnFailureCause::Outcome,
+        format!("admitted {} references an execution environment but the executor has no environment store", stores.executor),
+    ))?;
+    let mut env = StagedEnv {
+        env_ref,
+        staged: false,
+    };
     env.staged = acquire_env(env_store.as_ref(), claim, &env).await?;
     Ok(Some(env))
 }
@@ -741,9 +710,6 @@ struct StagedDefinition<'a> {
 
 struct StagedEnv {
     env_ref: ProcessExecutionEnvRef,
-    /// The bytes a start that carries its spec publishes; `None` for an
-    /// existing or inherited reference, which is acquired.
-    bytes: Option<Vec<u8>>,
     /// Whether the start's own referrer holds it: `false` when `Start(key)`
     /// was already fenced.
     staged: bool,

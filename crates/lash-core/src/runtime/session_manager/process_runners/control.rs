@@ -40,14 +40,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
         &self,
         registration: crate::ProcessRegistration,
         observers: Vec<SessionId>,
-        env_spec: Option<crate::ProcessExecutionEnvSpec>,
         execution_context: crate::ProcessExecutionContext,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Start {
                 registration,
                 observers,
-                env_spec,
                 execution_context: Box::new(execution_context),
             })
             .await?
@@ -363,40 +361,55 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         registration: &crate::ProcessRegistration,
-        requested_env_spec: Option<crate::ProcessExecutionEnvSpec>,
+        scope: &crate::ProcessOpScope<'_>,
     ) -> Result<
         (
             Option<crate::ProcessExecutionEnvRef>,
             Option<crate::ProcessExecutionEnvSpec>,
-            Option<crate::ProcessExecutionEnvSpec>,
         ),
         crate::PluginError,
     > {
+        let claim = crate::ReferrerClaim::guarded(
+            crate::ArtifactReferrer::Execution(
+                scope
+                    .effect_controller
+                    .execution_scope()
+                    .journal_identity()
+                    .map_err(|error| crate::PluginError::Session(error.to_string()))?,
+            ),
+            crate::ArtifactCleanupPlan::AwaitJournal,
+        )
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
         if let Some(env_ref) = registration.env_ref.clone() {
+            current
+                .host
+                .core
+                .durability
+                .process_env_store
+                .acquire_process_execution_env(&claim, &env_ref)
+                .await
+                .map_err(crate::PluginError::from)?;
             let spec = crate::load_process_execution_env(
                 current.host.core.durability.process_env_store.as_ref(),
                 &env_ref,
             )
             .await?;
-            // Keep the existing reference in the registration and let the
-            // replayable executor protect/transfer it. The decoded value is
-            // only for the pre-journal engine-admission check.
-            return Ok((Some(env_ref), None, Some(spec)));
+            return Ok((Some(env_ref), Some(spec)));
         }
-        if let Some(spec) = requested_env_spec {
-            return Ok((None, Some(spec.clone()), Some(spec)));
+        if matches!(
+            registration.input.as_ref(),
+            crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. }
+        ) {
+            return Ok((None, None));
         }
-        match registration.input.as_ref() {
-            // A start by id resolves to an engine start, which runs in an
-            // environment like every other.
-            crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. } => {
-                let spec = current.execution_env_spec()?;
-                Ok((None, Some(spec.clone()), Some(spec)))
-            }
-            crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
-                Ok((None, None, None))
-            }
-        }
+        let spec = current.execution_env_spec()?;
+        let env_ref = crate::publish_process_execution_env(
+            current.host.core.durability.process_env_store.as_ref(),
+            &claim,
+            &spec,
+        )
+        .await?;
+        Ok((Some(env_ref), Some(spec)))
     }
 
     pub(in crate::runtime::session_manager) async fn start_process(
@@ -415,8 +428,8 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let (env_ref, command_env_spec, validation_env_spec) = self
-            .capture_execution_env(current, &registration, options.env_spec.clone())
+        let (env_ref, validation_env_spec) = self
+            .capture_execution_env(current, &registration, &scope)
             .await?;
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
@@ -450,7 +463,6 @@ impl ProcessCapability {
             .start(
                 registration,
                 options.initial_observers.into_iter().collect(),
-                command_env_spec,
                 execution_context,
             )
             .await
@@ -472,7 +484,16 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let env_spec = request.env_spec.clone();
+        let env_spec = match request.env_ref.as_ref() {
+            Some(env_ref) => Some(
+                crate::load_process_execution_env(
+                    current.host.core.durability.process_env_store.as_ref(),
+                    env_ref,
+                )
+                .await?,
+            ),
+            None => None,
+        };
         // A leaf start declares no observer edge (#1534 gives the *run* its own
         // possession, which is what makes `await handle` reachable). Observation
         // is the other half: without an edge the declaring session cannot see
@@ -515,7 +536,7 @@ impl ProcessCapability {
             .as_ref()
             .and_then(|identity| identity.label.clone());
         let registration = request
-            .into_registration(None)
+            .into_registration()
             .with_process_provenance(
                 crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
             )
@@ -525,7 +546,7 @@ impl ProcessCapability {
         // retained process untouched (ADR 0107): its recorded attempt bound
         // stands whatever this declaration carried.
         // A recorded intent declares its own execution env, so the engine gate
-        // runs against the recorded spec instead of a stored env ref. It must
+        // loads the recorded environment reference. It must
         // run here: once the start command crosses the journal the entry is
         // committed and replays forever.
         let registration = self
@@ -538,7 +559,6 @@ impl ProcessCapability {
             .start(
                 registration,
                 options.initial_observers.into_iter().collect(),
-                env_spec,
                 execution_context,
             )
             .await

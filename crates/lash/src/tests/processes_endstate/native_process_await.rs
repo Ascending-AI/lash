@@ -17,7 +17,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
         .process_work()
         .watched()
         .add_event_sink(Arc::new(sink.clone()));
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {

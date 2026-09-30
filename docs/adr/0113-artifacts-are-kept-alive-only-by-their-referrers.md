@@ -86,6 +86,13 @@ successor frame with `AwaitFrame`. Invalid pairings and `Ended` guards
 are refused. Attachment upload guards belong to ADR 0124
 (`crates/lash-core-store/src/artifact_referrer.rs:640-730`).
 
+A captured `ProcessExecutionEnvSpec` is a `ProcessEnv` artifact addressed by
+the digest of its store bytes. The environment port verifies immutable
+bytes, deduplicates equal captures, arms guarded acquisitions, fences ended
+referrers and reclaims after the last edge. These contracts keep captures
+under the environment port and its existing referrer kinds. Attachment
+delivery has its own ownership and publication rules (ADR 0124).
+
 #### 2.2 Process engines
 
 Every `ProcessEngine` must implement `start_artifacts`,
@@ -305,6 +312,12 @@ including its descriptor and manifest for a start by definition id
 (`crates/lash-core-execution/src/runtime/process/start_staging.rs:319-430,640-718`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:271-279,346-362,454-502`).
 
+`ProcessStartDeclaration` and `ProcessStartRequest` carry `env_ref`;
+`ProcessCommand::Start` carries the registration's reference. Realization
+loads and validates the stored capture before registering the process.
+Equal captures under different start keys share one stored copy with
+independent durable lifetimes.
+
 A terminal refusal with no registered record arms an empty-carry `Ended`
 plan. An absent start is also ended when its starter's journal settles.
 Because keys are global, resolving an `Ended` start reads the key again
@@ -324,6 +337,9 @@ commits. `Delete` and `Prune` acquire no deliverable revision. The claim
 arms `AwaitSubscriptionRevision { creator }`. After commit, the wrapper
 nudges the replaced revision
 (`crates/lash-core-execution/src/triggers/revision_referrer.rs:64-151,179-218`).
+
+The declaration carries the draft's `env_ref`, held under its creator's
+`Execution` referrer before the command is journaled (§3.7).
 
 A revision ends only when it is not the current nontombstoned revision,
 no delivery reserved under its incarnation/revision remains unbound, and
@@ -394,6 +410,23 @@ fact alone cannot authorize cleanup while that journal may replay
 (`crates/lash-protocol-rlm/src/executor/mod.rs:955-979`,
 `crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:644-660`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:268-269`).
+
+The attempt coordinator publishes its live capture or acquires an inherited
+reference before returning a journalable attempt outcome, including pending
+starts. A code-runtime start does the same before recording its command.
+Host ingress acquires an already-published reference under its execution.
+Leaf tools derive a digest and declare it; publication belongs to the
+coordinator. Every capture publication is guarded by `AwaitJournal`.
+Declarations, submission rows, journal commands and process records contain
+references. The complete intent JSON, including those references, counts
+toward ADR 0025's 64 KiB budget. Immutable definition publication carries its
+descriptor and explicit artifact closure rather than a captured environment.
+
+`LoadExecutionEnv` acquires `Execution(child journal)` and validates the
+stored bytes before journaling its digest result. The driver resolves the
+same immutable bytes on replay. This journal's hold keeps them available
+when the source pin ends, and load failures retain the driver's I/O retry
+classification.
 
 ### 4. Ordering rules
 
@@ -499,6 +532,18 @@ and replay at six create/publication/start boundaries
 Prepared-frame laws cover an aborted activation and retention after a
 committed activation
 (`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:1088,1175`).
+
+The captured-environment row law uses 128 KiB of ProjectInstructions and
+bounds the intent batch, submission row, start command and process row at
+64 KiB (`tool_dispatch::intent_executor::tests::a_128_kib_environment_keeps_durable_start_rows_under_the_intent_budget`).
+The environment-load law bounds its journal result too
+(`runtime::effect::captured_environment_row_tests::an_environment_load_journal_row_stays_under_the_intent_budget`).
+`two_starts_share_one_captured_environment` realizes two starts and checks
+bounded records and last-reader reclamation.
+`captured_environments_are_shared_until_the_last_referrer_ends` reopens the
+store and checks cleanup replay and late-writer fences. Both store laws run
+on SQLite file, SQLite memory and PostgreSQL. The load-plan turn 2/9 law
+exercises tool-attempt capture and child realization under the large prompt.
 
 #### 7.1 Cold reopen
 

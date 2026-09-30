@@ -4,6 +4,64 @@ mod tests {
 
     use crate::{ProcessEffectOutcome, RuntimeEffectController};
 
+    #[tokio::test]
+    async fn a_journaled_environment_load_keeps_its_bytes_after_the_source_pin_ends() {
+        let backend = crate::support::memory_store_backend().await;
+        let store = backend.process_env_store();
+        let pin = crate::testing::host_pin_claim_for_testing();
+        let spec = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        );
+        let env_ref = crate::publish_process_execution_env(store.as_ref(), &pin, &spec)
+            .await
+            .expect("source publication");
+        let scope = crate::ExecutionScope::runtime_operation("load-retention-law");
+        let outcome = crate::RuntimeEffectLocalExecutor::execution_env_load(
+            Arc::clone(&store),
+            "retained load",
+        )
+        .execute(crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(scope.clone(), "load").expect("address"),
+                crate::RuntimeAttribution::none(),
+                "load",
+            ),
+            crate::RuntimeEffectCommand::LoadExecutionEnv {
+                env: env_ref.clone(),
+            },
+        ))
+        .await
+        .expect("recorded load");
+        assert_eq!(
+            outcome.into_execution_env_ref().expect("recorded digest"),
+            env_ref
+        );
+        store
+            .end_process_env_referrer(&end(pin.referrer().clone()))
+            .await
+            .expect("source pin ends");
+        assert_eq!(
+            crate::load_process_execution_env(store.as_ref(), &env_ref)
+                .await
+                .expect("replay resolves bytes"),
+            spec
+        );
+        store
+            .end_process_env_referrer(&end(crate::ArtifactReferrer::Execution(
+                scope.journal_identity().expect("journal"),
+            )))
+            .await
+            .expect("load journal ends");
+        assert_eq!(
+            store
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read reclaimed bytes"),
+            None
+        );
+    }
+
     /// The start laws' server-double seed.
     const SEED: u64 = 0x90_ca1;
 
@@ -94,11 +152,23 @@ mod tests {
         }
     }
 
-    fn start_envelope(
+    async fn start_envelope(
+        env_store: &dyn crate::ProcessExecutionEnvStore,
         effect_id: &str,
         registration: crate::ProcessRegistration,
         env_spec: crate::ProcessExecutionEnvSpec,
     ) -> crate::RuntimeEffectEnvelope {
+        let starter = crate::ExecutionScope::runtime_operation("runtime")
+            .journal_identity()
+            .expect("starter journal");
+        let claim = crate::ReferrerClaim::guarded(
+            crate::ArtifactReferrer::Start(registration.start_key.clone().expect("start key")),
+            crate::ArtifactCleanupPlan::AwaitStart { starter },
+        )
+        .expect("start claim");
+        let env_ref = crate::publish_process_execution_env(env_store, &claim, &env_spec)
+            .await
+            .expect("publish referenced environment");
         crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
@@ -110,9 +180,8 @@ mod tests {
                 effect_id,
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration,
+                registration: registration.with_execution_env_ref(Some(env_ref)),
                 observers: Vec::new(),
-                env_spec: Some(env_spec),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
         )
@@ -132,10 +201,12 @@ mod tests {
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
+            env_store.as_ref(),
             "owned-env-start",
             engine_registration(key, "original"),
             env_spec,
-        );
+        )
+        .await;
         let executor = || {
             crate::RuntimeEffectLocalExecutor::processes(
                 Arc::clone(&registry),
@@ -288,7 +359,6 @@ mod tests {
                 registration: engine_registration(key, "delivery")
                     .with_execution_env_ref(Some(env_ref.clone())),
                 observers: Vec::new(),
-                env_spec: None,
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
         );
@@ -396,6 +466,10 @@ mod tests {
 
         // The retry, in a second handler whose journal holds no record of the
         // first attempt, with changed content.
+        let retry_ref =
+            crate::publish_process_execution_env(env_store.as_ref(), &staging, &retry_env)
+                .await
+                .expect("publish retry environment");
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
@@ -407,9 +481,8 @@ mod tests {
                 "crashed-start",
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: registration("retry"),
+                registration: registration("retry").with_execution_env_ref(Some(retry_ref.clone())),
                 observers: Vec::new(),
-                env_spec: Some(retry_env),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
         );
@@ -522,6 +595,7 @@ mod tests {
     async fn a_failed_worker_poke_still_returns_the_started_record() {
         let key = "advisory-poke-start";
         let backend = crate::support::memory_backend().await;
+        let env_store = backend.process_env_store();
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
@@ -545,10 +619,12 @@ mod tests {
         let outcome = runtime_controller(&backend)
             .execute_effect(
                 start_envelope(
+                    env_store.as_ref(),
                     "advisory-poke-start",
                     engine_registration(key, "advisory"),
                     env_spec,
-                ),
+                )
+                .await,
                 executor,
             )
             .await
@@ -711,7 +787,13 @@ mod tests {
         let returned = started_record(
             execute_in_handler(
                 &double,
-                start_envelope("changed-content-start", keyed("changed"), env_spec),
+                start_envelope(
+                    env_store.as_ref(),
+                    "changed-content-start",
+                    keyed("changed"),
+                    env_spec,
+                )
+                .await,
                 executor,
             )
             .await

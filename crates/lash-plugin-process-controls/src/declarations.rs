@@ -272,9 +272,12 @@ pub async fn execute_process_start_tool_call(
     .with_wake_session_id(wake_session_id)
     // An engine start is admitted against the execution env its own record
     // carries, never against the live session env, so the declaration captures
-    // the attempt's env spec here rather than leaving realization to substitute
-    // one (FIG-2999).
-    .with_env_spec(context.process_execution_env_spec());
+    // the attempt's environment digest here. The coordinator stores the bytes
+    // before journaling, and realization loads those exact bytes (FIG-2999).
+    .with_env_ref(match context.process_execution_env_ref() {
+        Ok(env_ref) => env_ref,
+        Err(error) => return refuse(error),
+    });
     // The documented `label` argument: a host-facing name for this run, never
     // part of the process's identity (FIG-3122). Declaring it here is the only
     // way it reaches the row — an engine derives its own label from the

@@ -67,7 +67,11 @@ impl LinkedTestProcess {
             lash_core::Lifetime::Detached,
         )
         .with_host_start_key(start_key)
-        .with_env_spec(process_env_spec())
+        .with_env_ref(
+            (process_env_spec())
+                .stable_ref()
+                .expect("captured environment digest"),
+        )
         .with_extra_event_types(
             lash_lashlang_runtime::lashlang_process_event_types()
                 .into_iter()
@@ -195,7 +199,8 @@ async fn wait_for_terminal(
     .await
 }
 
-fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {
+async fn process_test_core(backend: lash_core::Backend) -> Result<LashCore> {
+    persist_process_env_ref(backend.process_env_store().as_ref()).await;
     let core = process_test_builder(backend).build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     Ok(core)
@@ -236,7 +241,7 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
 async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<()> {
     let backend = double_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
@@ -484,7 +489,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         })
         .await
         .expect("serve the SQLite facade store with Restate");
-    let core = process_test_core(double.lash_backend())?;
+    let core = process_test_core(double.lash_backend()).await?;
 
     let session_id = "sqlite-facade-prune-session";
     let source_key = "sqlite-facade-prune-source";
@@ -710,7 +715,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let process_env_store = backend.process_env_store();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {
@@ -856,7 +861,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let env_ref =
         persist_process_env_ref(core.env.core.durability.process_env_store.as_ref()).await;
     let session_id = "session-trigger-visibility";
@@ -966,7 +971,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
 async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: string } {
@@ -1057,7 +1062,7 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {
@@ -1162,7 +1167,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process child() { finish { from: "child" } }
@@ -1246,7 +1251,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
 async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let backend = double_backend().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let session_id = "chain-session";
     let process_id = "chain-parent";
     let process = LinkedTestProcess::new(
@@ -1330,7 +1335,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     let backend = double_backend_explicit_reconcile().await;
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone()).await?;
     let session_id = "process-outlives-session";
     let process_id = "outliving-process";
     let process = LinkedTestProcess::new(

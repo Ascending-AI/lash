@@ -62,7 +62,7 @@ frame, mandatory Lash `call_id`, attempt number and retry bound. It can read
 the prepared payload, execution binding, admitted catalog, sessions and
 process handles. It has cooperative cancellation, attachment output and
 direct model completions whose usage belongs to the attempt. It can obtain
-start context, spawn provenance, execution environment, intent identity,
+start context, spawn provenance, execution environment digest, intent identity,
 completion key and a named fault-probe phase
 (`crates/lash-core-execution/src/tool_provider.rs:162`, `:215`, `:305`,
 `:365`, `:383`, `:405`, `:431`, `:442`).
@@ -72,6 +72,10 @@ from that identity. A completion key requires host completion support
 (`crates/lash-core-execution/src/tool_provider.rs:383`, `:442`, `:447`).
 Session and process accessors expose reads (`:34`, `:123`). Tool output reaches
 the host with the completed call; the context has no incremental output sink.
+
+`process_execution_env_ref` derives the live capture's digest or returns an
+inherited reference. The runtime publishes or acquires that environment
+before journaling the declared attempt outcome (ADR 0113 §3.7).
 
 #### 1.4 Body capability boundaries
 

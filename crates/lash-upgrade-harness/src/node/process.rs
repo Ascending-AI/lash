@@ -123,7 +123,7 @@ impl UpgradeHarnessProcesses for HarnessProcesses {
         let build = BuildLabel::current();
         match op {
             HarnessOp::Start { start_key } => {
-                let request = start_request(&self.artifacts, &self.model, &start_key)
+                let request = start_request(&self.artifacts, &self.core, &self.model, &start_key)
                     .await
                     .map_err(terminal)?;
                 let receipt = self
@@ -190,6 +190,7 @@ pub(crate) fn bind(
 /// The process's module: linked, and published to the store's artifacts.
 async fn start_request(
     artifacts: &lashlang::LashlangArtifacts,
+    core: &lash::LashCore,
     model: &lash::ModelSpec,
     start_key: &str,
 ) -> Result<lash_core::ProcessStartRequest> {
@@ -244,7 +245,11 @@ async fn start_request(
         lash_core::Lifetime::Detached,
     )
     .with_host_start_key(start_key)
-    .with_env_spec(env)
+    .with_env_ref(
+        core.host_artifacts()
+            .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
+            .await?,
+    )
     .with_extra_event_types(
         lash_lashlang_runtime::lashlang_process_event_types()
             .into_iter()

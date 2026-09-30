@@ -295,6 +295,7 @@ impl ExecutionEnvLoadExecution {
         self,
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let claim = crate::session::execution_claim_of(envelope.invocation.execution_scope())?;
         let RuntimeEffectCommand::LoadExecutionEnv { env } = envelope.command else {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -304,10 +305,18 @@ impl ExecutionEnvLoadExecution {
                 ),
             ));
         };
+        self.store
+            .acquire_process_execution_env(&claim, &env)
+            .await
+            .map_err(|error| {
+                unresolved_execution_env(
+                    &self.subject,
+                    &env,
+                    crate::runtime::ProcessExecutionEnvLoadError::Store(error.into()),
+                )
+            })?;
         match crate::runtime::load_process_execution_env(self.store.as_ref(), &env).await {
-            Ok(spec) => Ok(RuntimeEffectOutcome::LoadExecutionEnv {
-                spec: Box::new(spec),
-            }),
+            Ok(_) => Ok(RuntimeEffectOutcome::LoadExecutionEnv { env }),
             Err(error) => Err(unresolved_execution_env(&self.subject, &env, error)),
         }
     }
@@ -324,7 +333,7 @@ impl ExecutionEnvLoadExecution {
 /// settles by its own cause, and a live fault is marked retryable, so an
 /// engine runs the step again instead of recording it (FIG-3683) and a redrive
 /// under a healthy store loads the environment.
-fn unresolved_execution_env(
+pub(crate) fn unresolved_execution_env(
     subject: &str,
     env: &crate::ProcessExecutionEnvRef,
     error: crate::runtime::ProcessExecutionEnvLoadError,
@@ -791,8 +800,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
 
     /// Binds the store a recorded
     /// [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv) step reads
-    /// on its first execution; replay serves the recorded spec. `subject`
-    /// names whose environment it is in a refusal.
+    /// validates and holds on its first execution; replay resolves the
+    /// recorded digest. `subject` names whose environment it is in a refusal.
     pub fn execution_env_load(
         store: Arc<dyn crate::ProcessExecutionEnvStore>,
         subject: impl Into<String>,

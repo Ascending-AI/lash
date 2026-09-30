@@ -1248,58 +1248,37 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Resolves the execution environment a session-path process start hands
-    /// the journaled process-start command, publishing nothing.
-    ///
-    /// Publication belongs inside the replayable process effect (FIG-3050).
-    /// Publishing here would stage the artifact under the start's referrer
-    /// *before* the start is journaled, and a replay of the same turn would
-    /// revisit that referrer after the first attempt's start settled and
-    /// fenced it — the divergence FIG-3028 had to absorb with a tolerance at
-    /// this call site.
-    /// The spec instead rides
-    /// [`ProcessStartOptions::env_spec`](crate::ProcessStartOptions::env_spec)
-    /// into the command, and the executor publishes it under the journal.
-    ///
-    /// A start made *inside* a process execution inherits the reference its own
-    /// registration carries: those bytes are already published under a durable
-    /// owner, so that start stages nothing either and the executor protects the
-    /// recorded reference instead.
-    pub(crate) fn process_start_execution_env(
+    /// Capture a start's environment under this execution before its command
+    /// is journaled. The command carries only the published digest.
+    pub(crate) async fn process_start_execution_env(
         &self,
         registration: crate::ProcessRegistration,
-    ) -> (
-        crate::ProcessRegistration,
-        Option<crate::ProcessExecutionEnvSpec>,
-    ) {
-        if registration.env_ref.is_some() {
-            return (registration, None);
+    ) -> Result<crate::ProcessRegistration, crate::PluginError> {
+        if registration.env_ref.is_some()
+            || matches!(
+                registration.input.as_ref(),
+                crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. }
+            )
+        {
+            return Ok(registration);
         }
-        match registration.input.as_ref() {
-            // A start by id resolves to an engine start, which runs in an
-            // environment like every other.
-            crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. } => {
-                match self.inherited_process_execution_env_ref() {
-                    Some(env_ref) => (registration.with_execution_env_ref(Some(env_ref)), None),
-                    None => (registration, Some(self.execution_env_spec.clone())),
-                }
-            }
-            crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
-                (registration, None)
-            }
-        }
+        let claim = execution_claim_of(self.dispatch.effect_controller.execution_scope())?;
+        let env_ref = self.captured_process_execution_env_ref(&claim).await?;
+        Ok(registration.with_execution_env_ref(Some(env_ref)))
     }
 
-    /// An ended referrer fails here. Every caller publishes under a durable referrer and then
-    /// persists the reference (trigger registration keeps it in
-    /// `TriggerSubscriptionDraft::env_ref`), so a fence must surface at publish time rather than
-    /// hand back a reference to bytes the cleanup already reclaimed. Process starts do not publish
-    /// at all before their journal: they go through [`Self::process_start_execution_env`].
+    /// Publish or acquire this execution's captured environment under `claim`
+    /// before persisting its digest in a declaration. An ended referrer refuses
+    /// acquisition; it cannot resurrect a reclaimed environment.
     pub async fn captured_process_execution_env_ref(
         &self,
         claim: &crate::ReferrerClaim,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
         if let Some(env_ref) = self.inherited_process_execution_env_ref() {
+            self.process_env_store
+                .acquire_process_execution_env(claim, &env_ref)
+                .await
+                .map_err(crate::PluginError::from)?;
             return Ok(env_ref);
         }
         crate::publish_process_execution_env(
@@ -1344,14 +1323,18 @@ impl<'run> RuntimeExecutionContext<'run> {
         _label: Option<String>,
     ) -> crate::ToolInvocationReply {
         let _phase = self.named_phase("process.start_child");
-        let registration = request.into_registration(None);
-        let (registration, env_spec) = self.process_start_execution_env(registration);
+        let registration = request.into_registration();
+        let registration = match self.process_start_execution_env(registration).await {
+            Ok(registration) => registration,
+            Err(error) => {
+                return crate::ToolInvocationReply::error(serde_json::json!(error.to_string()));
+            }
+        };
         // A redrive presents the same start key and gets the retained process
         // back untouched (ADR 0107), so the attempt bound it recorded stands
         // whatever this attempt resolved.
         let mut options = crate::ProcessStartOptions::new()
-            .with_initial_observers(self.child_process_observers())
-            .with_env_spec(env_spec);
+            .with_initial_observers(self.child_process_observers());
         if let Some(spawn) = self.process_spawn_provenance() {
             options = options.with_spawn_provenance(spawn);
         }

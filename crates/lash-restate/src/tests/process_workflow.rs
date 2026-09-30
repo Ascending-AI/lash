@@ -557,7 +557,6 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_e
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec![SessionId::from("session")],
-                    env_spec: None,
                     execution_context: Box::new(execution_context),
                 }),
             ),
@@ -1395,7 +1394,6 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
                     observers: vec![creator_scope.session_id.clone()],
-                    env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),

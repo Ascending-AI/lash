@@ -411,7 +411,7 @@ impl LoadWorker {
             })
             .ok_or_else(|| terminal(format!("the body of `{key}` declares no process")))?;
         let process_name = declaration.name.to_string();
-        // A host pin keeps the module alive for the process (ADR 0113).
+        // A host pin keeps the module and environment alive for the process (ADR 0113).
         let pin = lash::process::HostArtifactPin::mint();
         self.core
             .host_artifacts()
@@ -440,13 +440,19 @@ impl LoadWorker {
                 ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
             },
         );
+        let env_ref = self
+            .core
+            .host_artifacts()
+            .publish_process_env(&pin, &environment)
+            .await
+            .map_err(turn_handler_error)?;
         let request = lash_core::ProcessStartRequest::new(
             input,
             lash_core::ProcessOriginator::host(),
             lash_core::Lifetime::Detached,
         )
         .with_host_start_key(key.as_bytes())
-        .with_env_spec(environment)
+        .with_env_ref(env_ref)
         .with_extra_event_types(
             lash::process::lashlang_process_event_types()
                 .into_iter()

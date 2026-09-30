@@ -356,7 +356,6 @@ mod served_only_outside_a_run {
                                 command: Box::new(ProcessCommand::Start {
                                     registration,
                                     observers: Vec::new(),
-                                    env_spec: None,
                                     execution_context: Box::default(),
                                 }),
                             },

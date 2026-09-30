@@ -48,8 +48,7 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
     let request = publish_process(&world, "500ms")
         .await?
         .with_host_start_key(format!("crash-matrix-process-start-{seed}"));
-    let env_spec = request.env_spec.clone();
-    let registration = request.into_registration(None);
+    let registration = request.into_registration();
     let registry = world.backend().process_registry();
     let env_store = world.backend().process_env_store();
     let starter =
@@ -67,7 +66,6 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
         },
         registration,
         &[],
-        env_spec.as_ref(),
     )
     .await
     .map_err(|error| format!("register before the crash: {error}"))?;
@@ -203,13 +201,21 @@ pub(crate) async fn publish_process(
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
-        lash_core::SessionPolicy {
-            model: model_spec()?,
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-    ))
+    .with_env_ref(
+        lash_core::publish_process_execution_env(
+            world.backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                lash_core::SessionPolicy {
+                    model: model_spec()?,
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                },
+            )),
+        )
+        .await
+        .map_err(|error| format!("publish captured environment: {error}"))?,
+    )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types()))
 }
 

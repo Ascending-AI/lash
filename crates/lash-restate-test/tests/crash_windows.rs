@@ -487,7 +487,15 @@ async fn publish_process(engine: &Engine) -> lash_core::ProcessStartRequest {
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(process_env_spec())
+    .with_env_ref(
+        lash_core::publish_process_execution_env(
+            engine.lash_backend().process_env_store().as_ref(),
+            &lash_core::testing::host_pin_claim_for_testing(),
+            &(process_env_spec()),
+        )
+        .await
+        .expect("publish captured environment"),
+    )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
 }
 

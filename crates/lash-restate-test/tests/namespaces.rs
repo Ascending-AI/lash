@@ -267,7 +267,7 @@ fn process_worker(core: &lash::LashCore) -> lash::durability::DurableProcessWork
     .expect("build the process worker")
 }
 
-fn start_request(label: &str) -> lash_core::ProcessStartRequest {
+async fn start_request(core: &lash::LashCore, label: &str) -> lash_core::ProcessStartRequest {
     lash_core::ProcessStartRequest::new(
         lash_core::ProcessInput::Engine {
             kind: ENGINE_KIND.to_string(),
@@ -276,13 +276,21 @@ fn start_request(label: &str) -> lash_core::ProcessStartRequest {
         lash_core::ProcessOriginator::host(),
         lash_core::Lifetime::Detached,
     )
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
-        lash_core::SessionPolicy {
-            model: model_spec(),
-            ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
-        },
-    ))
+    .with_env_ref(
+        core.host_artifacts()
+            .publish_process_env(
+                &lash_core::HostArtifactPin::mint(),
+                &lash_core::ProcessExecutionEnvSpec::new(
+                    lash_core::PluginOptions::default(),
+                    lash_core::SessionPolicy {
+                        model: model_spec(),
+                        ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
+                    },
+                ),
+            )
+            .await
+            .expect("publish start environment"),
+    )
 }
 
 /// A lash deployment on the server under test.
@@ -382,7 +390,7 @@ impl Core {
     ) -> (lash_core::ProcessId, serde_json::Value) {
         let admitted =
             lash_core::AdmittedScope::new(session.turn_scope(lash::TurnId::from(START_TURN)));
-        let request = start_request(&self.label);
+        let request = start_request(&self.core, &self.label).await;
         let started = Arc::new(Mutex::new(None));
         let attempt: HandlerAttempt = {
             let core = self.core.clone();

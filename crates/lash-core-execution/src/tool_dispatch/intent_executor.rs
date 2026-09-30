@@ -218,7 +218,7 @@ pub(crate) fn declared_start_fault(
     }
 }
 
-fn admit_batch(
+pub(super) fn admit_batch(
     owner: &crate::RuntimeOwner,
     intents: &crate::ToolIntents,
 ) -> Option<crate::ToolIntentRefusalReason> {
@@ -370,7 +370,7 @@ fn refused(
     }
 }
 
-fn validate_trigger_registration_authority(
+pub(super) fn validate_trigger_registration_authority(
     context: &ToolDispatchContext<'_>,
     intent: &crate::RegisterTriggerIntent,
 ) -> Option<crate::ToolIntentRefusalReason> {
@@ -640,25 +640,7 @@ async fn register_recorded_trigger(
     intent: &crate::RegisterTriggerIntent,
 ) -> Result<serde_json::Value, crate::PluginError> {
     let scoped = context.effect_controller.clone();
-    let mut draft = intent.draft.clone();
-    if let Some(env_spec) = intent.env_spec.as_ref() {
-        // Publication moved out of the attempt and into realization: the
-        // bytes land under the realizing execution's journal referrer (ADR
-        // 0113 §3.4), which holds them until the revision acquires them. The
-        // draft's env ref is content-addressed, so the published reference is
-        // the one the draft already names.
-        let env_store = router.process_env_store().ok_or_else(|| {
-            crate::PluginError::Session(
-                "process execution env store is unavailable in this runtime".to_string(),
-            )
-        })?;
-        draft.env_ref = crate::publish_process_execution_env(
-            env_store.as_ref(),
-            &crate::session::execution_claim_of(scoped.execution_scope())?,
-            env_spec,
-        )
-        .await?;
-    }
+    let draft = intent.draft.clone();
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             scoped.execution_scope().clone(),
@@ -862,18 +844,70 @@ mod tests {
                 crate::ProcessOriginator::host(),
                 crate::Lifetime::Detached,
             )
-            .with_env_spec(crate::ProcessExecutionEnvSpec::new(
-                crate::PluginOptions::default(),
-                policy,
-            )),
+            .with_env_ref(
+                crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy)
+                    .stable_ref()
+                    .expect("environment digest"),
+            ),
         }))
     }
 
-    /// FIG-4255: the env a start captures from its session is the host's
-    /// policy, not the attempt's declaration. A turn whose project
-    /// instructions alone exceed the budget still starts its child.
     #[test]
-    fn admission_leaves_the_captured_execution_env_out_of_the_byte_budget() {
+    fn a_128_kib_environment_keeps_durable_start_rows_under_the_intent_budget() {
+        let intent = start_under_prompt(
+            serde_json::json!({"key": "child/0"}),
+            "x".repeat(128 * 1024),
+        );
+        let batch = crate::ToolIntents::v3(vec![intent.clone()]);
+        let identity = crate::derive_tool_intent_identity(
+            &session("session"),
+            "scope",
+            &crate::ToolCallId::fixture("start"),
+            0,
+        );
+        let submission = crate::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
+            .expect("submission");
+        let crate::ToolIntent::StartProcess(start) = intent else {
+            panic!("start");
+        };
+        let request = start.into_request(&identity);
+        let record = crate::ProcessRecord::from_registration(
+            request.clone().into_registration(),
+            crate::ProcessId::fixture("large-environment-child"),
+        );
+        let command = crate::ProcessCommand::Start {
+            registration: request.clone().into_registration(),
+            observers: Vec::new(),
+            execution_context: Box::default(),
+        };
+        for (name, bytes) in [
+            ("intent batch", serde_json::to_vec(&batch).expect("batch")),
+            (
+                "intent row",
+                serde_json::to_vec(&submission).expect("submission"),
+            ),
+            (
+                "journal command",
+                serde_json::to_vec(&command).expect("command"),
+            ),
+            ("process row", serde_json::to_vec(&record).expect("record")),
+        ] {
+            assert!(
+                bytes.len() < crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                "{name} stores {} bytes for a 128 KiB environment",
+                bytes.len()
+            );
+        }
+        assert_eq!(
+            batch.declared_canonical_bytes().expect("budget"),
+            serde_json::to_vec(&batch).expect("batch").len()
+        );
+    }
+
+    /// FIG-4256: the whole declaration counts, including its environment
+    /// digest, while large captured instructions live in the artifact store.
+    #[test]
+    fn admission_counts_the_complete_declaration_with_its_environment_digest() {
         let prompt = "x".repeat(2 * crate::TOOL_INTENT_MAX_CANONICAL_BYTES);
         let intents = crate::ToolIntents::v3(vec![start_under_prompt(
             serde_json::json!({"key": "child/0"}),
@@ -881,8 +915,8 @@ mod tests {
         )]);
         assert!(
             serde_json::to_vec(&intents).expect("encode").len()
-                > crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
-            "the batch as recorded carries the whole captured env"
+                < crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+            "the batch carries only the environment digest"
         );
         assert_eq!(admit_batch(&session("session"), &intents), None);
     }
