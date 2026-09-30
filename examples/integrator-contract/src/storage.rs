@@ -474,7 +474,7 @@ impl QueuedWorkStore for Integrator {
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+    async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
         unreachable!("external signature witness")
     }
 }
