@@ -27260,6 +27260,7 @@
           "cargo": "lash_protocol_rlm",
           "kind": "unit-test",
           "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+          "shard_count": 8,
           "tags": []
         },
         {

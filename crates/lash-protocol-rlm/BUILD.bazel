@@ -86,6 +86,7 @@ lash_rust_unit_test(
     ],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
+    shard_count = 8,
     test_env = {"LASH_VM_WORKER": "$(rootpath //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",

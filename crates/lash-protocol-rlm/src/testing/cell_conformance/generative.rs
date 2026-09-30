@@ -22,6 +22,7 @@ use super::syntax::{Cell, Literal};
 /// half thousand cells, which the executor runs well inside the
 /// suite's budget.
 const RESIDENT_SESSIONS: u64 = 1_500;
+const RESIDENT_SHARDS: usize = 8;
 /// Sessions generated in the restart-between-every-cell mode. Each
 /// cell there costs a full capture and restore, so the count is smaller and the
 /// breadth comes from the resident sweep above.
@@ -172,11 +173,18 @@ fn live_names(
         .collect()
 }
 
-fn sweep(mode: HarnessMode, sessions: u64) {
-    for seed in 0..sessions {
+fn sweep(mode: HarnessMode, seeds: impl IntoIterator<Item = u64>) {
+    for seed in seeds {
         let cells = generate_session(seed);
         drive(mode, &cells);
     }
+}
+
+fn sweep_resident_shard(shard: u64) {
+    sweep(
+        HarnessMode::Resident,
+        (shard..RESIDENT_SESSIONS).step_by(RESIDENT_SHARDS),
+    );
 }
 
 /// The corpus is a fixture: the same seed builds the same session, different
@@ -190,19 +198,54 @@ fn the_generated_corpus_is_deterministic() {
 }
 
 #[test]
-fn generated_sessions_never_poison_a_session() {
-    sweep(HarnessMode::Resident, RESIDENT_SESSIONS);
+fn generated_sessions_never_poison_a_session_shard_0() {
+    sweep_resident_shard(0);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session_shard_1() {
+    sweep_resident_shard(1);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session_shard_2() {
+    sweep_resident_shard(2);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session_shard_3() {
+    sweep_resident_shard(3);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session_shard_4() {
+    sweep_resident_shard(4);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session_shard_5() {
+    sweep_resident_shard(5);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session_shard_6() {
+    sweep_resident_shard(6);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session_shard_7() {
+    sweep_resident_shard(7);
 }
 
 #[test]
 fn generated_sessions_survive_a_restart_between_every_cell() {
-    sweep(HarnessMode::RestartBetweenCells, RESTARTING_SESSIONS);
+    sweep(HarnessMode::RestartBetweenCells, 0..RESTARTING_SESSIONS);
 }
 
 #[test]
 #[ignore = "soak: the same generator, far longer; run it when chasing a generated failure"]
 fn generated_sessions_soak() {
-    sweep(HarnessMode::Resident, SOAK_SESSIONS);
+    sweep(HarnessMode::Resident, 0..SOAK_SESSIONS);
 }
 
 /// The corpus reaches every cell shape it is supposed to.

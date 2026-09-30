@@ -122,6 +122,26 @@ def generated_nextest_terms() -> set[tuple[str, str, str | None]]:
 
 
 class BazelTestContractTests(unittest.TestCase):
+    def test_rlm_unit_suite_is_sharded_and_selected_by_ci(self) -> None:
+        label = "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test"
+        target = next(target for target in test_targets() if target["label"] == label)
+        self.assertGreater(target.get("shard_count", 0), 1)
+        self.assertEqual([], target["tags"])
+        self.assertIn(label, generated_list("WORKSPACE_TEST_SUITE_LABELS"))
+        self.assertNotIn(label, generated_list("WORKSPACE_TAIL_SUITE_LABELS"))
+        tests, _ = ci_plan.pr_affected_targets(["crates/lash-protocol-rlm/src/lib.rs"])
+        self.assertIn(label, tests)
+
+        policy = tomllib.loads((ROOT / "tools/bazel/package-policy.toml").read_text())
+        rlm_rules = [
+            rule for rule in policy["rule"]
+            if "lash-internal-protocol-rlm" in rule["packages"]
+            and "unit-test" in rule.get("kinds", ["unit-test"])
+        ]
+        self.assertFalse(any(rule.get("args") or rule.get("timeout") for rule in rlm_rules))
+        build = (ROOT / "crates/lash-protocol-rlm/BUILD.bazel").read_text()
+        self.assertIn(f"    shard_count = {target['shard_count']},", build)
+
     def test_source_ownership_keeps_shared_helpers_without_sibling_suites(self) -> None:
         policy = json.loads((ROOT / "tools/bazel/source-ownership.json").read_text())
         package = ROOT / "crates/lash-core"
