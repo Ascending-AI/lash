@@ -143,22 +143,34 @@ def resolve(root, label):
 
 
 def vm_helper(root, worker):
-    """The helper binary whose build identity the worker's VM client expects.
+    """The helper binary that speaks the protocol of the worker's linked helper library.
 
-    The identity pairs on the `testing` feature of the linked lash-vm-client
-    (parent side) and of the helper's lash-vm-worker library (child side);
-    both read from the generated feature variants."""
-    client = resolve(root, worker).get('variant_deps', {}).get(
-        '//crates/lash-vm-client', '//crates/lash-vm-client:lash-vm-client')
+    The handshake identity covers only the source fingerprint, platform,
+    debug and `testing`; a helper built without the worker's lash-vm-worker
+    features (the synthetic N+1's `synthetic-next`) passes it and then breaks
+    the protocol. The helper is the binary on the worker's own helper library
+    or, as Cargo ships it, the one standalone binary whose lash-vm-worker
+    features equal that library's, read from the generated feature variants.
+    Its `testing` must match the linked lash-vm-client's."""
+    deps = resolve(root, worker).get('variant_deps', {})
+    client = deps.get('//crates/lash-vm-client', '//crates/lash-vm-client:lash-vm-client')
+    library = deps.get('//crates/lash-vm-worker', '//crates/lash-vm-worker:lash-vm-worker')
     testing = 'testing' in resolve(root, client)['crate_features']
-    package = Path(root) / 'crates/lash-vm-worker/BUILD.bazel'
-    helpers = [name for name, rule in build_rules(package).items()
-               if rule.get('crate_name') == 'lash_vm_worker' and rule.get('crate_root') == 'src/main.rs'
-               and ('testing' in resolve(root, rule['library'] if rule['library'].startswith('//')
-                                         else '//crates/lash-vm-worker' + rule['library'])['crate_features']) == testing]
-    if len(helpers) != 1:
-        raise ValueError(f'expected one lash-vm-worker helper with testing={testing} for {worker}, found {helpers}')
-    return f'//crates/lash-vm-worker:{helpers[0]}', testing
+    features = set(resolve(root, library)['crate_features'])
+    if ('testing' in features) != testing:
+        raise ValueError(f'{worker} links {library} and {client}, which do not pair on testing')
+    helpers = {}
+    for name, rule in build_rules(Path(root) / 'crates/lash-vm-worker/BUILD.bazel').items():
+        if rule.get('crate_name') == 'lash_vm_worker' and rule.get('crate_root') == 'src/main.rs':
+            helpers[name] = rule['library'] if rule['library'].startswith('//') else '//crates/lash-vm-worker' + rule['library']
+    exact = [name for name, own in helpers.items() if own == library]
+    equal = [name for name, own in helpers.items() if set(resolve(root, own)['crate_features']) == features]
+    matches = exact or equal
+    if not matches:
+        raise ValueError(f'no lash-vm-worker helper binary with features {sorted(features)} of {library}, which {worker} links')
+    if len(matches) != 1:
+        raise ValueError(f'expected one lash-vm-worker helper binary for {library}, found {matches}')
+    return f'//crates/lash-vm-worker:{matches[0]}', testing
 
 
 def image_helper(bin_dir, testing):

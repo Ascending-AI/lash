@@ -130,11 +130,21 @@ lash_rust_binary(name = "lash-vm-worker__bin", crate_name = "lash_vm_worker", cr
 lash_rust_feature_library(name = "lash-vm-worker__fv_plain", crate_features = [])
 lash_rust_feature_binary(name = "lash-vm-worker__bin__fv_plain", crate_name = "lash_vm_worker",
     crate_root = "src/main.rs", crate_features = [], library = "//crates/lash-vm-worker:lash-vm-worker__fv_plain")
+lash_rust_feature_library(name = "lash-vm-worker__fv_next", crate_features = ["synthetic-next", "testing"])
 lash_rust_binary(name = "lash-vm-worker-fixture__bin", crate_name = "lash_vm_worker_fixture",
     crate_root = "src/bin/fixture.rs", crate_features = ["testing"], library = ":lash-vm-worker")
 '''
+    NEXT_HELPER = '''lash_rust_feature_library(name = "lash-vm-worker__fv_alone", crate_features = ["synthetic-next", "testing"])
+lash_rust_feature_binary(name = "lash-vm-worker__bin__fv_alone", crate_name = "lash_vm_worker",
+    crate_root = "src/main.rs", crate_features = ["synthetic-next"], library = "//crates/lash-vm-worker:lash-vm-worker__fv_alone")
+'''
     WORKER = '''lash_rust_binary(name = "worker__bin", crate_features = [], library = ":lib")
 lash_rust_feature_binary(name = "worker__bin__fv_plain", crate_features = [],
+    variant_deps = {"//crates/lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain",
+                    "//crates/lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_plain"})
+lash_rust_feature_binary(name = "worker__bin__fv_next", crate_features = ["synthetic-next"],
+    variant_deps = {"//crates/lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_next"})
+lash_rust_feature_binary(name = "worker__bin__fv_split", crate_features = [],
     variant_deps = {"//crates/lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain"})
 '''
 
@@ -148,29 +158,45 @@ lash_rust_feature_binary(name = "worker__bin__fv_plain", crate_features = [],
             (root / package / 'BUILD.bazel').write_text(text)
         return root
 
-    def test_each_generation_of_the_repository_worker_pairs_the_testing_helper(self):
+    def test_the_repository_worker_generations_pair_their_helper_features(self):
+        self.assertEqual(proof.vm_helper(ROOT, '//runbooks/restate-postgres-workers:lash-e2e-worker__bin'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
         rules = proof.build_rules(ROOT / 'runbooks/restate-postgres-workers/BUILD.bazel')
         (next_worker,) = [name for name, rule in rules.items() if name.startswith('lash-e2e-worker__bin__fv_')
                           and 'synthetic-next' in rule.get('crate_features', [])]
-        for worker in ['lash-e2e-worker__bin', next_worker]:
-            self.assertEqual(proof.vm_helper(ROOT, f'//runbooks/restate-postgres-workers:{worker}'),
-                             ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
+        library = proof.resolve(ROOT, rules[next_worker]['variant_deps']['//crates/lash-vm-worker'])
+        self.assertIn('synthetic-next', library['crate_features'])
+        helper, testing = proof.vm_helper(ROOT, f'//runbooks/restate-postgres-workers:{next_worker}')
+        self.assertTrue(testing)
+        self.assertEqual(sorted(proof.resolve(ROOT, proof.resolve(ROOT, helper)['library'])['crate_features']),
+                         sorted(library['crate_features']))
 
-    def test_a_worker_selects_the_helper_whose_features_match_its_client(self):
+    def test_a_worker_runs_the_helper_built_with_its_helper_features(self):
         root = self.workspace()
         self.assertEqual(proof.vm_helper(root, '//runbooks/e2e:worker__bin'),
                          ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
         self.assertEqual(proof.vm_helper(root, '//runbooks/e2e:worker__bin__fv_plain'),
                          ('//crates/lash-vm-worker:lash-vm-worker__bin__fv_plain', False))
+        paired = self.workspace(helper=self.HELPER + self.NEXT_HELPER)
+        self.assertEqual(proof.vm_helper(paired, '//runbooks/e2e:worker__bin__fv_next'),
+                         ('//crates/lash-vm-worker:lash-vm-worker__bin__fv_alone', True))
 
-    def test_a_missing_or_ambiguous_helper_fails(self):
-        missing = self.workspace(helper=self.HELPER.split('lash_rust_feature_library')[0])
-        with self.assertRaisesRegex(ValueError, 'expected one lash-vm-worker helper'):
-            proof.vm_helper(missing, '//runbooks/e2e:worker__bin__fv_plain')
+    def test_a_helper_without_the_workers_features_does_not_pair(self):
+        # The synthetic N+1's helper differs in protocol, not in build
+        # identity: the base helper passes its handshake and then writes
+        # artifacts the N+1 worker refuses.
+        with self.assertRaisesRegex(ValueError, r"no lash-vm-worker helper binary with features \['synthetic-next', 'testing'\]"):
+            proof.vm_helper(self.workspace(), '//runbooks/e2e:worker__bin__fv_next')
+
+    def test_a_helper_library_whose_features_disagree_with_the_client_fails(self):
+        with self.assertRaisesRegex(ValueError, 'do not pair on testing'):
+            proof.vm_helper(self.workspace(), '//runbooks/e2e:worker__bin__fv_split')
+
+    def test_an_ambiguous_helper_fails(self):
         ambiguous = self.workspace(helper=self.HELPER + '''lash_rust_binary(name = "lash-vm-worker__bin__twin",
     crate_name = "lash_vm_worker", crate_root = "src/main.rs", crate_features = ["testing"], library = ":lash-vm-worker")
 ''')
-        with self.assertRaisesRegex(ValueError, 'expected one lash-vm-worker helper'):
+        with self.assertRaisesRegex(ValueError, 'expected one lash-vm-worker helper binary'):
             proof.vm_helper(ambiguous, '//runbooks/e2e:worker__bin')
 
     def image(self, identity):
