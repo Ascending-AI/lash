@@ -14,6 +14,17 @@ spec = importlib.util.spec_from_file_location('driver', PATH)
 driver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(driver)
 
+REMOTE_CONFIG = '''[buck2_re_client]
+engine_address = grpcs://executor.fixture
+cas_address = grpcs://cas.fixture
+action_cache_address = grpcs://cache.fixture
+instance_name = fixture
+tls_ca_certs = .kiln/ca.pem
+tls_client_cert = .kiln/client.pem
+[kiln]
+executor_runtime = fixture-runtime
+'''
+
 
 class DriverTests(unittest.TestCase):
     def command(self, args, inventory=None):
@@ -78,7 +89,7 @@ class DriverTests(unittest.TestCase):
     def test_run_preserves_invocation_and_workspace_environment(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
-            (root / '.buckconfig.local').write_text('')
+            (root / '.buckconfig.local').write_text(REMOTE_CONFIG)
             current = Path.cwd()
             try:
                 with patch.object(driver, 'ROOT', root), patch.object(driver.subprocess, 'run'), patch.object(driver, 'run_command', return_value=0) as call, patch.dict(os.environ, {'LASH_BUILD_WORKING_DIRECTORY': '/original/subdirectory'}):
@@ -119,7 +130,7 @@ class DriverTests(unittest.TestCase):
     def test_runtime_secret_file_is_private_and_removed_after_failure(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
-            (root / '.buckconfig.local').write_text('')
+            (root / '.buckconfig.local').write_text(REMOTE_CONFIG)
             (root / '.buck2').mkdir()
             seen = []
             def safe_directory(path):
@@ -147,6 +158,42 @@ class DriverTests(unittest.TestCase):
         self.assertIn('--show-providers', command)
         self.assertNotIn('--local-only', command)
         self.assertNotIn('--num-threads', command)
+
+    def test_remote_configuration_requires_pool_metadata_but_local_remains_available(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            local = root / '.buckconfig.local'
+            local.write_text(
+                '[buck2_re_client]\n'
+                'execution_concurrency_limit = 1\n'
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                r'Shared executor configuration is incomplete .*engine_address.*executor_runtime.*kiln fork lash <name>',
+            ):
+                driver.validate_remote_configuration(local)
+
+            current = Path.cwd()
+            try:
+                with patch.object(driver, 'ROOT', root), patch.object(
+                    driver.subprocess, 'run'
+                ), patch.object(driver, 'run_command', return_value=0) as run:
+                    self.assertEqual(driver.main(['--local', 'analyze']), 0)
+                    self.assertTrue(run.called)
+            finally:
+                os.chdir(current)
+
+            local.write_text(REMOTE_CONFIG)
+            driver.validate_remote_configuration(local)
+
+    def test_missing_remote_configuration_names_a_real_recovery(self):
+        with tempfile.TemporaryDirectory() as work:
+            missing = Path(work) / '.buckconfig.local'
+            with self.assertRaisesRegex(
+                ValueError, r'kiln fork lash <name>.*pass --local'
+            ) as error:
+                driver.validate_remote_configuration(missing)
+            self.assertNotIn('refresh', str(error.exception))
 
 
 if __name__ == '__main__':

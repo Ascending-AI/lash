@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Repository build entrypoint using the pinned, unmodified Buck2 release."""
 import argparse
+import configparser
 import json
 import os
 from pathlib import Path
@@ -9,10 +10,42 @@ import sys
 import tempfile
 
 from service_policy import needs_local_uncached
-from invocation import run_command
+from invocation import regular_file, run_command
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULTS = {'build': '//:workspace_compile', 'check': '//:workspace_check', 'test': '//:dev_tests', 'clippy': '//:workspace_clippy', 'doc': '//:workspace_docs'}
+REMOTE_CONFIGURATION = {
+    'buck2_re_client': (
+        'engine_address', 'cas_address', 'action_cache_address', 'instance_name',
+        'tls_ca_certs', 'tls_client_cert',
+    ),
+    'kiln': ('executor_runtime',),
+}
+FORK_RECOVERY = (
+    'use the current Kiln CLI to create a fresh fork '
+    '(`kiln fork lash <name>`), or pass --local'
+)
+
+
+def validate_remote_configuration(path):
+    values = configparser.ConfigParser(interpolation=None)
+    try:
+        values.read_string(regular_file(path))
+    except (OSError, UnicodeError, ValueError, configparser.Error):
+        raise ValueError(
+            'Missing or invalid shared executor configuration; ' + FORK_RECOVERY
+        ) from None
+    missing = [
+        f'{section}.{key}'
+        for section, keys in REMOTE_CONFIGURATION.items()
+        for key in keys
+        if not values.get(section, key, fallback='').strip()
+    ]
+    if missing:
+        raise ValueError(
+            'Shared executor configuration is incomplete (' + ', '.join(missing)
+            + '); ' + FORK_RECOVERY
+        )
 
 
 def arguments(argv):
@@ -167,8 +200,8 @@ def main(argv=None):
             raise ValueError('sync accepts no arguments')
         return subprocess.call([sys.executable, str(sync)])
     if options.operation != 'clean':
-        if not options.local and not (ROOT / '.buckconfig.local').is_file():
-            raise ValueError('Missing .buckconfig.local shared executor configuration; refresh this Kiln fork or pass --local')
+        if not options.local:
+            validate_remote_configuration(ROOT / '.buckconfig.local')
         subprocess.run([sys.executable, str(sync), '--check'], check=True)
     inventory = None
     if options.operation in ('build', 'check', 'clippy', 'doc'):

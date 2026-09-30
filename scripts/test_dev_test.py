@@ -80,7 +80,11 @@ class DevTestTests(unittest.TestCase):
                             "python3 scripts/test_dev_test.py\nGATES\n")
         (self.root / "scripts/test_dev_test.py").write_text("raise SystemExit(0)\n")
         (self.root / ".gitignore").write_text(".buckconfig.local\n")
-        (self.root / ".buckconfig.local").touch()
+        (self.root / ".buckconfig.local").write_text(
+            "[buck2_re_client]\n"
+            "engine_address = grpcs://executor.fixture\n"
+            "tls_client_cert = .kiln/client.pem\n"
+        )
         (self.root / "tools/buck2/bootstrap.py").write_text(
             "from pathlib import Path\n"
             "print(Path(__file__).resolve().parents[2] / '.git/bin/buck2')\n"
@@ -296,6 +300,50 @@ class DevTestTests(unittest.TestCase):
         self.assertEqual(process.returncode, 2)
         receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
         self.assertFalse(receipt["inputs_unchanged"])
+
+    def test_driver_managed_concurrency_change_does_not_stale_result(self):
+        hold = self.root / ".git/hold"
+        hold.touch()
+        process = self.start()
+        self.wait_started()
+        config = self.root / ".buckconfig.local"
+        config.write_text(
+            config.read_text()
+            + "execution_concurrency_limit = 16\n"
+        )
+        hold.unlink()
+        _stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stderr)
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertTrue(receipt["inputs_unchanged"])
+
+    def test_snapshot_keeps_executor_identity_and_credentials(self):
+        module = dev_test_module()
+        path = Path(".buckconfig.local")
+        original = (
+            b"[buck2_re_client]\n"
+            b"engine_address = grpcs://one\n"
+            b"tls_client_cert = .kiln/one.pem\n"
+        )
+        with_limit = original + b"execution_concurrency_limit = 32\n"
+        self.assertEqual(
+            module.snapshot_contents(path, original),
+            module.snapshot_contents(path, with_limit),
+        )
+        self.assertNotEqual(
+            module.snapshot_contents(path, original),
+            module.snapshot_contents(
+                path,
+                original.replace(b"grpcs://one", b"grpcs://two"),
+            ),
+        )
+        self.assertNotEqual(
+            module.snapshot_contents(path, original),
+            module.snapshot_contents(
+                path,
+                original.replace(b".kiln/one.pem", b".kiln/two.pem"),
+            ),
+        )
 
 
     def test_ignored_input_change_still_requires_each_waiter_to_invoke_buck2(self):

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -188,6 +189,21 @@ class SharedActionTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_cross_backend_differential_stays_in_remote_cacheable_partition(self) -> None:
+        inventory = json.loads(
+            (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+        )
+        target = next(
+            target
+            for package in inventory["packages"]
+            if package["package"] == "lash-sim"
+            for target in package["targets"]
+            if target.get("cargo") == "cross_backend_store_differential"
+        )
+        self.assertEqual(target["tags"], [])
+        self.assertNotIn("cargo_only", target)
+        self.assertIn(target["label"], inventory["workspace_test_targets"])
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.ci_text = (ROOT / ".github/workflows/ci.yml").read_text()
@@ -434,6 +450,106 @@ raise SystemExit(int(os.environ.get("SHARD_EXIT", "0")))
                 text=True,
             )
             self.assertEqual(failed.returncode, 23)
+
+    def test_prefix_collisions_filters_ignored_and_empty_shards_are_lossless(self) -> None:
+        helper = ROOT / "tools/buck2/test_shard.py"
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            calls = temporary / "calls.jsonl"
+            binary = temporary / "fake-libtest"
+            binary.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+cases = [("prefix_1", False), ("prefix_1::extended", False),
+         ("other", False), ("ignored_case", True)]
+args = sys.argv[1:]
+if args == ["--list", "--format", "terse"]:
+    for name, _ignored in cases:
+        print(name + ": test")
+    raise SystemExit(0)
+filters, skips = [], []
+position = 0
+while position < len(args):
+    argument = args[position]
+    if argument in ("--skip", "--format", "--color", "--test-threads"):
+        position += 1
+        if argument == "--skip":
+            skips.append(args[position])
+    elif not argument.startswith("-"):
+        filters.append(argument)
+    position += 1
+exact = "--exact" in args
+selected = [
+    (name, ignored) for name, ignored in cases
+    if (not filters or any(name == value if exact else value in name for value in filters))
+    and not any(name == value if exact else value in name for value in skips)
+    and ("--ignored" not in args or ignored)
+]
+executed = [
+    name for name, ignored in selected
+    if not ignored or "--ignored" in args or "--include-ignored" in args
+]
+with open(os.environ["SHARD_CALLS"], "a", encoding="utf-8") as output:
+    output.write(json.dumps({"args": args, "executed": executed}) + "\\n")
+print(f"running {len(executed)} tests")
+for name in executed:
+    print(f"test {name} ... ok")
+print(f"test result: ok. {len(executed)} passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;")
+""",
+                encoding="utf-8",
+            )
+            binary.chmod(0o755)
+            environment = os.environ | {"SHARD_CALLS": str(calls)}
+
+            def run_all(*arguments: str) -> list[list[str]]:
+                calls.unlink(missing_ok=True)
+                for index in range(5):
+                    result = subprocess.run(
+                        ["python3", str(helper), "5", str(index), str(binary), *arguments],
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                return [
+                    json.loads(line)["executed"]
+                    for line in calls.read_text(encoding="utf-8").splitlines()
+                ]
+
+            short = int.from_bytes(hashlib.sha256(b"prefix_1").digest()[:8], "big") % 5
+            long = int.from_bytes(
+                hashlib.sha256(b"prefix_1::extended").digest()[:8], "big"
+            ) % 5
+            self.assertNotEqual(short, long, "fixture must reproduce the old split")
+
+            unfiltered = run_all()
+            flattened = [name for shard in unfiltered for name in shard]
+            self.assertCountEqual(flattened, ["prefix_1", "prefix_1::extended", "other"])
+            self.assertEqual(len(flattened), len(set(flattened)))
+            self.assertGreaterEqual(sum(not shard for shard in unfiltered), 2)
+            self.assertCountEqual(
+                [name for shard in run_all("prefix_1") for name in shard],
+                ["prefix_1", "prefix_1::extended"],
+            )
+            self.assertEqual(
+                [name for shard in run_all("prefix_1", "--exact") for name in shard],
+                ["prefix_1"],
+            )
+            self.assertEqual(
+                [name for shard in run_all("--skip", "prefix_1") for name in shard],
+                ["other"],
+            )
+            self.assertEqual(
+                [name for shard in run_all("--ignored") for name in shard],
+                ["ignored_case"],
+            )
+            self.assertCountEqual(
+                [name for shard in run_all("--include-ignored") for name in shard],
+                ["prefix_1", "prefix_1::extended", "other", "ignored_case"],
+            )
 
 
 if __name__ == "__main__":

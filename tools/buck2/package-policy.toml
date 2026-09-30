@@ -75,13 +75,6 @@ kinds = ["test"]
 tags = ["manual", "cargo-frontend-assets"]
 reason = "uses the Cargo-owned generated frontend asset workflow"
 
-[[rule]]
-packages = ["lash-sim"]
-kinds = ["test"]
-targets = ["cross_backend*"]
-tags = ["cargo-service-gate"]
-reason = "local differential and trait-surface checks run in the ordinary suite; ignored cross-backend cases run in the service job with PostgreSQL"
-
 # This binary carries the generated-simulation and minimizer fixture replays
 # (measured 182-418 s each under Cargo). The whole binary ran 227-300 s on the
 # pool, which straddles Buck2's default `medium` 300 s bound; `long` is 900 s.

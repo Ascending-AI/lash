@@ -44528,14 +44528,11 @@
         {
           "build_label": "//crates/lash-sim:cross_backend_store_differential__test",
           "cargo": "cross_backend_store_differential",
-          "cargo_only": "local differential and trait-surface checks run in the ordinary suite; ignored cross-backend cases run in the service job with PostgreSQL",
           "check_label": "//crates/lash-sim:cross_backend_store_differential__test[check]",
           "clippy_label": "//crates/lash-sim:cross_backend_store_differential__test[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_store_differential__test",
-          "tags": [
-            "cargo-service-gate"
-          ]
+          "tags": []
         },
         {
           "build_label": "//crates/lash-sim:logical_turn__test",

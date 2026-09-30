@@ -175,9 +175,7 @@ lash_rust_integration_test(
     manifest_dir = "crates/lash-sim",
     package_name = "lash-sim",
     rustc_env = {},
-    tags = [
-        "cargo-service-gate",
-    ],
+    tags = [],
     version = "0.0.0-dev",
 )
 

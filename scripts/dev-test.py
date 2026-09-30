@@ -52,6 +52,28 @@ def changed_files(base: str) -> list[str]:
     })
 
 
+def snapshot_contents(path: os.PathLike[str] | str | bytes, contents: bytes) -> bytes:
+    """Exclude the driver's startup-only remote concurrency setting."""
+    if os.fsdecode(path) != ".buckconfig.local":
+        return contents
+    try:
+        lines = contents.decode().splitlines(keepends=True)
+    except UnicodeDecodeError:
+        return contents
+    section = None
+    kept = []
+    for line in lines:
+        match = re.fullmatch(r"\s*\[([^]]+)]\s*(?:[#;].*)?\r?\n?", line)
+        if match:
+            section = match[1]
+        if section == "buck2_re_client" and re.match(
+            r"\s*execution_concurrency_limit\s*=", line
+        ):
+            continue
+        kept.append(line)
+    return "".join(kept).encode()
+
+
 def input_id(base: str) -> str:
     digest = hashlib.sha256()
 
@@ -77,7 +99,7 @@ def input_id(base: str) -> str:
             add(b"symlink:" + os.fsencode(os.readlink(path)))
         elif path.is_file():
             add(str(path.stat().st_mode).encode())
-            add(path.read_bytes())
+            add(snapshot_contents(raw, path.read_bytes()))
         else:
             add(b"missing")
     return digest.hexdigest()
