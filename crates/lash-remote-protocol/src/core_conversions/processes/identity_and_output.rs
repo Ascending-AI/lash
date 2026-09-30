@@ -1,3 +1,9 @@
+//! Remote identities project kind, label and the immutable definition ID, when
+//! present. Core separately persists an engine's typed definition reference and
+//! admission signature in durable rows and historical trigger receipts. Those
+//! facts do not travel in `RemoteProcessIdentity`. Restoring a remote identity
+//! preserves its ID without reconstructing or admitting a definition reference.
+
 use super::*;
 
 fn restore_frame_node_id(

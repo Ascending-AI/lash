@@ -500,13 +500,26 @@ fn trigger_dtos_round_trip_core_values() {
         },
         enabled: true,
     };
-    let remote = RemoteTriggerRegistration::from(registration.clone());
-    let core = lash_core::facade_support::TriggerRegistration::try_from(remote)
-        .expect("core registration");
-    assert_eq!(
-        serde_json::to_value(&core).expect("core registration json"),
-        serde_json::to_value(&registration).expect("registration json")
-    );
+    for definition_id in trigger_definition_ids() {
+        let mut registration = registration.clone();
+        registration.target.identity.definition_id = definition_id;
+        let remote = RemoteTriggerRegistration::from(registration.clone());
+        let mut expected = registration.clone();
+        expected.target.identity = assert_trigger_identity_projection(
+            &registration.target.identity,
+            &remote.target.identity,
+        );
+        let remote: RemoteTriggerRegistration = serde_json::from_value(
+            serde_json::to_value(&remote).expect("remote registration json"),
+        )
+        .expect("decode remote registration");
+        let core = lash_core::facade_support::TriggerRegistration::try_from(remote)
+            .expect("core registration");
+        assert_eq!(
+            serde_json::to_value(&core).expect("core registration json"),
+            serde_json::to_value(&expected).expect("projected registration json")
+        );
+    }
 
     let cause = lash_core::CausalRef::TriggerOccurrence {
         occurrence_id: "occurrence:1".to_string(),
@@ -521,25 +534,70 @@ fn trigger_dtos_round_trip_core_values() {
 
 #[test]
 fn trigger_subscription_dtos_round_trip_core_values() {
-    let draft = trigger_subscription_draft();
-    let remote = RemoteTriggerSubscriptionDraft::try_from(draft.clone()).expect("remote draft");
-    remote.validate().expect("valid remote trigger draft");
-    let core = lash_core::TriggerSubscriptionDraft::try_from(remote).expect("core draft");
-    assert_eq!(
-        serde_json::to_value(&core).expect("core draft json"),
-        serde_json::to_value(&draft).expect("draft json")
-    );
+    for definition_id in trigger_definition_ids() {
+        let mut draft = trigger_subscription_draft();
+        draft.target_identity.definition_id = definition_id.clone();
+        let remote = RemoteTriggerSubscriptionDraft::try_from(draft.clone()).expect("remote draft");
+        remote.validate().expect("valid remote trigger draft");
+        let mut expected_draft = draft.clone();
+        expected_draft.target_identity =
+            assert_trigger_identity_projection(&draft.target_identity, &remote.target_identity);
+        let remote: RemoteTriggerSubscriptionDraft =
+            serde_json::from_value(serde_json::to_value(&remote).expect("remote draft json"))
+                .expect("decode remote draft");
+        let core = lash_core::TriggerSubscriptionDraft::try_from(remote).expect("core draft");
+        assert_eq!(
+            serde_json::to_value(&core).expect("core draft json"),
+            serde_json::to_value(&expected_draft).expect("projected draft json")
+        );
 
-    let record = trigger_subscription_record();
-    let remote = RemoteTriggerSubscriptionRecord::try_from(record.clone()).expect("remote record");
-    remote
-        .validate("RemoteTriggerSubscriptionRecord")
-        .expect("valid remote trigger record");
-    let core = lash_core::TriggerSubscriptionRecord::try_from(remote).expect("core record");
-    assert_eq!(
-        serde_json::to_value(&core).expect("core record json"),
-        serde_json::to_value(&record).expect("record json")
-    );
+        let mut record = trigger_subscription_record();
+        record.target_identity.definition_id = definition_id;
+        let remote =
+            RemoteTriggerSubscriptionRecord::try_from(record.clone()).expect("remote record");
+        remote
+            .validate("RemoteTriggerSubscriptionRecord")
+            .expect("valid remote trigger record");
+        let mut expected_record = record.clone();
+        expected_record.target_identity =
+            assert_trigger_identity_projection(&record.target_identity, &remote.target_identity);
+        let remote: RemoteTriggerSubscriptionRecord =
+            serde_json::from_value(serde_json::to_value(&remote).expect("remote record json"))
+                .expect("decode remote record");
+        let core = lash_core::TriggerSubscriptionRecord::try_from(remote).expect("core record");
+        assert_eq!(
+            serde_json::to_value(&core).expect("core record json"),
+            serde_json::to_value(&expected_record).expect("projected record json")
+        );
+
+        let request = RemoteTriggerRegisterSubscriptionRequest {
+            draft: RemoteTriggerSubscriptionDraft::try_from(draft).expect("remote request draft"),
+        };
+        let core =
+            lash_core::TriggerSubscriptionDraft::try_from(request).expect("register request");
+        assert_eq!(
+            serde_json::to_value(&core).expect("core request draft json"),
+            serde_json::to_value(&expected_draft).expect("projected request draft json")
+        );
+
+        let result = RemoteTriggerRegisterSubscriptionReceipt::try_from(record.clone())
+            .expect("remote result");
+        let core = lash_core::TriggerSubscriptionRecord::try_from(result).expect("register result");
+        assert_eq!(
+            serde_json::to_value(&core).expect("core receipt record json"),
+            serde_json::to_value(&expected_record).expect("projected receipt record json")
+        );
+
+        let response =
+            RemoteTriggerListSubscriptionsResponse::try_from(vec![record]).expect("response");
+        let core_records =
+            Vec::<lash_core::TriggerSubscriptionRecord>::try_from(response).expect("list response");
+        assert_eq!(core_records.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&core_records[0]).expect("core list record json"),
+            serde_json::to_value(&expected_record).expect("projected list record json")
+        );
+    }
 
     let mut filter = lash_core::TriggerSubscriptionFilter::for_session("session-a");
     filter.subscription_key = Some("button-watcher".to_string());
@@ -565,27 +623,6 @@ fn trigger_subscription_dtos_round_trip_core_values() {
     assert_eq!(
         serde_json::to_value(&core).expect("core filter json"),
         serde_json::to_value(&filter).expect("filter json")
-    );
-
-    let request = RemoteTriggerRegisterSubscriptionRequest {
-        draft: RemoteTriggerSubscriptionDraft::try_from(draft).expect("remote request draft"),
-    };
-    let core = lash_core::TriggerSubscriptionDraft::try_from(request).expect("register request");
-    assert_eq!(core.source_key, "source-key");
-
-    let result =
-        RemoteTriggerRegisterSubscriptionReceipt::try_from(record.clone()).expect("remote result");
-    let core = lash_core::TriggerSubscriptionRecord::try_from(result).expect("register result");
-    assert_eq!(core.subscription_id, record.subscription_id);
-
-    let response =
-        RemoteTriggerListSubscriptionsResponse::try_from(vec![record.clone()]).expect("response");
-    let core_records =
-        Vec::<lash_core::TriggerSubscriptionRecord>::try_from(response).expect("list response");
-    assert_eq!(core_records.len(), 1);
-    assert_eq!(
-        serde_json::to_value(&core_records[0]).expect("core record json"),
-        serde_json::to_value(&record).expect("record json")
     );
 }
 
@@ -2035,38 +2072,6 @@ fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
             }),
         )]),
     }
-}
-
-fn process_definition_identity(process_name: &str) -> serde_json::Value {
-    serde_json::json!({
-        "module_ref": "lashlang:v2:blake3:module",
-        "host_requirements_ref": "lashlang-host-requirements:v1:sha256:host",
-        "process_id": {
-            "component": "process-component",
-            "pos": 1
-        },
-        "process_name": process_name
-    })
-}
-
-fn engine_process_input(process_name: &str, args: serde_json::Value) -> lash_core::ProcessInput {
-    let _ = process_name;
-    lash_core::ProcessInput::Engine {
-        kind: "lashlang".to_string(),
-        payload: serde_json::json!({
-            "args": args
-        }),
-    }
-}
-
-fn engine_process_identity(process_name: &str) -> lash_core::ProcessIdentity {
-    lash_core::ProcessIdentity::for_definition(
-        lash_core::ProcessDefinitionRef::unclaimed(
-            "lashlang",
-            process_definition_identity(process_name),
-        ),
-        Some(process_name.to_string()),
-    )
 }
 
 fn trigger_target_identity() -> serde_json::Value {
