@@ -32,6 +32,8 @@ use lash_core::{
 
 use crate::clock::SimClock;
 
+mod settlements;
+
 /// The reconcile tick's nominal interval.
 const TICK_MS: u64 = 10_000;
 /// The longest a jittered tick waits: `T` + 10%.
@@ -689,17 +691,15 @@ impl SessionControlEngine for SlowReleases {
 /// re-claimed, while its attempt runs; and the attempt is cut at its
 /// budget, its retry due its backoff after it started, and retried by the
 /// first tick its lane is free for.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
     use lash_core::engine::{ReconcileCursor, RecoveryPassBudget};
     use lash_core::runtime::drive::{
         RECOVERY_TICK, ReconcileParts, RecoveryInterval, RelayLanes, reconcile_once,
     };
+    use settlements::Progress;
 
-    const STEP_MS: u64 = 100;
-    /// How far a virtual instant the harness observes may trail the one the
-    /// schedule meant: the clock moves in steps while the store works.
-    const SLACK_MS: u64 = 1_000;
+    const FIRST_RELEASE_DELAY_MS: u64 = 100;
     let tick_ms = RECOVERY_TICK.as_millis() as u64;
     let budget = RecoveryPassBudget::default();
     let wait_ms = budget.tick_wait.as_millis() as u64;
@@ -727,20 +727,22 @@ async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
         "the close armed its root's scope close"
     );
 
-    // The deployment's schedule, as its engine runs it.
-    let ticks = Arc::new(Mutex::new(
-        Vec::<(u64, lash_core::engine::ReconcileTick)>::new(),
-    ));
+    let (control_relay, mut control_settled) =
+        settlements::observe(world.relay.clone(), clock.clone(), FIRST_RELEASE_DELAY_MS);
+    let (scope_relay, mut scope_settled) =
+        settlements::observe(world.scope_close.clone(), clock.clone(), 0);
+    let (ready, mut tick_ready) = tokio::sync::mpsc::unbounded_channel();
+    let (proceed, mut tick_proceed) = tokio::sync::mpsc::unbounded_channel();
+    let (finished, mut tick_finished) = tokio::sync::mpsc::unbounded_channel();
+
+    // The real interval and lanes run independently. The driver orders a
+    // timeout settlement before a tick due at the same instant.
     let schedule = {
-        let ticks = Arc::clone(&ticks);
         let clock = Arc::clone(&clock);
         let factory = world.stores.session_store_factory();
         let work = Work(Arc::clone(&engine) as Arc<dyn SessionControlEngine>);
         let close = Arc::clone(&world.close);
-        let relays: Vec<Arc<dyn ObligationRelay>> = vec![
-            Arc::clone(&world.relay) as _,
-            Arc::clone(&world.scope_close) as _,
-        ];
+        let relays = vec![control_relay, scope_relay];
         tokio::spawn(async move {
             let lanes = RelayLanes::new(Arc::clone(&clock) as Arc<dyn Clock>, budget);
             let mut interval =
@@ -749,6 +751,8 @@ async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
             loop {
                 interval.tick().await;
                 let ticked_at = clock.logical_ms();
+                ready.send(ticked_at).expect("tick observer");
+                tick_proceed.recv().await.expect("tick admission");
                 let tick = reconcile_once(
                     &ReconcileParts {
                         sessions: factory.as_ref(),
@@ -765,39 +769,71 @@ async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
                 )
                 .await;
                 cursor = tick.next.clone();
-                ticks
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push((ticked_at, tick));
+                finished.send((ticked_at, tick)).expect("tick observer");
             }
         })
     };
     let start = clock.logical_ms();
-    let horizon = start + policy.attempt_budget_ms + 2 * tick_ms + SLACK_MS;
-    while clock.logical_ms() < horizon {
-        clock.advance_to(clock.logical_ms() + STEP_MS).await;
-        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let started_ms = clock.timestamp_ms();
+    let cutoff = start + policy.attempt_budget_ms;
+    let mut ticks = Vec::new();
+    for index in 0..=5 {
+        let tick_at = start + tick_ms * index;
+        clock.advance_to(tick_at).await;
+        assert_eq!(tick_ready.recv().await, Some(tick_at));
+        if tick_at == cutoff {
+            assert!(matches!(
+                control_settled.recv().await,
+                Some(Progress::Settled(lash_core::store::ObligationSettlement::Retry { due_at_ms, .. }))
+                    if due_at_ms == started_ms + policy.base_backoff_ms
+            ));
+            assert_eq!(world.obligation().await, Some(ObligationState::Due));
+        }
+        proceed.send(()).expect("schedule is running");
+        if index == 0 {
+            // Model the awaited work between starting the attempt budget
+            // and entering the engine RPC, without spending wall time.
+            clock.wait_for_sleep(cutoff).await;
+            clock.wait_for_sleep(start + FIRST_RELEASE_DELAY_MS).await;
+            assert!(matches!(
+                scope_settled.recv().await,
+                Some(Progress::Settled(
+                    lash_core::store::ObligationSettlement::Delivered
+                ))
+            ));
+            clock.advance_to(start + FIRST_RELEASE_DELAY_MS).await;
+            clock
+                .wait_for_sleep(start + FIRST_RELEASE_DELAY_MS + engine.release_ms)
+                .await;
+        } else if tick_at == cutoff {
+            clock
+                .wait_for_sleep(cutoff + policy.attempt_budget_ms)
+                .await;
+            clock.wait_for_sleep(cutoff + engine.release_ms).await;
+        }
+        if index > 0 {
+            assert!(matches!(
+                scope_settled.recv().await,
+                Some(Progress::EmptyPass)
+            ));
+        }
+        clock.wait_for_sleep(tick_at + wait_ms).await;
+        clock.advance_to(tick_at + wait_ms).await;
+        ticks.push(tick_finished.recv().await.expect("completed tick"));
     }
     schedule.abort();
+    assert!(schedule.await.expect_err("schedule aborted").is_cancelled());
 
-    let ticks = ticks
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .iter()
-        .map(|(at, tick)| (*at, tick.clone()))
-        .collect::<Vec<_>>();
     let instants: Vec<u64> = ticks.iter().map(|(at, _)| *at).collect();
-    assert!(
-        instants.len() >= 5,
-        "the interval ticked through the slow release: {instants:?}"
+    assert_eq!(
+        instants.len(),
+        6,
+        "the interval ticked through the slow release"
     );
     // Cadence: every tick fires on the grid, whatever the release spends.
     for (index, at) in instants.iter().enumerate() {
         let due = start + tick_ms * index as u64;
-        assert!(
-            *at >= due && *at <= due + SLACK_MS,
-            "tick {index} fired at {at}, due at {due}: {instants:?}"
-        );
+        assert_eq!(*at, due, "tick {index}: {instants:?}");
     }
     // Parks: each tick's leader arm ran within its lane wait.
     let parks = engine
@@ -805,38 +841,33 @@ async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
-    assert!(
-        parks.len() >= instants.len() - 1,
+    assert_eq!(
+        parks.len(),
+        instants.len(),
         "{parks:?} for ticks {instants:?}"
     );
     for (at, park) in instants.iter().zip(&parks) {
-        assert!(
-            *park <= at + wait_ms + SLACK_MS,
-            "the parks of the tick at {at} ran at {park}"
-        );
+        assert_eq!(*park, at + wait_ms, "the parks of the tick at {at}");
     }
     // A later kind: the root's scope close was delivered in the first tick.
     let closes = world.root_closes();
     let [closed] = closes.as_slice() else {
         panic!("one root scope close: {closes:?}");
     };
-    assert!(
-        *closed <= start + SLACK_MS,
-        "closed at {closed}, first tick at {start}"
-    );
+    assert_eq!(*closed, start, "the later kind ran beside the slow intent");
     assert_eq!(
         world.root_scope_close().await,
         Some(ObligationState::Delivered)
     );
     // The slow kind: busy, never re-claimed, while its attempt ran.
-    for (at, tick) in &ticks[1..] {
-        if *at + SLACK_MS < start + policy.attempt_budget_ms {
-            assert_eq!(
-                tick.obligations_busy,
-                vec![ObligationKind::ControlIntent],
-                "the tick at {at} found the intent's lane busy"
-            );
-        }
+    for (at, tick) in &ticks {
+        assert!(tick.failures.is_empty(), "tick at {at}: {tick:?}");
+        let busy = if *at == start || *at == cutoff {
+            vec![]
+        } else {
+            vec![ObligationKind::ControlIntent]
+        };
+        assert_eq!(tick.obligations_busy, busy, "the busy lanes at {at}");
     }
     // The attempt was cut at its budget and retried from its start.
     let releases = engine
@@ -844,13 +875,17 @@ async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
-    let [first, second, ..] = releases.as_slice() else {
+    let [first, second] = releases.as_slice() else {
         panic!("the cut attempt was retried: {releases:?}");
     };
-    assert!(*first <= start + SLACK_MS, "{releases:?}");
-    assert!(
-        *second >= first + policy.attempt_budget_ms
-            && *second <= first + policy.attempt_budget_ms + tick_ms + SLACK_MS,
-        "the retry started at {second}, the cut attempt at {first}"
+    assert_eq!(*first, start + FIRST_RELEASE_DELAY_MS, "{releases:?}");
+    // The budget starts before the relay's awaited preparation, not when
+    // the engine RPC finally begins.
+    assert_eq!(
+        *second, cutoff,
+        "the first free tick retries the cut attempt"
+    );
+    eprintln!(
+        "attempt_start={start}, first_rpc={first}, cutoff={cutoff}, retry_rpc={second}, ticks={instants:?}"
     );
 }

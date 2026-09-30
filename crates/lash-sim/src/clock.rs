@@ -19,6 +19,8 @@ pub(crate) struct SimClock {
     logical_ms: AtomicU64,
     monotonic_origin: Instant,
     sleepers: Mutex<SleepersByDeadline>,
+    #[cfg(test)]
+    sleep_registered: tokio::sync::Notify,
 }
 
 impl SimClock {
@@ -27,6 +29,8 @@ impl SimClock {
             logical_ms: AtomicU64::new(0),
             monotonic_origin: Instant::now(),
             sleepers: Mutex::new(BTreeMap::new()),
+            #[cfg(test)]
+            sleep_registered: tokio::sync::Notify::new(),
         })
     }
 
@@ -71,6 +75,17 @@ impl SimClock {
             .await;
     }
 
+    #[cfg(test)]
+    pub(crate) async fn wait_for_sleep(&self, deadline_ms: u64) {
+        loop {
+            let registered = self.sleep_registered.notified();
+            if self.sleepers.lock_recover().contains_key(&deadline_ms) {
+                return;
+            }
+            registered.await;
+        }
+    }
+
     async fn wait_until_ms(&self, deadline_ms: u64) {
         let receiver = {
             let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -79,6 +94,8 @@ impl SimClock {
                 return;
             }
             sleepers.entry(deadline_ms).or_default().push(sender);
+            #[cfg(test)]
+            self.sleep_registered.notify_one();
             receiver
         };
         let _ = receiver.await;
