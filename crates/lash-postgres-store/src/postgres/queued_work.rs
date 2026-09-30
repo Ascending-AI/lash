@@ -16,6 +16,8 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) authority: QueuedWorkAuthority,
     pub(crate) merge_key: Option<String>,
     enqueued_at_ms: u64,
+    submission_digest: String,
+    terminal: Option<lash_core_execution::store::IngressTerminal>,
 }
 
 /// The turn-lane candidate `batch` offers an admission.
@@ -45,6 +47,14 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
             "QueuedWorkBatch",
             "enqueued_at_ms",
             row.get("enqueued_at_ms"),
+        )?,
+        submission_digest: row.get("submission_digest"),
+        terminal: lash_core_execution::store_backend_support::decode_ingress_terminal(
+            "QueuedWorkBatch",
+            row.get::<Option<String>, _>("terminal_cause").as_deref(),
+            row.get::<Option<i64>, _>("terminal_at_ms")
+                .map(|at| u64_from_sql("QueuedWorkBatch", "terminal_at_ms", at))
+                .transpose()?,
         )?,
     })
 }
@@ -103,6 +113,8 @@ pub(crate) async fn queued_work_batch_from_row(
         merge_key: row.merge_key,
         enqueued_at_ms: row.enqueued_at_ms,
         items,
+        submission_digest: row.submission_digest,
+        terminal: row.terminal,
     };
     batch.validate_payload_family()?;
     Ok(batch)
@@ -121,6 +133,7 @@ pub(crate) async fn complete_admitted_batch_tx(
     session_id: &SessionId,
     root: &lash_core_execution::TurnId,
     batch_id: &lash_core_execution::BatchId,
+    terminal: lash_core_execution::store::IngressTerminal,
 ) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let row = lash_core_execution::store::IngressRowId::Batch(batch_id.clone());
@@ -176,6 +189,8 @@ pub(crate) async fn complete_admitted_batch_tx(
         .bind(session_id.as_str())
         .bind(batch_id.as_str())
         .bind(root.as_str())
+        .bind(terminal.cause.as_str())
+        .bind(crate::support::clamp_epoch_ms(terminal.at_ms))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -204,6 +219,7 @@ pub(crate) async fn settle_open_command_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     batch_id: &lash_core_execution::BatchId,
+    at_ms: u64,
 ) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> =
@@ -221,6 +237,7 @@ pub(crate) async fn settle_open_command_tx(
     let settled = sqlx::query(sql.queued_batches.settle_command.sql())
         .bind(session_id.as_str())
         .bind(batch_id.as_str())
+        .bind(crate::support::clamp_epoch_ms(at_ms))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?

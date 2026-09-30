@@ -32,6 +32,8 @@ pub mod history;
 #[cfg(test)]
 mod history_gate_tests;
 pub mod ingress_obligation;
+mod ingress_terminal;
+pub use ingress_terminal::{IngressTerminal, IngressTerminalCause};
 mod lease_timings;
 mod maintenance;
 pub use enumeration::*;
@@ -168,10 +170,10 @@ pub use retention::{RetentionBound, RetentionReport};
 pub use root::{
     AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
     InMemoryRootLedger, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal,
-    RootCommittedOutcome, RootEnd, RootEndedTurns, RootExecutor, RootStore, RootTerminal,
-    RootTerminalCause, RootTerminalKind, RootTerminalWrite, RootTerminalWriteDecision,
-    StoredRootTerminal, TurnCommitId, UnfinishedRoot, decide_root_terminal_write,
-    refused_run_owns_root, root_binding_conflict,
+    RootCommittedOutcome, RootEnd, RootExecutor, RootStore, RootTerminal, RootTerminalCause,
+    RootTerminalKind, RootTerminalWrite, RootTerminalWriteDecision, RootTurns, StoredRootTerminal,
+    TurnCommitId, UnfinishedRoot, decide_root_terminal_write, refused_run_owns_root,
+    root_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
@@ -1483,6 +1485,14 @@ pub trait QueuedWorkStore: Send + Sync {
 
     /// Persist a queued-work batch and expose whether receiver idempotency
     /// absorbed it. The wake driver uses this for delivery evidence.
+    ///
+    /// Admission records the draft's
+    /// [`submission_digest`](crate::QueuedWorkBatchDraft::submission_digest)
+    /// (ADR 0101 §8). A draft whose source key the session already filed
+    /// answers that batch, open or a tombstone, as
+    /// [`Existing`](crate::QueuedWorkEnqueueOutcome::Existing) when the
+    /// digests are equal, and nothing reopens; a changed digest is
+    /// [`StoreError::QueuedWorkSourceKeyConflict`] and nothing is stored.
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: crate::QueuedWorkBatchDraft,
@@ -1506,21 +1516,22 @@ pub trait QueuedWorkStore: Send + Sync {
         fence: &DriveFence,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
 
-    /// Remove an open queued-work batch from durable ingress.
+    /// Withdraw an open queued-work batch from durable ingress into its
+    /// `cancelled` tombstone (ADR 0101 §8).
     ///
-    /// Returns the removed batch when cancellation won the race. Returns `None`
-    /// when the batch is missing or a root admitted it; callers must treat
-    /// that as "already admitted or completed" and must not restore any stale
-    /// local draft state. A session command is admitted by the drive's
-    /// fenced read of its run ([`Self::open_session_command_run`]), which
-    /// delivers its obligation: from that read on, the command is being
-    /// applied and a withdrawal returns `None` (FIG-4202).
+    /// Returns the batch as it stood open when cancellation won the race.
+    /// Returns `None` when the batch is missing, a tombstone, or held by a
+    /// root; callers must treat that as "already admitted or completed" and
+    /// must not restore any stale local draft state.
+    /// A command whose fenced read delivered its obligation is being applied
+    /// and cannot be withdrawn.
     ///
     /// Cancelling a process-wake batch is a terminal transition of that wake:
     /// the session's redelivery fence rises to `max(floor, sequence)` in the
-    /// same transaction as the removal, so a later redelivery of the same
-    /// `(process, sequence)` is refused with
-    /// [`StoreError::ProcessWakeSequenceRewound`] rather than re-admitted.
+    /// same transaction as the tombstone. A redelivery of the same
+    /// `(process, sequence)` answers the tombstone and reopens nothing; after
+    /// host vacuum it is refused with
+    /// [`StoreError::ProcessWakeSequenceRewound`].
     async fn cancel_queued_work_batch(
         &self,
         session_id: &SessionId,

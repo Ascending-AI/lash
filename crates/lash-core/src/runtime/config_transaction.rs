@@ -126,22 +126,26 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state().await?;
         let id = id.into();
         let record = self.admit_config_transaction(id.clone(), expected_revision, transaction)?;
-        let digest = config_transaction_digest(&record)?;
-        let (accepted, existing) = self
+        // The store decides a resubmission by its submission digest (ADR
+        // 0101 §8): the same record answers the retained command, and any
+        // other one under the id is refused.
+        let accepted = match self
             .enqueue_session_command(
                 crate::SessionCommand::ApplyConfigTransaction {
                     transaction: Box::new(record),
                 },
                 id.clone(),
             )
-            .await?;
-        if let Some(crate::SessionCommand::ApplyConfigTransaction {
-            transaction: existing,
-        }) = existing.as_ref()
-            && config_transaction_digest(existing)? != digest
+            .await
         {
-            return Err(crate::ConfigSubmitError::ChangedContent { id }.into());
-        }
+            Ok(accepted) => accepted,
+            Err(super::session_api::SessionCommandEnqueueError::ChangedContent(_)) => {
+                return Err(crate::ConfigSubmitError::ChangedContent { id }.into());
+            }
+            Err(super::session_api::SessionCommandEnqueueError::Runtime(error)) => {
+                return Err(error.into());
+            }
+        };
         let receipt = match accepted {
             super::session_api::AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
             super::session_api::AcceptedSessionCommand::Queued(handle) => handle.receipt,
@@ -346,22 +350,6 @@ impl LashRuntime {
                 },
             )
     }
-}
-
-/// The digest a resubmission under the same id is compared by.
-fn config_transaction_digest(
-    record: &crate::ConfigTransactionRecord,
-) -> Result<String, ConfigTransactionSubmitError> {
-    record.digest().map_err(|error| {
-        RuntimeError::new(
-            RuntimeErrorCode::SessionCommandRun,
-            format!(
-                "config transaction `{}` could not be digested: {error}",
-                record.id
-            ),
-        )
-        .into()
-    })
 }
 
 /// Publish `resolution` onto resident `state`: the recorded replacements

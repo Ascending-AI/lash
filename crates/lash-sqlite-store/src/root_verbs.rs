@@ -140,13 +140,25 @@ pub(crate) fn open_root_intent_conn(
     inputs.sort();
     inputs.dedup();
     for input in inputs {
-        let state = if request.verb == RootVerb::Fork {
-            "deferred_next_turn"
+        if request.verb == RootVerb::Fork {
+            crate::conn::cached_execute(
+                tx,
+                sql.reopen_input.sql(),
+                params![session.as_str(), input],
+            )
         } else {
-            "cancelled"
-        };
-        crate::conn::cached_execute(tx, sql.input.sql(), params![session.as_str(), input, state])
-            .map_err(sqlite_error)?;
+            crate::conn::cached_execute(
+                tx,
+                sql.cancel_input.sql(),
+                params![
+                    session.as_str(),
+                    input,
+                    crate::clamp_epoch_ms(at_ms),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                ],
+            )
+        }
+        .map_err(sqlite_error)?;
         if let Some(root) = new_root.as_ref() {
             crate::conn::cached_execute(
                 tx,
@@ -161,14 +173,7 @@ pub(crate) fn open_root_intent_conn(
     }
     if request.verb == RootVerb::Cancel {
         for batch in batches {
-            crate::conn::cached_execute(tx, sql.delete_batch_items.sql(), params![batch])
-                .map_err(sqlite_error)?;
-            crate::conn::cached_execute(
-                tx,
-                sql.delete_batch.sql(),
-                params![session.as_str(), batch],
-            )
-            .map_err(sqlite_error)?;
+            crate::session_roots::cancel_root_batch_conn(tx, session, &batch, at_ms)?;
         }
     }
     // The verb settles the root's own input and batches first; its terminal

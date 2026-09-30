@@ -114,6 +114,9 @@ struct GeneratedRuntimeSession {
     provider_kind: String,
     active_provider_turns: BTreeMap<String, ActiveProviderTurn>,
     finished_provider_turns: BTreeMap<String, Value>,
+    /// Every modeled provider turn that has started: a turn input may
+    /// address (ADR 0101 §5.1), running or ended.
+    started_provider_turns: BTreeSet<String>,
     /// The engine's drive of the session, held from a queued ingress until
     /// its paired cancellation (or the next modeled provider turn): the
     /// engine drives an input as soon as it is accepted, and each modeled
@@ -404,6 +407,7 @@ impl GeneratedRuntimeWorld {
                 provider_kind,
                 active_provider_turns: BTreeMap::new(),
                 finished_provider_turns: BTreeMap::new(),
+                started_provider_turns: BTreeSet::new(),
                 drive_hold: None,
             },
         );
@@ -460,13 +464,27 @@ impl GeneratedRuntimeWorld {
             .get("active_turn_id")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let ingress_mode = event
+        let planned_mode = event
             .queued_ingress_mode()
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let active_turn_id = observed_active_turn_id
+            .as_deref()
+            .unwrap_or(&event.boundary_id);
+        // A host addresses a turn that is running or has ended (ADR 0101
+        // §5.1). A modeled provider turn is its own root, so its boundary id
+        // is the turn's id; one that has not started yet, as serialized
+        // provider turns can leave it, has nothing to address, and the input
+        // is next-turn input.
+        let ingress_mode = if planned_mode == QueuedIngressMode::ActiveTurn
+            && !runtime_session
+                .started_provider_turns
+                .contains(active_turn_id)
+        {
+            QueuedIngressMode::NextTurn
+        } else {
+            planned_mode
+        };
         if ingress_mode == QueuedIngressMode::ActiveTurn {
-            let active_turn_id = observed_active_turn_id
-                .as_deref()
-                .unwrap_or(&event.boundary_id);
             send = send.ingress(lash_core::TurnInputIngress::active_turn(
                 active_turn_id,
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -625,6 +643,9 @@ impl GeneratedRuntimeWorld {
                 };
             }
         }
+        runtime_session
+            .started_provider_turns
+            .insert(event.boundary_id.clone());
         runtime_session.active_provider_turns.insert(
             event.boundary_id.clone(),
             ActiveProviderTurn {

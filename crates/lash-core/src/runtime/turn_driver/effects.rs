@@ -681,6 +681,8 @@ mod checkpoint_admission_determinism_tests {
                 merge_key: None,
                 enqueued_at_ms: 0,
                 items: Vec::new(),
+                submission_digest: String::new(),
+                terminal: None,
             }],
         }
     }

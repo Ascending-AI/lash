@@ -18,6 +18,7 @@ pub(crate) struct PendingTurnInputRow {
     /// The root whose admission holds the row; `None` while it is open.
     pub(crate) admitted_root: Option<String>,
     run_spec_hash: Option<String>,
+    terminal_at_ms: Option<u64>,
 }
 
 pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError> {
@@ -43,6 +44,10 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
         )?,
         admitted_root: row.get("admitted_root"),
         run_spec_hash: row.get("run_spec_hash"),
+        terminal_at_ms: row
+            .get::<Option<i64>, _>("terminal_at_ms")
+            .map(|at| u64_from_sql("PendingTurnInput", "terminal_at_ms", at))
+            .transpose()?,
     })
 }
 
@@ -60,6 +65,7 @@ pub(crate) fn pending_turn_input_from_row(
         run_spec: row
             .run_spec_hash
             .map(lash_core_execution::RunSpecHash::from_stored),
+        terminal_at_ms: row.terminal_at_ms,
     })
 }
 

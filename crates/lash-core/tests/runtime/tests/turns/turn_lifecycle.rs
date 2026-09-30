@@ -536,11 +536,11 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
 /// no input pinned to a dead turn once its root ends.
 ///
 /// The host routed an input into the running turn, and the turn's checkpoint
-/// admitted it to the root. The turn's commit is refused for good, so the
-/// turn ends without the commit-time re-defer. Nothing re-defers the row
-/// behind the root's back: it stays bound to the root until the root's
-/// terminal write, here the refused run's own end (FIG-4018), re-defers it
-/// to the next turn. The root's own acceptance ends with the root.
+/// admitted it to the root. The turn's commit is refused for good. The row
+/// stays bound to the root until the root's terminal write, here the refused
+/// run's own end (FIG-4018), releases it open with its submitted delivery:
+/// its turn is over, so it is next-turn input by rule. The root's own
+/// acceptance ends with the root.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
@@ -549,17 +549,30 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     let live_turn_id = "fig1573-live-turn";
     let store = double_unbound_recording_store(&double).await;
     let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
+    let steer = SteerWhileRunning::default();
+    steer.bind(&store);
+    steer.queue(
+        &SessionId::from(session_id),
+        &TurnId::from(live_turn_id),
+        None,
+        lash_core::TurnInput::text("routed into the live turn"),
+    );
+    let provider_steer = steer.clone();
     let transport = TestProvider::builder()
         .kind("mock")
-        .complete(|_| async {
-            Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: "answered".to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            })
+        .complete(move |_| {
+            let steer = provider_steer.clone();
+            async move {
+                steer.send_queued().await;
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "answered".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
         })
         .build();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -570,20 +583,6 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         Arc::clone(&runtime_store),
     )
     .await;
-
-    lash_core::TurnInputStore::enqueue_pending_turn_input(
-        store.as_ref(),
-        lash_core::PendingTurnInputDraft::new(
-            session_id,
-            lash_core::TurnInputIngress::active_turn(
-                live_turn_id.to_string(),
-                lash_core::TurnInputCheckpointBoundary::AfterWork,
-            ),
-            lash_core::TurnInput::text("routed into the live turn"),
-        ),
-    )
-    .await
-    .expect("enqueue an input scoped to the live turn");
 
     // An outcome, not a live fault: a live fault is the engine's to retry
     // under the same root, so no teardown runs for it (FIG-3897); a commit
@@ -669,14 +668,13 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     );
     assert_eq!(row.status, lash_core::PendingTurnInputReadStatus::Open);
     assert_eq!(
-        row.input.state,
-        lash_core::TurnInputState::DeferredNextTurn,
-        "the root's end must re-defer the input its dead turn held"
+        row.input.ingress().active_turn_id(),
+        Some(&TurnId::from(live_turn_id)),
+        "the root's end keeps the input's submitted delivery (ADR 0101 §5.1)"
     );
-    assert_eq!(
-        row.input.ingress(),
-        lash_core::TurnInputIngress::NextTurn,
-        "the repaired row must be addressable by the next turn, not by the dead turn id"
+    assert!(
+        row.input.state.is_next_turn_input(None),
+        "the repaired row is next-turn input by rule, its dead turn being over"
     );
 }
 
@@ -1802,6 +1800,33 @@ impl lash_core::store::RuntimeStoreDecorator for JournalRedriveStore {
     }
 }
 
+/// Sends the steering fixture's queued input the moment a root admission
+/// returns: for a turn whose model calls never reach the test's provider.
+pub(super) struct SteerAfterRootAdmissionStore {
+    pub(super) inner: Arc<RecordingStore>,
+    pub(super) steer: SteerWhileRunning,
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::RuntimeStoreDecorator for SteerAfterRootAdmissionStore {
+    type Inner = RecordingStore;
+
+    fn inner(&self) -> &RecordingStore {
+        self.inner.as_ref()
+    }
+
+    async fn admit_root(
+        &self,
+        request: &lash_core::store::AdmitRootRequest,
+    ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
+        let admission = self.inner.admit_root(request).await?;
+        if admission.is_some() {
+            self.steer.send_queued().await;
+        }
+        Ok(admission)
+    }
+}
+
 /// Withdraws the accepted head input just before the drive's root admission,
 /// as a host cancel racing the drive would.
 pub(super) struct WithdrawBeforeDriveStore {
@@ -1876,6 +1901,131 @@ pub(super) fn request_contains_text(
             _ => false,
         })
     })
+}
+
+/// Input a test sends to a turn while the turn runs (ADR 0101 §5.1: a turn is
+/// addressable only while it runs or once it has ended). The test queues the
+/// input before it drives the turn; the provider sends it, addressed to that
+/// turn's checkpoints, when it takes its first call, and the test reads back
+/// what the store admitted.
+#[derive(Clone, Default)]
+pub(super) struct SteerWhileRunning {
+    store: Arc<std::sync::OnceLock<Arc<RecordingStore>>>,
+    queued: Arc<Mutex<Vec<lash_core::PendingTurnInputDraft>>>,
+    sent: Arc<Mutex<Vec<lash_core::PendingTurnInput>>>,
+}
+
+impl SteerWhileRunning {
+    /// The store the queued input is sent to.
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: one fixture steers one store"
+    )]
+    pub(super) fn bind(&self, store: &Arc<RecordingStore>) {
+        self.store
+            .set(Arc::clone(store))
+            .ok()
+            .expect("a steering fixture binds its store once");
+    }
+
+    /// Queue `input` for `turn_id`'s checkpoints, filed under `source_key`.
+    pub(super) fn queue(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        source_key: Option<String>,
+        input: TurnInput,
+    ) {
+        let mut draft = lash_core::PendingTurnInputDraft::new(
+            session_id.to_string(),
+            lash_core::TurnInputIngress::active_turn(
+                turn_id.to_string(),
+                lash_core::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            input,
+        );
+        draft.source_key = source_key;
+        self.queued.lock_recover().push(draft);
+    }
+
+    /// Send every queued input: the provider calls this while the turn runs.
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: the running turn accepts its own steering input"
+    )]
+    pub(super) async fn send_queued(&self) {
+        let drafts = std::mem::take(&mut *self.queued.lock_recover());
+        if drafts.is_empty() {
+            return;
+        }
+        let store = Arc::clone(
+            self.store
+                .get()
+                .expect("the steering fixture is bound before the turn runs"),
+        );
+        for draft in drafts {
+            let input =
+                lash_core::store::TurnInputStore::enqueue_pending_turn_input(store.as_ref(), draft)
+                    .await
+                    .expect("enqueue input addressed to the running turn");
+            self.sent.lock_recover().push(input);
+        }
+    }
+
+    /// The inputs the store admitted, in the order they were sent.
+    pub(super) fn sent(&self) -> Vec<lash_core::PendingTurnInput> {
+        self.sent.lock_recover().clone()
+    }
+
+    /// A phase probe that sends the queued input as the running turn begins
+    /// its before-turn hooks: for a turn that never reaches its provider. It
+    /// blocks its worker on the send, so the runtime must be multi-threaded.
+    pub(super) fn at_before_turn_hooks(
+        &self,
+    ) -> Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe> {
+        Arc::new(SteerAtBeforeTurnHooks(self.clone()))
+    }
+
+    /// A mock provider answering `calls` in order that sends the queued
+    /// input before it answers the first.
+    pub(super) fn provider(&self, calls: Vec<MockCall>) -> TestProvider {
+        let calls = Arc::new(Mutex::new(calls));
+        let steer = self.clone();
+        TestProvider::builder()
+            .kind("mock")
+            .requires_streaming(true)
+            .complete(move |req| {
+                let calls = Arc::clone(&calls);
+                let steer = steer.clone();
+                async move {
+                    steer.send_queued().await;
+                    let call = calls.lock_recover().remove(0);
+                    if let Some(tx) = req.stream_events.as_ref() {
+                        for event in &call.stream_events {
+                            tx.send(event.clone());
+                        }
+                    }
+                    call.response
+                }
+            })
+            .build()
+    }
+}
+
+struct SteerAtBeforeTurnHooks(SteerWhileRunning);
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for SteerAtBeforeTurnHooks {
+    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
+        if phase != lash_core::runtime::RuntimeTurnPhase::BeforeTurnHooks {
+            return;
+        }
+        let steer = self.0.clone();
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(steer.send_queued());
+        });
+    }
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
 pub(super) async fn enqueue_turn_input_for_checkpoint(

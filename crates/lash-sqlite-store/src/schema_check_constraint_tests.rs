@@ -25,11 +25,11 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &core,
         "INSERT INTO pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
-             submitted_ingress_json, submission_digest, enqueued_at_ms
+             submission_digest, enqueued_at_ms
          ) VALUES (1,
              'bad-turn-input-state', 'session',
              '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-             'waiting', '{}', '{}', 'digest', 0
+             'waiting', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state",
     );
@@ -37,10 +37,10 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &core,
         "INSERT INTO pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
-             submitted_ingress_json, submission_digest, enqueued_at_ms
+             submission_digest, enqueued_at_ms
          ) VALUES (1,
              'bad-turn-input-pair', 'session', '{\"scope\":\"next_turn\"}',
-             'pending_active', '{}', '{}', 'digest', 0
+             'pending_active', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state_ingress",
     );
@@ -48,10 +48,10 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &core,
         "INSERT INTO pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
-             submitted_ingress_json, submission_digest, enqueued_at_ms
+             submission_digest, enqueued_at_ms
          ) VALUES (1,
              'bad-turn-input-accepted-pair', 'session', '{\"scope\":\"next_turn\"}',
-             'accepted', '{}', '{}', 'digest', 0
+             'accepted', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state_ingress",
     );
@@ -59,11 +59,11 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &core,
         "INSERT INTO pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
-             submitted_ingress_json, submission_digest, enqueued_at_ms
+             submission_digest, enqueued_at_ms
          ) VALUES (1,
              'bad-turn-input-deferred-pair', 'session',
              '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-             'deferred_next_turn', '{}', '{}', 'digest', 0
+             'deferred_next_turn', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state_ingress",
     );

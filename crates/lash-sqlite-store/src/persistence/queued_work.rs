@@ -86,6 +86,7 @@ impl SqliteStore {
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let batch_id = batch_id.to_string();
+        let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<Option<QueuedWorkBatch>, StoreError> = (|| {
@@ -103,8 +104,8 @@ impl SqliteStore {
                     };
                     let batch = queued_work_batch_from_conn(tx, row)?;
                     // A host cancel is a wake's terminal transition too: the
-                    // fence lands with the removal, or a redelivery of the
-                    // withdrawn wake would be admitted again (FIG-3545).
+                    // fence lands with the tombstone, so a redelivery after
+                    // vacuum is not admitted again (FIG-3545).
                     if let Some(wake) =
                         lash_core_execution::store::TerminalProcessWake::of_batch(&batch)
                     {
@@ -114,12 +115,21 @@ impl SqliteStore {
                             &wake,
                         )?;
                     }
-                    crate::conn::cached_execute(
+                    let withdrawn = crate::conn::cached_execute(
                         tx,
-                        sql.queued_batches_sqlite.delete_cancelled.sql(),
-                        params![session_id.as_str(), batch_id.as_str()],
+                        sql.queued_batches.withdraw_open.sql(),
+                        params![
+                            session_id.as_str(),
+                            batch_id.as_str(),
+                            crate::clamp_epoch_ms(now)
+                        ],
                     )
                     .map_err(sqlite_error)?;
+                    if withdrawn != 1 {
+                        return Err(StoreError::Backend(format!(
+                            "open queued work batch `{batch_id}` was not withdrawn under the write lock"
+                        )));
+                    }
                     Ok(Some(batch))
                 })();
                 match outcome {

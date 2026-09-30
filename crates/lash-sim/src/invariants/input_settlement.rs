@@ -77,6 +77,8 @@ impl HistoryChecker for InputSettlement {
                         "left {} at the end of the history",
                         state.unwrap_or("stateless")
                     )),
+                    // A settled batch stays as its tombstone (ADR 0101 §8).
+                    ("queued_work_batches", Some(_)) => None,
                     _ => Some(match &input.admitted_root {
                         None => "queued batch left unadmitted at the end of the history".to_owned(),
                         Some(root) => format!(

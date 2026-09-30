@@ -235,16 +235,20 @@ pub fn require_open_command(
     }
 }
 
-/// The durable state a row takes when `mode` admits it (FIG-3927): a
-/// next-turn row keeps its state, bound where it stands; active-turn input a
-/// checkpoint takes is `accepted` into the running turn.
+/// The durable state a row takes when `mode` admits it (FIG-3927), `None`
+/// when it keeps its own: a next-turn row stays in the state its submitted
+/// delivery names, bound where it stands, an addressed row included (ADR 0101
+/// §5.1); active-turn input a checkpoint takes is `accepted` into the running
+/// turn.
 #[must_use]
 pub fn turn_input_state_after_admission(
     mode: &crate::TurnInputAdmissionMode,
-) -> crate::TurnInputStateKind {
+) -> Option<crate::TurnInputStateKind> {
     match mode {
-        crate::TurnInputAdmissionMode::ActiveTurn { .. } => crate::TurnInputStateKind::Accepted,
-        crate::TurnInputAdmissionMode::NextTurn => crate::TurnInputStateKind::DeferredNextTurn,
+        crate::TurnInputAdmissionMode::ActiveTurn { .. } => {
+            Some(crate::TurnInputStateKind::Accepted)
+        }
+        crate::TurnInputAdmissionMode::NextTurn => None,
     }
 }
 
@@ -267,7 +271,7 @@ pub fn plan_turn_input_admission(
         let same_spec = rows.iter().take_while(|row| row.run_spec == spec).count();
         rows.truncate(same_spec);
     }
-    if turn_input_state_after_admission(&mode) == crate::TurnInputStateKind::Accepted {
+    if turn_input_state_after_admission(&mode) == Some(crate::TurnInputStateKind::Accepted) {
         for input in &mut rows {
             if let Some(accepted) = input.state.accepted() {
                 input.state = accepted;

@@ -230,6 +230,10 @@ pub enum RuntimeErrorCode {
     /// An input addressed to a running turn carried an explicit run spec
     /// that differs from the turn's (FIG-3838): refused before acceptance.
     RunSpecMismatch,
+    /// An input addressed a turn that is neither its session's running turn
+    /// nor one with its final commit recorded (ADR 0101 §5.1): refused before
+    /// acceptance, with no row and no sequence number.
+    TurnAddressUnknown,
     Plugin,
     QueuedWork,
     /// One queued row alone renders larger than the whole model context window,
@@ -497,6 +501,7 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
+        | crate::store::StoreError::QueuedWorkSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
         | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
         | crate::store::StoreError::RunSpecHashCollision { .. }) => {
@@ -504,6 +509,9 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
         }
         err @ crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. } => {
             RuntimeError::new(RuntimeErrorCode::RunSpecMismatch, err.to_string())
+        }
+        err @ crate::store::StoreError::IngressTurnAddressUnknown { .. } => {
+            RuntimeError::new(RuntimeErrorCode::TurnAddressUnknown, err.to_string())
         }
         err @ (crate::store::StoreError::SessionClosing { .. }
         | crate::store::StoreError::SessionDeleted { .. }) => runtime_error_from_store_commit(err),
@@ -518,10 +526,12 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
+        | crate::store::StoreError::QueuedWorkSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
         | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
         | crate::store::StoreError::RunSpecHashCollision { .. }
-        | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }) => {
+        | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }
+        | crate::store::StoreError::IngressTurnAddressUnknown { .. }) => {
             runtime_error_from_turn_input_admission(err)
         }
         crate::store::StoreError::Contended => RuntimeError::new(
@@ -682,6 +692,7 @@ impl RuntimeErrorCode {
             Self::OutputRetentionFailed => "output_retention_failed",
             Self::RunShapeRefused => "run_shape_refused",
             Self::RunSpecMismatch => "run_spec_mismatch",
+            Self::TurnAddressUnknown => "turn_address_unknown",
             Self::Plugin => "plugin",
             Self::QueuedWork => "queued_work",
             Self::QueuedWorkRowExceedsContextWindow => "queued_work_row_exceeds_context_window",
@@ -940,6 +951,7 @@ impl RuntimeErrorCode {
         Self::OutputRetentionFailed,
         Self::RunShapeRefused,
         Self::RunSpecMismatch,
+        Self::TurnAddressUnknown,
         Self::Plugin,
         Self::QueuedWork,
         Self::QueuedWorkRowExceedsContextWindow,
@@ -1140,6 +1152,7 @@ impl RuntimeErrorCode {
             "output_retention_failed" => Self::OutputRetentionFailed,
             "run_shape_refused" => Self::RunShapeRefused,
             "run_spec_mismatch" => Self::RunSpecMismatch,
+            "turn_address_unknown" => Self::TurnAddressUnknown,
             "plugin" => Self::Plugin,
             "queued_work" => Self::QueuedWork,
             "queued_work_row_exceeds_context_window" => Self::QueuedWorkRowExceedsContextWindow,

@@ -75,9 +75,9 @@ pub struct RootVerbStatements {
     pub unbind: crate::Rendered,
     pub set_kind: crate::Rendered,
     pub raise_epoch: crate::Rendered,
-    pub input: crate::Rendered,
-    pub delete_batch_items: crate::Rendered,
-    pub delete_batch: crate::Rendered,
+    pub cancel_input: crate::Rendered,
+    pub reopen_input: crate::Rendered,
+    pub cancel_batch: crate::Rendered,
     pub intents: crate::Rendered,
 }
 
@@ -91,7 +91,6 @@ impl RootVerbStatements {
         let group3 =
             crate::turn_ingress::pending_inputs::PendingRootVerbStatements::render(dialect);
         let group4 = crate::turn_ingress::queued_batches::BatchRootVerbStatements::render(dialect);
-        let group5 = crate::turn_ingress::queued_items::ItemRootVerbStatements::render(dialect);
         Self {
             bound_inputs: group0.bound_inputs,
             rebind: group0.rebind,
@@ -99,9 +98,9 @@ impl RootVerbStatements {
             set_kind: group1.set_kind,
             intents: group1.intents,
             raise_epoch: group2.raise_epoch,
-            input: group3.input,
-            delete_batch: group4.delete_batch,
-            delete_batch_items: group5.delete_batch_items,
+            cancel_input: group3.cancel_input,
+            reopen_input: group3.reopen_input,
+            cancel_batch: group4.cancel_batch,
         }
     }
 }

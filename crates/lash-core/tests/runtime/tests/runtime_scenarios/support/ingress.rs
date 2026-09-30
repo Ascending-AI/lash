@@ -153,6 +153,27 @@ impl RuntimeScenarioContext {
                     });
                 self.enqueued_turn_inputs.insert(*alias, input);
             }
+            RuntimeTurnInputIngress::StartScenarioRoot { alias, text } => {
+                self.ensure_lease().await;
+                let input = self
+                    .store()
+                    .enqueue_pending_turn_input(pending_next_turn_input_draft(
+                        &self.session_id,
+                        text,
+                    ))
+                    .await
+                    .unwrap_or_else(|err| {
+                        panic!("{} failed to enqueue its root's head: {err}", self.name)
+                    });
+                let admission = self
+                    .admit_scenario_root(lash_core::store::AdmittedHead::Input(
+                        input.input_id.clone(),
+                    ))
+                    .await
+                    .unwrap_or_else(|| panic!("{} root admission missed its head", self.name));
+                self.admission = Some(admission);
+                self.enqueued_turn_inputs.insert(*alias, input);
+            }
         }
     }
 

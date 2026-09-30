@@ -56,6 +56,20 @@ impl PostgresStore {
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
+        // Every queued-work tombstone goes: a vacuumed wake's redelivery
+        // still meets its receiver floor, and a vacuumed command's replay
+        // meets its revision check (ADR 0101 §8).
+        let removed_queued_work_tombstone_count = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .queued_batches
+                .delete_tombstones
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
         // Cancellation rows include unresolved recovery intent. They remain
         // until session deletion, which is the only safe reclamation boundary
         // without terminal correlation.
@@ -64,6 +78,7 @@ impl PostgresStore {
             removed_node_count,
             removed_pending_turn_input_tombstone_count: removed_pending_turn_input_tombstone_count
                 as usize,
+            removed_queued_work_tombstone_count: removed_queued_work_tombstone_count as usize,
         })
     }
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {

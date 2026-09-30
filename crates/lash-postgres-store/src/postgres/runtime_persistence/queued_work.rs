@@ -66,13 +66,16 @@ impl PostgresStore {
         let row = queued_batch_row(row)?;
         let batch = queued_work_batch_from_row(&mut tx, row).await?;
         // A host cancel is a wake's terminal transition too: the fence lands
-        // with the removal, or a redelivery of the withdrawn wake would be
-        // admitted again (FIG-3545).
+        // with the tombstone, so a redelivery after vacuum is not admitted
+        // again (FIG-3545).
         if let Some(wake) = lash_core_execution::store::TerminalProcessWake::of_batch(&batch) {
             raise_wake_redelivery_fence_tx(&mut tx, session_id, &wake).await?;
         }
-        sqlx::query(sql.queued_batches_postgres.delete_cancelled.sql())
+        // The row lock `select_cancelable` took holds the openness decision.
+        sqlx::query(sql.queued_batches.withdraw_open.sql())
+            .bind(session_id.as_str())
             .bind(batch_id)
+            .bind(crate::support::clamp_epoch_ms(self.clock.timestamp_ms()))
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;

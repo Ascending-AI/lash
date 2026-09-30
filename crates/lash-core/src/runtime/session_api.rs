@@ -796,32 +796,57 @@ pub(super) enum AcceptedSessionCommand {
     Queued(crate::runtime::SessionCommandSettlementHandle),
 }
 
+/// Why a session command was not accepted.
+pub(super) enum SessionCommandEnqueueError {
+    /// The idempotency key already names a command with other submitted
+    /// content (ADR 0101 §8): the store refused the resubmission.
+    ChangedContent(RuntimeError),
+    /// The runtime or its store could not take the command.
+    Runtime(RuntimeError),
+}
+
+impl From<RuntimeError> for SessionCommandEnqueueError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Runtime(error)
+    }
+}
+
+impl From<SessionCommandEnqueueError> for RuntimeError {
+    fn from(error: SessionCommandEnqueueError) -> Self {
+        match error {
+            SessionCommandEnqueueError::ChangedContent(error)
+            | SessionCommandEnqueueError::Runtime(error) => error,
+        }
+    }
+}
+
 impl LashRuntime {
     async fn accept_session_command(
         &mut self,
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
     ) -> Result<AcceptedSessionCommand, RuntimeError> {
-        self.enqueue_session_command(command, idempotency_key)
-            .await
-            .map(|(accepted, _)| accepted)
+        Ok(self
+            .enqueue_session_command(command, idempotency_key)
+            .await?)
     }
 
-    /// Accept `command` under `idempotency_key`, and the command a retained
-    /// submission under the same key already holds, when the store answered
-    /// with that submission's row instead of inserting one.
+    /// Accept `command` under `idempotency_key`. An identical resubmission
+    /// under the key answers the retained submission's row; one with other
+    /// content is refused [`SessionCommandEnqueueError::ChangedContent`].
     pub(super) async fn enqueue_session_command(
         &mut self,
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
-    ) -> Result<(AcceptedSessionCommand, Option<crate::SessionCommand>), RuntimeError> {
+    ) -> Result<AcceptedSessionCommand, SessionCommandEnqueueError> {
         self.reload_invalidated_resident_session_state().await?;
         let idempotency_key = idempotency_key.into();
         if idempotency_key.trim().is_empty() {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::SessionCommandIdempotencyKey,
                 "session command idempotency key cannot be empty",
-            ));
+            )
+            .into());
         }
         let source_key = command.source_key(&idempotency_key);
         let session_id = self.state.session_id.clone();
@@ -837,7 +862,7 @@ impl LashRuntime {
             };
             self.apply_session_command_after_admission(vec![command], None)
                 .await?;
-            return Ok((AcceptedSessionCommand::Inline(receipt), None));
+            return Ok(AcceptedSessionCommand::Inline(receipt));
         };
         let draft = crate::QueuedWorkBatchDraft::new(
             session_id.clone(),
@@ -845,21 +870,17 @@ impl LashRuntime {
             command,
         )
         .with_source_key(source_key.clone());
-        let (enqueued, existing) = match store
-            .enqueue_queued_work_with_outcome(draft)
-            .await
-            .map_err(super::runtime_error_from_store_commit)?
-        {
-            crate::QueuedWorkEnqueueOutcome::Inserted(batch) => (batch, None),
-            crate::QueuedWorkEnqueueOutcome::Existing(batch) => {
-                let existing = batch.items.first().and_then(|item| match &item.payload {
-                    crate::QueuedWorkPayload::SessionCommand { command } => {
-                        Some(command.as_ref().clone())
-                    }
-                    _ => None,
-                });
-                (batch, existing)
+        let enqueued = match store.enqueue_queued_work_with_outcome(draft).await {
+            Ok(
+                crate::QueuedWorkEnqueueOutcome::Inserted(batch)
+                | crate::QueuedWorkEnqueueOutcome::Existing(batch),
+            ) => batch,
+            Err(error @ crate::StoreError::QueuedWorkSourceKeyConflict { .. }) => {
+                return Err(SessionCommandEnqueueError::ChangedContent(
+                    super::runtime_error_from_store_commit(error),
+                ));
             }
+            Err(error) => return Err(super::runtime_error_from_store_commit(error).into()),
         };
         // The command's batch owes its session a drive, armed at admission;
         // deliver it now (ADR 0109 §3). The drive applies the command at its
@@ -867,15 +888,14 @@ impl LashRuntime {
         self.ingress_relay()
             .deliver_admitted(enqueued.batch_id.as_str())
             .await;
-        Ok((
-            AcceptedSessionCommand::Queued(crate::runtime::SessionCommandSettlementHandle {
+        Ok(AcceptedSessionCommand::Queued(
+            crate::runtime::SessionCommandSettlementHandle {
                 receipt: crate::SessionCommandReceipt {
                     session_id,
                     batch_id: enqueued.batch_id,
                     source_key,
                 },
-            }),
-            existing,
+            },
         ))
     }
 

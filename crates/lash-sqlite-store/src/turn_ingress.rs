@@ -52,7 +52,7 @@ pub(crate) use turn_parks::{
 /// Every expansion is generated from
 /// [`TurnInputStateKind`](lash_core_execution::runtime::TurnInputStateKind), so adding a state is
 /// one edit in `lash-core-store` rather than one per statement. The term names
-/// are the domain's, and PostgreSQL registers the same eight.
+/// are the domain's, and PostgreSQL registers the same ten.
 pub(crate) const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new(
         "accepted_turn_input_state",
@@ -79,6 +79,10 @@ pub(crate) const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
         vocabulary::pending_active_turn_input_state_predicate_sql,
     ),
     VocabularyTerm::new(
+        "released_turn_input_state",
+        vocabulary::released_turn_input_state_sql,
+    ),
+    VocabularyTerm::new(
         "terminal_turn_input_state",
         vocabulary::terminal_turn_input_state_predicate_sql,
     ),
@@ -86,7 +90,15 @@ pub(crate) const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
         "undelivered_turn_input_state",
         vocabulary::undelivered_turn_input_state_predicate_sql,
     ),
+    VocabularyTerm::new("ingress_turn_id", ingress_turn_id_sql),
 ]);
+
+/// The turn an `active_turn` submitted delivery in `column` addresses, `NULL`
+/// for a `next_turn` one: the one JSON read the lifecycle terms need, spelled
+/// in this dialect (the PostgreSQL term reads the same field).
+fn ingress_turn_id_sql(column: &str) -> String {
+    format!("json_extract({column}, '$.turn_id')")
+}
 
 /// Every turn-ingress statement the session catalog issues.
 pub(crate) struct TurnIngressSql {

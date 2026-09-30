@@ -307,25 +307,6 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         ))
         .await
         .expect("enqueue queued work under skewed client clock");
-    let active_input = store
-        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &session_id,
-            TurnInputIngress::active_turn(
-                "clock-contract-turn",
-                TurnInputCheckpointBoundary::AfterWork,
-            ),
-            TurnInput::text("clock-contract active input"),
-        ))
-        .await
-        .expect("enqueue active input under skewed client clock");
-    let next_input = store
-        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &session_id,
-            TurnInputIngress::NextTurn,
-            TurnInput::text("clock-contract pending input"),
-        ))
-        .await
-        .expect("enqueue pending input under skewed client clock");
 
     // The command lane is bindless: its fenced read delivers the obligation
     // and admits the command, so withdrawal no longer reaches it (FIG-4202).
@@ -437,12 +418,30 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             .is_empty(),
         "an admitted batch stays hidden from the open queue"
     );
+    // Input addressed to a turn is accepted only once that turn runs
+    // (ADR 0101 §5.1): the active input steers the admitted root.
+    let active_input = store
+        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+            &session_id,
+            TurnInputIngress::active_turn(root.as_str(), TurnInputCheckpointBoundary::AfterWork),
+            TurnInput::text("clock-contract active input"),
+        ))
+        .await
+        .expect("enqueue active input under skewed client clock");
+    let next_input = store
+        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+            &session_id,
+            TurnInputIngress::NextTurn,
+            TurnInput::text("clock-contract pending input"),
+        ))
+        .await
+        .expect("enqueue pending input under skewed client clock");
 
     let checkpoint = store
         .admit_at_checkpoint(&CheckpointAdmissionRequest {
             fence: fence.clone(),
             root: root.clone(),
-            turn_id: TurnId::from("clock-contract-turn"),
+            turn_id: root.clone(),
             checkpoint: CheckpointKind::AfterWork,
             step: "clock-contract-checkpoint".to_string(),
             max_inputs: 1,

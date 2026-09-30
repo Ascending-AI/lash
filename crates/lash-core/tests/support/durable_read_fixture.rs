@@ -1022,7 +1022,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         pending[0].input.source_key.as_deref(),
         Some(INPUT_SOURCE_KEY)
     );
-    assert!(pending[0].input.state.is_next_turn_pending());
+    assert!(pending[0].input.state.is_next_turn_input(None));
     assert_eq!(
         serde_json::to_value(&pending[0].input.input).expect("encode fixture pending input"),
         serde_json::to_value(TurnInput::text("durable read pending input"))
@@ -1172,20 +1172,18 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         Some(1),
         "durable fixture semantic drift: sender wake allocation floor changed"
     );
+    // The settled wake's tombstone answers its redelivery, and nothing
+    // reopens (ADR 0101 §8).
     let redelivery = session
-        .enqueue_queued_work(process_wake_batch_draft(expected.wake_delivery.clone()))
+        .enqueue_queued_work_with_outcome(process_wake_batch_draft(expected.wake_delivery.clone()))
         .await
-        .expect_err("durable fixture drift: settled process wake was redelivered");
+        .expect("durable fixture drift: a settled process wake's redelivery is refused");
     assert!(
         matches!(
-            redelivery,
-            StoreError::ProcessWakeSequenceRewound {
-                sequence: 1,
-                allocation_floor: 1,
-                ..
-            }
+            &redelivery,
+            lash_core::runtime::QueuedWorkEnqueueOutcome::Existing(batch) if batch.terminal.is_some()
         ),
-        "durable fixture drift: receiver wake-redelivery fence returned {redelivery}"
+        "durable fixture drift: settled process wake was redelivered: {redelivery:?}"
     );
 
     match handles.processes.get_process(&tombstone_process_id()).await {

@@ -79,7 +79,9 @@ fn no_shared_statement_spells_a_turn_input_state() {
     // from the enum. A spelled literal is how a new variant silently stops
     // being claimed while still being prunable, so the repository gate refuses
     // one — and this is the same rule held over the shared statements alone,
-    // so the refusal arrives in this crate's own suite.
+    // so the refusal arrives in this crate's own suite. The rule governs
+    // statements over `pending_turn_inputs`: `queued_work_batches` spells its
+    // closed `terminal_cause` set, which shares some of these words.
     for state in [
         "'pending_active'",
         "'deferred_next_turn'",
@@ -87,7 +89,10 @@ fn no_shared_statement_spells_a_turn_input_state() {
         "'cancelled'",
         "'completed'",
     ] {
-        for statement in statements() {
+        for statement in statements()
+            .into_iter()
+            .filter(|statement| statement.neutral().contains("pending_turn_inputs"))
+        {
             assert!(
                 !statement.neutral().contains(state),
                 "`{}` spells the turn-input state {state}",

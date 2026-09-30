@@ -552,6 +552,45 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
     Ok(())
 }
 
+/// ADR 0101 §5.1 through the facade's ingress: an input addressed to a turn
+/// the session never ran is refused as an unknown turn address before
+/// anything is stored, and the session's queue stays empty.
+#[tokio::test]
+async fn an_input_addressed_to_an_unknown_turn_is_refused_through_the_facade() -> Result<()> {
+    let double = restate_double(SEED).await;
+    let (backend, _) = counting_factory(&double.lash_backend(), 0);
+    let core = counting_core(backend)?;
+    crate::tests::create_catalog_session(&core, "unknown-turn-address").await?;
+    let durable = core.session("unknown-turn-address").durable().await?;
+    let error = durable
+        .send(TurnInput::text("steer a turn that never ran"))
+        .ingress(lash_core::TurnInputIngress::active_turn(
+            lash_core::TurnId::from("unknown-turn-address-never-ran"),
+            lash_core::TurnInputCheckpointBoundary::AfterWork,
+        ))
+        .accepted()
+        .await
+        .expect_err("an unknown turn address is refused");
+    assert!(
+        matches!(
+            &error,
+            EmbedError::Store(StoreError::IngressTurnAddressUnknown { session_id, turn_id })
+                if session_id.as_str() == "unknown-turn-address"
+                    && turn_id.as_str() == "unknown-turn-address-never-ran"
+        ) || matches!(
+            &error,
+            EmbedError::Runtime(error)
+                if error.code == lash_core::RuntimeErrorCode::TurnAddressUnknown
+        ),
+        "an unknown turn address gets its typed refusal, got {error:?}"
+    );
+    assert!(
+        durable.pending_turn_inputs().await?.is_empty(),
+        "a refused address stores no row"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Result<()> {
     let double = restate_double(SEED).await;
@@ -565,8 +604,8 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     assert!(metadata_only.pending_turn_inputs().await?.is_empty());
     // A facade send asks the engine to drive; the pending input below must
     // stay pending for the read, so it is written through the store port
-    // instead (the send path's enqueue event is not under test here), parked
-    // on a turn that never runs so the engine cannot claim it either.
+    // instead (the send path's enqueue event is not under test here), which
+    // asks no drive.
     let accepted = lash_core::runtime::live_session_view(
         &double.lash_backend().session_store_factory(),
         &SessionId::from("metadata-only"),
@@ -577,10 +616,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
         input_id: Some("metadata-only-input".to_string()),
         ..lash_core::PendingTurnInputDraft::new(
             SessionId::from("metadata-only"),
-            lash_core::TurnInputIngress::active_turn(
-                lash_core::TurnId::from("metadata-only-parked-turn"),
-                lash_core::TurnInputCheckpointBoundary::AfterWork,
-            ),
+            lash_core::TurnInputIngress::NextTurn,
             TurnInput::text("queued against metadata-only"),
         )
     })
@@ -631,10 +667,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
         input_id: Some("checkpointed-input".to_string()),
         ..lash_core::PendingTurnInputDraft::new(
             SessionId::from("checkpointed"),
-            lash_core::TurnInputIngress::active_turn(
-                lash_core::TurnId::from("checkpointed-parked-turn"),
-                lash_core::TurnInputCheckpointBoundary::AfterWork,
-            ),
+            lash_core::TurnInputIngress::NextTurn,
             TurnInput::text("queued against a checkpointed head"),
         )
     })
@@ -1190,9 +1223,9 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     counters.process_admissions.store(0, Ordering::SeqCst);
 
     // The FIG-3353 poll, through the Durable Session. The pending input is
-    // seeded through the store port and parked on a turn that never runs:
-    // a facade send would ask the engine to drive, and a next-turn row the
-    // engine could claim would race the pending reads below.
+    // seeded through the store port, which asks no drive: a facade send
+    // would ask the engine to drive, and its claim would race the pending
+    // reads below.
     let durable = grantless_core.session(session_id.clone()).durable().await?;
     let queued = lash_core::runtime::live_session_view(&factory, &session_id)
         .await?
@@ -1201,10 +1234,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
             input_id: Some("fig-3353-pending".to_string()),
             ..lash_core::PendingTurnInputDraft::new(
                 session_id.clone(),
-                lash_core::TurnInputIngress::active_turn(
-                    lash_core::TurnId::from("fig-3353-parked-turn"),
-                    lash_core::TurnInputCheckpointBoundary::AfterWork,
-                ),
+                lash_core::TurnInputIngress::NextTurn,
                 TurnInput::text("left pending for the grantless core"),
             )
         })

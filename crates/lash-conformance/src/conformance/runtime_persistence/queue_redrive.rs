@@ -46,22 +46,24 @@ async fn admitted_under(
         .expect("the root's admission reaches its head")
 }
 
+/// A batch-headed root takes the ready prefix its drain policy admits, a
+/// batch with no merge key included: `merge_key` is per-item data, not a
+/// composition gate (ADR 0101 §5.2). The row limit caps the prefix, and one
+/// session's roots never take another session's work.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_respects_membership_limits_exclusivity_and_sessions(
-    store: Arc<dyn RuntimeStore>,
-) {
+pub async fn queued_work_respects_membership_limits_and_sessions(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("queued-membership");
-    let exclusive = store
+    let unkeyed = store
         .enqueue_queued_work(queued_draft(
             &session,
-            "exclusive",
+            "unkeyed",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
-        .expect("enqueue exclusive work");
+        .expect("enqueue unkeyed work");
     let joined = store
         .enqueue_queued_work(
             queued_draft(&session, "joined", DeliveryPolicy::EarliestSafeBoundary)
@@ -78,29 +80,19 @@ pub async fn queued_work_respects_membership_limits_exclusivity_and_sessions(
         .await
         .expect("enqueue other session work");
 
-    // One root at a time: each root's admission takes its prefix, and the
-    // next root sees what follows only once the first has settled.
     let fence = seal_drive_fence_for_test(&store, &session, "owner-a").await;
     let first = drive_root_to_end(
         &store,
         &fence,
-        "membership-exclusive",
-        AdmittedHead::Batch(exclusive.batch_id.clone()),
+        "membership-unkeyed",
+        AdmittedHead::Batch(unkeyed.batch_id.clone()),
     )
     .await;
     assert_eq!(
         batch_ids(&first),
-        ids(&[&exclusive]),
-        "an exclusive batch must be admitted alone"
+        ids(&[&unkeyed, &joined]),
+        "an absent merge key composes like any other: the policy drains both"
     );
-    let next = drive_root_to_end(
-        &store,
-        &fence,
-        "membership-joined",
-        AdmittedHead::Batch(joined.batch_id.clone()),
-    )
-    .await;
-    assert_eq!(batch_ids(&next), ids(&[&joined]));
 
     assert_eq!(
         store
@@ -155,13 +147,15 @@ pub async fn queued_work_respects_membership_limits_exclusivity_and_sessions(
     assert_eq!(batch_ids(&remaining), ids(&[&limited[2]]));
 }
 
+/// A joined admission groups the adjacent batches that share the head's
+/// delivery policy; differing merge keys join, since `merge_key` is per-item
+/// data a drain policy may read (ADR 0101 §5.2), and a delivery-policy
+/// change ends the prefix.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
-    store: Arc<dyn RuntimeStore>,
-) {
+pub async fn queued_work_join_groups_by_delivery_policy(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("queued-join");
     let first = store
         .enqueue_queued_work(
@@ -214,41 +208,31 @@ pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     .await;
     assert_eq!(
         batch_ids(&first_root),
-        ids(&[&first, &second]),
-        "a joined admission must group only adjacent batches with the same delivery policy and merge key"
+        ids(&[&first, &second, &different_merge]),
+        "a joined admission groups adjacent batches with the head's delivery policy, whatever \
+         their merge keys"
     );
     let second_root = drive_root_to_end(
-        &store,
-        &fence,
-        "join-b",
-        AdmittedHead::Batch(different_merge.batch_id.clone()),
-    )
-    .await;
-    assert_eq!(batch_ids(&second_root), ids(&[&different_merge]));
-    let third_root = drive_root_to_end(
         &store,
         &fence,
         "join-after-commit",
         AdmittedHead::Batch(different_delivery.batch_id.clone()),
     )
     .await;
-    assert_eq!(batch_ids(&third_root), ids(&[&different_delivery]));
+    assert_eq!(batch_ids(&second_root), ids(&[&different_delivery]));
     // FIG-3156. The runbook's phase-4 scorecard row asks for "two Each claims
     // vs one Coalesce claim". No `EachWake`/`Coalesce` delivery policy exists:
     // `DeliveryPolicy` is `EarliestSafeBoundary | AfterCurrentTurnCommit`
     // (`crates/lash-core-store/src/queued_work_vocabulary.rs:69-72`). The
     // admission shapes this law actually establishes are recorded instead.
     lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
-        "checkpoint": "queued_work_admissions_join_by_policy_and_merge_key",
+        "checkpoint": "queued_work_admissions_join_by_delivery_policy",
         "first_admission_batch_count": first_root.batch_ids().len(),
         "first_admission_delivery_policy": DeliveryPolicy::EarliestSafeBoundary.as_str(),
-        "first_admission_merge_key": "a",
+        "first_admission_merge_keys": ["a", "a", "b"],
         "second_admission_batch_count": second_root.batch_ids().len(),
-        "second_admission_merge_key": "b",
-        "second_admission_split_reason": "merge_key",
-        "third_admission_batch_count": third_root.batch_ids().len(),
-        "third_admission_delivery_policy": DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
-        "third_admission_split_reason": "delivery_policy",
+        "second_admission_delivery_policy": DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
+        "second_admission_split_reason": "delivery_policy",
     }));
 }
 
@@ -382,13 +366,32 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimeStore>) {
             .await
             .expect("list merged queue after settlement")
             .is_empty(),
-        "merged settlement must delete every admitted receiver row"
+        "merged settlement must settle every admitted receiver row"
     );
+    // Until vacuum each delivered tombstone answers its wake's redelivery;
+    // after it, the receiver floor refuses it.
+    for wake in &merged_wakes {
+        let answered = store
+            .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(wake.clone()))
+            .await
+            .expect("a settled wake's redelivery answers its tombstone");
+        assert!(
+            matches!(
+                &answered,
+                crate::QueuedWorkEnqueueOutcome::Existing(batch) if batch.terminal.is_some()
+            ),
+            "the redelivery is the delivered wake: {answered:?}"
+        );
+    }
+    store
+        .vacuum(&session)
+        .await
+        .expect("vacuum the delivered tombstones");
     for wake in merged_wakes {
         let error = store
             .enqueue_queued_work(crate::process_wake_batch_draft(wake))
             .await
-            .expect_err("settled wake without a live row must trip the receiver floor");
+            .expect_err("a vacuumed settled wake must trip the receiver floor");
         assert!(matches!(
             error,
             StoreError::ProcessWakeSequenceRewound { .. }

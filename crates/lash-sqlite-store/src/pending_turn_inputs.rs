@@ -39,6 +39,8 @@ pub(crate) struct PendingTurnInputRow {
     /// The root whose admission holds the row; `None` while it is open.
     pub(crate) admitted_root: Option<String>,
     pub(crate) run_spec_hash: Option<String>,
+    /// When the row's tombstone was written; `None` until it is terminal.
+    pub(crate) terminal_at_ms: Option<u64>,
 }
 
 pub(crate) fn pending_turn_input_row_from_sql(
@@ -55,6 +57,10 @@ pub(crate) fn pending_turn_input_row_from_sql(
         enqueued_at_ms: u64_from_sql("PendingTurnInput", "enqueued_at_ms", row.get(7)?)?,
         admitted_root: row.get(8)?,
         run_spec_hash: row.get(10)?,
+        terminal_at_ms: row
+            .get::<_, Option<i64>>(11)?
+            .map(|at| u64_from_sql("PendingTurnInput", "terminal_at_ms", at))
+            .transpose()?,
     })
 }
 
@@ -73,6 +79,7 @@ pub(crate) fn pending_turn_input_from_row(
         run_spec: row
             .run_spec_hash
             .map(lash_core_execution::RunSpecHash::from_stored),
+        terminal_at_ms: row.terminal_at_ms,
     })
 }
 

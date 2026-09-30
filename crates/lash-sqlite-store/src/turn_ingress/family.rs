@@ -27,6 +27,7 @@ lash_store_sql::statements! {
                  SELECT batch_id AS head_batch_id, delivery_policy AS head_delivery_policy
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
+                   AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
@@ -70,6 +71,7 @@ lash_store_sql::statements! {
                  SELECT batch_id AS head_batch_id, delivery_policy AS head_delivery_policy
                  FROM queued_work_batches
                  WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
+                   AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )

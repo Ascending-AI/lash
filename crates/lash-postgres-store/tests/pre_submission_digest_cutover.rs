@@ -1,8 +1,8 @@
-//! Component 118 (FIG-3544): every pending turn input carries an immutable
-//! submitted ingress and submission digest written once at admission, and
-//! source-key replay compares only the digest.
+//! Component 118 (FIG-3544): every pending turn input carries a submission
+//! digest written once at admission, and source-key replay compares only the
+//! digest.
 //!
-//! A component-117 catalog holds rows with neither column, and the digest is a
+//! A component-117 catalog holds rows without it, and the digest is a
 //! Rust-computed value no DDL can backfill, so the boundary is destructive: the
 //! whole store is refused at open rather than replayed against a missing
 //! digest.
@@ -23,14 +23,10 @@ async fn postgres_refuses_pre_submission_digest_catalog_at_open() {
 
     // The old shape is unsafe even if a later compatible release stamps it as
     // an expansion that this build should otherwise be able to read.
-    sqlx::query(
-        "ALTER TABLE lash_pending_turn_inputs
-             DROP COLUMN submitted_ingress_json,
-             DROP COLUMN submission_digest",
-    )
-    .execute(&pool)
-    .await
-    .expect("rewrite the pending-input table to its component-117 shape");
+    sqlx::query("ALTER TABLE lash_pending_turn_inputs DROP COLUMN submission_digest")
+        .execute(&pool)
+        .await
+        .expect("rewrite the pending-input table to its component-117 shape");
     sqlx::query(
         "UPDATE lash_schema_versions SET version = 2, min_reader = 1
          WHERE component = 'lash-postgres-store'",

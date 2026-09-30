@@ -72,6 +72,8 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
     for statement in [
         sql.family.has_admissible_work.sql(),
         sql.family.pending_session_work_ordering.sql(),
+        sql.family.turn_address_ended.sql(),
+        sql.family.root_ended.sql(),
         sql.family_sqlite.checkpoint_work_pending_after_work.sql(),
         sql.family_sqlite
             .checkpoint_work_pending_before_completion
@@ -81,7 +83,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.list_undelivered.sql(),
         sql.pending_inputs.list_accepted.sql(),
         sql.pending_inputs.cancel.sql(),
-        sql.pending_inputs.defer_to_next_turn.sql(),
         sql.pending_inputs.earliest_next_turn_candidate_seq.sql(),
         sql.pending_inputs.select_admitted_by_step.sql(),
         sql.pending_inputs.admit.sql(),
@@ -115,13 +116,14 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.queued_batches.select_admitted_batch_head_payload.sql(),
         sql.queued_batches.settle_admitted.sql(),
         sql.queued_batches.settle_command.sql(),
+        sql.queued_batches.withdraw_open.sql(),
+        sql.queued_batches.delete_tombstones.sql(),
         sql.queued_batches.release_admitted.sql(),
         sql.queued_batches.release_root.sql(),
         sql.queued_batches.delete_by_session.sql(),
         sql.queued_batches_sqlite.insert_new.sql(),
         sql.queued_batches_sqlite.settlement_facts.sql(),
         sql.queued_batches_sqlite.select_cancelable.sql(),
-        sql.queued_batches_sqlite.delete_cancelled.sql(),
         sql.queued_batches_sqlite.admission_candidates_idle.sql(),
         sql.queued_batches_sqlite
             .admission_candidates_turn_lane
@@ -360,9 +362,9 @@ mod byte_identity {
         );
         assert!(
             sql.family.has_admissible_work.sql().contains(
-                &vocabulary::deferred_next_turn_turn_input_state_predicate_sql("pti.state")
+                &vocabulary::undelivered_turn_input_state_predicate_sql("pti.state")
             ),
-            "the open-work probe no longer spells the generated deferred state",
+            "the open-work probe no longer spells the generated undelivered set",
         );
     }
 

@@ -1109,10 +1109,24 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             .all(|batch| batch.source_key.as_deref() != draft.source_key.as_deref()),
         "forced evidence-check/drain/live-check interleaving must not recreate the wake"
     );
+    // Until vacuum the delivered wake's tombstone answers its redelivery.
+    let answered = store
+        .enqueue_queued_work(draft.clone())
+        .await
+        .expect("a late redelivery answers the delivered tombstone");
+    assert_eq!(
+        answered.terminal.as_ref().map(|terminal| terminal.cause),
+        Some(lash_core_execution::store::IngressTerminalCause::Delivered),
+        "the late redelivery is the delivered wake: {answered:?}"
+    );
+    store
+        .vacuum(&SessionId::from(session_id))
+        .await
+        .expect("vacuum the delivered tombstone");
     let late_redelivery = store
         .enqueue_queued_work(draft.clone())
         .await
-        .expect_err("a no-live-row wake at the receiver floor is a typed rewind");
+        .expect_err("a vacuumed wake at the receiver floor is a typed rewind");
     assert!(matches!(
         late_redelivery,
         lash_core_execution::StoreError::ProcessWakeSequenceRewound {

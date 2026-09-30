@@ -520,11 +520,49 @@ impl SeamControl {
 struct SeamStore {
     inner: Arc<dyn RuntimeStore>,
     control: SeamControl,
+    /// Active-turn inputs written the moment the admission of the root they
+    /// address returns: the store's view of a client steering the running
+    /// root ([`reference_steer`]).
+    steer: Vec<PendingTurnInputDraft>,
 }
 
 impl SeamStore {
     fn wrap(inner: Arc<dyn RuntimeStore>, control: SeamControl) -> Arc<dyn RuntimeStore> {
-        Arc::new(Self { inner, control })
+        Self::steering(inner, control, Vec::new())
+    }
+
+    /// A seam store that writes each of `steer` once the root it addresses
+    /// is admitted.
+    fn steering(
+        inner: Arc<dyn RuntimeStore>,
+        control: SeamControl,
+        steer: Vec<PendingTurnInputDraft>,
+    ) -> Arc<dyn RuntimeStore> {
+        Arc::new(Self {
+            inner,
+            control,
+            steer,
+        })
+    }
+
+    /// Admit the root, then steer every input addressed to it. Each steer
+    /// carries a source key, so a redrive's admission writes nothing new.
+    async fn admit_root_and_steer(
+        &self,
+        request: &crate::store::AdmitRootRequest,
+    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
+        let admission = self.inner.admit_root(request).await?;
+        if admission.is_some() {
+            for draft in &self.steer {
+                if matches!(
+                    &draft.ingress,
+                    crate::TurnInputIngress::ActiveTurn { turn_id, .. } if *turn_id == request.root
+                ) {
+                    self.inner.enqueue_pending_turn_input(draft.clone()).await?;
+                }
+            }
+        }
+        Ok(admission)
     }
 }
 
@@ -549,7 +587,7 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
         self.control
             .around(
                 TurnSeamOperation::Store(StoreOperation::AdmitRoot),
-                self.inner.admit_root(request),
+                self.admit_root_and_steer(request),
             )
             .await
     }
@@ -1142,12 +1180,36 @@ async fn try_build_runtime_over_host_with_delivery_failure(
     .await
 }
 
-async fn seed_reference_ingress(
-    store: &Arc<dyn RuntimeStore>,
-    identity: &ReferenceIdentity,
-    scenario: &str,
-) {
-    seed_reference_ingress_as(store, identity, scenario, Some(&identity.turn_id)).await;
+/// Source key of the reference turn's active-turn input.
+const REFERENCE_STEER_KEY: &str = "reference-active-checkpoint-input";
+
+/// The reference turn's active-turn input. An input addressed to a turn that
+/// has not started is refused (ADR 0101 §5.1), so the reference seam store
+/// steers it into the root the moment the root's admission returns, as a
+/// client steers a running turn; the root's after-work checkpoint admits it.
+fn reference_steer(identity: &ReferenceIdentity) -> PendingTurnInputDraft {
+    PendingTurnInputDraft::new(
+        &identity.session_id,
+        crate::TurnInputIngress::active_turn(
+            &identity.turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+        ),
+        crate::TurnInput::text("active checkpoint input"),
+    )
+    .with_input_id(reference_steer_input_id(identity).as_str())
+    .with_source_key(REFERENCE_STEER_KEY)
+}
+
+/// The input id [`reference_steer`] writes.
+fn reference_steer_input_id(identity: &ReferenceIdentity) -> crate::InputId {
+    crate::InputId::from(PendingTurnInputDraft::keyed_input_id(
+        &identity.session_id,
+        REFERENCE_STEER_KEY,
+    ))
+}
+
+async fn seed_reference_ingress(store: &Arc<dyn RuntimeStore>, identity: &ReferenceIdentity) {
+    seed_reference_ingress_as(store, identity, Some(&identity.turn_id)).await;
 }
 
 /// The reference ingress for a drain through the session drive: the
@@ -1157,9 +1219,8 @@ async fn seed_reference_ingress(
 async fn seed_reference_ingress_for_drive(
     store: &Arc<dyn RuntimeStore>,
     identity: &ReferenceIdentity,
-    scenario: &str,
 ) {
-    seed_reference_ingress_as(store, identity, scenario, Some(&identity.turn_id)).await;
+    seed_reference_ingress_as(store, identity, Some(&identity.turn_id)).await;
 }
 
 #[expect(
@@ -1169,38 +1230,22 @@ async fn seed_reference_ingress_for_drive(
 async fn seed_reference_ingress_as(
     store: &Arc<dyn RuntimeStore>,
     identity: &ReferenceIdentity,
-    scenario: &str,
     root: Option<&TurnId>,
 ) {
     super::admit_conformance_session(store, &identity.session_id).await;
-    // FIG-1573: one scenario deliberately seeds no next-turn row, so a recovering
-    // drain evaluates the drain-time orphan backstop.
-    if !scenario.starts_with("peer-reclaim-pinned-active-input-") {
-        let draft = PendingTurnInputDraft::new(
-            &identity.session_id,
-            crate::TurnInputIngress::NextTurn,
-            crate::TurnInput::text("durable next-turn input"),
-        );
-        let draft = match root {
-            Some(root) => draft.with_source_key(root.as_str()),
-            None => draft,
-        };
-        store
-            .enqueue_pending_turn_input(draft)
-            .await
-            .expect("seed next-turn input");
-    }
+    let draft = PendingTurnInputDraft::new(
+        &identity.session_id,
+        crate::TurnInputIngress::NextTurn,
+        crate::TurnInput::text("durable next-turn input"),
+    );
+    let draft = match root {
+        Some(root) => draft.with_source_key(root.as_str()),
+        None => draft,
+    };
     store
-        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &identity.session_id,
-            crate::TurnInputIngress::active_turn(
-                &identity.turn_id,
-                crate::TurnInputCheckpointBoundary::AfterWork,
-            ),
-            crate::TurnInput::text("active checkpoint input"),
-        ))
+        .enqueue_pending_turn_input(draft)
         .await
-        .expect("seed active-turn input");
+        .expect("seed next-turn input");
     store
         .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
             &identity.session_id,
@@ -1342,7 +1387,7 @@ pub async fn turn_crash_trace_drift_check<F, S>(
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let raw = make("trace-drift") as Arc<dyn RuntimeStore>;
     let identity = ReferenceIdentity::for_scenario("trace-drift");
-    seed_reference_ingress(&raw, &identity, "trace-drift").await;
+    seed_reference_ingress(&raw, &identity).await;
     // The golden trace below is an exact ordering; pin the one seam whose
     // timing is owned by a background timer rather than by the turn.
     let (attempt, reports) = ReferenceTurn::new(
@@ -1415,7 +1460,7 @@ fn deferred_to_next_turn(pending_inputs: &[crate::PendingTurnInputRead]) -> bool
     !pending_inputs.is_empty()
         && pending_inputs
             .iter()
-            .all(|read| read.input.state.is_next_turn_pending())
+            .all(|read| read.input.state.is_next_turn_input(None))
 }
 
 /// The reference turn's committed user text for one pending input row.

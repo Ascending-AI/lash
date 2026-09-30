@@ -191,11 +191,27 @@ Evidence: `crates/lash-core-store/src/store/admission_plan.rs:285`,
 
 An input's submitted delivery is written once and never rewritten.
 `Turn { turn_id: T, min_boundary }` is eligible only at T's admitted checkpoints
-while T runs. Once T has terminal evidence it is eligible as next-turn input at
-its existing sequence position, by rule rather than stored delivery mutation.
+while T runs. Once T is not running it is eligible as next-turn input at its
+existing sequence position, by rule rather than stored delivery mutation: an
+open row is next-turn input when its delivery is next-turn, or when it
+addresses a turn other than the running one, and with no turn running every
+open row is. A root's release hands an accepted row back open in the state its
+delivery names, and deferral at a cancel writes nothing.
+
 Admission accepts the address only if T is this session's running turn or has
-its final commit recorded. An unknown turn is refused with
-`TurnAddressUnknown`, with no row or sequence allocation.
+ended. T is running when it is a physical turn of the unfinished root, of a
+member that root's admission composed, or of the follow-on the head owes. T
+has ended when its final commit or its root's terminal is recorded. An unknown
+turn, another session's running turn included, is refused with
+`StoreError::IngressTurnAddressUnknown` (`TurnAddressUnknown` to the runtime)
+before any row or sequence number is allocated. A resubmission of an admitted
+row is answered by its digest before the address is consulted.
+
+Evidence: `crates/lash-core-store/src/turn_input_vocabulary.rs:292`,
+`crates/lash-core-store/src/store_backend_support/queued_work_admission.rs:77`,
+`crates/lash-store-sql/src/turn_ingress/pending_inputs.rs`
+(`earliest_next_turn_candidate_seq`, `release_root`), and
+`crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`.
 
 #### 5.2 Composition
 
@@ -205,7 +221,14 @@ open turn row. It never skips that stop to take later work. A checkpoint can
 select input addressed to its running turn. Its unaddressed prefix stops at a
 delivery mismatch and at kind, total, or host policy bounds. The host's drain
 policy chooses how much eligible work to take. `authority` and `merge_key` are
-per-item data for policy and traces, not equality gates for composition.
+per-item data for policy and traces, not equality gates for composition: a
+host that keeps principals apart does so in its `QueuedDrainPolicy`, which
+sees each candidate's authority and merge key. The default policy takes one
+row at a time.
+
+Evidence: `crates/lash-core-store/src/store/queued_work.rs`
+(`select_turn_work_indices`) and
+`crates/lash-core-store/src/queued_drain_policy.rs:24`.
 
 One root answers every input it admits, at idle or at its checkpoints. Each
 input retains its own application evidence even when inputs share a root's
@@ -238,22 +261,42 @@ Evidence: `crates/lash-core-store/src/store/admission_plan.rs:67`, `:197`,
 
 Admission records an immutable submission digest. Equal source key and digest
 returns the existing item, open or terminal. A changed digest returns a typed
-content conflict for every kind, without silently adopting different content.
-Wake identity covers its process fact rather than host-configured delivery
-policy. System source-key namespaces belong to their item kinds.
+content conflict for every kind, without silently adopting different content:
+`PendingTurnInputSourceKeyConflict` for input and
+`QueuedWorkSourceKeyConflict` for queued work. Wake identity covers its process
+fact (target session, process, sequence, event type, input, authority and
+cause) rather than host-configured delivery policy, merge key or delivery
+metadata. A command's digest covers the command, its delivery policy, its
+authority and its merge key. A config transaction command's digest covers
+its id, the revision it was written against and its ordered commands, never
+the reducer identities ingress stamped on it, so a resubmission from another
+build is the same request; the lane refuses a changed one as
+`ConfigSubmitError::ChangedContent`. System source-key namespaces belong to
+their item kinds.
 
-Terminal items retain tombstones until host vacuum. Tombstones preserve kind,
-source key, sequence, submitted delivery, digest, terminal cause, and terminal
-time, with no admission binding. Cancelled items cannot reopen on retry.
-Terminal causes distinguish delivered input or wake, applied command, stale
-config revision, and cancellation. Open-row selection excludes tombstones.
+Terminal items stay in place as tombstones. Tombstones preserve kind, source
+key, sequence, submitted delivery, digest, terminal cause, and terminal time,
+with no admission binding. A queued-work tombstone records `terminal_cause`
+and `terminal_at_ms`; an input's terminal state names its cause and it records
+`terminal_at_ms`. Cancelled items cannot reopen on retry. Terminal causes
+distinguish delivered input or wake, applied command, and cancellation.
+Open-row selection excludes tombstones. Host vacuum removes queued-work
+tombstones and withdrawn input; an input a root took keeps its tombstone
+beside that root's terminal evidence until session deletion.
+
+Evidence: `crates/lash-core-store/src/store/ingress_terminal.rs`,
+`crates/lash-core-store/src/store_backend_support/queued_work_admission.rs:29`,
+`crates/lash-store-sql/src/turn_ingress/queued_batches.rs`
+(`settle_admitted`, `settle_command`, `withdraw_open`, `delete_tombstones`), and
+`crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`.
 
 ### 9. The floor invariant
 
 Every terminal wake transition raises the receiver redelivery floor to at least
 its sequence in the same transaction: delivery, drop, or host withdrawal.
-`Defer` retains position and does not advance the floor. Redelivery at or below
-the floor cannot recreate work after removal. Process-owned allocation floors
+`Defer` retains position and does not advance the floor. Until host vacuum a
+redelivery answers the wake's tombstone; after it, redelivery at or below the
+floor is refused `ProcessWakeSequenceRewound`. Neither recreates work. Process-owned allocation floors
 and receiver floors have distinct responsibilities.
 
 Evidence: `crates/lash-core-store/src/store/admission_plan.rs:332`,
@@ -263,8 +306,10 @@ Evidence: `crates/lash-core-store/src/store/admission_plan.rs:332`,
 ### 10. Cancel by author
 
 A turn cancel applies its accepted undelivered-input policy to host input
-addressed to that turn. `Defer` is the default; `Drop` records cancellation.
-Other held input is released. Every held wake is deferred at its existing
+addressed to that turn. `Defer` is the default and writes nothing; `Drop`
+records cancellation. Once the turn's root has terminal evidence, the root's
+terminal write has already applied the disposition, and a later teardown of
+that turn reaches no input. Other held input is released. Every held wake is deferred at its existing
 position with its floor unchanged. `TurnCancelInputOutcome` records affected
 inputs and affected wakes with their disposition. Host withdrawal may remove
 undelivered queued work, including wakes; wake withdrawal raises its floor.
@@ -321,8 +366,9 @@ host. Upgrade proofs use synthetic-next. Evidence lives in
 `crates/lash-conformance/src/conformance/session_ingress.rs`,
 `crates/lash-conformance/src/conformance/drive_admission.rs`,
 `crates/lash-conformance/src/conformance/runtime_persistence/pending_follow_on.rs`,
-`crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`, and
-`crates/lash-restate-test/tests/follow_on_crash_replay.rs`.
+`crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`,
+`crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`,
+and `crates/lash-restate-test/tests/follow_on_crash_replay.rs`.
 
 ### A1. The ingress is the only way a turn starts
 

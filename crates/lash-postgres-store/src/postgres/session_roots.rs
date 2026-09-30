@@ -11,8 +11,8 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootEnd, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
-    RootTerminalKind, RootTerminalWriteDecision, UnfinishedRoot, close_admission,
+    RootAdmission, RootEnd, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWriteDecision, RootTurns, UnfinishedRoot, close_admission,
     decide_root_terminal_write, refused_run_owns_root, root_binding_conflict, stored_intent_kind,
     stored_intent_state,
 };
@@ -177,19 +177,19 @@ pub(crate) async fn write_root_terminal_conn(
 }
 
 /// Release every row of either admission table `root` still holds, in the
-/// caller's transaction: active-turn input is re-deferred to the next turn
-/// (FIG-1573), and each row owes its session a drive again.
+/// caller's transaction: accepted input is open again in the state its
+/// submitted delivery names, and each row owes its session a drive again.
 ///
-/// Open input addressed to a turn the root ends ([`RootEndedTurns`]: its own
+/// Open input addressed to a turn the root ends ([`RootTurns`]: its own
 /// physical turns and the turns its admission's members were accepted
-/// under) names a turn that will never run, so the root's disposition
+/// under) names a turn that will never run again, so the root's disposition
 /// applies to it here (FIG-3946): the undelivered disposition of the root's
-/// cancellation request if it has one, else `Defer`. `Defer` re-opens the
-/// row as next-turn input at its own position; `Drop` withdraws it. Either
-/// is recorded on the request's outcome, and a withdrawal settles the row's
-/// ingress obligation at the terminal instant `at_ms` (FIG-4098). The
-/// terminal write is where a root's orphaned input is repaired (FIG-3927 §2.6): no open row is bound
-/// to, or addressed to a turn of, a root with terminal evidence.
+/// cancellation request if it has one, else `Defer`. `Defer` writes
+/// nothing: the row is next-turn input at its own position by rule, its
+/// submitted delivery unchanged (ADR 0101 §5.1). `Drop` withdraws it into
+/// its tombstone, settling its ingress obligation at the terminal instant
+/// `at_ms` (FIG-4098). Either is recorded once on the request's outcome. No
+/// open row is bound to a root with terminal evidence.
 ///
 /// An input the root's admission took as its own (`session_root_inputs`)
 /// that is still open is unbound from the root too, so a later root can
@@ -216,13 +216,9 @@ async fn release_root_rows_conn(
             .map_err(store_sqlx_error)?;
     }
     let sql = crate::turn_ingress::turn_ingress_sql();
-    let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
-    let deferred_ingress = crate::encode_json(&deferred.ingress())?;
     sqlx::query(sql.pending_inputs.release_root.sql())
         .bind(session_id.as_str())
         .bind(root.as_str())
-        .bind(deferred.as_str())
-        .bind(&deferred_ingress)
         .execute(&mut *conn)
         .await
         .map_err(store_sqlx_error)?;
@@ -232,7 +228,7 @@ async fn release_root_rows_conn(
         .execute(&mut *conn)
         .await
         .map_err(store_sqlx_error)?;
-    let ended = RootEndedTurns::new(
+    let ended = RootTurns::new(
         root,
         root_admission_conn(conn, session_id, root).await?.as_ref(),
     );
@@ -271,25 +267,16 @@ async fn release_root_rows_conn(
         .transpose()?
         .unwrap_or(lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer);
     for input in addressed {
-        match disposition {
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
-                sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
-                    .bind(session_id.as_str())
-                    .bind(input.input_id.as_str())
-                    .bind(deferred.as_str())
-                    .bind(&deferred_ingress)
-            }
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
-                sqlx::query(sql.pending_inputs.cancel.sql())
-                    .bind(session_id.as_str())
-                    .bind(input.input_id.as_str())
-                    .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
-                    .bind(crate::support::clamp_epoch_ms(at_ms))
-            }
+        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
+            sqlx::query(sql.pending_inputs.cancel.sql())
+                .bind(session_id.as_str())
+                .bind(input.input_id.as_str())
+                .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+                .bind(crate::support::clamp_epoch_ms(at_ms))
+                .execute(&mut *conn)
+                .await
+                .map_err(store_sqlx_error)?;
         }
-        .execute(&mut *conn)
-        .await
-        .map_err(store_sqlx_error)?;
         if request.is_some() {
             crate::runtime_persistence::turn_cancel::append_turn_cancel_outcome_conn(
                 conn,
@@ -497,7 +484,7 @@ async fn write_unanswered_root_end_tx(
     .await
     .map_err(store_sqlx_error)?;
 
-    // The root's own input is dropped and its batches removed first; the
+    // The root's own input is dropped and its batches cancelled first; the
     // terminal write then releases whatever else the root still held.
     let sql = &session_roots_sql().verbs;
     let mut inputs: Vec<String> = sqlx::query_scalar(sql.bound_inputs.sql())
@@ -510,32 +497,49 @@ async fn write_unanswered_root_end_tx(
     inputs.sort();
     inputs.dedup();
     for input in inputs {
-        sqlx::query(sql.input.sql())
+        sqlx::query(sql.cancel_input.sql())
             .bind(session.as_str())
             .bind(input)
-            .bind("cancelled")
+            .bind(crate::support::clamp_epoch_ms(at_ms))
+            .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
     }
     for batch in batches {
-        sqlx::query(sql.delete_batch_items.sql())
-            .bind(&batch)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        sqlx::query(sql.delete_batch.sql())
-            .bind(session.as_str())
-            .bind(batch)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        cancel_root_batch_tx(tx, session, &batch, at_ms).await?;
     }
     // The terminal write applies the root's cancel request's `undelivered`
     // disposition to open input addressed to a turn the root ends
     // (FIG-3927 §2.4, FIG-3946).
     write_root_terminal_conn(&mut *tx, &terminal).await?;
     Ok(terminal)
+}
+
+/// Cancel batch `batch_id` of session `session_id`, held by a root a verb
+/// ends, into its `cancelled` tombstone at `at_ms` (ADR 0101 §8). A wake's
+/// cancellation is its terminal transition, so its receiver floor rises in
+/// the same transaction (ADR 0101 §9).
+pub(crate) async fn cancel_root_batch_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    batch_id: &str,
+    at_ms: u64,
+) -> Result<(), StoreError> {
+    if let Some(batch) = crate::queued_work::load_queued_batch(tx, batch_id).await?
+        && batch.terminal.is_none()
+        && let Some(wake) = lash_core_execution::store::TerminalProcessWake::of_batch(&batch)
+    {
+        crate::runtime_persistence::raise_wake_redelivery_fence_tx(tx, session_id, &wake).await?;
+    }
+    sqlx::query(session_roots_sql().verbs.cancel_batch.sql())
+        .bind(session_id.as_str())
+        .bind(batch_id)
+        .bind(crate::support::clamp_epoch_ms(at_ms))
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
 }
 
 /// Decode a root's recorded admission (`session_roots.admission_json`).
@@ -598,6 +602,19 @@ pub(crate) async fn head_ownership_facts_conn(
             .map(|seq| u64_from_sql("QueuedWorkBatch", "enqueue_seq", seq))
             .transpose()?,
     })
+}
+
+/// The turns session `session_id`'s unfinished root runs, if a root is
+/// unfinished, read on `conn`.
+pub(crate) async fn unfinished_root_turns_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+) -> Result<Option<RootTurns>, StoreError> {
+    let Some(unfinished) = unfinished_root_conn(conn, session_id).await? else {
+        return Ok(None);
+    };
+    let admission = root_admission_conn(conn, session_id, &unfinished.root).await?;
+    Ok(Some(RootTurns::new(&unfinished.root, admission.as_ref())))
 }
 
 /// `root`'s recorded admission, read on `conn`: `None` for a root with no

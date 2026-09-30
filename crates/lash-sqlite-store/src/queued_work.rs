@@ -48,20 +48,7 @@ pub(crate) fn queued_work_batch_from_conn(
             payload: decode_queued_payload(payload_json)?,
         });
     }
-    let batch = QueuedWorkBatch {
-        batch_id: row.batch_id.into(),
-        session_id: row.session_id,
-        enqueue_seq: row.enqueue_seq,
-        source_key: row.source_key,
-        delivery_policy: decode_delivery_policy(row.delivery_policy)?,
-        kind: decode_work_kind(row.work_kind)?,
-        authority: decode_authority(row.authority_json)?,
-        merge_key: row.merge_key,
-        enqueued_at_ms: row.enqueued_at_ms,
-        items,
-    };
-    batch.validate_payload_family()?;
-    Ok(batch)
+    row.into_batch(items)
 }
 
 pub(crate) fn queued_work_batches_from_conn(
@@ -109,20 +96,7 @@ pub(crate) fn queued_work_batches_from_conn(
         .cloned()
         .map(|row| {
             let items = items_by_batch.remove(&row.batch_id).unwrap_or_default();
-            let batch = QueuedWorkBatch {
-                batch_id: row.batch_id.into(),
-                session_id: row.session_id,
-                enqueue_seq: row.enqueue_seq,
-                source_key: row.source_key,
-                delivery_policy: decode_delivery_policy(row.delivery_policy)?,
-                kind: decode_work_kind(row.work_kind)?,
-                authority: decode_authority(row.authority_json)?,
-                merge_key: row.merge_key,
-                enqueued_at_ms: row.enqueued_at_ms,
-                items,
-            };
-            batch.validate_payload_family()?;
-            Ok(batch)
+            row.into_batch(items)
         })
         .collect()
 }
@@ -138,8 +112,37 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) authority_json: String,
     pub(crate) merge_key: Option<String>,
     pub(crate) enqueued_at_ms: u64,
+    pub(crate) submission_digest: String,
     /// The root whose admission holds the batch; `None` while it is open.
     pub(crate) admitted_root: Option<String>,
+    pub(crate) terminal_cause: Option<String>,
+    pub(crate) terminal_at_ms: Option<u64>,
+}
+
+impl QueuedBatchRow {
+    /// The batch this row and its `items`, in item order, describe.
+    fn into_batch(self, items: Vec<QueuedWorkItem>) -> Result<QueuedWorkBatch, StoreError> {
+        let batch = QueuedWorkBatch {
+            batch_id: self.batch_id.into(),
+            session_id: self.session_id,
+            enqueue_seq: self.enqueue_seq,
+            source_key: self.source_key,
+            delivery_policy: decode_delivery_policy(self.delivery_policy)?,
+            kind: decode_work_kind(self.work_kind)?,
+            authority: decode_authority(self.authority_json)?,
+            merge_key: self.merge_key,
+            enqueued_at_ms: self.enqueued_at_ms,
+            items,
+            submission_digest: self.submission_digest,
+            terminal: lash_core_execution::store_backend_support::decode_ingress_terminal(
+                "QueuedWorkBatch",
+                self.terminal_cause.as_deref(),
+                self.terminal_at_ms,
+            )?,
+        };
+        batch.validate_payload_family()?;
+        Ok(batch)
+    }
 }
 
 /// The turn-lane candidate `batch` offers an admission.
@@ -164,7 +167,13 @@ pub(crate) fn queued_batch_row_from_sql(
             "enqueued_at_ms",
             row.get("enqueued_at_ms")?,
         )?,
+        submission_digest: row.get("submission_digest")?,
         admitted_root: row.get("admitted_root")?,
+        terminal_cause: row.get("terminal_cause")?,
+        terminal_at_ms: row
+            .get::<_, Option<i64>>("terminal_at_ms")?
+            .map(|at| u64_from_sql("QueuedWorkBatch", "terminal_at_ms", at))
+            .transpose()?,
     })
 }
 
@@ -197,89 +206,93 @@ pub(crate) fn enqueue_queued_work_conn(
         .map(QueuedWorkEnqueueOutcome::into_batch)
 }
 
+/// Admit `batch` under the database write lock the caller's transaction
+/// holds (ADR 0101 §8): a batch the session already filed under the draft's
+/// source key, open or a tombstone, answers an identical submission and
+/// refuses a changed one; otherwise the draft is inserted at the next
+/// position of the session's ingress sequence with its submission digest.
 pub(crate) fn enqueue_queued_work_conn_with_outcome(
     conn: &Connection,
     batch: &QueuedWorkBatchDraft,
     now: u64,
     nonce: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-    let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
-        conn.query_row(
-            crate::process_registry::sql::process_sql()
-                .fence
-                .select_floor
-                .sql(),
-            params![batch.session_id.as_str(), wake_source.process_id.as_str()],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()
-        .map_err(sqlite_error)?
-    } else {
-        None
-    };
+    use lash_core_execution::store_backend_support as support;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let submission_digest = support::queued_work_submission_digest(batch)?;
+    if let Some(source_key) = batch.source_key.as_deref() {
+        let by_source_key = conn
+            .query_row(
+                sql.queued_batches.select_id_by_source_key.sql(),
+                params![batch.session_id.as_str(), source_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        if let support::QueuedWorkDraftAdmission::Existing { batch_id } =
+            support::decide_queued_work_draft_admission(batch, &submission_digest, by_source_key)?
+        {
+            let existing =
+                load_queued_batch_by_id_conn(conn, batch_id.as_str())?.ok_or_else(|| {
+                    StoreError::Backend("queued work source row disappeared".to_string())
+                })?;
+            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
+        }
+    }
+    if let Some(wake_source) = batch.process_wake_source.as_ref() {
+        let allocation_floor = conn
+            .query_row(
+                crate::process_registry::sql::process_sql()
+                    .fence
+                    .select_floor
+                    .sql(),
+                params![batch.session_id.as_str(), wake_source.process_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    stored_data_corrupt(
+                        "WakeAllocationFloor",
+                        format!("allocation_floor must be non-negative, got {value}"),
+                    )
+                })
+            })
+            .transpose()?;
+        if let Some(allocation_floor) = allocation_floor
+            && wake_source.sequence <= allocation_floor
+        {
+            return Err(StoreError::ProcessWakeSequenceRewound {
+                session_id: batch.session_id.clone(),
+                process_id: wake_source.process_id.clone(),
+                sequence: wake_source.sequence,
+                allocation_floor,
+            });
+        }
+    }
     let batch_id = derive_batch_id(
         &batch.session_id,
         batch.source_key.as_deref(),
         now,
         Some(nonce),
     );
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    let inserted = conn
-        .execute(
-            sql.queued_batches_sqlite.insert_new.sql(),
-            params![
-                batch_id.as_str(),
-                batch.session_id.as_str(),
-                batch.source_key.as_deref(),
-                batch.delivery_policy.as_str(),
-                batch.kind().as_str(),
-                encode_json(&batch.authority)?,
-                batch.merge_key.as_deref(),
-                now as i64,
-                crate::session_ingress::allocate_sequence(conn, &batch.session_id)?,
-            ],
-        )
-        .map_err(sqlite_error)?;
-    if inserted == 0 {
-        let source_key = batch.source_key.as_deref().ok_or_else(|| {
-            StoreError::Backend("queued work insert without source key was ignored".to_string())
-        })?;
-        let existing_id: Option<String> = conn
-            .query_row(
-                sql.queued_batches.select_id_by_source_key.sql(),
-                params![batch.session_id.as_str(), source_key],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let existing_id = existing_id.ok_or_else(|| {
-            StoreError::Backend("queued work conflict row disappeared".to_string())
-        })?;
-        let existing = load_queued_batch_by_id_conn(conn, &existing_id)?
-            .ok_or_else(|| StoreError::Backend("queued work source row disappeared".to_string()))?;
-        return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
-    }
-    let allocation_floor = allocation_floor
-        .map(|value| {
-            u64::try_from(value).map_err(|_| {
-                stored_data_corrupt(
-                    "WakeAllocationFloor",
-                    format!("allocation_floor must be non-negative, got {value}"),
-                )
-            })
-        })
-        .transpose()?;
-    if let (Some(wake_source), Some(allocation_floor)) =
-        (batch.process_wake_source.as_ref(), allocation_floor)
-        && wake_source.sequence <= allocation_floor
-    {
-        return Err(StoreError::ProcessWakeSequenceRewound {
-            session_id: batch.session_id.clone(),
-            process_id: wake_source.process_id.clone(),
-            sequence: wake_source.sequence,
-            allocation_floor,
-        });
-    }
+    conn.execute(
+        sql.queued_batches_sqlite.insert_new.sql(),
+        params![
+            batch_id.as_str(),
+            batch.session_id.as_str(),
+            batch.source_key.as_deref(),
+            batch.delivery_policy.as_str(),
+            batch.kind().as_str(),
+            encode_json(&batch.authority)?,
+            batch.merge_key.as_deref(),
+            now as i64,
+            crate::session_ingress::allocate_sequence(conn, &batch.session_id)?,
+            submission_digest.as_str(),
+        ],
+    )
+    .map_err(sqlite_error)?;
     for (index, payload) in batch.payloads.iter().enumerate() {
         let item_id = format!("{batch_id}:item:{index}");
         crate::conn::cached_execute(
@@ -309,6 +322,7 @@ pub(crate) fn complete_admitted_batch_conn(
     session_id: &SessionId,
     root: &lash_core_execution::TurnId,
     batch_id: &lash_core_execution::BatchId,
+    terminal: lash_core_execution::store::IngressTerminal,
 ) -> Result<(), StoreError> {
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let row = lash_core_execution::store::IngressRowId::Batch(batch_id.clone());
@@ -352,7 +366,13 @@ pub(crate) fn complete_admitted_batch_conn(
     let settled = conn
         .execute(
             turn_ingress.queued_batches.settle_admitted.sql(),
-            params![session_id.as_str(), batch_id.as_str(), root.as_str()],
+            params![
+                session_id.as_str(),
+                batch_id.as_str(),
+                root.as_str(),
+                terminal.cause.as_str(),
+                crate::clamp_epoch_ms(terminal.at_ms),
+            ],
         )
         .map_err(sqlite_error)?;
     lash_core_execution::store_backend_support::require_fenced_write_applied(
@@ -377,6 +397,7 @@ pub(crate) fn settle_open_command_conn(
     conn: &Connection,
     session_id: &SessionId,
     batch_id: &lash_core_execution::BatchId,
+    at_ms: u64,
 ) -> Result<(), StoreError> {
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> = conn
@@ -395,7 +416,11 @@ pub(crate) fn settle_open_command_conn(
     let settled = conn
         .execute(
             turn_ingress.queued_batches.settle_command.sql(),
-            params![session_id.as_str(), batch_id.as_str()],
+            params![
+                session_id.as_str(),
+                batch_id.as_str(),
+                crate::clamp_epoch_ms(at_ms)
+            ],
         )
         .map_err(sqlite_error)?;
     lash_core_execution::store_backend_support::require_fenced_write_applied(

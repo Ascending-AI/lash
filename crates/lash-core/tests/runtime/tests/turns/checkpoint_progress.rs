@@ -354,7 +354,8 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
-    let transport = mock_provider(vec![
+    let steer = SteerWhileRunning::default();
+    let transport = steer.provider(vec![
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
@@ -380,14 +381,13 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
     ]);
     let (mut runtime, store) =
         standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
-    enqueue_turn_input_for_checkpoint(
-        store.as_ref(),
+    steer.bind(&store);
+    steer.queue(
         &SessionId::from("root"),
         &TurnId::from("queued-checkpoint-turn"),
         None,
         TurnInput::text("one more thing"),
-    )
-    .await;
+    );
 
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -453,12 +453,16 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_calls = Arc::clone(&calls);
+    let steer = SteerWhileRunning::default();
+    let provider_steer = steer.clone();
     let transport = TestProvider::builder()
         .kind("mock")
         .complete(move |request| {
             let captured_requests = Arc::clone(&captured_requests);
             let captured_calls = Arc::clone(&captured_calls);
+            let steer = provider_steer.clone();
             async move {
+                steer.send_queued().await;
                 captured_requests.lock_recover().push(request);
                 let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let text = if call == 0 {
@@ -487,8 +491,8 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
         )
         .build()
         .await;
-    enqueue_turn_input_for_checkpoint(
-        store.as_ref(),
+    steer.bind(&store);
+    steer.queue(
         &SessionId::from("root"),
         &TurnId::from("image-attachment-turn"),
         None,
@@ -496,8 +500,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
             lash_core::MediaType::parse("image/png").unwrap(),
             vec![1, 2, 3],
         )),
-    )
-    .await;
+    );
 
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -658,7 +661,8 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
             }))
         }),
     });
-    let transport = mock_provider(vec![MockCall {
+    let steer = SteerWhileRunning::default();
+    let transport = steer.provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
@@ -679,14 +683,13 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         runtime_store,
     )
     .await;
-    let admitted = enqueue_turn_input_for_checkpoint(
-        store.as_ref(),
+    steer.bind(&store);
+    steer.queue(
         &SessionId::from("root"),
         &TurnId::from("checkpoint-plugin-abort-turn"),
         Some("host:checkpoint-plugin-abort".to_string()),
         TurnInput::text("must remain pending"),
-    )
-    .await;
+    );
     let turn_events = RecordingTurnEvents::default();
 
     let handler = double
@@ -705,6 +708,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         .await
         .expect("plugin-aborted turn assembles");
     handler.close().await.expect("close the turn's handler");
+    let admitted = steer.sent().remove(0);
 
     assert!(
         matches!(turn.outcome, TurnOutcome::Stopped(_)),
@@ -826,7 +830,8 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
             }))
         }),
     });
-    let transport = mock_provider(vec![MockCall {
+    let steer = SteerWhileRunning::default();
+    let transport = steer.provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
@@ -848,14 +853,13 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
     )
     .await;
     runtime.host.core.attachment_source_policy = Arc::new(DenyHostCheckpointAttachments);
-    let admitted = enqueue_turn_input_for_checkpoint(
-        store.as_ref(),
+    steer.bind(&store);
+    steer.queue(
         &SessionId::from("root"),
         &TurnId::from("checkpoint-attachment-failure-turn"),
         Some("host:checkpoint-attachment-failure".to_string()),
         TurnInput::text("must remain pending after attachment failure"),
-    )
-    .await;
+    );
     let turn_events = RecordingTurnEvents::default();
 
     let handler = double
@@ -874,6 +878,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         .await
         .expect("attachment-failed turn assembles");
     handler.close().await.expect("close the turn's handler");
+    let admitted = steer.sent().remove(0);
 
     assert!(
         matches!(turn.outcome, TurnOutcome::Stopped(_)),
@@ -933,7 +938,8 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() {
     let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
-    let transport = mock_provider(vec![
+    let steer = SteerWhileRunning::default();
+    let transport = steer.provider(vec![
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
@@ -959,14 +965,13 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
     ]);
     let (mut runtime, store) =
         standard_runtime_with_transport_and_double_queue_store(&double, transport).await;
-    enqueue_turn_input_for_checkpoint(
-        store.as_ref(),
+    steer.bind(&store);
+    steer.queue(
         &SessionId::from("root"),
         &TurnId::from("injection-accepted-turn"),
         Some("host:follow-up-id".to_string()),
         TurnInput::text("follow up"),
-    )
-    .await;
+    );
     let sink = RecordingSink::default();
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -1097,6 +1102,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
     lash_core::TurnInput,
     lash_core::facade_support::TurnInputAcceptanceReceipt,
 ) {
+    let steer = SteerWhileRunning::default();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -1122,7 +1128,12 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         },
     ]);
     let backend = double.lash_backend();
-    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
+    // The injection is sent while the root runs: an input addressed to a
+    // turn that has not started is refused (ADR 0101 §5.1).
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(SteerAfterRootAdmissionStore {
+        inner: Arc::clone(&store),
+        steer: steer.clone(),
+    });
     let mut runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -1137,14 +1148,13 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         "queued before opening",
     )
     .await;
-    enqueue_turn_input_for_checkpoint(
-        store.as_ref(),
+    steer.bind(&store);
+    steer.queue(
         &SessionId::from("root"),
         turn_id,
         Some(format!("host:{turn_id}:injection")),
         TurnInput::text("mid-turn injection"),
-    )
-    .await;
+    );
     let input = TurnInput::text("opening input");
     let handler = double
         .open_handler(lash_core::AdmittedScope::turn("root", turn_id))
@@ -1233,9 +1243,10 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
     // The root's admission composes next-turn rows only (FIG-3927 §2.2): the
     // mid-turn injection is addressed to the turn named by the opening
     // acceptance's source key, which the root composed as a member, so that
-    // turn never runs and never reaches a checkpoint. The root's terminal
-    // write ends that turn too (FIG-3946): it re-opens the injection as
-    // next-turn input at its own position, for the session's next root.
+    // turn never runs and never reaches a checkpoint. Once the root ended,
+    // the injection names a turn that is over: it stays open exactly as
+    // submitted, next-turn input by rule (ADR 0101 §5.1), for the session's
+    // next root.
     let injection = lash_core::store::TurnInputStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
@@ -1253,9 +1264,13 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         "the ended root released the injection: it is bound to no root"
     );
     assert_eq!(
-        injection.input.state.kind(),
-        lash_core::TurnInputStateKind::DeferredNextTurn,
-        "the injection no longer names the turn that never ran: {:?}",
+        injection.input.ingress().active_turn_id(),
+        Some(turn_id),
+        "the injection keeps the delivery it was submitted with"
+    );
+    assert!(
+        injection.input.state.is_next_turn_input(None),
+        "the injection is next-turn input by rule: {:?}",
         injection.input.state
     );
     assert!(
@@ -1537,14 +1552,13 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     .await
     .expect("deferred late input");
     assert_eq!(pending.len(), 1);
-    assert!(matches!(
-        pending[0].input.ingress(),
-        lash_core::TurnInputIngress::NextTurn
-    ));
+    // The input keeps the delivery it was submitted with; its turn is over,
+    // so it is next-turn input by rule (ADR 0101 §5.1).
     assert_eq!(
-        pending[0].input.state,
-        lash_core::TurnInputState::DeferredNextTurn
+        pending[0].input.ingress().active_turn_id(),
+        Some(&TurnId::from("after-last-call-turn"))
     );
+    assert!(pending[0].input.state.is_next_turn_input(None));
 
     let handler = double
         .open_handler(AdmittedScope::queue_drain(

@@ -746,19 +746,17 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
             );
             let turn_id = format!("matrix-{mode:?}-{disposition:?}").to_ascii_lowercase();
-            let undelivered = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
-                store.as_ref(),
-                lash_core::PendingTurnInputDraft::new(
-                    &session_id,
-                    lash_core::TurnInputIngress::active_turn(
-                        &turn_id,
-                        lash_core::TurnInputCheckpointBoundary::AfterWork,
-                    ),
-                    lash_core::TurnInput::text("unsent steer"),
-                ),
-            )
-            .await
-            .expect("enqueue active-turn input");
+            // The steer is sent while the turn runs, before its start gate
+            // honours the cancellation (ADR 0101 §5.1).
+            let steer = SteerWhileRunning::default();
+            steer.bind(&store);
+            steer.queue(
+                &session_id,
+                &TurnId::from(turn_id.as_str()),
+                None,
+                lash_core::TurnInput::text("unsent steer"),
+            );
+            runtime.set_turn_phase_probe(steer.at_before_turn_hooks());
             let receipt = driver
                 .request_cancel(
                     TurnCancelRequest::new(
@@ -789,6 +787,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 .await
                 .expect("refused turn assembles");
             handler.close().await.expect("close the scope's handler");
+            let undelivered = steer.sent().remove(0);
             let evidence = cancelled_evidence(&turn);
             assert_eq!(evidence.mode, mode);
             assert_eq!(evidence.undelivered, disposition);

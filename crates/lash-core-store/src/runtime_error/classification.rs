@@ -206,6 +206,8 @@ impl RuntimeErrorCode {
             Self::RunShapeRefused => Terminal,
             // the same spec differs from the same running turn's again.
             Self::RunSpecMismatch => Terminal,
+            // the same address names the same unknown turn again.
+            Self::TurnAddressUnknown => Terminal,
             // a plugin refusal over the same inputs.
             Self::Plugin => Terminal,
             // the selected queued work cannot be admitted; the same selection is refused again.

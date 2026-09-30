@@ -65,6 +65,9 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     // `lash.definition:sha256:<hex>` (ADR 0095). Its own owned domain; no
     // existing family's version moves.
     "lash.process-definition-id",
+    // FIG-4356: the immutable submission digest of one queued-work batch,
+    // a process wake's fact or a session command (ADR 0101 §8).
+    "lash.queued-work-submission",
 ];
 
 /// Grandfathered families whose preimages omit the framing header (ADR 0097).

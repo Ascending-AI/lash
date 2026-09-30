@@ -193,9 +193,9 @@ pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeS
 
 /// An input addressed to a running turn joins that turn's recorded shape.
 /// An omitted spec inherits it and an equal spec matches it; a differing
-/// explicit spec is refused before anything is stored. Once the turn's own
-/// input is delivered the turn has ended, and an input addressed to it is a
-/// next-turn input under its own spec.
+/// explicit spec is refused before anything is stored. Once the turn's root
+/// has ended, an input addressed to it is a next-turn input under its own
+/// spec.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -214,6 +214,14 @@ pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
         )
         .await
         .expect("admit the input that starts the turn");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "run-spec-steering-owner").await;
+    let admission = admitted_root(
+        &store,
+        &fence,
+        turn.as_str(),
+        crate::store::AdmittedHead::Input(started.input_id.clone()),
+    )
+    .await;
     let steer = |text: &str, spec: crate::RunSpec| {
         pending_active_turn_input_draft(
             &session_id,
@@ -255,10 +263,12 @@ pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
         "the refused input stored nothing"
     );
 
-    store
-        .cancel_pending_turn_input(&session_id, &started.input_id)
-        .await
-        .expect("settle the turn's own input");
+    end_root(
+        &store,
+        &fence,
+        completing_admission(turn.as_str(), &admission),
+    )
+    .await;
     store
         .enqueue_pending_turn_input(steer("after the turn", spec_with_provider("elsewhere")))
         .await

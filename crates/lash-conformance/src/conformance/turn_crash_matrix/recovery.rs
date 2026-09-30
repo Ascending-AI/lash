@@ -17,7 +17,7 @@ pub(super) async fn run_crash_matrix_case(
     let identity = ReferenceIdentity::for_scenario(scenario);
     let admitted = reference_admitted_scope(&identity);
     let raw = make(scenario);
-    seed_reference_ingress(&raw, &identity, scenario).await;
+    seed_reference_ingress(&raw, &identity).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let crash = crash_at_armed_point(&control);

@@ -340,10 +340,12 @@ impl QueuedWorkKind {
 }
 /// Producer-stamped execution authority for queued work.
 ///
-/// Both fields are opaque to Lash. Equality is the batching contract: rows
-/// with different principals or different elevation overrides never share a
-/// turn. Keeping this separate from `merge_key` prevents a grouping label from
-/// becoming an authorization encoding.
+/// Both fields are opaque to Lash and belong to the row that carries them.
+/// Lash applies no authorization policy: composition does not compare
+/// authorities, and rows with different principals may share a turn unless
+/// the host's [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) stops the
+/// drain at a principal change (ADR 0101 §5.2). Keeping this separate from
+/// `merge_key` keeps a grouping label from becoming an authority encoding.
 #[derive(
     Clone,
     Debug,
@@ -364,9 +366,6 @@ pub struct QueuedWorkAuthority {
 }
 impl QueuedWorkAuthority {
     /// Stamps queued work with an opaque principal and no elevation override.
-    ///
-    /// Lash compares the complete authority value when forming a batch, so
-    /// work created for a different principal cannot share the resulting turn.
     pub fn new(principal: impl Into<String>) -> Self {
         Self {
             principal: Some(principal.into()),
@@ -375,9 +374,6 @@ impl QueuedWorkAuthority {
     }
 
     /// Adds or replaces the opaque elevation override used by the work.
-    ///
-    /// Elevation participates in the same equality gate as the principal;
-    /// rows with different overrides are never coalesced into one turn.
     pub fn with_elevation(mut self, elevation: impl Into<String>) -> Self {
         self.elevation = Some(elevation.into());
         self
@@ -438,6 +434,15 @@ pub struct QueuedWorkBatch {
     pub merge_key: Option<String>,
     pub enqueued_at_ms: u64,
     pub items: Vec<QueuedWorkItem>,
+    /// The immutable digest admission recorded
+    /// ([`QueuedWorkBatchDraft::submission_digest`]): a resubmission under the
+    /// same source key must carry it (ADR 0101 §8).
+    pub submission_digest: String,
+    /// The batch's terminal tombstone, `None` while it is open or admitted.
+    /// A tombstone holds no admission binding and is never selected again;
+    /// it stays until host vacuum (ADR 0101 §8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<crate::store::IngressTerminal>,
 }
 impl QueuedWorkBatch {
     pub fn validate_payload_family(&self) -> Result<(), crate::StoreError> {
@@ -568,6 +573,25 @@ impl QueuedWorkBatchDraft {
         self.kind().work_class()
     }
 
+    /// The digest this draft is admitted and compared under (ADR 0101 §8).
+    ///
+    /// A session command's submission is its command with the delivery
+    /// policy, authority and merge key its producer chose. A process wake's
+    /// is the process fact it carries: target session, process, sequence,
+    /// event type, input, the originator's authority and cause. The delivery
+    /// policy and merge key a wake travels under are host configuration, so
+    /// a redelivery under changed configuration is the same submission. The
+    /// preimage is the `lash.queued-work-submission` identity family at
+    /// [`QUEUED_WORK_SUBMISSION_FAMILY_VERSION`]; the rendered form is
+    /// `queued-work-submission:v<family>:blake3:<hex>`.
+    pub fn submission_digest(&self) -> Result<String, serde_json::Error> {
+        Ok(crate::stable_identity::rendered_hash(
+            "queued-work-submission",
+            QUEUED_WORK_SUBMISSION_FAMILY_VERSION,
+            &queued_work_submission_preimage(self)?,
+        ))
+    }
+
     /// Stored references carried by typed queued payloads, sorted and deduplicated.
     pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
         let ids = std::collections::BTreeSet::new();
@@ -613,6 +637,92 @@ impl QueuedWorkBatchDraft {
             ),
         }
     }
+}
+/// The queued-work submission identity family's current version.
+pub const QUEUED_WORK_SUBMISSION_FAMILY_VERSION: u8 = 1;
+
+/// Permanent tag registry for the queued-work submission preimage.
+///
+/// Payload: 1 process wake (target session, process, sequence, event type,
+/// input, authority, cause), 2 session command (one canonical JSON payload
+/// leaf). A command batch then appends tag 3 with its delivery policy
+/// (1 `earliest_safe_boundary`, 2 `after_current_turn_commit`), authority and
+/// merge key. An optional field is tag 0 when absent and tag 1 and its value
+/// when present. Retired tags remain burned.
+fn queued_work_submission_preimage(
+    draft: &QueuedWorkBatchDraft,
+) -> Result<Vec<u8>, serde_json::Error> {
+    fn optional_string(
+        identity: &mut crate::stable_identity::IdentityEncoder,
+        value: Option<&str>,
+    ) {
+        match value {
+            Some(value) => {
+                identity.tag(1);
+                identity.string(value);
+            }
+            None => identity.tag(0),
+        }
+    }
+    fn authority(
+        identity: &mut crate::stable_identity::IdentityEncoder,
+        authority: &QueuedWorkAuthority,
+    ) {
+        optional_string(identity, authority.principal.as_deref());
+        optional_string(identity, authority.elevation.as_deref());
+    }
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.queued-work-submission",
+        QUEUED_WORK_SUBMISSION_FAMILY_VERSION,
+    );
+    for payload in draft.payloads.iter() {
+        match payload {
+            QueuedWorkPayload::ProcessWake { wake } => {
+                identity.tag(1);
+                identity.string(wake.target_session_id.as_str());
+                identity.string(wake.process_id.as_str());
+                identity.u64(wake.sequence);
+                identity.string(&wake.event_type);
+                identity.string(&wake.input);
+                authority(&mut identity, &wake.authority);
+                match &wake.process_caused_by {
+                    Some(cause) => {
+                        identity.tag(1);
+                        identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
+                            cause,
+                        )?));
+                    }
+                    None => identity.tag(0),
+                }
+            }
+            // A config transaction is the request its submitter wrote, never
+            // the reducer identities ingress stamped on it: a resubmission
+            // from another build asks the same thing.
+            QueuedWorkPayload::SessionCommand { command } => match command.as_ref() {
+                SessionCommand::ApplyConfigTransaction { transaction } => {
+                    identity.tag(4);
+                    identity.string(&transaction.id);
+                    identity.string(&transaction.digest()?);
+                }
+                command => {
+                    identity.tag(2);
+                    identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
+                        command,
+                    )?));
+                }
+            },
+        }
+    }
+    if draft.kind() == QueuedWorkKind::Control {
+        identity.tag(3);
+        identity.tag(match draft.delivery_policy {
+            DeliveryPolicy::EarliestSafeBoundary => 1,
+            DeliveryPolicy::AfterCurrentTurnCommit => 2,
+        });
+        authority(&mut identity, &draft.authority);
+        optional_string(&mut identity, draft.merge_key.as_deref());
+    }
+    Ok(identity.finish())
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessWakeSource {

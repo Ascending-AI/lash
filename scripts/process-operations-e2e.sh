@@ -198,11 +198,11 @@ echo "scenario 3 evidence: model process tools were filtered while host list/sig
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   bash -c 'cd crates/lash-postgres-store && exec "$1" "$2" --nocapture --test-threads=1' _ \
-  "$postgres_conformance_tests" queued_work_join_groups_by_delivery_policy_and_merge_key \
+  "$postgres_conformance_tests" queued_work_join_groups_by_delivery_policy \
   2>&1 | tee "$artifact_dir/04-wake-turn-policy.log" | tee -a "$test_output"
 require_checkpoints "$artifact_dir/04-wake-turn-policy.log" \
-  queued_work_admissions_join_by_policy_and_merge_key
-echo "scenario 4 evidence: EachWake produced separate admissions and Coalesce produced one multi-batch admission on PostgreSQL" | tee -a "$test_output"
+  queued_work_admissions_join_by_delivery_policy
+echo "scenario 4 evidence: adjacent wakes sharing a delivery policy joined one admission and a delivery-policy change split the next on PostgreSQL" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   run_postgres_conformance_test trigger_capture_route_and_compaction_refusal_matrix \

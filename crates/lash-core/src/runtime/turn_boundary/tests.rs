@@ -180,6 +180,34 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         .expect("valid test session id");
     let turn_id = crate::TurnId::from("final-cancel-cas:turn");
     let address = crate::TurnAddress::new(&state.session_id, &turn_id);
+    // The turn runs as its own root, so input may address it (ADR 0101 §5.1).
+    let runtime_store: Arc<dyn crate::RuntimeStore> = recording.clone();
+    let root_fence = crate::testing::store_fixtures::seal_drive_fence_for_test(
+        &runtime_store,
+        &state.session_id,
+        "final-cancel-cas-root",
+    )
+    .await;
+    let head = store
+        .enqueue_pending_turn_input(
+            crate::PendingTurnInputDraft::new(
+                &state.session_id,
+                crate::TurnInputIngress::NextTurn,
+                crate::TurnInput::text("start the turn"),
+            )
+            .with_source_key(turn_id.as_str()),
+        )
+        .await
+        .expect("enqueue the turn's own input");
+    crate::testing::store_fixtures::admit_root_for_test(
+        &runtime_store,
+        &root_fence,
+        &turn_id,
+        crate::store::AdmittedHead::Input(head.input_id),
+    )
+    .await
+    .expect("admit the turn's root")
+    .expect("the root's admission reaches its head");
     let pending = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &state.session_id,

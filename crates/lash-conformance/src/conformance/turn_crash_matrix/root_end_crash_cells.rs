@@ -22,24 +22,36 @@ async fn run_root_end_crash_cell<F, S>(
     };
     let identity = ReferenceIdentity::for_scenario(scenario);
     let reader: Arc<dyn RuntimeStore> = make(scenario);
-    seed_reference_ingress_for_drive(&reader, &identity, scenario).await;
-    reader
-        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &identity.session_id,
-            crate::TurnInputIngress::active_turn(
-                &identity.turn_id,
-                crate::TurnInputCheckpointBoundary::BeforeCompletion,
-            ),
-            crate::TurnInput::text("withheld follow-on input"),
-        ))
-        .await
-        .expect("seed the terminal-checkpoint input");
+    seed_reference_ingress_for_drive(&reader, &identity).await;
+    // The terminal checkpoint's input is steered into the running root beside
+    // the reference input: an input addressed to a turn that has not started
+    // is refused.
+    let follow_on = PendingTurnInputDraft::new(
+        &identity.session_id,
+        crate::TurnInputIngress::active_turn(
+            &identity.turn_id,
+            crate::TurnInputCheckpointBoundary::BeforeCompletion,
+        ),
+        crate::TurnInput::text("withheld follow-on input"),
+    )
+    .with_input_id(PendingTurnInputDraft::keyed_input_id(
+        &identity.session_id,
+        "withheld-follow-on-input",
+    ))
+    .with_source_key("withheld-follow-on-input");
     let seeded = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
         .expect("read seeded inputs")
         .into_iter()
         .map(|row| row.input.input_id)
+        .chain([
+            reference_steer_input_id(&identity),
+            crate::InputId::from(PendingTurnInputDraft::keyed_input_id(
+                &identity.session_id,
+                "withheld-follow-on-input",
+            )),
+        ])
         .collect::<Vec<_>>();
     let before = reader
         .load_session_head_meta(&identity.session_id)
@@ -59,10 +71,17 @@ async fn run_root_end_crash_cell<F, S>(
         operation: TurnSeamOperation::Store(StoreOperation::CommitRootEnd),
         placement,
     };
-    let (report, redriven, executions, crashed) = Box::pin(
-        admission_crash_cells::crash_then_redrive(&law, &identity, scenario, point, None, true),
-    )
-    .await;
+    let (report, redriven, executions, crashed) =
+        Box::pin(admission_crash_cells::crash_then_redrive(
+            &law,
+            &identity,
+            scenario,
+            point,
+            None,
+            &[follow_on],
+            true,
+        ))
+        .await;
     assert!(
         crashed.contains(&TurnSeamOperation::Store(StoreOperation::CommitRootEnd)),
         "the crash reached the root-end commit"

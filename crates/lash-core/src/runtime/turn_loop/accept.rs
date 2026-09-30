@@ -340,10 +340,17 @@ impl LashRuntime {
         if !matches!(own.status, crate::PendingTurnInputReadStatus::Open) {
             return Ok(None);
         }
+        // The owed follow-on is the turn that runs next; input addressed to
+        // it waits for its checkpoints, not for a next turn.
+        let running = self
+            .state
+            .pending_follow_on
+            .as_ref()
+            .map(|owed| &owed.follow_on_turn_id);
         let ahead = open
             .iter()
             .filter(|earlier| {
-                earlier.input.state == crate::TurnInputState::DeferredNextTurn
+                earlier.input.state.is_next_turn_input(running)
                     && earlier.input.enqueue_seq < own.input.enqueue_seq
             })
             .count();

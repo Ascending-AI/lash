@@ -29,18 +29,19 @@ lash_store_sql::statements! {
         /// anchored at one input covers. Same lock fork as
         /// [`settlement_facts`](Self::settlement_facts).
         select_suffix = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,
+                    terminal_at_ms
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND enqueue_seq >= ?2
              ORDER BY enqueue_seq ASC";
 
-        /// Session `?1`'s open active-turn inputs, which an interrupted
-        /// turn's commit re-defers: input addressed to the turn that no
-        /// checkpoint admitted. Same lock fork as
+        /// Session `?1`'s open active-turn inputs: what an interrupted turn's
+        /// commit and a root's terminal write sweep for input addressed to a
+        /// turn that is over. Same lock fork as
         /// [`settlement_facts`](Self::settlement_facts).
         select_pending_active = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_root,
-                    admitted_by, run_spec_hash
+                    admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -51,6 +52,10 @@ lash_store_sql::statements! {
         /// Session `?1`'s open next-turn inputs a root's admission composes
         /// from, up to `?2` of them (ADR 0101 §4, §5).
         ///
+        /// A root's admission runs with no turn running, so every open input
+        /// is next-turn input by rule, an addressed one included: its turn
+        /// ran and is over (ADR 0101 §5.1).
+        ///
         /// The admission chose the turn lane at a boundary whose command
         /// lane was empty, so a command enqueued since holds back only the
         /// rows after it: the prefix ends at the earliest open command. It
@@ -60,21 +65,22 @@ lash_store_sql::statements! {
         /// SQLite is already the only writer.
         admission_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_root,
-                    admitted_by, run_spec_hash
+                    admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
                AND admitted_root IS NULL
-               AND {{deferred_next_turn_turn_input_state(state)}}
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+                      AND commands.terminal_cause IS NULL
                       AND commands.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS turn_work
                     WHERE turn_work.session_id = ?1 AND turn_work.work_kind = 'turn'
                       AND turn_work.admitted_root IS NULL
+                      AND turn_work.terminal_cause IS NULL
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
              ORDER BY enqueue_seq ASC
@@ -90,7 +96,7 @@ lash_store_sql::statements! {
         /// so a third would not compile.
         admission_candidates_active_turn_after_work = "SELECT enqueue_seq, input_id, session_id,
                     source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_root,
-                    admitted_by, run_spec_hash
+                    admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
@@ -107,7 +113,7 @@ lash_store_sql::statements! {
         /// at the `before_completion` checkpoint, which admits both boundaries.
         admission_candidates_active_turn_before_completion = "SELECT enqueue_seq, input_id,
                     session_id, source_key, ingress_json, state, input_json, enqueued_at_ms,
-                    admitted_root, admitted_by, run_spec_hash
+                    admitted_root, admitted_by, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}

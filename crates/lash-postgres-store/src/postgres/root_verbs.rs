@@ -126,18 +126,20 @@ pub(crate) async fn open_root_intent_tx(
     inputs.sort();
     inputs.dedup();
     for input in inputs {
-        let state = if request.verb == RootVerb::Fork {
-            "deferred_next_turn"
+        if request.verb == RootVerb::Fork {
+            sqlx::query(sql.reopen_input.sql())
+                .bind(session.as_str())
+                .bind(&input)
         } else {
-            "cancelled"
-        };
-        sqlx::query(sql.input.sql())
-            .bind(session.as_str())
-            .bind(&input)
-            .bind(state)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+            sqlx::query(sql.cancel_input.sql())
+                .bind(session.as_str())
+                .bind(&input)
+                .bind(crate::support::clamp_epoch_ms(at_ms))
+                .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+        }
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
         if let Some(root) = new_root.as_ref() {
             sqlx::query(sql.rebind.sql())
                 .bind(session.as_str())
@@ -157,17 +159,7 @@ pub(crate) async fn open_root_intent_tx(
     }
     if request.verb == RootVerb::Cancel {
         for batch in batches {
-            sqlx::query(sql.delete_batch_items.sql())
-                .bind(&batch)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            sqlx::query(sql.delete_batch.sql())
-                .bind(session.as_str())
-                .bind(&batch)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
+            crate::session_roots::cancel_root_batch_tx(tx, session, &batch, at_ms).await?;
         }
     }
     // The verb settles the root's own input and batches first; its terminal

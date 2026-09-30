@@ -45,9 +45,9 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs
             (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
-             submitted_ingress_json, submission_digest, enqueued_at_ms)
+             submission_digest, enqueued_at_ms, terminal_at_ms)
          SELECT n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
-                'completed', '{}', '{}', 'digest', 0
+                'completed', '{}', 'digest', 0, 0
          FROM generate_series(1, 10000) AS n",
     )
     .execute(&mut *connection)
@@ -56,11 +56,11 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs
             (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
-             submitted_ingress_json, submission_digest, enqueued_at_ms)
+             submission_digest, enqueued_at_ms)
          VALUES (10001, 'next', 'history', '{\"scope\":\"next_turn\"}',
-                 'deferred_next_turn', '{}', '{}', 'digest', 0),
+                 'deferred_next_turn', '{}', 'digest', 0),
                 (10002, 'active', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-                 'pending_active', '{}', '{}', 'digest', 0)",
+                 'pending_active', '{}', 'digest', 0)",
     )
     .execute(&mut *connection)
     .await
@@ -68,10 +68,10 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs
             (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
-             submitted_ingress_json, submission_digest, enqueued_at_ms,
+             submission_digest, enqueued_at_ms,
              admitted_root, admitted_by)
          VALUES (10003, 'accepted', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-                 'accepted', '{}', '{}', 'digest', 0, 'root', 'checkpoint')",
+                 'accepted', '{}', 'digest', 0, 'root', 'checkpoint')",
     )
     .execute(&mut *connection)
     .await
@@ -79,9 +79,9 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
             (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
-             authority_json, enqueued_at_ms, admitted_root, admitted_by)
+             authority_json, submission_digest, enqueued_at_ms, admitted_root, admitted_by)
          SELECT n, 'admitted-' || n, 'history', 'earliest_safe_boundary',
-                'turn', '{}', 0, 'root', 'admit'
+                'turn', '{}', 'digest', 0, 'root', 'admit'
          FROM generate_series(1, 10000) AS n",
     )
     .execute(&mut *connection)
@@ -90,8 +90,8 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
             (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
-             authority_json, enqueued_at_ms)
-         VALUES (10001, 'open', 'history', 'earliest_safe_boundary', 'turn', '{}', 0)",
+             authority_json, submission_digest, enqueued_at_ms)
+         VALUES (10001, 'open', 'history', 'earliest_safe_boundary', 'turn', '{}', 'digest', 0)",
     )
     .execute(&mut *connection)
     .await
@@ -111,7 +111,7 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
         ),
         (
             &sql.pending_inputs.earliest_next_turn_candidate_seq,
-            vec![PlanParam::Text("history")],
+            vec![PlanParam::Text("history"), PlanParam::Text("turn")],
         ),
         (
             &sql.family.has_admissible_work,
@@ -252,7 +252,7 @@ fn a_state_token_renders_to_the_predicate_its_generator_spells() {
         sql.pending_inputs
             .release_root
             .sql()
-            .contains(&vocabulary::active_turn_input_state_predicate_sql("state")),
+            .contains(&vocabulary::released_turn_input_state_sql("state")),
     );
     assert!(sql.pending_inputs.list_undelivered.sql().contains(
         &vocabulary::undelivered_turn_input_state_predicate_sql("state")

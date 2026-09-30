@@ -1664,6 +1664,27 @@ async fn assert_enqueued_wake_high_water_safety(
         "Enqueued-wake high-water safety: cancelling sequence 2 removed or disturbed live sequence 1"
     );
 
+    // Until vacuum the cancelled tombstone answers the redelivery; after it,
+    // the no-live-row wake at the receiver floor is a typed rewind.
+    let answered = runtime
+        .enqueue_queued_work_with_outcome(process_wake_batch_draft(runtime_wake_for(
+            &session, &process, 2,
+        )))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert!(
+        matches!(
+            &answered,
+            crate::QueuedWorkEnqueueOutcome::Existing(batch)
+                if batch.batch_id == later.batch_id && batch.terminal.is_some()
+        ),
+        "Enqueued-wake high-water safety: the redelivery must answer the cancelled tombstone: \
+         {answered:?}"
+    );
+    runtime
+        .vacuum(&session)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let redelivery_error = runtime
         .enqueue_queued_work(process_wake_batch_draft(runtime_wake_for(
             &session, &process, 2,
@@ -1696,10 +1717,24 @@ async fn assert_enqueued_wake_high_water_safety(
 
     // A retry whose receiver row is still live remains idempotent even when its sequence is below
     // the receiver floor. The live row is the durable evidence that this exact semantic source was
-    // accepted; only the no-live-row case above is a restored-sender rewind.
+    // accepted; only the no-live-row case above is a restored-sender rewind. The retry's delivery
+    // metadata may differ; its process fact may not (ADR 0101 §8).
+    let mut changed = runtime_wake_for(&session, &process, 1);
+    changed.input = "a different process fact under the same sequence".to_string();
+    let conflict = runtime
+        .enqueue_queued_work_with_outcome(process_wake_batch_draft(changed))
+        .await;
+    prop_assert!(
+        matches!(
+            &conflict,
+            Err(StoreError::QueuedWorkSourceKeyConflict { existing_batch_id, .. })
+                if *existing_batch_id == earlier.batch_id
+        ),
+        "Enqueued-wake allocation fence: a changed process fact must be a typed conflict: \
+         {conflict:?}"
+    );
     let mut rewound = runtime_wake_for(&session, &process, 1);
     rewound.wake_id = "wake:law-high-water-process:rewound:1".to_string();
-    rewound.input = "retry while receiver row remains live".to_string();
     rewound.created_at_ms = 2;
     let retry = runtime
         .enqueue_queued_work_with_outcome(process_wake_batch_draft(rewound))

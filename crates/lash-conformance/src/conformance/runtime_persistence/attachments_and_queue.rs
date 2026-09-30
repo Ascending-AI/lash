@@ -40,12 +40,29 @@ pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(store: Arc<
     let replay = store
         .enqueue_queued_work(keyed_queued_draft(
             &SessionId::from("root"),
-            "different replay payload",
+            "first",
             DeliveryPolicy::EarliestSafeBoundary,
             "source:first",
         ))
         .await
         .expect("replay first batch");
+    let changed = store
+        .enqueue_queued_work(keyed_queued_draft(
+            &SessionId::from("root"),
+            "different replay payload",
+            DeliveryPolicy::EarliestSafeBoundary,
+            "source:first",
+        ))
+        .await
+        .expect_err("a changed submission under the source key is refused");
+    assert!(
+        matches!(
+            &changed,
+            StoreError::QueuedWorkSourceKeyConflict { existing_batch_id, .. }
+                if *existing_batch_id == first.batch_id
+        ),
+        "a changed submission names the stored batch: {changed:?}"
+    );
     let second = store
         .enqueue_queued_work(queued_draft(
             &SessionId::from("root"),
@@ -68,11 +85,7 @@ pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(store: Arc<
         "replaying a source key must return the original batch"
     );
     assert_eq!(first.items[0].item_id, replay.items[0].item_id);
-    assert_eq!(
-        queued_batch_text(&replay),
-        Some("first"),
-        "source-key replay must return the original stored payload, not the replay attempt"
-    );
+    assert_eq!(queued_batch_text(&replay), Some("first"));
     let listed = store
         .list_queued_work(&SessionId::from("root"))
         .await
@@ -187,15 +200,6 @@ pub async fn pending_session_work_ordering_agrees_across_ingress_families(
     store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = "pending-work-ordering-tie";
-    store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(session_id),
-            &TurnId::from("active-turn"),
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "ignored active input",
-        ))
-        .await
-        .expect("seed an active input the next-turn filter must exclude");
     let command = store
         .enqueue_queued_work(queued_session_command_draft(
             &SessionId::from(session_id),

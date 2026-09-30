@@ -9,12 +9,13 @@ pub const TABLE: &str = "queued_work_batches";
 /// each call site `join(", ")`ed into a `format!`; it is one list now, and the
 /// row decoders read by column name so the order is the list's to choose.
 pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-     work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by";
+     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest, admitted_root,
+     admitted_by, terminal_cause, terminal_at_ms";
 
 /// The columns written after allocation under the session lock.
 pub const INSERT_COLUMNS: &str =
     "enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-     authority_json, merge_key, enqueued_at_ms";
+     authority_json, merge_key, enqueued_at_ms, submission_digest";
 
 /// The facts the settlement verdict
 /// [`require_admitted_to_root`](lash_core::store_backend_support::require_admitted_to_root)
@@ -29,28 +30,34 @@ crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
     pub struct QueuedBatchStatements @ "queued_work_batch" {
         select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
              FROM queued_work_batches
              WHERE batch_id = ?1";
 
-        /// The batch session `?1` filed under source key `?2`.
-        select_id_by_source_key = "SELECT batch_id FROM queued_work_batches
+        /// The id and admission-time submission digest of the batch session
+        /// `?1` filed under source key `?2`, open or a tombstone: what a
+        /// resubmission's verdict compares (ADR 0101 §8).
+        select_id_by_source_key = "SELECT batch_id, submission_digest FROM queued_work_batches
              WHERE session_id = ?1 AND source_key = ?2";
 
-        /// Every batch of session `?1`, in enqueue order.
+        /// Every live batch of session `?1`, open or admitted, in enqueue
+        /// order: tombstones are not queued work.
         list_by_session = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
              FROM queued_work_batches
-             WHERE session_id = ?1
+             WHERE session_id = ?1 AND terminal_cause IS NULL
              ORDER BY enqueue_seq ASC";
 
-        /// Session `?1`'s open batches: every batch no root has admitted, in
-        /// enqueue order. Session commands are never admitted, so they are
-        /// always open.
+        /// Session `?1`'s open batches: every live batch no root has
+        /// admitted, in enqueue order. Session commands are never admitted,
+        /// so they are open until their tombstone.
         list_open = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+                    work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
              FROM queued_work_batches
-             WHERE session_id = ?1 AND admitted_root IS NULL
+             WHERE session_id = ?1 AND admitted_root IS NULL AND terminal_cause IS NULL
              ORDER BY enqueue_seq ASC";
 
         /// Session `?1`'s batches root `?2` bound under step `?3`, in
@@ -58,7 +65,8 @@ crate::statements! {
         /// instead of choosing again (FIG-3927).
         select_admitted_by_step = "SELECT enqueue_seq, batch_id, session_id, source_key,
                     delivery_policy, work_kind, authority_json, merge_key,
-                    enqueued_at_ms, admitted_root, admitted_by
+                    enqueued_at_ms, submission_digest, admitted_root, admitted_by,
+                    terminal_cause, terminal_at_ms
              FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_root = ?2 AND admitted_by = ?3
              ORDER BY enqueue_seq ASC";
@@ -86,7 +94,8 @@ crate::statements! {
                      THEN ?5 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_root IS NULL";
+               AND admitted_root IS NULL
+               AND terminal_cause IS NULL";
 
         /// Deliver the ingress obligation of open session command `?2` of
         /// session `?1` at `?3`: the command lane takes no admission, so the
@@ -105,7 +114,8 @@ crate::statements! {
                      THEN ?3 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_root IS NULL";
+               AND admitted_root IS NULL
+               AND terminal_cause IS NULL";
 
         /// The first payload of batch `?2` of session `?1`, if root `?3`
         /// still holds it: the wake identity a settled batch contributes to
@@ -126,21 +136,80 @@ crate::statements! {
              LIMIT 1";
 
         /// Settle batch `?2` of session `?1` under root `?3`, which must hold
-        /// it, by removing it. A settled batch has no resting state: its items
-        /// go with it through the foreign key's cascade.
-        settle_admitted = "DELETE FROM queued_work_batches
+        /// it, into its tombstone with cause `?4` at `?5` (ADR 0101 §8): the
+        /// binding goes, the submission stays, and its items stay with it
+        /// until host vacuum.
+        settle_admitted = "UPDATE queued_work_batches
+             SET admitted_root = NULL,
+                 admitted_by = NULL,
+                 terminal_cause = ?4,
+                 terminal_at_ms = ?5,
+                 obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN 'delivered' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_due_at_ms END,
+                 obligation_claim_token = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_claim_token END,
+                 obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_stall_reason END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN ?5 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND batch_id = ?2
                AND admitted_root = ?3";
 
-        /// Settle open session command `?2` of session `?1` by removing it:
-        /// the command lane's settlement, in the commit that applied it
-        /// (FIG-3927). A command withdrawn since the drive read it matches no
-        /// row, and the commit is refused.
-        settle_command = "DELETE FROM queued_work_batches
+        /// Settle open session command `?2` of session `?1` into its
+        /// `applied` tombstone at `?3`: the command lane's settlement, in the
+        /// commit that applied it (FIG-3927). A command withdrawn since the
+        /// drive read it matches no row, and the commit is refused.
+        settle_command = "UPDATE queued_work_batches
+             SET terminal_cause = 'applied',
+                 terminal_at_ms = ?3,
+                 obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN 'delivered' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_due_at_ms END,
+                 obligation_claim_token = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_claim_token END,
+                 obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_stall_reason END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN ?3 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_root IS NULL";
+               AND admitted_root IS NULL
+               AND terminal_cause IS NULL";
+
+        /// Withdraw open batch `?2` of session `?1` into its `cancelled`
+        /// tombstone at `?3`: the host's withdrawal (ADR 0101 §8, §10). Only
+        /// an open batch is withdrawn; a batch a root admitted is that root's
+        /// to settle or release. The withdrawal owes its session no drive, so
+        /// it settles the batch's ingress obligation in the same write, as an
+        /// admission would.
+        withdraw_open = "UPDATE queued_work_batches
+             SET terminal_cause = 'cancelled',
+                 terminal_at_ms = ?3,
+                 obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN 'delivered' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_due_at_ms END,
+                 obligation_claim_token = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_claim_token END,
+                 obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_stall_reason END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN ?3 ELSE obligation_settled_at_ms END
+             WHERE session_id = ?1
+               AND batch_id = ?2
+               AND admitted_root IS NULL
+               AND terminal_cause IS NULL";
+
+        /// Remove session `?1`'s tombstones: host vacuum, the only reclaim a
+        /// tombstone has short of session deletion. Their items go with them
+        /// through the foreign key's cascade. A vacuumed wake's redelivery
+        /// still meets its receiver floor.
+        delete_tombstones = "DELETE FROM queued_work_batches
+             WHERE session_id = ?1 AND terminal_cause IS NOT NULL";
 
         /// Hand batch `?2` of session `?1` back open at its own position,
         /// under root `?3`, which must hold it.
@@ -172,7 +241,7 @@ crate::statements! {
                      THEN 0 ELSE obligation_due_at_ms END,
                  obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
                      THEN NULL ELSE obligation_settled_at_ms END
-             WHERE session_id = ?1 AND admitted_root = ?2";
+             WHERE session_id = ?1 AND admitted_root = ?2 AND terminal_cause IS NULL";
 
         delete_by_session = "DELETE FROM queued_work_batches WHERE session_id = ?1";
     }
@@ -181,7 +250,25 @@ crate::statements! {
 crate::statements! {
     /// Statements for parked-root control and recovery.
     pub struct BatchRootVerbStatements @ "queued_work_batch" {
-        delete_batch = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND batch_id = ?2";
+        /// Cancel batch `?2` of session `?1`, held by a root a cancel verb
+        /// ends, into its `cancelled` tombstone at `?3`, letting go of its
+        /// admission (ADR 0101 §8).
+        cancel_batch = "UPDATE queued_work_batches
+             SET admitted_root = NULL,
+                 admitted_by = NULL,
+                 terminal_cause = 'cancelled',
+                 terminal_at_ms = ?3,
+                 obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN 'delivered' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_due_at_ms END,
+                 obligation_claim_token = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_claim_token END,
+                 obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_stall_reason END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN ?3 ELSE obligation_settled_at_ms END
+             WHERE session_id = ?1 AND batch_id = ?2 AND terminal_cause IS NULL";
     }
 }
 
@@ -282,7 +369,10 @@ crate::statements! {
         obligation_count_stalled = "SELECT COUNT(*) FROM queued_work_batches WHERE obligation_state = 'stalled'";
 
         /// Obligation `?1`'s state and the claims taken since it was armed.
-        obligation_select_standing = "SELECT obligation_state, obligation_attempts FROM queued_work_batches WHERE obligation_id = ?1";
+        /// A tombstone owes no drive: its standing is gone with its terminal
+        /// transition, so a caller awaiting its ask awaits nothing.
+        obligation_select_standing = "SELECT obligation_state, obligation_attempts FROM queued_work_batches
+             WHERE obligation_id = ?1 AND terminal_cause IS NULL";
     }
 }
 

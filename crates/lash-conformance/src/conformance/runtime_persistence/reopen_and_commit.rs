@@ -543,10 +543,29 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
             .is_empty(),
         "completed wake delivery must be removed exactly once"
     );
+    // Until vacuum the delivered tombstone answers a late redelivery.
+    let answered = store
+        .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(wake.clone()))
+        .await
+        .expect("a late redelivery answers the delivered tombstone");
+    assert!(
+        matches!(
+            &answered,
+            crate::QueuedWorkEnqueueOutcome::Existing(batch)
+                if batch.batch_id == first.batch_id
+                    && batch.terminal.as_ref().map(|terminal| terminal.cause)
+                        == Some(lash_core::store::IngressTerminalCause::Delivered)
+        ),
+        "the late redelivery is the delivered wake: {answered:?}"
+    );
+    store
+        .vacuum(&SessionId::from("root"))
+        .await
+        .expect("vacuum the delivered tombstone");
     let consumed_replay = store
         .enqueue_queued_work(crate::process_wake_batch_draft(wake))
         .await
-        .expect_err("late no-live-row wake must trip the receiver floor");
+        .expect_err("a vacuumed wake's late redelivery must trip the receiver floor");
     assert!(matches!(
         consumed_replay,
         StoreError::ProcessWakeSequenceRewound { .. }
@@ -590,11 +609,12 @@ fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
 }
 
 /// A host cancel is a terminal transition of a wake, so it raises the
-/// session's redelivery floor in the same transaction that removes the row
-/// (FIG-3545). A redelivery of the withdrawn `(process, seq)` — after a
-/// producer crash, a failed terminal mark or a lost admission — is refused with
-/// the typed rewind outcome instead of resurrecting the wake; a later
-/// sequence from the same process is still admitted.
+/// session's redelivery floor in the same transaction that leaves the
+/// `cancelled` tombstone (FIG-3545, ADR 0101 §8). A redelivery of the
+/// withdrawn `(process, seq)` — after a producer crash, a failed terminal
+/// mark or a lost admission — answers the tombstone until host vacuum and is
+/// refused with the typed rewind outcome after it, never resurrecting the
+/// wake; a later sequence from the same process is still admitted.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -611,10 +631,36 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>
         .expect("host cancel of the queued wake")
         .expect("an unadmitted wake is cancelled");
 
+    let answered = store
+        .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(root_process_wake(7)))
+        .await
+        .expect("a redelivery answers the cancelled tombstone");
+    assert!(
+        matches!(
+            &answered,
+            crate::QueuedWorkEnqueueOutcome::Existing(batch)
+                if batch.batch_id == queued.batch_id
+                    && batch.terminal.as_ref().map(|terminal| terminal.cause)
+                        == Some(lash_core::store::IngressTerminalCause::Cancelled)
+        ),
+        "the redelivery is the cancelled wake: {answered:?}"
+    );
+    assert!(
+        store
+            .list_queued_work(&session_id)
+            .await
+            .expect("list after answered redelivery")
+            .is_empty(),
+        "an answered redelivery reopens nothing"
+    );
+    store
+        .vacuum(&session_id)
+        .await
+        .expect("vacuum the cancelled tombstone");
     let redelivery = store
         .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(7)))
         .await
-        .expect_err("redelivery of a host-cancelled wake must trip the receiver floor");
+        .expect_err("redelivery of a vacuumed host-cancelled wake must trip the receiver floor");
     match redelivery {
         StoreError::ProcessWakeSequenceRewound {
             session_id: refused_session,

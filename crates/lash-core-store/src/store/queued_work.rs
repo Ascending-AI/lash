@@ -3,7 +3,7 @@
 //! The SQL backends (sqlite, postgres) load candidate batch rows ordered by
 //! `enqueue_seq` and pre-filtered to open batches no root admitted, then
 //! apply the same pure state machine: a delivery-policy boundary gate and
-//! compatibility/merge-key prefix grouping. That state machine lives here so
+//! a delivery-policy prefix. That state machine lives here so
 //! the backends own only their SQL reads and writes while the composition
 //! rule has a single implementation, exercised against every backend by the
 //! shared `runtime_persistence` conformance suite.
@@ -218,11 +218,16 @@ pub fn select_leading_session_command(candidates: &[TurnLaneCandidate]) -> usize
 /// * An [`AdmissionBoundary::ActiveTurnCheckpoint`] boundary only
 ///   admits work whose head batch is
 ///   [`DeliveryPolicy::EarliestSafeBoundary`].
-/// * An absent merge key, or a control/cancel kind, admits exactly one batch.
-/// * A batchable head extends through immediately following rows with the same
-///   delivery policy, merge key, and authority/elevation, within the host's row
-///   and age bounds. How much of that eligible prefix actually drains is the
-///   host's [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) decision.
+/// * A control kind admits exactly one batch.
+/// * A batchable head extends through immediately following batchable turn
+///   work with the same delivery policy, within the host's row and age
+///   bounds (ADR 0101 §5.2). How much of that eligible prefix actually drains
+///   is the host's [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) decision.
+///
+/// Each row's `authority` and `merge_key` are its own data, offered to the
+/// drain policy and to traces. Neither is an equality gate here: Lash applies
+/// no authorization policy, so a host that keeps principals or labels apart
+/// does so in its drain policy.
 pub fn select_turn_work_indices(
     candidates: &[TurnLaneCandidate],
     boundary: AdmissionBoundary,
@@ -285,7 +290,7 @@ pub fn select_turn_work_indices(
             max_context_tokens: policy.max_context_tokens,
         });
     }
-    if !first.kind.is_batchable() || first.merge_key.is_none() {
+    if !first.kind.is_batchable() {
         record_turn_admission_decision(
             candidates,
             boundary,
@@ -316,8 +321,6 @@ pub fn select_turn_work_indices(
             || candidate.kind.work_class() != QueuedWorkClass::TurnWork
             || !candidate.kind.is_batchable()
             || candidate.delivery_policy != first.delivery_policy
-            || candidate.merge_key != first.merge_key
-            || candidate.authority != first.authority
         {
             break;
         }

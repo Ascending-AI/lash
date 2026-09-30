@@ -426,8 +426,11 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     authority_json TEXT NOT NULL,
     merge_key TEXT,
     enqueued_at_ms BIGINT NOT NULL,
+    submission_digest TEXT NOT NULL, -- Written once at admission (ADR 0101 §8).
     admitted_root TEXT, -- The root whose fenced admission holds the batch; NULL while open.
     admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
+    terminal_cause TEXT, -- NULL while open or admitted; the tombstone's cause after.
+    terminal_at_ms BIGINT,
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -440,6 +443,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
+    CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled') AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -453,10 +457,14 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_stalled
     ON lash_queued_work_batches(obligation_id)
     WHERE obligation_state = 'stalled';
+-- Both scans range over live batches only: a tombstone never lengthens an
+-- open-work scan (ADR 0101 §8).
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admission_order
-    ON lash_queued_work_batches(session_id, admitted_root, enqueue_seq);
+    ON lash_queued_work_batches(session_id, admitted_root, enqueue_seq)
+    WHERE terminal_cause IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
-    ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);
+    ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)
+    WHERE terminal_cause IS NULL;
 
 CREATE TABLE IF NOT EXISTS lash_queued_work_items (
     batch_id TEXT NOT NULL REFERENCES lash_queued_work_batches(batch_id) ON DELETE CASCADE,
@@ -478,15 +486,15 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     input_id TEXT NOT NULL UNIQUE,
     session_id TEXT NOT NULL,
     source_key TEXT,
-    ingress_json TEXT NOT NULL,
+    ingress_json TEXT NOT NULL, -- The submitted delivery, written once (ADR 0101 §5.1).
     state TEXT NOT NULL,
     input_json TEXT NOT NULL,
-    submitted_ingress_json TEXT NOT NULL,
     submission_digest TEXT NOT NULL,
     enqueued_at_ms BIGINT NOT NULL,
     admitted_root TEXT, -- The root whose fenced admission holds the input; NULL while open.
     admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     run_spec_hash TEXT,
+    terminal_at_ms BIGINT, -- When the input's tombstone was written; NULL until then.
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -500,6 +508,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_root IS NULL OR state NOT IN ('cancelled', 'completed')),
+    CONSTRAINT ck_pending_turn_inputs_terminal_at CHECK ((state IN ('cancelled', 'completed')) = (terminal_at_ms IS NOT NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );

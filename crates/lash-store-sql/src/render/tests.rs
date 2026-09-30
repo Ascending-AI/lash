@@ -439,8 +439,10 @@ fn every_owned_statement_renders_for_both_backends() {
         VocabularyTerm::new("deferred_next_turn_turn_input_state", stub_predicate),
         VocabularyTerm::new("nonterminal_turn_input_state", stub_predicate),
         VocabularyTerm::new("pending_active_turn_input_state", stub_predicate),
+        VocabularyTerm::new("released_turn_input_state", stub_predicate),
         VocabularyTerm::new("terminal_turn_input_state", stub_predicate),
         VocabularyTerm::new("undelivered_turn_input_state", stub_predicate),
+        VocabularyTerm::new("ingress_turn_id", stub_predicate),
     ]);
 
     for statement in crate::all_statements() {

@@ -202,11 +202,17 @@ pub(crate) fn append_turn_cancel_outcome_conn(
     let Some(mut record) = load_turn_cancel_request_conn(conn, session_id, turn_id)? else {
         return Ok(());
     };
-    record
-        .outcome
-        .get_or_insert_default()
-        .affected_inputs
-        .push(affected);
+    // An input the interrupted turn's commit recorded is still addressed to
+    // that turn, its delivery unchanged, when the root's terminal write
+    // sweeps the turns it ends: it is recorded once.
+    let affected_inputs = &mut record.outcome.get_or_insert_default().affected_inputs;
+    if affected_inputs
+        .iter()
+        .any(|recorded| recorded.input_id == affected.input_id)
+    {
+        return Ok(());
+    }
+    affected_inputs.push(affected);
     crate::conn::cached_execute(
         conn,
         crate::turn_ingress::turn_ingress_sql()

@@ -693,19 +693,20 @@ impl RootAdmission {
     }
 }
 
-/// The turns a root's terminal write ends (FIG-3946): the root's own
-/// physical turns, and the turn each member of its admission was accepted
-/// under (the member's source key). A member composed into this root never
-/// runs as a root of its own, so open input still addressed to its turn is
-/// answered by this root's terminal or by nothing.
+/// The turns a root runs, and its terminal write ends (FIG-3946): the
+/// root's own physical turns, and the turn each member of its admission was
+/// accepted under (the member's source key). A member composed into this root
+/// never runs as a root of its own, so input addressed to its turn is
+/// addressed to this root: accepted while it runs (ADR 0101 §5.1), and
+/// next-turn input, or dropped by its cancellation, once it ends.
 #[derive(Clone, Debug)]
-pub struct RootEndedTurns {
+pub struct RootTurns {
     root: TurnId,
     members: std::collections::BTreeSet<String>,
 }
 
-impl RootEndedTurns {
-    /// The turns `root` ends, given its recorded admission, if it has one.
+impl RootTurns {
+    /// The turns `root` runs, given its recorded admission, if it has one.
     pub fn new(root: &TurnId, admission: Option<&RootAdmission>) -> Self {
         let members = admission
             .into_iter()
@@ -729,7 +730,7 @@ impl RootEndedTurns {
         }
     }
 
-    /// Whether `turn` is one of the physical turns of a turn this root ends.
+    /// Whether `turn` is one of the physical turns of a turn this root runs.
     pub fn contains(&self, turn: &TurnId) -> bool {
         let (logical, _) = super::PhysicalTurn::split_turn_id(turn);
         logical == self.root || self.members.contains(logical.as_str())

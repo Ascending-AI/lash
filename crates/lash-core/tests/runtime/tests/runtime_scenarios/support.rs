@@ -672,18 +672,27 @@ pub(crate) enum RuntimeTurnInputIngress {
         min_boundary: TurnInputCheckpointBoundary,
         text: &'static str,
     },
+    /// Start the scenario's root, headed by a next-turn input, so input may
+    /// address its turn while it runs (ADR 0101 §5.1). The final commit
+    /// settles it.
+    StartScenarioRoot {
+        alias: &'static str,
+        text: &'static str,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimePendingTurnInputExpectation {
     pub(crate) alias: &'static str,
-    pub(crate) state: TurnInputState,
     pub(crate) ingress: RuntimePendingTurnInputIngressExpectation,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum RuntimePendingTurnInputIngressExpectation {
-    NextTurn,
+    /// Pending for the next turn in `state`.
+    NextTurn(TurnInputState),
+    /// Pending in the state and with the delivery it was submitted with.
+    AsSubmitted,
 }
 
 pub(crate) fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
@@ -759,16 +768,23 @@ async fn assert_pending_turn_inputs(
         "{scenario_name} pending turn-input ids changed"
     );
     for (input, expected) in pending.iter().zip(expectations) {
-        assert_eq!(
-            input.input.state, expected.state,
-            "{scenario_name} pending turn-input state changed for `{}`",
-            expected.alias
-        );
-        match expected.ingress {
-            RuntimePendingTurnInputIngressExpectation::NextTurn => {
+        match &expected.ingress {
+            RuntimePendingTurnInputIngressExpectation::NextTurn(state) => {
+                assert_eq!(
+                    &input.input.state, state,
+                    "{scenario_name} pending turn-input state changed for `{}`",
+                    expected.alias
+                );
                 assert!(
                     matches!(input.input.ingress(), TurnInputIngress::NextTurn),
                     "{scenario_name} expected `{}` to be pending for the next turn",
+                    expected.alias
+                );
+            }
+            RuntimePendingTurnInputIngressExpectation::AsSubmitted => {
+                assert_eq!(
+                    input.input.state, enqueued_turn_inputs[expected.alias].state,
+                    "{scenario_name} expected `{}` to keep its submitted delivery",
                     expected.alias
                 );
             }

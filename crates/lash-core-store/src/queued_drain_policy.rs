@@ -1,12 +1,48 @@
 //! Host-owned selection of which queued work drains on one wake.
 //!
 //! Lash owns the *laws* of a queued-work claim: the queue head must be turn
-//! work, a delivery boundary must admit it, and only rows sharing a merge key,
-//! delivery policy, authority, and batchable kind may travel together. What
-//! Lash does not own is *how much* of that legal, strictly FIFO-ordered prefix
-//! a host wants to execute in one turn. That is a product decision — throughput
-//! against per-turn context pressure — so it is a host policy seam
-//! ([`QueuedDrainPolicy`]) rather than kernel arithmetic.
+//! work, a delivery boundary must admit it, and only batchable turn work
+//! sharing the head's delivery policy may travel with it (ADR 0101 §5.2).
+//! What Lash does not own is *how much* of that legal, strictly FIFO-ordered
+//! prefix a host wants to execute in one turn. That is a product decision —
+//! throughput against per-turn context pressure, and which producers may
+//! share a turn — so it is a host policy seam ([`QueuedDrainPolicy`]) rather
+//! than kernel arithmetic.
+//!
+//! Each candidate carries its own `authority` and `merge_key`. Lash does not
+//! compare them: it applies no authorization policy. A host that keeps
+//! principals apart returns the length of the run that shares the head's
+//! principal:
+//!
+//! ```
+//! use lash_core_store::queued_drain_policy::{
+//!     QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+//! };
+//!
+//! /// Drains the leading run of rows stamped with the head's principal.
+//! #[derive(Debug)]
+//! struct OnePrincipalPerTurn;
+//!
+//! impl QueuedDrainPolicy for OnePrincipalPerTurn {
+//!     fn name(&self) -> &str {
+//!         "one_principal_per_turn"
+//!     }
+//!
+//!     fn select_drain(&self, request: &QueuedDrainRequest<'_>) -> QueuedDrainSelection {
+//!         let candidates = request.candidates();
+//!         let Some(head) = candidates.first() else {
+//!             return QueuedDrainSelection::head_only();
+//!         };
+//!         let run = candidates
+//!             .iter()
+//!             .take_while(|candidate| candidate.authority.principal == head.authority.principal)
+//!             .count();
+//!         QueuedDrainSelection::leading(run)
+//!     }
+//! }
+//! ```
+//!
+//! The same shape keeps merge-key groups apart by comparing `merge_key`.
 //!
 //! The shipped default performs no token arithmetic at all: it is the two-mode
 //! [`DrainModePolicy`], defaulting to [`DrainMode::OneAtATime`]. A drain then
@@ -27,15 +63,17 @@ use crate::{AdmissionBoundary, QueuedWorkAuthority, QueuedWorkKind};
 ///
 /// Candidates are presented in durable `enqueue_seq` order and are already
 /// filtered to rows that may legally share this turn with the queue head.
+/// Their `authority` and `merge_key` are per-row data: candidates may differ
+/// in both.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueuedDrainCandidate {
     /// Durable queue position, ascending and unique per session.
     pub enqueue_seq: u64,
     /// Semantic row kind; only [`QueuedWorkKind::Turn`] rows are ever batchable.
     pub kind: QueuedWorkKind,
-    /// Producer-selected grouping label shared by every offered candidate.
+    /// This row's producer-selected grouping label.
     pub merge_key: Option<String>,
-    /// Producer-stamped execution authority shared by every offered candidate.
+    /// This row's producer-stamped execution authority.
     pub authority: QueuedWorkAuthority,
     /// Conservative model-context cost Lash already computed for this row
     /// alone, charging one serialized UTF-8 byte as one token.
@@ -180,7 +218,7 @@ pub enum DrainMode {
     /// window or is irreducibly oversized and named as such.
     #[default]
     OneAtATime,
-    /// Every compatible pending row in one drain, strict FIFO, for large-window
+    /// Every eligible pending row in one drain, strict FIFO, for large-window
     /// hosts that want throughput and accept the provider as the authority on
     /// what fits.
     All,

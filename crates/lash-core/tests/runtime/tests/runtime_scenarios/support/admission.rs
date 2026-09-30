@@ -19,7 +19,7 @@ impl RuntimeScenarioContext {
 
     /// Admit the scenario's root headed by `head`; `None` when the admission
     /// cannot reach it.
-    async fn admit_scenario_root(&self, head: AdmittedHead) -> Option<RootAdmission> {
+    pub(super) async fn admit_scenario_root(&self, head: AdmittedHead) -> Option<RootAdmission> {
         let (_, fence) = self.owner_and_lease();
         let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
             fence,
@@ -235,7 +235,12 @@ impl RuntimeScenarioContext {
             .into_iter()
             .find(|read| {
                 matches!(read.status, lash_core::PendingTurnInputReadStatus::Open)
-                    && matches!(read.input.ingress(), TurnInputIngress::NextTurn)
+                    && read.input.state.is_next_turn_input(
+                        self.admission
+                            .as_ref()
+                            .map(|_| TurnId::from(SCENARIO_ROOT))
+                            .as_ref(),
+                    )
             })
             .map(|read| read.input.input_id)
     }

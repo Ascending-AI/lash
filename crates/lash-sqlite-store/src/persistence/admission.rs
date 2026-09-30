@@ -110,6 +110,7 @@ pub(crate) async fn admit_root_sqlite(
                             now,
                             session_id,
                             AdmissionBoundary::Idle,
+                            None,
                             &request.policy,
                         )?;
                         if !batches.iter().any(|batch| batch.batch_id == *head) {
@@ -252,6 +253,7 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
                     now,
                     session_id,
                     AdmissionBoundary::ActiveTurnCheckpoint,
+                    Some(&request.turn_id),
                     &request.policy,
                 )?;
                 bind_batches_conn(tx, now, session_id, &request.root, &request.step, &batches)?;
@@ -526,7 +528,8 @@ fn bind_turn_inputs_conn(
     step: &str,
     admitted: &lash_core_execution::AdmittedTurnInputs,
 ) -> Result<(), StoreError> {
-    let state = lash_core_execution::store::turn_input_state_after_admission(&admitted.mode);
+    let state = lash_core_execution::store::turn_input_state_after_admission(&admitted.mode)
+        .map(|state| state.as_str());
     let statement = &crate::turn_ingress::turn_ingress_sql().pending_inputs.admit;
     for input in &admitted.inputs {
         let bound = crate::conn::cached_execute(
@@ -535,7 +538,7 @@ fn bind_turn_inputs_conn(
             params![
                 admitted.session_id.as_str(),
                 input.input_id.as_str(),
-                state.as_str(),
+                state,
                 root.as_str(),
                 step,
                 i64::try_from(now).unwrap_or(i64::MAX),
@@ -592,12 +595,14 @@ fn bind_batches_conn(
 
 /// The open queued turn work one composition at `boundary` takes, by the
 /// shared prefix rule: stopped before the earliest open next-turn input
-/// (ADR 0101 §5) and bounded by `policy`.
+/// while `running_turn` runs (`None` at idle) (ADR 0101 §5) and bounded by
+/// `policy`.
 fn compose_turn_lane_batches_conn(
     tx: &Connection,
     now: u64,
     session_id: &SessionId,
     boundary: AdmissionBoundary,
+    running_turn: Option<&TurnId>,
     policy: &TurnLaneAdmissionPolicy,
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     if policy.max_rows == 0 {
@@ -616,8 +621,12 @@ fn compose_turn_lane_batches_conn(
     };
     let (_, mut batches, candidates) =
         scan_queued_work_candidates_sqlite(tx, session_id, statement, policy.max_rows)?;
-    let admitted = TurnLaneStop::before(earliest_next_turn_candidate_seq_conn(tx, session_id)?)
-        .queued_prefix(&candidates);
+    let admitted = TurnLaneStop::before(earliest_next_turn_candidate_seq_conn(
+        tx,
+        session_id,
+        running_turn,
+    )?)
+    .queued_prefix(&candidates);
     let selected = match select_turn_work_prefix(&candidates[..admitted], boundary, policy, now)? {
         TurnWorkPrefix::Selected { len } => len,
         TurnWorkPrefix::Refused { .. } => 0,
@@ -658,10 +667,12 @@ fn scan_queued_work_candidates_sqlite(
 }
 
 /// The `enqueue_seq` of session `session_id`'s earliest open next-turn
-/// input: the turn-lane head of the input table.
+/// input while `running_turn` runs (`None` at idle): the turn-lane head of
+/// the input table.
 fn earliest_next_turn_candidate_seq_conn(
     tx: &Connection,
     session_id: &SessionId,
+    running_turn: Option<&TurnId>,
 ) -> Result<Option<u64>, StoreError> {
     let seq: Option<i64> = tx
         .query_row(
@@ -669,7 +680,7 @@ fn earliest_next_turn_candidate_seq_conn(
                 .pending_inputs
                 .earliest_next_turn_candidate_seq
                 .sql(),
-            params![session_id.as_str()],
+            params![session_id.as_str(), running_turn.map(TurnId::as_str)],
             |row| row.get(0),
         )
         .map_err(sqlite_error)?;

@@ -509,7 +509,7 @@ pub async fn cold_process_real_turn_driver(
             | ColdProcessTurnAction::CancelRecover
     );
     if !recovers_existing_turn {
-        seed_reference_ingress(&store, &identity, scenario).await;
+        seed_reference_ingress(&store, &identity).await;
         if action.is_cancel_crash() {
             let host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
                 inner: Arc::clone(&effect_controller),
@@ -638,7 +638,7 @@ pub async fn cold_process_real_turn_driver(
         ..TraceTool::default()
     };
     let reader = Arc::clone(&store);
-    let decorated = SeamStore::wrap(store, control.clone());
+    let decorated = SeamStore::steering(store, control.clone(), vec![reference_steer(&identity)]);
     let runtime = Box::pin(build_runtime(
         stores,
         decorated,
