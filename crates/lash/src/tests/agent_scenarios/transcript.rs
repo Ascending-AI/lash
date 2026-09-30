@@ -28,8 +28,9 @@ use std::collections::BTreeMap;
 
 #[cfg(feature = "rlm")]
 use super::harness::AgentScenarioRun;
+use lash_core::testing::behavior_transcript::{Actor, Component, Entry, Usage};
 #[cfg(feature = "rlm")]
-use lash_core::testing::behavior_transcript::{Actor, Attr, Component, Entry, IdKind, Kind, Usage};
+use lash_core::testing::behavior_transcript::{Attr, IdKind, Kind};
 use lash_core::testing::checkpoint_observer::{CheckpointComponentWriteKind, CheckpointWriteEvent};
 
 /// `root` is the semantic name pinned to the scenario's root session, so the
@@ -74,7 +75,6 @@ pub(super) fn agent_scenario_transcript(run: &AgentScenarioRun, root: &str) -> S
     transcript.render()
 }
 
-#[cfg(feature = "rlm")]
 pub(super) fn assert_typed_checkpoint_transcript(writes: &[CheckpointWriteEvent]) {
     assert!(
         !writes.is_empty(),
@@ -305,7 +305,6 @@ fn commit_shape(group: &[&CheckpointWriteEvent]) -> String {
     shape
 }
 
-#[cfg(feature = "rlm")]
 fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
     let mut entry = Entry::commit(
         Actor::session(write.attributed_session().to_string()),
