@@ -93,6 +93,19 @@ jobs:
           name: confidence-artifacts-attempt-${{ github.run_attempt }}
           path: target/confidence/**
 
+  append-vec-miri:
+    name: AppendVec Miri
+    # The scheduled main full run and manual full recovery use the same gate.
+    # This independent interpreter job does not consume the stable build.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - *checkout
+
+      - name: Test AppendVec under pinned Miri
+        run: bash scripts/hermetic-build.sh miri
+
   confidence-build:
     name: Build full confidence once
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
@@ -689,7 +702,7 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-authority, confidence-mutation-packages-rotating, sim-search]
+    needs: [confidence, append-vec-miri, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-authority, confidence-mutation-packages-rotating, sim-search]
     steps:
       - *checkout
 

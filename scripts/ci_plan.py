@@ -417,6 +417,7 @@ BAZEL_TEST_JOBS = frozenset({BAZEL_TEST_JOB, "bazel-tests-tail"})
 CONFIDENCE_JOB_POLICY = {
     "confidence": "selector",
     "confidence-build": "full-producer",
+    "append-vec-miri": "full-independent",
     "confidence-harnesses": "full-consumer",
     "confidence-generated": "full-consumer",
     "confidence-minimizer": "full-consumer",
@@ -446,7 +447,7 @@ def evaluate_confidence_conclusion(needs: Mapping, event_name: str, selector: st
         problems.append("Confidence selector is missing")
     for job in sorted(expected & set(needs)):
         policy = CONFIDENCE_JOB_POLICY[job]
-        if policy not in {"selector", "full-producer", "full-consumer"}:
+        if policy not in {"selector", "full-producer", "full-consumer", "full-independent"}:
             problems.append(f"unknown Confidence policy for {job}: {policy!r}")
             continue
         required = active and ((selector != "full") if policy == "selector" else (selector == "full"))

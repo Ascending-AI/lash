@@ -309,6 +309,15 @@ The `rust-version` in the workspace manifest is a separate, deliberately
 older number: the declared compatibility floor for published crates, not the
 toolchain anyone builds with.
 
+AppendVec's unsafe buffer has a separate interpreter gate. Run
+`kiln gate lash <fork> -- bash scripts/hermetic-build.sh miri` locally, or
+`bash scripts/hermetic-build.sh miri` in CI. The driver installs the dated
+nightly and Miri component from `scripts/miri-toolchain.toml` under `.tgt/miri`
+and runs the complete `append_vec::tests::` suite with 20 Miri seeds, including
+its threaded tests. Confidence requires this gate on scheduled and manual full
+runs; it stays off the per-merge path. Update the interpreter pin explicitly
+when moving Miri versions.
+
 ## Releases
 
 Merging to `main` does not release. A maintainer manually runs the GitHub

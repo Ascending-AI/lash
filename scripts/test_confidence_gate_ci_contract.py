@@ -219,7 +219,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                      "confidence-mutation-core", "confidence-mutation-sim",
                      "confidence-mutation-authority", "confidence-mutation-packages-rotating",
                      "sim-search"}
-        self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion"}, set(jobs))
+        self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion", "append-vec-miri"}, set(jobs))
+        self.assertNotIn("needs", jobs["append-vec-miri"])
+        self.assertNotIn("download-artifact@", str(jobs["append-vec-miri"]["steps"]))
         artifact = "confidence-build-${{ github.sha }}-${{ github.run_attempt }}"
         producer = jobs["confidence-build"]
         uploads = [s for j in jobs.values() for s in j["steps"]

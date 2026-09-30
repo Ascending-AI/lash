@@ -9,6 +9,13 @@ if [[ -f "$repo/env.sh" ]]; then
   source "$repo/env.sh"
 fi
 
+# Miri uses its own pinned compiler and interpreter, not Bazel's stable
+# code generator. Keep the same entrypoint for CI and Kiln callers.
+if [[ "${1:-}" == miri ]]; then
+  shift
+  exec bash "$repo/scripts/append-vec-miri.sh" "$@"
+fi
+
 bazel="${BAZEL:-bazel}"
 if ! command -v "$bazel" >/dev/null 2>&1; then
   echo "hermetic-build: '$bazel' is unavailable; install Bazelisk as bazel" >&2
@@ -33,7 +40,7 @@ fi
 cd "$repo"
 
 usage() {
-  echo "usage: scripts/hermetic-build.sh [--local|--shared] {sync|clean|fmt|analyze|build|check|test|clippy|doc|run} [labels...] [-- args...]" >&2
+  echo "usage: scripts/hermetic-build.sh [--local|--shared] {sync|clean|fmt|analyze|build|check|test|clippy|doc|run|miri} [labels...] [-- args...]" >&2
 }
 
 # The remote-executing operations need .kiln.bazelrc: kiln writes it on every

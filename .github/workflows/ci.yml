@@ -515,6 +515,7 @@ jobs:
           python3 scripts/test_ci_artifact_provenance.py
           python3 scripts/test_ci_report_failed_tests.py
           python3 scripts/test_toolchain_pin.py
+          python3 scripts/test_append_vec_miri.py
           GATES
 
   # An unused dependency is a real cost: it enlarges the locked graph that

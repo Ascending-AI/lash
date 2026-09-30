@@ -1,0 +1,5 @@
+# AppendVec's interpreter toolchain, separate from the stable build pin.
+[toolchain]
+channel = "nightly-2026-09-29"
+components = ["miri", "rust-src"]
+profile = "minimal"
