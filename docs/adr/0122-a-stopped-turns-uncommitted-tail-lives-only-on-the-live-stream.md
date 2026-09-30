@@ -2,33 +2,24 @@
 
 ## Status
 
-Accepted 2026-09-29 (FIG-4113). A stopped turn publishes its terminal only
-after the accepted commit. It builds on
-the stop semantics of
-[ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md),
-the bounded live replay of
-[ADR 0002](0002-session-observation-uses-cursors-and-bounded-live-replay.md)
-and the `CheckpointRecorded` marker that FIG-4114 added to the turn
-activity lane.
-
-Sam's ruling on audit G14 (2026-09-29) binds this decision:
-
-- Checkpoints are frequent. A host that wants output streamed after the last
-  checkpoint consumes the live stream and may resubmit it as ordinary input.
-  Lash keeps no durable record of it and never feeds it back.
+Accepted.
 
 ## Context
 
-A turn checkpoints at every protocol iteration. The host receives the
-uncommitted tail live and can identify it as everything after the last
-`CheckpointRecorded` marker.
+A turn checkpoints at protocol iteration boundaries. A host can want the
+streamed tail after the last checkpoint when an Immediate stop backtracks.
+The committed graph and the live observation stream have different retention
+contracts; the host needs an explicit marker between their contents.
+
+The stop modes follow [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md),
+and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors-and-bounded-live-replay.md).
 
 ## Decision
 
 1. **Lash keeps no uncommitted tail.** An `Immediate` stop backtracks to the
    last checkpoint, and an `AfterStep` stop waits for the step's checkpoint,
-   so nothing is uncommitted (ADR 0039). After an `Immediate` stop the next
-   turn's context is the last checkpoint. Nothing a stopped turn streamed
+   so its completed step is committed (ADR 0039). After an `Immediate` stop
+   the next turn's context is the last checkpoint. Nothing a stopped turn streamed
    after it enters the graph, `AssistantOutput`, history or the store.
 
 2. **The live stream is the contract.** Every host-visible observation is
@@ -37,7 +28,7 @@ uncommitted tail live and can identify it as everything after the last
    one, never dropped, including across a cancellation: a stopped turn
    delivers every delta it queued. The observer holds that backlog for as
    long as the host's sink takes to drain it; a sink that blocks delays the
-   turn's `published()` barrier, as it always did.
+   turn's `published()` barrier, until the backlog drains.
 
 3. **The tail is found by the marker.** The tail of an `Immediate` stop is
    the prose and reasoning deltas after the turn's last
@@ -70,29 +61,6 @@ uncommitted tail live and can identify it as everything after the last
    iteration, and `RootTerminalCause` (including `SubstrateLost {
    cancelled_by }` and `Refused`) carry why a turn or root stopped.
 
-## What is deleted
-
-With no shims, and with shapes changed in place under the version freeze
-(the SQLite 99 and PostgreSQL 141 DDL versions stay):
-
-- the `TurnCaptureStore` segment, its in-memory, SQLite and PostgreSQL
-  implementations and reducer, and its four tables on each backend;
-- the model-call and tool-attempt capture writers, the capture base and its
-  advance, the seal, `RuntimeCommit.stopped_partial` and the
-  capture-watermark on recorded outcomes;
-- the progress sink (`AttemptContext::progress` and its traits);
-- the provider `ToolInputStart`, `ToolInputDelta` and `ToolInputEnd` events;
-- `StoppedPartial`, `StoppedPartialAvailable`, `ToolOutputProgress` and
-  every event, protocol and host mirror of them, including the host reads
-  and the workbench panel;
-- the lost-root seal and its announcement;
-- the capture store errors (with their arms in `StoreError::is_transient`,
-  which attachment retries still use) and
-  `RuntimeErrorCode::TransientCaptureWrite`;
-- the observer's discard of lagging deltas on a cancellation.
-
-The store once more has the ten segments ADR 0112 names.
-
 ## Consequences
 
 - A host that wants a stopped turn's tail collects it while it streams. A
@@ -107,3 +75,22 @@ The store once more has the ten segments ADR 0112 names.
   (merge across a cancellation, an alternating-block backlog, hold and
   release, abandon) enforce decisions 2 and 5.
 - `docs/observing-turns.md` states the contract for hosts.
+
+## Implementation
+
+- `crates/lash-core/src/runtime/turn_observer.rs:55` sets the lag budget;
+  `:433` merges only matching deltas at the lagging tail of a lane;
+  `:189` holds, releases and abandons terminal observations.
+- `crates/lash-core/src/runtime/turn_loop/commit.rs:349` abandons held
+  terminals on a failed commit. Its accepted-commit path releases them.
+- `crates/lash-core/src/runtime/observation/replay.rs:22` defines the
+  configurable default event and time window.
+- `crates/lash/src/send/follow.rs:52` bounds the pre-adoption buffer.
+- `crates/lash-core/tests/runtime/stop_publication.rs` pins terminal
+  publication; `crates/lash-core/src/runtime/turn_observer/tests.rs` pins
+  backlog merge, hold, release and abandon.
+
+A separate durable tail would need another write and retention contract for
+output the host already receives live. This design keeps the last committed
+checkpoint as the next turn's context and lets the host choose whether to
+resubmit its live tail.

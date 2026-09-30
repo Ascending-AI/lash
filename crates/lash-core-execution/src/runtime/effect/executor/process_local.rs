@@ -269,7 +269,7 @@ impl ProcessLocalExecution {
                     await_terminal().await?
                 };
                 // Acquire, then return: the return is what the local executor
-                // records (ADR 0124 §8.3). A direct await holds no consumer
+                // records (ADR 0124 §4). A direct await holds no consumer
                 // hold, so a child pruned mid-wait answers the typed
                 // source-gone failure.
                 let output = delivered_output(attachments.as_ref(), receiver, output).await?;
@@ -315,7 +315,7 @@ impl ProcessLocalExecution {
                         {
                             // Acquire before the key resolves: the waiter's
                             // journal records the value the resolution carries
-                            // (ADR 0124 §8.2).
+                            // (ADR 0124 §4).
                             // A store fault leaves the wait open rather than
                             // recording a failure the fault did not decide:
                             // the redriven turn re-arms and acquires again.

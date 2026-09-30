@@ -2,32 +2,19 @@
 
 ## Status
 
-Accepted 2026-09-30 (FIG-4215). Amends ADR 0028 (the lifecycle layer of
-attachments), ADR 0049 (runtime-internal session ids), ADR 0107 (process
-identities) and ADR 0113 (the referrer vocabulary and the cleanup executor).
+Accepted.
 
 ## Context
 
-An attachment's bytes were kept alive by a manifest row keyed by
-`(session_id, attachment_id)`, with an optional owner (a turn or a process)
-and a `committed_at` stamp. Process runtimes had no session, so lash minted
-synthetic ones (an environment session and a turn session per process), admitted a
-catalog row for each, and deleted them again at prune. A process's
-attachments were rows of that synthetic session. Liveness was a mix of
-edges, age (an uncommitted intent older than a grace window was forgotten)
-and owner death (a process-owned intent died with its process, which the
-root set had to prove through a registry it was wired to).
+Attachment bytes live outside the store that records their users. Session
+history, execution journals, process records and uploads have different
+lifetimes. A receiver needs its own hold before recording a delivered value,
+so the producer's lifetime cannot determine whether the receiver can read it.
 
-That model had three faults. A process runtime pretended to be a session,
-so every interface a process crossed carried a session id that named
-nothing. Liveness had three sources, two of them clocks and proofs outside
-the store that held the edge. And a value delivered from one runtime to
-another carried stored attachments whose edges belonged to the producer, so
-the consumer held the bytes only as long as the producer happened to.
-
-ADR 0113 already gives lash one vocabulary for "who holds this": a
-referrer, a guarded claim, a permanent fence, and a cleanup obligation the
-executor resolves. This decision puts attachments on it.
+The referrer, guarded claim, permanent fence and cleanup obligation of
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) give
+attachments the same lifecycle vocabulary as artifacts. The store holding
+those claims owns the root predicate.
 
 ## Decision
 
@@ -44,7 +31,7 @@ Four kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
 |---|---|---|---|
 | `execution` (journal `j`) | a put in a session runtime bound to `j`; a delivery into any scope that is not a process | `AwaitJournal` | `j` settles (ADR 0113). |
 | `process_record` (`p`) | every put in `p`'s runtime; every delivery into `p`; `p`'s terminal output and its start input | none | Prune's `Ended` record. |
-| `session` (`s`) | the boundary commit, on the committed ids; an enqueue into `s` | none | Session deletion arms `AwaitSessionGraphRetired`; the executor ends it once `s` is deleted and no untombstoned graph node of `s` remains, so a fork keeps what its retained history names (FIG-653). |
+| `session` (`s`) | the boundary commit, on the committed ids; an enqueue into `s` | none | Session deletion arms `AwaitSessionGraphRetired`; the executor ends it once `s` is deleted and no untombstoned graph node of `s` remains, so a fork keeps what its retained history names. |
 | `upload` (`s`, `u`) | a put in a session runtime with no execution bound | `AwaitUploadExpiry { expires_at_ms }` | `expires_at_ms` passes, or `s` is deleted or absent. Each put mints a fresh `u`, so one expiry never fences a later upload. |
 
 No other kind holds an attachment, and an attachment end carries nothing:
@@ -131,7 +118,7 @@ terminal output needs the row anyway.
   one resolver above. The key is the invocation's `AwaitEventKey` with wait
   identity `Custom { key: "process-await:<process id>:<effect id>" }`: the
   effect id makes two awaits of the same child from one scope two waits.
-  The wait races the turn cancel and the process cancel as before. A turn
+  The wait races turn cancellation and process cancellation. A turn
   stop that wins releases that wait as cancelled, so the await then arms a
   second attach on `process-await:<process id>:<effect id>:after-turn-cancel`
   and reads the cancelled process's terminal from it.
@@ -156,7 +143,7 @@ terminal output needs the row anyway.
 - **The boundary commit** acquires `Session(s)` on the committed ids, all or
   nothing. The committed ids are every stored attachment the committed
   history names: tool outputs, omitted calls, message parts, and each
-  retained output (FIG-1643). A tool result's retained block is read from
+  retained output. A tool result's retained block is read from
   its message part. A code cell's retained prints and finish value live in
   protocol records the commit cannot read, so the turn driver notes them
   from the cell's recorded response, and a replay notes the same ones.
@@ -184,8 +171,8 @@ every runtime the host builds, session or process, inherits it.
 A process is not a session. Its runtime, `ProcessRuntimeContext`, is built
 from the host's ports, the environment its start captured and the
 controller the worker admitted; it has no session state, no catalog row and
-no plugin session of a fake session. The synthetic sessions, their
-admissions and their prune-time deletion are gone.
+no plugin session of a fake session. Process construction and prune operate
+on the process id without admitting or deleting a synthetic session.
 
 Interfaces both kinds of runtime cross are keyed by `RuntimeOwner`
 (`Session(s)` or `Process(p)`, displayed `session:<id>` and
@@ -213,10 +200,38 @@ a stand-in for its own id.
   set needs no registry, no clock and no proof of owner death.
 - Every delivery path acquires before it records; a lost race is a typed
   failure the receiver records, not bytes that vanish later.
-- Process runtimes no longer mint, admit or delete sessions, and nothing a
+- Process runtimes hold attachments under their own ids, and nothing a
   process holds is keyed by a session it does not have.
 - A turn's scratch puts that nothing commits are reclaimed without an age
   window.
-- The shapes changed in place: the tool-intent identity encoding, the
-  submissions column and the attachment tables have no older reader to
-  upcast for.
+- The pre-1.0 version freeze changes shapes in place; ADR 0115 governs
+  upgrade read contracts.
+
+## Implementation
+
+- `crates/lash-core-store/src/artifact_referrer.rs:116` selects the four
+  attachment-holding kinds; `crates/lash-core-store/src/attachments.rs:1651`
+  chooses the claim before a put.
+- `crates/lash-core-store/src/store/attachment_referrers.rs:474` defines
+  the eight verbs. `crates/lash-sqlite-store/src/attachments.rs:694` and
+  `crates/lash-postgres-store/src/postgres/attachments.rs:595` implement them.
+- `crates/lash-core-execution/src/runtime/attachment_delivery.rs:36` chooses
+  the receiver's claim; `:138`, `:153` and `:170` acquire terminal and start
+  input references.
+- `crates/lash-restate/src/process_attach.rs:119` acquires before resolving
+  the wait. `crates/lash-core-execution/src/runtime/process/start_staging.rs:456`
+  acquires the start input after registration.
+- `crates/lash-sqlite-store/src/persistence/turn_input.rs:971` and
+  `crates/lash-postgres-store/src/postgres/runtime_persistence/turn_input.rs:513`
+  acquire queued input in the acceptance transaction.
+- `crates/lash-sqlite-store/src/persistence/session_commit.rs:853` and
+  `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:1028`
+  acquire committed ids in the boundary transaction.
+- `crates/lash-core/src/runtime/process_runtime.rs:139` builds a process-owned
+  runtime and attachment store.
+
+Using age as the root predicate would forget a slow but live producer.
+Consulting a process registry would add an independent owner-death proof to
+attachment collection. Holding delivered bytes only through the producer
+would let prune remove a value the receiver has recorded. Exact edges and
+pending writes avoid those lifetime dependencies.

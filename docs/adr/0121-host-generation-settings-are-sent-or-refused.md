@@ -2,41 +2,14 @@
 
 ## Status
 
-Accepted 2026-09-29 (FIG-4120).
-Amends [ADR 0026](0026-model-capability-is-host-supplied-data.md) (the
-capability shape and where defaults live),
-[ADR 0070](0070-cache-capabilities-are-host-supplied-data.md) (no URL-derived
-choice survives) and
-[ADR 0074](0074-generation-intent-is-session-policy-and-its-fate-is-reported.md)
-(refusal instead of remapping, shared pinning, the new receipt rows).
-
-The rulings on audit G9 (Sam, 2026-09-29) bind this decision:
-
-1. **Q1: refuse.** A setting the call's model or wire cannot carry is refused,
-   for route settings and session-wide `GenerationOptions` alike. Nothing is
-   remapped.
-2. **Q2: no invented defaults.** Lash's 32,768-token default cap is gone.
-   With no cap set, none is sent; a wire that requires one refuses the call.
-3. **Effort matches exactly.** No clamping to a "nearest" effort, no aliases,
-   no case folding.
-4. **Whole-hog and the version freeze.** The old path is deleted with no shims
-   or dual paths, and shapes change in place.
+Accepted.
 
 ## Context
 
-Lash accepted host settings it then dropped without a word. A validated
-`Effort("high")` on any OpenAI-compatible route whose reasoning format was the
-default `none` vanished from the request. That covered direct OpenAI Chat
-Completions, Azure and every compatible gateway. A `Disabled` selection with
-the `Omit` encoding sent nothing. Google sent `temperature: 0` when the host
-set none and ignored pinned sampling. Anthropic and Google always sent a
-32,768-token cap nobody asked for. Codex dropped every sampling control and
-sent OpenRouter-shaped reasoning fields on the Responses wire. Four providers
-each resolved `ReasoningSelection × ReasoningCapability` their own way, and
-gave the same `Native` and `ToggleFalse` tokens different meanings.
-
-ADR 0074 made these omissions observable after the call. A receipt arrives too
-late, though, to stop an uncapped or mis-sampled call.
+A host's generation settings are execution intent. An adapter that silently
+drops a setting can issue a call with a different cost or sampling contract.
+A receipt after the call cannot prevent that mismatch. Model capability and
+wire representability therefore need one exact resolution before transport.
 
 ## Decision
 
@@ -97,14 +70,12 @@ Off also requires the capability's `disable`.
 
 A route with no dialect refuses an explicit selection with
 `reasoning_encoding_unrepresentable`, and `ProviderDefault` sends nothing. No
-URL selects a dialect. Lash does not guess `OpenAi` for an unknown gateway:
-Gateways can ignore wrong-shape fields, so guessing a dialect can move an
-unsupported selection past local validation without honoring it.
+URL selects a dialect. Gateways can ignore wrong-shape fields, so guessing a
+dialect can move an unsupported selection past local validation without
+honoring it.
 
-The pluggable `ReasoningWireEncoder` / `ReasoningWireFormat` machinery is
-deleted. No host used a custom encoder, and a custom encoder could not
-deserialize, so it could not cross the remote wire. Exotic shapes such as
-`enable_thinking` belong in raw passthrough (FIG-4121), not in a trait object.
+A closed, serializable dialect travels with the host's route configuration.
+A custom trait object cannot supply the same durable and remote contract.
 
 **Generation options resolve once, against the wire.**
 `resolve_generation_policy` takes the request, the provider options and a
@@ -122,7 +93,7 @@ call. It refuses everything else before the adapter does any I/O:
 - **Seed and stop sequences** are refused on wires with no field: Anthropic
   and Responses (seed), Responses and Codex (stop), and Codex for both.
 - **`parallel_tool_calls`** is a typed `Option<bool>` on `GenerationOptions`
-  and replaces the hard-coded values. It is sent on Chat (with tools), on
+  and replaces implicit adapter choices. It is sent on Chat (with tools), on
   Responses and Codex, and on Anthropic as
   `tool_choice.disable_parallel_tool_use` (with tools). Google has no such
   control and refuses it.
@@ -133,8 +104,8 @@ the effort-validation codes. All are `Forbidden` for retry.
 
 Lash adds only mechanics to the wire. `store: false` and
 `include: ["reasoning.encrypted_content"]` stay, because stateless replay
-needs them. The `text.verbosity: "medium"` default and the hard-coded
-`parallel_tool_calls` are gone.
+needs them. Verbosity and parallel-call defaults are left to the provider
+when the host sets none.
 
 **Validation precedes I/O.** Codex resolves every setting before its
 credential manager may refresh a token. Google resolves before the credential
@@ -144,28 +115,45 @@ refresh, the project lookup and any attachment upload.
 what the host asked for. Each adapter reports, from the branch that wrote it,
 what it put on the wire, through `ResolvedGenerationPolicy::receipt`. The
 receipt is not read back off the body. `Applied` means lash sent the value,
-never that the provider complied. The receipt gains four rows: `reasoning`,
+never that the provider complied. The receipt includes `reasoning`,
 `parallel_tool_calls`, `thinking_summary` and `thinking_visibility`.
 
-`OmittedSamplingPinned` is gone, because pinning now refuses the call.
-`OmittedUnsupported` survives only on the `cache` row. That row reports
+`OmittedUnsupported` applies only to the `cache` row. That row reports
 prompt-cache breakpoints placed by the protocol, not a host setting.
 
-**Recorded shapes of the old path are refused.** `ReasoningCapability` and its
+**Recorded policy shapes are strict.** `ReasoningCapability` and its
 remote mirror deny unknown fields, so a persisted `default_effort`, `aliases`
 or encoded `disable` fails to load rather than being ignored. An `OpenAiCompat`
-naming `reasoning_format` is refused the same way. A recorded
-`omitted_sampling_pinned` outcome no longer deserializes.
+naming `reasoning_format` is refused the same way. The receipt decoder
+refuses an `omitted_sampling_pinned` outcome.
 
 ## Consequences
 
 - A mixed-model session that sets a session-wide temperature or seed must
   clear it for models or wires that cannot carry it
-  (`GenerationOverlay::Replace`). That is the cost of refusing, and the
-  trade Q1 accepted: a receipt cannot un-send a call.
+  (`GenerationOverlay::Replace`). A receipt cannot un-send a call.
 - Hosts on Anthropic set `ProviderOptions.max_output_tokens` or a request cap.
-- Hosts that relied on a URL-selected dialect choose a preset or set
+- Hosts choose a preset or set
   `OpenAiCompat.reasoning`.
-- Replay-route ownership is unchanged. Opaque reasoning, tool-call and
+- Replay-route ownership is exact. Opaque reasoning, tool-call and
   response-item state is reusable only on the exact minting route, and dialect
   equality never makes two replay routes equal.
+
+## Implementation
+
+- `crates/lash-sansio/src/llm/capability.rs:434` resolves reasoning intent.
+- `crates/lash-core-llm/src/provider/options.rs:299` resolves generation
+  options; `:389` joins requested provenance to adapter emission evidence.
+- `crates/lash-provider-google/src/request.rs:369` declares its wire and
+  maps the selected reasoning dialect.
+- `crates/lash-provider-anthropic/src/request.rs:434` declares its wire;
+  `crates/lash-provider-anthropic/src/policy.rs:27` maps reasoning.
+- `crates/lash-provider-openai/src/codex.rs:224` validates before credential
+  access; `crates/lash-provider-openai/src/responses.rs:43` builds the
+  Responses request from resolved policy.
+- `crates/lash-core-llm/src/provider/tests/generation_policy_tests.rs` and
+  the providers' generation tests pin refusal and emission.
+
+The pre-1.0 freeze changes these shapes in place. Exact effort matching and
+refusal avoid guessing a substitute sampling contract. Provider defaults stay
+provider-owned when the host omits a setting.

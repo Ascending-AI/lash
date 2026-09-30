@@ -454,7 +454,7 @@ async fn stage_and_register(
             .await?;
     }
     // The start input is held through the row the registration just minted
-    // (ADR 0124 §8.6): record, then acquire. A replay of this step answers
+    // (ADR 0124 §4): record, then acquire. A replay of this step answers
     // `Existing` and acquires again; an acquisition is idempotent.
     if let Some(ports) = stores.ports() {
         crate::runtime::attachment_delivery::acquire_start_input(

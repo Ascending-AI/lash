@@ -667,7 +667,7 @@ impl ProcessCapability {
         self.mark_current_process_sync_needed(current, session_id);
         // The record holds what the output delivers before the registry
         // records it; an output whose source was swept is refused with
-        // nothing recorded (ADR 0124 §8.5).
+        // nothing recorded (ADR 0124 §4).
         crate::runtime::attachment_delivery::acquire_completion_output(
             current
                 .host

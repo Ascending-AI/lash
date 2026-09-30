@@ -133,7 +133,7 @@ fn process_record_claim(process_id: &crate::ProcessId) -> Result<ReferrerClaim, 
 
 /// The terminal a process's own run publishes: its record acquires every
 /// stored attachment the output delivers before the registry records it
-/// (ADR 0124 §8.5). An output whose source was already swept is published as
+/// (ADR 0124 §4). An output whose source was already swept is published as
 /// the typed source-gone failure instead.
 pub async fn publish_process_terminal(
     attachments: &dyn AttachmentReferrers,
@@ -165,7 +165,7 @@ pub async fn acquire_completion_output(
 }
 
 /// The start input a registered process holds through its record
-/// (ADR 0124 §8.6): acquired after the registration committed, since the
+/// (ADR 0124 §4): acquired after the registration committed, since the
 /// id is minted there. A missing upload refuses the step.
 pub async fn acquire_start_input(
     attachments: &dyn AttachmentReferrers,

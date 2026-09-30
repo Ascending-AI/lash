@@ -991,7 +991,7 @@ pub(crate) async fn complete_process_outcome(
     prelude: Vec<lash_core::ProcessEventAppendRequest>,
 ) -> Result<ProcessAwaitOutput, PluginError> {
     // The record holds what its terminal delivers before the registry
-    // records it (ADR 0124 §8.5); a swept source publishes the typed
+    // records it (ADR 0124 §4); a swept source publishes the typed
     // source-gone failure instead.
     let proposed = lash_core::runtime::attachment_delivery::publish_process_terminal(
         attachments,
