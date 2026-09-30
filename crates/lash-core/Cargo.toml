@@ -60,7 +60,6 @@ futures-util = { workspace = true }
 lash-conformance = { workspace = true }
 chrono = { workspace = true }
 lash-core = { package = "lash-internal-core", path = ".", features = ["testing"] }
-insta = "1"
 proptest = "1"
 # FIG-3580: fixtures layer over a SQLite memory backend's effect host; the
 # store depends on lash-core-execution, not on this crate (ADR 0102).

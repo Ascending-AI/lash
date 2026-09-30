@@ -9252,6 +9252,12 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_33ddcd6f",
+      "package": "lash-internal-lashlang-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_3a442a97",
       "package": "lash-internal-lashlang-runtime"
     },
@@ -9535,12 +9541,6 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_f2d77020",
-      "package": "lash-internal-lashlang-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_f4a8f62b",
       "package": "lash-internal-lashlang-runtime"
     },
     {
@@ -11485,6 +11485,14 @@
     },
     {
       "features": [
+        "synthetic-next"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_21156f63",
+      "package": "lash-internal-protocol-rlm"
+    },
+    {
+      "features": [
         "default",
         "synthetic-next",
         "testing"
@@ -11559,14 +11567,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_7c47c1e8",
-      "package": "lash-internal-protocol-rlm"
-    },
-    {
-      "features": [
-        "synthetic-next"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_94421e88",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -11743,19 +11743,19 @@
     },
     {
       "features": [
+        "synthetic-next"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_5ee4c4cf",
+      "package": "lash-internal-protocol-rlm"
+    },
+    {
+      "features": [
         "default",
         "testing"
       ],
       "kind": "unit-test",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_78568fbe",
-      "package": "lash-internal-protocol-rlm"
-    },
-    {
-      "features": [
-        "synthetic-next"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_f83a6ae2",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -21467,12 +21467,6 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-vm-client:lash-vm-client__fv_bdac56ef",
-      "package": "lash-internal-vm-client"
-    },
-    {
-      "features": [],
-      "kind": "lib",
       "label": "//crates/lash-vm-client:lash-vm-client__fv_da2d97de",
       "package": "lash-internal-vm-client"
     },
@@ -21480,6 +21474,14 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-vm-client:lash-vm-client__fv_da2d97de",
+      "package": "lash-internal-vm-client"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-vm-client:lash-vm-client__fv_e03b491d",
       "package": "lash-internal-vm-client"
     },
     {
@@ -25845,7 +25847,6 @@
         "async-trait",
         "chrono",
         "futures-util",
-        "insta",
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-effect",
@@ -28250,7 +28251,6 @@
         "serde_json",
         "sha2",
         "tempfile",
-        "thiserror",
         "toml"
       ],
       "doc": "//crates/lash-vm-worker:lash-vm-worker__doc",

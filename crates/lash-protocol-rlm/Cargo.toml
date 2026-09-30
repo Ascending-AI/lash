@@ -32,7 +32,6 @@ lash-vm-client = { workspace = true }
 lash-vm-worker = { workspace = true, optional = true, features = ["testing"] }
 lash-vm-broker = { workspace = true }
 lash-vm-protocol = { workspace = true }
-tokio-util = { workspace = true }
 lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
@@ -52,6 +51,7 @@ jsonschema = { workspace = true, default-features = false }
 tokio = { workspace = true, features = ["rt", "sync"] }
 
 [dev-dependencies]
+lash-vm-client = { workspace = true, features = ["testing"] }
 # Kernel tests whose effects need an engine run on the Restate server double
 # (FIG-3668, D1 PR-S2). A dev-dependency cycle where the double links this
 # crate: only types from below the cycle cross it.

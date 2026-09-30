@@ -2097,7 +2097,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures-util",
- "insta",
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-effect",
@@ -2887,7 +2886,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror",
  "toml",
 ]
 
