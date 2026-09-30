@@ -64,6 +64,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 
 bazel_test() {
+  local events code=0
+  events=$(mktemp)
   local startup=()
   if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
     startup=(--output_user_root="${BAZEL_OUTPUT_USER_ROOT}")
@@ -71,6 +73,7 @@ bazel_test() {
   # shellcheck disable=SC2086
   bazel "${startup[@]}" test \
     ${BAZEL_SHARED_CACHE_FLAGS} \
+    --build_event_json_file="$events" \
     --nocache_test_results \
     --modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache,TestRunner=+no-remote-exec \
     --local_test_jobs=1 \
@@ -85,7 +88,23 @@ bazel_test() {
     --test_env=LASH_S3_ACCESS_KEY \
     --test_env=LASH_S3_SECRET_KEY \
     --test_env=LASH_CROSS_BACKEND_CASES \
-    "$@"
+    "$@" || code=$?
+  if ((code == 0)); then
+    python3 tools/bazel/libtest_selection.py bazel "$events" || code=$?
+  fi
+  rm -f "$events"
+  return "$code"
+}
+
+cargo_test() {
+  local log code=0
+  log=$(mktemp)
+  "$@" 2>&1 | tee "$log" || code=$?
+  if ((code == 0)); then
+    python3 tools/bazel/libtest_selection.py cargo "$log" "$@" || code=$?
+  fi
+  rm -f "$log"
+  return "$code"
 }
 
 labels() {
@@ -192,7 +211,11 @@ render_cargo_suite() {
     suite_has_flag "$flags" include-ignored && cmd+=(--run-ignored all)
     [ -n "$filter" ] && cmd+=(-E "test(${filter})")
   fi
-  "${cmd[@]}"
+  if [ "$runner" = cargo-test ]; then
+    cargo_test "${cmd[@]}"
+  else
+    "${cmd[@]}"
+  fi
 }
 
 run_uniform_store_suite() {
@@ -231,9 +254,9 @@ case "${suite}" in
         --test_arg=a_mismatched_version_stamp_is_reported_without_a_column_diff \
         //crates/lash-postgres-store:schema_drift__test
     else
-      cargo test -p lash-internal-postgres-store --locked --lib \
+      cargo_test cargo test -p lash-internal-postgres-store --locked --lib \
         committed_shape_artifact_matches_the_ddl_artifact
-      cargo test -p lash-internal-postgres-store --locked --test schema_drift \
+      cargo_test cargo test -p lash-internal-postgres-store --locked --test schema_drift \
         a_mismatched_version_stamp_is_reported_without_a_column_diff
     fi
     ;;
@@ -271,12 +294,12 @@ case "${suite}" in
         --test_sharding_strategy=disabled \
         //crates/lash-restate:lash-restate__unit_test
     else
-      cargo test -p lash-internal-postgres-store --locked
+      cargo_test cargo test -p lash-internal-postgres-store --locked
       # The synthetic successor's suites (FIG-4262), the Cargo spelling of
       # the feature-lane variants the generated label file adds above.
-      cargo test -p lash-internal-postgres-store --locked --no-default-features \
+      cargo_test cargo test -p lash-internal-postgres-store --locked --no-default-features \
         --features synthetic-next
-      cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
+      cargo_test cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
     fi
     ;;
 
@@ -285,7 +308,7 @@ case "${suite}" in
       # shellcheck disable=SC2046
       bazel_test $(labels s3)
     else
-      cargo test -p lash-internal-s3-store --locked
+      cargo_test cargo test -p lash-internal-s3-store --locked
     fi
     ;;
   *)

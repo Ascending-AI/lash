@@ -485,6 +485,7 @@ jobs:
           python3 scripts/test_dev_test.py
           python3 scripts/test_test_batch_runner.py
           python3 scripts/test_test_xml.py
+          python3 scripts/test_filtered_store_gates.py
           python3 scripts/test_launcher_test_sandbox.py
           python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py

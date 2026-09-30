@@ -6,8 +6,10 @@
 # whole run request to do 0.1 s of work. This runs the test unchanged -- same
 # argv, stdin, cwd and environment, output still streamed to test.log -- keeps
 # a copy of its output, and writes the report itself unless the test already
-# did (`test_batch_runner.sh` writes one suite per member). The exit code is
-# the test's own.
+# did (`test_batch_runner.sh` writes one suite per member). Test failures
+# retain their exit code; empty explicit libtest selections also fail. Each
+# shard validates discovery for the whole binary, while the store gate checks
+# observed execution across the shard union.
 #
 # Signals: test-setup.sh forwards a timeout or interrupt to this whole process
 # group, so the test receives it directly. This script and the output copy
@@ -15,7 +17,7 @@
 set -uo pipefail
 
 xml=${XML_OUTPUT_FILE:?the Bazel test runner sets XML_OUTPUT_FILE}
-log=$(mktemp) || exec "$@"
+log=$(mktemp) || exit 1
 trap 'rm -f "$log"' EXIT
 for signal in TERM INT HUP; do
     trap : "$signal"
@@ -36,6 +38,10 @@ for ((i = 0; i < 200; i++)); do
     kill -0 "$copier" 2>/dev/null || break
     sleep 0.01
 done
+
+if ((code == 0)) && [[ ! -e "$xml" ]]; then
+    python3 "${BASH_SOURCE[0]%/*}/libtest_selection.py" runner "$log" "$@" || code=$?
+fi
 
 if [[ ! -e "$xml" ]]; then
     name=${TEST_BINARY#./}
