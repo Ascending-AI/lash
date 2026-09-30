@@ -3,7 +3,7 @@ use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 pub mod artifact_cleanup;
-pub mod attachment_manifest;
+pub mod attachment_referrers;
 pub mod catalog;
 mod checkpoint;
 pub mod namespace;
@@ -75,11 +75,11 @@ pub use admission_plan::{
     require_open_command, turn_input_state_after_admission,
 };
 pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
-pub use attachment_manifest::{
+pub use attachment_referrers::{
     AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
     AttachmentCondemnationPhase, AttachmentCondemnationProvenance, AttachmentCondemnationRecord,
     AttachmentCondemnationSettlement, AttachmentDeleteArming, AttachmentDeleteStallReason,
-    AttachmentManifest, AttachmentSettlementOutcome, AttachmentSweepGeneration, AttachmentWrite,
+    AttachmentReferrers, AttachmentSettlementOutcome, AttachmentSweepGeneration, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken,
     MAX_ATTACHMENT_DELETE_ATTEMPTS, SessionReferrerState, StoredAttachmentCondemnation,
     decode_attachment_condemnation_record,
@@ -1711,7 +1711,7 @@ pub trait FleetFormatStore: Send + Sync {
 /// §1).
 ///
 /// `Arc<dyn RuntimeStore>` implements every store segment —
-/// [`AttachmentManifest`] (the attachment write-ahead manifest),
+/// [`AttachmentReferrers`] (the attachment write-ahead manifest),
 /// [`SessionCatalogStore`] (admission, lookup, enumeration, forks and
 /// deletion), [`SessionCommitStore`] (atomic head commits, metadata and
 /// parks), [`SessionHistoryStore`] (frame windows and paged history),
@@ -1738,7 +1738,7 @@ pub trait FleetFormatStore: Send + Sync {
 /// the norm.
 pub trait RuntimeStore:
     FleetFormatStore
-    + AttachmentManifest
+    + AttachmentReferrers
     + SessionCatalogStore
     + SessionCommitStore
     + SessionHistoryStore
@@ -1752,7 +1752,7 @@ pub trait RuntimeStore:
 
 impl<T> RuntimeStore for T where
     T: FleetFormatStore
-        + AttachmentManifest
+        + AttachmentReferrers
         + SessionCatalogStore
         + SessionCommitStore
         + SessionHistoryStore

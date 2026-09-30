@@ -967,8 +967,10 @@ fn decorator_surface_covers_every_component_trait_method() {
     const UNCHANGED_SEGMENT_DEFAULTS: &[&str] = &[];
 
     let store_mod = include_str!("mod.rs");
-    let mut declared =
-        declared_methods(include_str!("attachment_manifest.rs"), "AttachmentManifest");
+    let mut declared = declared_methods(
+        include_str!("attachment_referrers.rs"),
+        "AttachmentReferrers",
+    );
     declared.extend(declared_methods(
         include_str!("catalog.rs"),
         "SessionCatalogStore",

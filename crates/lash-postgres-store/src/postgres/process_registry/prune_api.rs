@@ -129,10 +129,11 @@ pub(super) async fn prune_terminal_processes(
 
     // The candidates stay locked from selection through the prune. The same
     // transaction fences each pruned process record and writes its cleanup.
-    let process_ids = prunable
+    let mut process_ids = prunable
         .iter()
         .map(|record| record.id.clone())
         .collect::<Vec<_>>();
+    process_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
     tx.commit().await.map_err(plugin_sqlx_error)?;
     Ok(report)

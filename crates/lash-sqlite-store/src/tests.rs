@@ -592,7 +592,7 @@ async fn live_attachment_refs_reads_the_catalog() {
             .expect("claim"),
         };
         let lash_core_execution::AttachmentWriteFence::Granted(permit) =
-            lash_core_execution::AttachmentManifest::begin_attachment_write(
+            lash_core_execution::AttachmentReferrers::begin_attachment_write(
                 &store,
                 &(intent.clone()),
             )
@@ -601,10 +601,12 @@ async fn live_attachment_refs_reads_the_catalog() {
         else {
             panic!("a free digest must grant its writer");
         };
-        lash_core_execution::AttachmentManifest::complete_attachment_write(&store, &intent, permit)
-            .await
-            .expect("stamp upload evidence");
-        lash_core_execution::AttachmentManifest::acquire_attachment_refs(
+        lash_core_execution::AttachmentReferrers::complete_attachment_write(
+            &store, &intent, permit,
+        )
+        .await
+        .expect("stamp upload evidence");
+        lash_core_execution::AttachmentReferrers::acquire_attachment_refs(
             &store,
             &lash_core_execution::ReferrerClaim::unguarded(
                 lash_core_execution::ArtifactReferrer::Session(

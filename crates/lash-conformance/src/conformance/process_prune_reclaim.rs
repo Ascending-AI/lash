@@ -1,382 +1,55 @@
-//! Tombstone-reclaim conformance for the *process-prune* delete path.
-//!
-//! The session-delete path has its own reclaim cases in
-//! [`session_store_factory_vacuum`](super::session_store_factory_vacuum). Prune
-//! is a second, independent delete path — SQL backends implement it as a batch
-//! delete — so the reclaim law has to be asserted through it as well. Both cases
-//! below use the same observation trick: reads hide tombstones, so a stale
-//! handle's session-scoped `vacuum` count is the only backend-agnostic way to
-//! tell a physically reclaimed row from a merely hidden one. A reclaiming prune
-//! or delete leaves nothing for that vacuum to remove.
-
+//! Process retention leaves independent session history and checkpoint roots alive.
 use super::DeploymentViewExt as _;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
-use pretty_assertions::assert_eq;
-use std::sync::Arc;
-
 use super::session_delete_blob_reclaim::{
     SessionDeleteBlobProbe, commit_content_aliased_checkpoint_roots,
 };
+use lash_sansio::{ProcessId, SessionId};
+use pretty_assertions::assert_eq;
+use std::sync::Arc;
 
-/// Process pruning must reclaim a two-session checkpoint batch even when root
-/// B's exact bytes are an opaque component of root A and B sorts first.
-///
-/// Integrator class (ADR 0051): **conformance-suite embedders** run this law
-/// against custom process registries and session-store backends.
-pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture establishes each result"
+)]
+pub async fn process_prune_preserves_independent_session_checkpoint_roots(
     backend: &str,
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     probe: Arc<dyn SessionDeleteBlobProbe>,
 ) {
     let process_id = register_process(registry.as_ref()).await;
-    let [aliased_session_id, dependent_session_id] =
-        crate::process_runtime_session_ids(&process_id);
-    let roots = commit_content_aliased_checkpoint_roots(
-        &factory,
-        &dependent_session_id,
-        &aliased_session_id,
-    )
-    .await;
-    assert!(
-        roots.aliased_root.as_str() < roots.dependent_root.as_str(),
-        "{backend}: the fixture must put aliased root B first in hash order"
-    );
+    let dependent = SessionId::from("prune-independent-dependent");
+    let aliased = SessionId::from("prune-independent-aliased");
+    let roots = commit_content_aliased_checkpoint_roots(&factory, &dependent, &aliased).await;
+    assert!(probe.blob_exists(&roots.aliased_root).await);
+    assert!(probe.blob_exists(&roots.dependent_root).await);
+    probe.fail_next_blob_delete().await;
+    prune_completed_process(registry.as_ref(), &process_id).await;
+    probe.clear_blob_delete_failure().await;
+    for id in [&dependent, &aliased] {
+        assert!(
+            factory
+                .live_view(id)
+                .await
+                .expect("read independent session after prune")
+                .is_some(),
+            "{backend}: process retention must preserve independently admitted sessions"
+        );
+        assert!(
+            !factory
+                .is_deleted(id)
+                .await
+                .expect("read independent deletion state")
+        );
+    }
     assert!(
         probe.blob_exists(&roots.aliased_root).await,
-        "{backend}: the content-aliased root must exist before process prune"
-    );
-
-    prune_completed_process(registry.as_ref(), &process_id).await;
-    assert!(
-        !probe.blob_exists(&roots.aliased_root).await,
-        "{backend}: process prune must reclaim root B after severing root A's edge"
-    );
-}
-
-/// Process retention must route its runtime-session severance through the same
-/// exact-edge blob reclaim as an explicit session delete. A failed blob delete
-/// aborts the process prune, and the identical retry reclaims the now-unowned
-/// checkpoint root and components.
-///
-/// Integrator class (ADR 0051): **conformance-suite embedders** run this law
-/// against custom process registries and session-store backends.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
-    backend: &str,
-    factory: Arc<dyn crate::DeploymentStore>,
-    registry: Arc<dyn crate::ProcessRegistry>,
-    probe: Arc<dyn SessionDeleteBlobProbe>,
-) {
-    let process_id = register_process(registry.as_ref()).await;
-    let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-    let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
-    let store = admit_root_session(&factory, &process_session_id, &policy).await;
-    let mut state = crate::RuntimeSessionState {
-        session_id: process_session_id.clone(),
-        ..crate::RuntimeSessionState::new(policy)
-    };
-    state.ensure_agent_frame_initialized();
-    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
-    commit.checkpoint.components.insert(
-        "conformance/process-prune-owned".to_string(),
-        crate::HydratedCheckpointComponent::changed(
-            format!("process-prune-owned:{backend}").into_bytes(),
-        ),
-    );
-    let receipt = store
-        .commit_runtime_state(commit)
-        .await
-        .expect("commit process-owned checkpoint");
-    let mut blob_refs = receipt
-        .manifest
-        .components
-        .values()
-        .map(|component| component.blob_ref.clone())
-        .collect::<Vec<_>>();
-    blob_refs.push(receipt.checkpoint_ref);
-
-    let terminal = registry
-        .complete_process(
-            &process_id,
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            crate::ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete process with owned checkpoint");
-    probe.fail_next_blob_delete().await;
-    let failure = registry
-        .prune_terminal_processes(
-            terminal.updated_at_ms.saturating_add(1),
-            None,
-            crate::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect_err("a process-session blob failure must fail the process prune");
-    probe.clear_blob_delete_failure().await;
-    assert!(
-        failure.to_string().contains("blob"),
-        "{backend}: the process prune must propagate the blob reclaim failure: {failure}"
+        "{backend}: content-aliased checkpoint root stays alive"
     );
     assert!(
-        registry
-            .get_process(&process_id)
-            .await
-            .expect("read process after failed prune")
-            .is_some(),
-        "{backend}: failed blob reclaim must roll back the process prune"
+        probe.blob_exists(&roots.dependent_root).await,
+        "{backend}: dependent checkpoint root stays alive"
     );
-    for blob_ref in &blob_refs {
-        assert!(
-            probe.blob_exists(blob_ref).await,
-            "{backend}: failed prune must retain blob `{}`",
-            blob_ref.as_str()
-        );
-    }
-
-    let report = registry
-        .prune_terminal_processes(
-            terminal.updated_at_ms.saturating_add(1),
-            None,
-            crate::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("retry process prune after clearing blob failure");
-    assert_eq!(report.pruned_processes, 1);
-    for blob_ref in &blob_refs {
-        assert!(
-            !probe.blob_exists(blob_ref).await,
-            "{backend}: successful process prune must reclaim blob `{}`",
-            blob_ref.as_str()
-        );
-    }
-}
-
-/// A prune's ancestry retire tombstones nodes regardless of who owns them, so a
-/// batch can tombstone a node owned by a session *outside* the batch. When that
-/// owner is already deleted, its id is unbindable and no session-scoped vacuum
-/// can ever reach the row again — the prune itself has to reclaim it.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
-    factory: Arc<dyn crate::DeploymentStore>,
-    registry: Arc<dyn crate::ProcessRegistry>,
-) {
-    const OWNER_SESSION_ID: &str = "prune-reclaim-outside-owner-session";
-    let process_id = register_process(registry.as_ref()).await;
-    let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-
-    let owner_store =
-        admit_root_session(&factory, &SessionId::from(OWNER_SESSION_ID), &policy).await;
-    let owner_leaf = commit_root_node(
-        owner_store.as_ref(),
-        &SessionId::from(OWNER_SESSION_ID),
-        &policy,
-    )
-    .await;
-
-    // The process session forks at the owner's tip and grows its own node, so
-    // the owner's node has a live child owned by another session.
-    let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
-    fork_and_advance(
-        &factory,
-        &owner_leaf,
-        &process_session_id,
-        "prune-reclaim-outside-child-node",
-        &policy,
-    )
-    .await;
-
-    // The owner's delete cannot reclaim its own leaf: the fork child still hangs
-    // off it. The row only becomes a tombstone when the prune retires the
-    // child's ancestry, by which point the owner is long gone.
-    factory
-        .delete_session(&SessionId::from(OWNER_SESSION_ID))
-        .await
-        .expect("delete the outside owner session");
-
-    prune_completed_process(registry.as_ref(), &process_id).await;
-
-    let report = owner_store
-        .vacuum(&SessionId::from(OWNER_SESSION_ID))
-        .await
-        .expect("vacuum the deleted owner's stale handle");
-    assert_eq!(
-        report.removed_node_count, 0,
-        "the prune must reclaim tombstoned rows owned by an already-deleted session; \
-         the owner's id is unbindable, so nothing else ever could"
-    );
-}
-
-/// The mirror case: a pruned process session's own node survives its prune
-/// because another session's node hangs off it, and is only tombstoned by that
-/// session's later delete. Draining it then depends on the prune having recorded
-/// the process-owned id in the deleted set — the frontier every delete-time
-/// reclaim arm reads.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn process_prune_records_deletions_for_later_reclaim(
-    factory: Arc<dyn crate::DeploymentStore>,
-    registry: Arc<dyn crate::ProcessRegistry>,
-) {
-    const FORK_SESSION_ID: &str = "prune-recorded-fork-child-session";
-    let process_id = register_process(registry.as_ref()).await;
-    let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-
-    let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
-    let process_store = admit_root_session(&factory, &process_session_id, &policy).await;
-    let process_leaf = commit_root_node(process_store.as_ref(), &process_session_id, &policy).await;
-
-    fork_and_advance(
-        &factory,
-        &process_leaf,
-        &SessionId::from(FORK_SESSION_ID),
-        "prune-recorded-fork-child-node",
-        &policy,
-    )
-    .await;
-
-    prune_completed_process(registry.as_ref(), &process_id).await;
-    assert!(
-        factory
-            .is_deleted(&process_session_id)
-            .await
-            .expect("probe the deleted set after the prune"),
-        "the prune must record {process_session_id} in the deleted set"
-    );
-
-    // Now the fork child's delete tombstones the pruned process session's node.
-    // Its owner is gone, so this delete's reclaim arm is the last chance to
-    // physically remove it.
-    factory
-        .delete_session(&SessionId::from(FORK_SESSION_ID))
-        .await
-        .expect("delete the fork child session");
-
-    let report = process_store
-        .vacuum(&process_session_id)
-        .await
-        .expect("vacuum the pruned process session's stale handle");
-    assert_eq!(
-        report.removed_node_count, 0,
-        "a delete must drain tombstoned rows owned by a pruned process session; \
-         omitting pruned ids from the deleted set strands them forever"
-    );
-}
-
-async fn admit_root_session(
-    factory: &Arc<dyn crate::DeploymentStore>,
-    session_id: &SessionId,
-    policy: &crate::SessionPolicy,
-) -> Arc<dyn crate::RuntimeStore> {
-    factory
-        .admit_session(&crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
-            relation: crate::SessionRelation::Root,
-            config: policy.clone().into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
-        })
-        .await
-        .unwrap_or_else(|error| panic!("admit session {session_id}: {error}"));
-    Arc::clone(factory) as Arc<dyn crate::RuntimeStore>
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn commit_root_node(
-    store: &dyn crate::RuntimeStore,
-    session_id: &SessionId,
-    policy: &crate::SessionPolicy,
-) -> String {
-    let mut state = crate::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
-        ..crate::RuntimeSessionState::new(policy.clone())
-    };
-    state.ensure_agent_frame_initialized();
-    let leaf = state
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("root leaf node id");
-    store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("commit root node");
-    leaf.to_string()
-}
-
-/// Fork `child_session_id` at `node_id` and grow one node of its own, so
-/// `node_id` gains a live child owned by another session.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn fork_and_advance(
-    factory: &Arc<dyn crate::DeploymentStore>,
-    node_id: &str,
-    child_session_id: &SessionId,
-    child_node_id: &str,
-    policy: &crate::SessionPolicy,
-) {
-    factory
-        .fork_session(&crate::ForkSessionRequest {
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(child_session_id.to_string()),
-            node_id: node_id.to_string().into(),
-            relation: crate::SessionRelation::Root,
-            policy: policy.clone(),
-        })
-        .await
-        .expect("fork at a live tip");
-    let child = factory
-        .live_view(child_session_id)
-        .await
-        .expect("look up the forked child")
-        .expect("the forked child exists");
-    let mut state =
-        crate::store::load_session_window_state(&child, crate::store::WindowSelector::Current)
-            .await
-            .map(|loaded| loaded.map(|loaded| loaded.state))
-            .expect("load the forked child's state")
-            .expect("the forked child has state");
-    let parent_node_id = state.session_graph.leaf_node_id.clone();
-    state
-        .session_graph
-        .apply_append(&crate::GraphAppend::Extend {
-            nodes: vec![crate::SessionNodeRecord {
-                node_id: child_node_id.to_string().into(),
-                parent_node_id,
-                timestamp: "2026-08-17T00:00:00Z".to_string(),
-                payload: crate::SessionNodePayload::Event {
-                    event: crate::SessionHistoryRecord::Protocol(
-                        crate::ProtocolEvent::typed(
-                            "prune-reclaim-child-event",
-                            serde_json::json!({ "content": "child node" }),
-                        )
-                        .expect("typed child event"),
-                    ),
-                },
-            }],
-        })
-        .expect("append child node");
-    child
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("advance the forked child");
 }
 
 #[expect(

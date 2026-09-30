@@ -3,9 +3,9 @@ use super::StoreError;
 use crate::SessionId;
 
 /// Identity of one attempt to write an attachment's bytes, minted by
-/// [`AttachmentManifest::begin_attachment_write`].
+/// [`AttachmentReferrers::begin_attachment_write`].
 ///
-/// The id is persisted on the manifest row for the duration of the attempt and is carried back
+/// The id is persisted on an independent pending-write row and is carried back
 /// in the attempt's [`AttachmentWritePermit`].
 /// While the attempt holds a `Condemned` digest it is also the claim token on the condemnation
 /// row, so the sweeper's arm CAS fails.
@@ -32,7 +32,7 @@ impl Default for AttachmentWriteToken {
 
 /// Authority returned with a granted attachment write fence.
 ///
-/// Every granted write carries the attempt identity its manifest row was
+/// Every granted write carries the attempt identity its pending-write row was
 /// stamped with. There is no tokenless permit: an attempt that cannot name
 /// itself cannot be fenced against a concurrent attempt for the same digest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,9 +54,9 @@ impl AttachmentWritePermit {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentWriteFence {
-    /// The intent row exists and the digest is rooted: no sweep can condemn it
-    /// until the intent is committed, forgotten, or reconciled. The writer may
-    /// now `put` the bytes.
+    /// An independent pending write and its referrer edge root the digest.
+    /// The writer may now put the bytes; completion removes only the pending
+    /// attempt, while the edge remains until its referrer ends or forgets it.
     Granted(AttachmentWritePermit),
     /// A sweep has already armed the physical delete, or another writer owns a
     /// condemned digest until its backend put settles. No intent was recorded;
@@ -67,61 +67,24 @@ pub enum AttachmentWriteFence {
 /// Outcome of the GC-side condemn CAS
 /// ([`AttachmentRootSet::condemn_attachment`](crate::AttachmentRootSet::condemn_attachment)).
 ///
-/// # The digest state machine
+/// A digest is free, condemned, or deleting. Condemnation requires that no
+/// referrer edge and no pending write exists, and removes upload evidence.
+/// It carries no root-age cutoff or writer-death inference.
 ///
-/// Condemnation is per-digest state in the lash-owned root authority, held in
-/// the same durable store as the manifest so the writer's intent insert and the
-/// sweeper's condemn insert are one conditional mutation against each other. It
-/// carries no timestamps and no TTL: every transition is a CAS, and a lost CAS
-/// defers work rather than waiting for anything.
+/// A fresh writer may claim an unclaimed condemnation through a foreign key
+/// to its independent pending attempt. Completion records upload evidence and
+/// removes the claimed condemnation. Abort releases the claim, preserving the
+/// condemnation unless another edge or pending write roots the digest.
+/// A deleting or already-claimed digest grants no write permit.
 ///
-/// ```text
-///             writer: claim phase + record a fresh attempt
-///            ┌───────────────────────────────────────────────┐
-///            │                                               v
-///   ┌────────┴─┐  condemn: no root, and every manifest  ┌───────────┐
-///   │   Free   │ ───── row for the digest is deleted ──> │ Condemned │ <─┐
-///   └──────────┘ <──── spare (sweep gives it back) ──────└───────────┘   │
-///       ^   ^                                                 │ arm      │ delete failed:
-///       │   │                                                 v          │ attempts + 1,
-///       │   │                                           ┌───────────┐    │ stalled past
-///       │   └──── spare (bytes refreshed) ──────────────│ Deleting  │ ───┘ the bound
-///       │                                               └───────────┘
-///       │                                                     │
-///       └──── delete succeeded or bytes already gone: the ────┘
-///             condemnation row is retired, and no manifest
-///             row survives to make the digest adoptable again
-/// ```
-///
-/// * `Free` — the ordinary state. A writer records its intent and the digest is
-///   rooted; a sweeper that finds no root may condemn it.
-/// * `Condemned` — a sweeper claimed the digest for deletion but has issued no
-///   physical delete yet, or its delete failed. A writer arriving here claims
-///   the phase with its attempt identity and records its intent in one
-///   mutation, so the sweeper's later arm CAS fails. Success clears the claimed
-///   phase after bytes exist; failure releases the claim while preserving
-///   `Condemned`, unless the same intent became committed while the claim was
-///   held; that root returns the digest to `Free` before the old sweep can arm.
-/// * `Deleting` — the physical delete is in flight. A writer arriving here
-///   cannot un-issue it, so it records nothing and retries.
-///
-/// Every sweep-owned row names the sweep generation that owns it
-/// ([`AttachmentSweepGeneration`]). Only that generation moves it, and a later
-/// sweep adopts it only once the owning pass is provably dead (ADR 0067 §6):
-/// a crashed sweeper's `Condemned` or `Deleting` row is finished by the next
-/// sweep, never by a host.
-///
-/// There is no terminal post-delete phase. Condemnation deletes every manifest
-/// row for the digest, and a completed delete deletes the condemnation row, so
-/// the digest returns to `Free` holding no upload evidence. Adoption is gated
-/// on that positive evidence
-/// (the `attachment_uploads` row), not on a negative
-/// tombstone that nothing would ever clear.
+/// Sweep rows carry a generation whose liveness permits another pass to adopt
+/// them only after that pass is provably dead. A completed delete retires the
+/// condemnation; attachment acquisition then requires new upload evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentCondemnation {
     /// The digest moved `Free -> Condemned` under this sweeper's CAS.
     Condemned,
-    /// A live root (committed ref or intent) exists: the digest is not garbage.
+    /// A referrer edge or pending write exists: the digest is not garbage.
     /// The sweep skips it and never waits.
     RootPresent,
     /// A condemnation for this digest already exists: a live peer sweep owns
@@ -508,7 +471,7 @@ pub enum SessionReferrerState {
 }
 /// Attachment edges, pending writes, and upload evidence of one durable core.
 #[async_trait::async_trait]
-pub trait AttachmentManifest: Send + Sync {
+pub trait AttachmentReferrers: Send + Sync {
     async fn begin_attachment_write(
         &self,
         write: &AttachmentWrite,
@@ -549,10 +512,10 @@ pub trait AttachmentManifest: Send + Sync {
 }
 /// Attachment-free stores grant writes and retain no durable edges.
 #[macro_export]
-macro_rules! impl_noop_attachment_manifest {
+macro_rules! impl_noop_attachment_referrers {
     ($ty:ty) => {
         #[$crate::async_trait]
-        impl $crate::store::AttachmentManifest for $ty {
+        impl $crate::store::AttachmentReferrers for $ty {
             async fn begin_attachment_write(
                 &self,
                 _: &$crate::store::AttachmentWrite,

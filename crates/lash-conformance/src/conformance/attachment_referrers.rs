@@ -7,7 +7,7 @@
 use super::attachment_adoption::{
     AttachmentBytesFactory, create, image_meta, record_completed_write,
 };
-use lash_core::facade_support::SessionAttachmentStore;
+use lash_core::facade_support::{SessionAttachmentStore, SystemClock};
 use lash_core::*;
 use std::sync::Arc;
 
@@ -61,11 +61,10 @@ pub(super) fn execution(session: &SessionId, name: &str) -> ArtifactReferrer {
 }
 
 pub(super) async fn permit(
-    store: &dyn AttachmentManifest,
+    store: &dyn AttachmentReferrers,
     write: &AttachmentWrite,
 ) -> AttachmentWritePermit {
-    let AttachmentWriteFence::Granted(permit) =
-        store.begin_attachment_write(&(write)).await.unwrap()
+    let AttachmentWriteFence::Granted(permit) = store.begin_attachment_write(write).await.unwrap()
     else {
         panic!("free digest refused")
     };
@@ -230,7 +229,25 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
     let source = ArtifactReferrer::ProcessRecord(ProcessId::fixture("atomic-source"));
     record_completed_write(&producer, &write(&id, source)).await;
     let receiver = create(&h.factory, "receiver").await;
-    let absent = AttachmentId::parse("atomic-absent").unwrap();
+    let snapshot = |head: Option<store::SessionHeadMeta>| {
+        head.map(|head| {
+            (
+                head.schema_version,
+                head.session_id,
+                head.head_revision,
+                head.leaf_node_id,
+                head.checkpoint_ref,
+                head.current_frame_node_id,
+                serde_json::to_value(head.config).unwrap(),
+                serde_json::to_value(head.pending_follow_on).unwrap(),
+            )
+        })
+    };
+    let before = receiver
+        .load_session_head_meta(&SessionId::from("receiver"))
+        .await
+        .unwrap();
+    let absent = AttachmentId::parse("atomic-z-absent").unwrap();
     let current = state("receiver");
     let commit = RuntimeCommit::persisted_state_for_test(&current, &[])
         .with_committed_attachments([id.clone(), absent.clone()]);
@@ -238,6 +255,15 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
         receiver.commit_runtime_state(commit).await,
         Err(StoreError::UnknownAttachment { .. })
     ));
+    assert_eq!(
+        snapshot(
+            receiver
+                .load_session_head_meta(&SessionId::from("receiver"))
+                .await
+                .unwrap()
+        ),
+        snapshot(before)
+    );
     let session_referrer = ArtifactReferrer::Session("receiver".into());
     assert!(
         !receiver
@@ -379,9 +405,27 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
         plan: ArtifactCleanupPlan::AwaitSessionGraphRetired,
         gate: None,
     };
-    let key = h.cleanup.arm_cleanup(&cleanup, 0).await.unwrap();
+    let claims = h
+        .cleanup
+        .claim_due(
+            SystemClock.timestamp_ms().saturating_add(60_000),
+            1_000,
+            std::num::NonZeroUsize::new(100).unwrap(),
+        )
+        .await
+        .unwrap();
+    let claimed = claims
+        .into_iter()
+        .find(|claim| {
+            claim.key.as_ref().is_ok_and(|key| {
+                key == &store::ObligationKey::ArtifactCleanup {
+                    referrer: referrer.clone(),
+                }
+            })
+        })
+        .expect("session deletion arms its cleanup without another producer");
     assert_eq!(
-        h.cleanup.load_cleanup(&key).await.unwrap().unwrap(),
+        h.cleanup.load_cleanup(&claimed.id).await.unwrap().unwrap(),
         cleanup
     );
     store
@@ -493,4 +537,49 @@ pub async fn condemnation_needs_no_edge_and_no_pending_write(h: AttachmentReferr
         h.factory.condemn_attachment(&id, &pass).await.unwrap(),
         AttachmentCondemnation::RootPresent
     );
+    let superseded_id = AttachmentId::parse("superseded-condemnation").unwrap();
+    assert_eq!(
+        h.factory
+            .condemn_attachment(&superseded_id, &pass)
+            .await
+            .unwrap(),
+        AttachmentCondemnation::Condemned
+    );
+    let restoring = write(
+        &superseded_id,
+        ArtifactReferrer::ProcessRecord(ProcessId::fixture("superseded-writer")),
+    );
+    let permit = permit(store.as_ref(), &restoring).await;
+    let peer = ArtifactReferrer::ProcessRecord(ProcessId::fixture("superseding-root"));
+    (h.insert_edge)(
+        superseded_id.clone(),
+        peer.kind().as_str().into(),
+        peer.canonical_id(),
+    )
+    .await
+    .unwrap();
+    store
+        .abort_attachment_write(&restoring, permit)
+        .await
+        .unwrap();
+    assert!(
+        !h.factory
+            .list_condemnations()
+            .await
+            .unwrap()
+            .iter()
+            .any(|row| row.digest == superseded_id)
+    );
+    assert_eq!(
+        store.attachment_referrers(&superseded_id).await.unwrap(),
+        vec![peer]
+    );
+    store
+        .abort_attachment_write(&restoring, permit)
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.complete_attachment_write(&restoring, permit).await,
+        Err(StoreError::StaleWritePermit { .. })
+    ));
 }

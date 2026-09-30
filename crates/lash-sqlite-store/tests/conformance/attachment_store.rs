@@ -1,14 +1,14 @@
 //! `SqliteAttachmentStore`: the shared attachment-store suite on the
-//! backend's catalog, and the GC agreeing with the manifest over it.
+//! backend's catalog, and the GC agreeing with the referrer over it.
 
 use super::*;
 
 use lash_core_execution::attachments::{SessionAttachmentStore, reclaim_unreferenced_attachments};
 use lash_core_execution::{
     AttachmentCreateMeta, AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRef,
-    AttachmentSource, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
-    EmptyRootSetPolicy, Message, MessageRole, Part, RuntimeSessionState, SessionCatalogStore,
-    SessionRelation,
+    AttachmentReferrers as _, AttachmentSource, AttachmentStore, AttachmentStoreError,
+    AttachmentStorePersistence, EmptyRootSetPolicy, Message, MessageRole, Part,
+    RuntimeSessionState, SessionCatalogStore, SessionRelation,
 };
 use lash_sansio::MediaType;
 
@@ -106,14 +106,14 @@ async fn sweep(
     .expect("attachment sweep")
 }
 
-/// The bytes live in the catalog that holds the manifest, so the GC's two
+/// The bytes live in the catalog that holds the referrer, so the GC's two
 /// halves — the root set and the backend listing — read one database. A blob a
-/// committed manifest row holds survives every sweep; a blob no row holds is
+/// committed referrer row holds survives every sweep; a blob no row holds is
 /// collected; the checkpoint bytes beside them in `blobs` are never listed as
 /// attachments; and once the session that held the blob is deleted, its bytes
 /// go too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
+async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.store().await;
     let session_id = SessionId::from("attachment-gc-holder");
@@ -148,7 +148,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         .await
         .expect("commit the turn that holds the attachment");
     let unheld = attachments
-        .put(b"no manifest row holds this".to_vec(), octet_meta())
+        .put(b"no referrer row holds this".to_vec(), octet_meta())
         .await
         .expect("store an unreferenced blob");
     let checkpoint_blobs = checkpoint_blob_count(&backend);
@@ -176,7 +176,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         attachments
             .get(&held.id)
             .await
-            .expect("a blob a committed manifest row holds survives the sweep")
+            .expect("a blob a committed referrer row holds survives the sweep")
             .bytes,
         b"held by a committed turn".to_vec()
     );
@@ -185,7 +185,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
             attachments.get(&unheld.id).await,
             Err(AttachmentStoreError::NotFound(_))
         ),
-        "a blob no manifest row holds is collected"
+        "a blob no referrer row holds is collected"
     );
     assert_eq!(
         checkpoint_blob_count(&backend),
@@ -200,15 +200,33 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         .await
         .expect("the held blob survives a repeated sweep");
 
+    for referrer in factory
+        .attachment_referrers(&held.id)
+        .await
+        .expect("read holders before deletion")
+    {
+        if matches!(referrer, lash_core_execution::ArtifactReferrer::Upload(_)) {
+            factory
+                .end_attachment_referrer(&referrer)
+                .await
+                .expect("finish staging hold");
+        }
+    }
     drop(session);
     factory
         .delete_session(&session_id)
         .await
         .expect("delete the holding session");
+    factory
+        .end_attachment_referrer(&lash_core_execution::ArtifactReferrer::Session(
+            session_id.clone(),
+        ))
+        .await
+        .expect("apply graph-retired session cleanup");
     assert_eq!(
         sweep(&factory, &attachments).await.reclaimed_count,
         1,
-        "with its holder deleted, nothing roots the blob"
+        "with every holder ended, nothing roots the blob"
     );
     assert!(
         matches!(

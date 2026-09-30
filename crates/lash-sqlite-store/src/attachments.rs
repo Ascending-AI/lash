@@ -691,7 +691,7 @@ fn adopted_condemnation(
 }
 
 #[async_trait::async_trait]
-impl AttachmentManifest for SqliteStore {
+impl AttachmentReferrers for SqliteStore {
     async fn begin_attachment_write(
         &self,
         write: &AttachmentWrite,

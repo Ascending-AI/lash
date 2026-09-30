@@ -729,7 +729,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// rationale.
 ///
 /// Bumped to 10 for the attachment three-layer cutover (ADR 0028): the
-/// `attachment_manifest` this schema gates carried, pre-cutover, committed refs
+/// the legacy attachment ownership table this schema gates carried, pre-cutover, committed refs
 /// and canonical URIs that named `sessions/<hash>/...` blob paths the flat
 /// content-addressed layout cannot read. Pre-10 session databases are rejected
 /// at open and recreated; the old `sessions/` blob trees are unreachable garbage
@@ -895,7 +895,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// incarnation. Version-58 catalogs are rejected so a bare process id is never
 /// reinterpreted as the current incarnation with the same reusable name.
 /// Bumped to 61 for FIG-2795: attachment adoption requires upload evidence.
-/// `attachment_manifest` gains `write_id` and `written_at_ms`, and the
+/// the legacy attachment ownership table gains `write_id` and `written_at_ms`, and the
 /// `attachment_condemnations` phase vocabulary drops `reclaimed` — a pre-61
 /// database can hold rows in a phase this schema forbids and manifest rows with
 /// no upload evidence for bytes that are present, so it is rejected at open and
@@ -1071,7 +1071,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// admission by another execution is refused. A pre-97 database is rejected
 /// at open and recreated; it is not migrated.
 /// Bumped to 98 for FIG-3607: a process is named by its minted, never-reused
-/// process id, so `attachment_manifest` drops `owner_incarnation` and
+/// process id, so the legacy attachment ownership table drops `owner_incarnation` and
 /// `session_meta_pending_observer_intents` drops `process_incarnation`, and
 /// the durable `RuntimeErrorCode` vocabulary drops
 /// `process_incarnation_superseded`. A pre-98 database is rejected at open

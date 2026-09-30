@@ -11,7 +11,7 @@
 //! shape and the `ProtocolDriverPlugin` slot, while external protocol crates
 //! provide the driver implementation.
 
-/// Re-exported so `impl_noop_attachment_manifest!` can paste an
+/// Re-exported so `impl_noop_attachment_referrers!` can paste an
 /// `#[async_trait]` impl into crates that do not depend on `async-trait`
 /// directly. Not part of the supported surface.
 #[doc(hidden)]
@@ -33,7 +33,7 @@ pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::compat;
 pub use lash_core_store::impl_current_fleet_format;
-pub use lash_core_store::impl_noop_attachment_manifest;
+pub use lash_core_store::impl_noop_attachment_referrers;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_store::process_id_for_test;
 pub use lash_core_store::process_identity::process_id_from_handle_json;
@@ -862,7 +862,7 @@ pub use store::{
     AdmissionRefusal, AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,
     AttachmentCondemnationAdoption, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentDeleteArming,
-    AttachmentDeleteStallReason, AttachmentManifest, AttachmentSettlementOutcome,
+    AttachmentDeleteStallReason, AttachmentReferrers, AttachmentSettlementOutcome,
     AttachmentSweepGeneration, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit,
     AttachmentWriteToken, BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor,
     CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage,

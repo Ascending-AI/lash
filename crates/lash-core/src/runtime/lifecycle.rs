@@ -218,8 +218,8 @@ impl LashRuntime {
         // (no-store) runtimes use the inner store directly — there's
         // nothing to reconcile against.
         if let Some(store) = services.attachment_manifest_store.clone() {
-            let manifest: Arc<dyn crate::AttachmentManifest> =
-                Arc::new(crate::attachments::PersistenceManifestAdapter(store));
+            let manifest: Arc<dyn crate::AttachmentReferrers> =
+                Arc::new(crate::attachments::PersistenceReferrersAdapter(store));
             // Rebind a fresh facade over the flat backend. Attachment ownership
             // is recorded durably on each intent; no live facade state crosses
             // rebuilds or child-session initialisation.

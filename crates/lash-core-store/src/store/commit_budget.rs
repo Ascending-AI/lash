@@ -69,7 +69,7 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub session_config_bytes: usize,
     pub graph_delta_bytes: usize,
     pub checkpoint_bytes: usize,
-    pub attachment_manifest_bytes: usize,
+    pub attachment_referrer_bytes: usize,
     pub follow_on_bytes: usize,
     pub agent_frame_bytes: usize,
     pub usage_delta_bytes: usize,
@@ -203,7 +203,7 @@ impl RuntimeCommit {
                 session_config_bytes = measurement.session_config_bytes,
                 graph_delta_bytes = measurement.graph_delta_bytes,
                 checkpoint_bytes = measurement.checkpoint_bytes,
-                attachment_manifest_bytes = measurement.attachment_manifest_bytes,
+                attachment_referrer_bytes = measurement.attachment_referrer_bytes,
                 follow_on_bytes = measurement.follow_on_bytes,
                 agent_frame_bytes = measurement.agent_frame_bytes,
                 usage_delta_bytes = measurement.usage_delta_bytes,
@@ -217,7 +217,7 @@ impl RuntimeCommit {
                 session_config_bytes: measurement.session_config_bytes,
                 graph_delta_bytes: measurement.graph_delta_bytes,
                 checkpoint_bytes: measurement.checkpoint_bytes,
-                attachment_manifest_bytes: measurement.attachment_manifest_bytes,
+                attachment_referrer_bytes: measurement.attachment_referrer_bytes,
                 follow_on_bytes: measurement.follow_on_bytes,
                 agent_frame_bytes: measurement.agent_frame_bytes,
                 usage_delta_bytes: measurement.usage_delta_bytes,
@@ -236,7 +236,7 @@ impl RuntimeCommit {
             session_config_bytes = measurement.session_config_bytes,
             graph_delta_bytes = measurement.graph_delta_bytes,
             checkpoint_bytes = measurement.checkpoint_bytes,
-            attachment_manifest_bytes = measurement.attachment_manifest_bytes,
+            attachment_referrer_bytes = measurement.attachment_referrer_bytes,
             follow_on_bytes = measurement.follow_on_bytes,
             agent_frame_bytes = measurement.agent_frame_bytes,
             usage_delta_bytes = measurement.usage_delta_bytes,
@@ -280,7 +280,7 @@ impl RuntimeCommit {
             .filter_map(HydratedCheckpointComponent::body)
             .fold(0usize, |total, body| total.saturating_add(body.len()));
         let checkpoint_bytes = checkpoint_root_bytes.saturating_add(changed_component_bytes);
-        let attachment_manifest_bytes = self
+        let attachment_referrer_bytes = self
             .committed_attachment_ids
             .iter()
             .fold(0usize, |total, id| total.saturating_add(id.as_str().len()));
@@ -306,7 +306,7 @@ impl RuntimeCommit {
         let total_bytes = session_config_bytes
             .saturating_add(graph_delta_bytes)
             .saturating_add(checkpoint_bytes)
-            .saturating_add(attachment_manifest_bytes)
+            .saturating_add(attachment_referrer_bytes)
             .saturating_add(follow_on_bytes)
             .saturating_add(agent_frame_bytes)
             .saturating_add(usage_delta_bytes)
@@ -321,7 +321,7 @@ impl RuntimeCommit {
             session_config_bytes,
             graph_delta_bytes,
             checkpoint_bytes,
-            attachment_manifest_bytes,
+            attachment_referrer_bytes,
             follow_on_bytes,
             agent_frame_bytes,
             usage_delta_bytes,
@@ -467,7 +467,7 @@ mod tests {
                 session_config_bytes,
                 graph_delta_bytes,
                 checkpoint_bytes,
-                attachment_manifest_bytes,
+                attachment_referrer_bytes,
                 follow_on_bytes,
                 agent_frame_bytes,
                 usage_delta_bytes,
@@ -477,7 +477,7 @@ mod tests {
             }) if session_config_bytes == expected_session_config_bytes
                 && graph_delta_bytes == expected_graph_bytes
                 && checkpoint_bytes == expected_checkpoint_bytes
-                && attachment_manifest_bytes == expected_attachment_bytes
+                && attachment_referrer_bytes == expected_attachment_bytes
                 && follow_on_bytes == 0
                 && agent_frame_bytes == 0
                 && usage_delta_bytes == 0
@@ -706,7 +706,7 @@ mod tests {
         assert!(measurement.session_config_bytes > 0);
         assert!(measurement.graph_delta_bytes > 0);
         assert!(measurement.checkpoint_bytes > 0);
-        assert!(measurement.attachment_manifest_bytes > 0);
+        assert!(measurement.attachment_referrer_bytes > 0);
         assert!(measurement.follow_on_bytes > 0);
         assert!(measurement.agent_frame_bytes > 0);
         assert!(measurement.usage_delta_bytes > 0);

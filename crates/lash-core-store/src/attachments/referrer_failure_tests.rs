@@ -25,18 +25,18 @@ impl Cause {
     fn error(self) -> StoreError {
         match self {
             Self::Storage => StoreError::StorageFailure {
-                backend: "manifest-probe",
+                backend: "referrers-probe",
                 message: "write unavailable".to_string(),
             },
             Self::Contended => StoreError::Contended,
-            Self::Backend => StoreError::Backend("manifest transport failed".to_string()),
+            Self::Backend => StoreError::Backend("referrers transport failed".to_string()),
             Self::WriterFenced => StoreError::WriterFenced {
                 recorded: 3,
                 writable: crate::compat::VersionRange::between(1, 2),
             },
             Self::Incompatible => StoreError::Incompatible {
                 refusal: crate::compat::CompatRefusal::UnknownVocabulary {
-                    surface: "attachment manifest".to_string(),
+                    surface: "attachment referrers".to_string(),
                     label: "future owner".to_string(),
                 },
             },
@@ -46,12 +46,12 @@ impl Cause {
     fn assert_preserved(self, error: &StoreError) {
         match (self, error) {
             (Self::Storage, StoreError::StorageFailure { backend, message }) => {
-                assert_eq!(*backend, "manifest-probe");
+                assert_eq!(*backend, "referrers-probe");
                 assert_eq!(message, "write unavailable");
             }
             (Self::Contended, StoreError::Contended) => {}
             (Self::Backend, StoreError::Backend(message)) => {
-                assert_eq!(message, "manifest transport failed");
+                assert_eq!(message, "referrers transport failed");
             }
             (Self::WriterFenced, StoreError::WriterFenced { recorded, writable }) => {
                 assert_eq!(*recorded, 3);
@@ -61,7 +61,7 @@ impl Cause {
                 assert_eq!(
                     *refusal,
                     crate::compat::CompatRefusal::UnknownVocabulary {
-                        surface: "attachment manifest".to_string(),
+                        surface: "attachment referrers".to_string(),
                         label: "future owner".to_string(),
                     }
                 );
@@ -79,20 +79,20 @@ enum Operation {
     Abort,
 }
 
-struct FailingManifest {
+struct FailingReferrers {
     operation: Operation,
     cause: Cause,
     calls: Mutex<Vec<&'static str>>,
 }
 
-impl FailingManifest {
+impl FailingReferrers {
     fn record(&self, operation: &'static str) {
         self.calls.lock_recover().push(operation);
     }
 }
 
 #[async_trait::async_trait]
-impl AttachmentManifest for FailingManifest {
+impl AttachmentReferrers for FailingReferrers {
     async fn begin_attachment_write(
         &self,
         intent: &AttachmentWrite,
@@ -101,7 +101,7 @@ impl AttachmentManifest for FailingManifest {
         if matches!(self.operation, Operation::Begin) {
             return Err(self.cause.error());
         }
-        NoopAttachmentManifest.begin_attachment_write(intent).await
+        NoopAttachmentReferrers.begin_attachment_write(intent).await
     }
 
     async fn complete_attachment_write(
@@ -147,7 +147,7 @@ impl AttachmentManifest for FailingManifest {
     async fn session_referrer_state(
         &self,
         _s: &SessionId,
-    ) -> Result<crate::SessionReferrerState, StoreError> {
+    ) -> Result<crate::store::SessionReferrerState, StoreError> {
         panic!("unexpected state")
     }
     async fn attachment_referrers(
@@ -224,10 +224,10 @@ fn probe(
     result: PutResult,
 ) -> (
     SessionAttachmentStore,
-    Arc<FailingManifest>,
+    Arc<FailingReferrers>,
     Arc<ProbeBackend>,
 ) {
-    let manifest = Arc::new(FailingManifest {
+    let referrers = Arc::new(FailingReferrers {
         operation,
         cause,
         calls: Mutex::new(Vec::new()),
@@ -239,10 +239,10 @@ fn probe(
     (
         SessionAttachmentStore::new(
             backend.clone(),
-            manifest.clone(),
-            RuntimeOwner::Session("manifest-failure-session".into()),
+            referrers.clone(),
+            RuntimeOwner::Session("referrers-failure-session".into()),
         ),
-        manifest,
+        referrers,
         backend,
     )
 }
@@ -250,7 +250,7 @@ fn probe(
 async fn put(store: &SessionAttachmentStore) -> AttachmentStoreError {
     store
         .put(
-            b"manifest failure probe".to_vec(),
+            b"referrers failure probe".to_vec(),
             AttachmentCreateMeta::new(
                 lash_sansio::MediaType::parse("text/plain").unwrap(),
                 None,
@@ -261,12 +261,12 @@ async fn put(store: &SessionAttachmentStore) -> AttachmentStoreError {
         .expect_err("injected failure")
 }
 
-async fn assert_manifest_failure(operation: Operation) {
+async fn assert_referrers_failure(operation: Operation) {
     for cause in CAUSES {
-        let (store, manifest, backend) = probe(operation, cause, PutResult::Success);
+        let (store, referrers, backend) = probe(operation, cause, PutResult::Success);
         let error = if matches!(operation, Operation::Forget) {
             store
-                .delete(&content_id(b"manifest failure probe"))
+                .delete(&content_id(b"referrers failure probe"))
                 .await
                 .expect_err("injected forget failure")
         } else {
@@ -278,7 +278,7 @@ async fn assert_manifest_failure(operation: Operation) {
             Operation::Forget => (vec!["forget"], 0),
             Operation::Abort => unreachable!(),
         };
-        assert_eq!(*manifest.calls.lock_recover(), calls);
+        assert_eq!(*referrers.calls.lock_recover(), calls);
         assert_eq!(
             backend.puts.load(Ordering::SeqCst),
             puts,
@@ -292,15 +292,15 @@ async fn assert_manifest_failure(operation: Operation) {
         let source = error
             .source()
             .and_then(|source| source.downcast_ref::<Box<StoreError>>().map(Box::as_ref))
-            .expect("manifest adapter must expose the typed StoreError source");
+            .expect("referrers adapter must expose the typed StoreError source");
         cause.assert_preserved(source);
-        let AttachmentStoreError::ManifestOperationFailed {
+        let AttachmentStoreError::ReferrersOperationFailed {
             operation: actual_operation,
             attachment_id,
             ..
         } = &error
         else {
-            panic!("manifest operation context must be structured");
+            panic!("referrers operation context must be structured");
         };
         let expected_operation = match operation {
             Operation::Begin => "begin_attachment_write",
@@ -309,23 +309,23 @@ async fn assert_manifest_failure(operation: Operation) {
             Operation::Abort => unreachable!(),
         };
         assert_eq!(*actual_operation, expected_operation);
-        assert_eq!(*attachment_id, content_id(b"manifest failure probe"));
+        assert_eq!(*attachment_id, content_id(b"referrers failure probe"));
     }
 }
 
 #[tokio::test]
 async fn begin_write_preserves_store_causes_and_classification() {
-    assert_manifest_failure(Operation::Begin).await;
+    assert_referrers_failure(Operation::Begin).await;
 }
 
 #[tokio::test]
 async fn complete_write_preserves_store_causes_and_classification() {
-    assert_manifest_failure(Operation::Complete).await;
+    assert_referrers_failure(Operation::Complete).await;
 }
 
 #[tokio::test]
 async fn remove_reference_preserves_store_causes_and_classification() {
-    assert_manifest_failure(Operation::Forget).await;
+    assert_referrers_failure(Operation::Forget).await;
 }
 
 #[tokio::test]
@@ -336,10 +336,10 @@ async fn backend_write_abort_failure_preserves_causes_and_conservative_classific
         AttachmentStoreFailureClass::Credentials,
     ] {
         for cause in CAUSES {
-            let (store, manifest, backend) =
+            let (store, referrers, backend) =
                 probe(Operation::Abort, cause, PutResult::Failure(class));
             let error = put(&store).await;
-            assert_eq!(*manifest.calls.lock_recover(), vec!["begin", "abort"]);
+            assert_eq!(*referrers.calls.lock_recover(), vec!["begin", "abort"]);
             assert_eq!(backend.puts.load(Ordering::SeqCst), 1);
             assert_eq!(
                 error.is_retryable(),
@@ -367,9 +367,9 @@ async fn backend_write_abort_failure_preserves_causes_and_conservative_classific
 #[tokio::test]
 async fn wrong_id_abort_failure_preserves_terminal_contract() {
     for cause in CAUSES {
-        let (store, manifest, backend) = probe(Operation::Abort, cause, PutResult::WrongId);
+        let (store, referrers, backend) = probe(Operation::Abort, cause, PutResult::WrongId);
         let error = put(&store).await;
-        assert_eq!(*manifest.calls.lock_recover(), vec!["begin", "abort"]);
+        assert_eq!(*referrers.calls.lock_recover(), vec!["begin", "abort"]);
         assert_eq!(backend.puts.load(Ordering::SeqCst), 1);
         assert!(!error.is_retryable(), "contract failure remains terminal");
         let write = error
@@ -400,6 +400,6 @@ fn assert_rollback_cause(error: &AttachmentStoreError, cause: Cause) {
     else {
         panic!("rollback must retain both typed causes");
     };
-    assert_eq!(*attachment_id, content_id(b"manifest failure probe"));
+    assert_eq!(*attachment_id, content_id(b"referrers failure probe"));
     cause.assert_preserved(abort_error);
 }

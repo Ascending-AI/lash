@@ -1215,10 +1215,7 @@ macro_rules! __process_prune_reclaim_register {
 macro_rules! process_prune_reclaim_tests {
     ($fixture:block) => {
         $crate::process_prune_reclaim_tests!(@catalogue $fixture; [
-            (process_prune_reclaims_tombstones_owned_by_deleted_sessions, "process-prune-tombstone-reclaim", registry),
-            (process_prune_records_deletions_for_later_reclaim, "process-prune-records-deletions", registry),
-            (process_prune_reclaims_checkpoint_blobs_and_propagates_failure, "process-prune-checkpoint-blob-reclaim", blob),
-            (process_prune_reclaims_content_aliased_checkpoint_roots, "process-prune-content-alias", blob),
+            (process_prune_preserves_independent_session_checkpoint_roots, "process-prune-independent-checkpoints", blob),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
@@ -1578,7 +1575,7 @@ macro_rules! process_prune_session_store_tests {
     ($fixture:block) => {
         $crate::process_prune_session_store_tests!(@catalogue $fixture; [
             (ended_process_record_has_no_attachment_edges, "process-prune-session-store-cleanup"),
-            (a_same_start_key_successor_after_prune_owns_fresh_session_stores, "same-key-successor-after-prune"),
+            (a_same_start_key_successor_after_prune_has_independent_attachment_referrers, "same-key-successor-after-prune"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

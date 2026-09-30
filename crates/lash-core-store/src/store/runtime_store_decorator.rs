@@ -39,7 +39,7 @@ use std::num::NonZeroU32;
 macro_rules! runtime_store_operations {
     ($emit:ident) => {
         $emit! {
-            AttachmentManifest {
+            AttachmentReferrers {
                 [catalog] fn begin_attachment_write(&self, write: &AttachmentWrite) -> Result<AttachmentWriteFence, StoreError>;
                 [catalog] fn complete_attachment_write(&self, write: &AttachmentWrite, permit: AttachmentWritePermit) -> Result<(), StoreError>;
                 [catalog] fn abort_attachment_write(&self, write: &AttachmentWrite, permit: AttachmentWritePermit) -> Result<(), StoreError>;

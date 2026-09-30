@@ -154,7 +154,7 @@ async fn unknown_attachment_referrer_kind_refuses_with_canonical_typed_error() {
     )
     .expect("insert unknown owner kind");
 
-    let error = lash_core_execution::AttachmentManifest::attachment_referrers(
+    let error = lash_core_execution::AttachmentReferrers::attachment_referrers(
         &store,
         &lash_core_execution::AttachmentId::parse("unknown-owner").unwrap(),
     )
@@ -164,6 +164,27 @@ async fn unknown_attachment_referrer_kind_refuses_with_canonical_typed_error() {
         matches!(error, StoreError::Incompatible { .. }),
         "SQLite must return the typed attachment-owner incompatibility, got {error:?}"
     );
+}
+
+async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, SqliteStore) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("readonly.db");
+    let writable = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("provision store");
+    writable
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&SessionId::from(
+                "readonly-session",
+            )),
+        )
+        .await
+        .expect("admit session before the read-only test");
+    let store =
+        SqliteStore::open_readonly(&crate::location::DatabaseLocation::standalone_file(&path))
+            .await
+            .expect("open read-only store");
+    (dir, store)
 }
 
 #[tokio::test]
@@ -690,7 +711,7 @@ async fn absent_rows_remain_honest_successful_outcomes() {
             .is_none()
     );
     assert!(
-        lash_core_execution::AttachmentManifest::attachment_referrers(
+        lash_core_execution::AttachmentReferrers::attachment_referrers(
             store.as_ref(),
             &lash_core_execution::AttachmentId::parse("absent").unwrap()
         )
@@ -791,7 +812,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     )
     .expect("insert unknown owner kind");
     assert!(matches!(
-        lash_core_execution::AttachmentManifest::attachment_referrers(
+        lash_core_execution::AttachmentReferrers::attachment_referrers(
             &store,
             &lash_core_execution::AttachmentId::parse("unknown-owner").unwrap()
         )
@@ -960,8 +981,8 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     );
     assert_storage_failure("get_checkpoint", store.get_checkpoint(&blob_ref).await);
     assert_storage_failure(
-        "AttachmentManifest::attachment_referrers",
-        lash_core_execution::AttachmentManifest::attachment_referrers(
+        "AttachmentReferrers::attachment_referrers",
+        lash_core_execution::AttachmentReferrers::attachment_referrers(
             store.as_ref(),
             &lash_core_execution::AttachmentId::parse("absent").unwrap(),
         )

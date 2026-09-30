@@ -659,10 +659,8 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         }
     };
 
-    // Widen the writer's read-then-revoke window so the interleaving an
-    // unfenced `arm` corrupts is reached on every odd round instead of once
-    // in a blue moon. The fence does not care how wide the window is: a
-    // concurrent `arm` waits on the per-digest advisory key either way.
+    crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS
+        .store(20, std::sync::atomic::Ordering::Relaxed);
 
     let pass = lash_core_execution::AttachmentRootSet::begin_attachment_sweep(&factory)
         .await
@@ -685,7 +683,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             let store = std::sync::Arc::clone(&store);
             let intent = intent.clone();
             async move {
-                lash_core_execution::AttachmentManifest::begin_attachment_write(
+                lash_core_execution::AttachmentReferrers::begin_attachment_write(
                     &*store,
                     &(intent()),
                 )
@@ -710,7 +708,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         let fence = writer.await.expect("join writer").expect("fenced write");
 
         let contains_ref =
-            lash_core_execution::AttachmentManifest::attachment_referrers(&*store, &attachment_id)
+            lash_core_execution::AttachmentReferrers::attachment_referrers(&*store, &attachment_id)
                 .await
                 .map(|refs| !refs.is_empty())
                 .expect("contains_ref");
@@ -737,7 +735,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
                     "round {round}: a granted writer records its intent"
                 );
                 let completed_intent = intent();
-                lash_core_execution::AttachmentManifest::complete_attachment_write(
+                lash_core_execution::AttachmentReferrers::complete_attachment_write(
                     &*store,
                     &completed_intent,
                     permit,
@@ -761,7 +759,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         .await
         .expect("spare");
         if contains_ref {
-            lash_core_execution::AttachmentManifest::forget_attachment_ref(
+            lash_core_execution::AttachmentReferrers::forget_attachment_ref(
                 &*store,
                 &intent().claim.referrer(),
                 &attachment_id,
@@ -771,6 +769,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         }
     }
 
+    crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS.store(0, std::sync::atomic::Ordering::Relaxed);
     factory
         .delete_session(&session_id)
         .await
@@ -831,7 +830,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         .expect("claim"),
     };
     let lash_core_execution::AttachmentWriteFence::Granted(live_permit) =
-        lash_core_execution::AttachmentManifest::begin_attachment_write(
+        lash_core_execution::AttachmentReferrers::begin_attachment_write(
             &*live_store,
             &(live_intent.clone()),
         )
@@ -840,14 +839,14 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     else {
         panic!("a free digest must grant its writer");
     };
-    lash_core_execution::AttachmentManifest::complete_attachment_write(
+    lash_core_execution::AttachmentReferrers::complete_attachment_write(
         &*live_store,
         &live_intent,
         live_permit,
     )
     .await
     .expect("stamp live attachment upload");
-    lash_core_execution::AttachmentManifest::acquire_attachment_refs(
+    lash_core_execution::AttachmentReferrers::acquire_attachment_refs(
         &*live_store,
         &lash_core_execution::ReferrerClaim::unguarded(
             lash_core_execution::ArtifactReferrer::Session((&request.session_id).clone()),
@@ -1283,7 +1282,9 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("INSERT INTO lash_runtime_turn_commits") => "turn-commit-insert",
         q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
         q if q.starts_with("INSERT INTO lash_sessions") => "head-upsert",
-        q if q.starts_with("UPDATE lash_attachment_referrer_edges") => "attachment-manifest-commit",
+        q if q.starts_with("UPDATE lash_attachment_referrer_edges") => {
+            "attachment-referrers-commit"
+        }
         q if q.starts_with("SELECT admission_json FROM lash_session_roots") => {
             "root-admission-read"
         }

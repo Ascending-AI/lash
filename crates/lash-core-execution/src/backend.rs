@@ -127,8 +127,8 @@ impl Backend {
         self.stores().session_store_factory()
     }
 
-    pub fn attachment_manifest(&self) -> Arc<dyn crate::store::AttachmentManifest> {
-        self.stores().attachment_manifest()
+    pub fn attachment_referrers(&self) -> Arc<dyn crate::store::AttachmentReferrers> {
+        self.stores().attachment_referrers()
     }
 
     /// The host that journals and replays this backend's effects.
@@ -257,7 +257,7 @@ pub trait StoreSet: Send + Sync {
     fn session_store_factory(&self) -> Arc<dyn DeploymentStore>;
 
     /// The durable core attachment manifest and shared referrer fence.
-    fn attachment_manifest(&self) -> Arc<dyn crate::store::AttachmentManifest>;
+    fn attachment_referrers(&self) -> Arc<dyn crate::store::AttachmentReferrers>;
 
     /// The durable registry of background processes.
     fn process_registry(&self) -> Arc<dyn ProcessRegistry>;

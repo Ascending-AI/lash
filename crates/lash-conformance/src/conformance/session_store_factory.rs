@@ -17,7 +17,7 @@ mod admission;
 mod owning_process;
 pub use owning_process::session_meta_records_the_process_that_owns_it;
 mod process_successor;
-pub use process_successor::a_same_start_key_successor_after_prune_owns_fresh_session_stores;
+pub use process_successor::a_same_start_key_successor_after_prune_has_independent_attachment_referrers;
 #[path = "session_store_factory_attachment_fence.rs"]
 mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]
@@ -1852,7 +1852,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     // A completed delete retires the condemnation row outright, so the next
     // writer is granted immediately.
     assert!(matches!(
-        crate::AttachmentManifest::begin_attachment_write(
+        crate::AttachmentReferrers::begin_attachment_write(
             store.store().as_ref(),
             &(crate::AttachmentWrite {
                 attachment_id: orphan.id.clone(),

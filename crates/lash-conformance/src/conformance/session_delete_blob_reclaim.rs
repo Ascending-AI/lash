@@ -517,7 +517,7 @@ async fn attachment_prefix_retention(
     let bytes = Arc::clone(&handles.attachments);
     let parent = crate::SessionAttachmentStore::new(
         bytes.clone(),
-        Arc::clone(store.store()) as Arc<dyn crate::AttachmentManifest>,
+        Arc::clone(store.store()) as Arc<dyn crate::AttachmentReferrers>,
         crate::RuntimeOwner::Session((request.session_id).clone()),
     );
     let reference = parent
@@ -531,7 +531,16 @@ async fn attachment_prefix_retention(
         )
         .await
         .expect("put shared-prefix attachment");
-    // A crashed, superseded turn left bytes plus an uncommitted intent.
+    let staging = store
+        .store()
+        .attachment_referrers(&reference.id)
+        .await
+        .unwrap();
+    // A settled execution has an explicit cleanup boundary.
+    let orphan_referrer = crate::conformance::attachment_referrers::execution(
+        &request.session_id,
+        "completed-fixture",
+    );
     let orphan = bytes
         .put(
             vec![4, 5, 6],
@@ -579,6 +588,18 @@ async fn attachment_prefix_retention(
     commit.committed_attachment_ids = vec![reference.id.clone()];
     let receipt = store.commit_runtime_state(commit).await.unwrap();
     let leaf_node_id = receipt.committed_leaf_node_id.unwrap();
+    for referrer in staging {
+        store
+            .store()
+            .end_attachment_referrer(&referrer)
+            .await
+            .unwrap();
+    }
+    store
+        .store()
+        .end_attachment_referrer(&orphan_referrer)
+        .await
+        .unwrap();
     if pinned {
         handles.factory.pin(&leaf_node_id).await.unwrap();
     }
@@ -621,7 +642,7 @@ async fn attachment_prefix_retention(
     );
     let child = crate::SessionAttachmentStore::new(
         bytes.clone(),
-        Arc::clone(fork.store()) as Arc<dyn crate::AttachmentManifest>,
+        Arc::clone(fork.store()) as Arc<dyn crate::AttachmentReferrers>,
         crate::RuntimeOwner::Session((fork_request.session_id).clone()),
     );
     assert_eq!(
@@ -665,7 +686,7 @@ async fn attachment_prefix_retention(
             .unwrap();
     assert_eq!(
         reconciled.reclaimed_count, 1,
-        "receipt pruning cannot leak the orphan intent's bytes"
+        "receipt pruning cannot leak the settled execution's bytes"
     );
     assert!(matches!(
         bytes.get(&orphan.id).await,
@@ -689,6 +710,21 @@ async fn attachment_prefix_retention(
             .await
             .unwrap();
     }
+    assert_eq!(
+        store
+            .store()
+            .session_referrer_state(&request.session_id)
+            .await
+            .unwrap(),
+        crate::SessionReferrerState::DeletedRetired
+    );
+    store
+        .store()
+        .end_attachment_referrer(&crate::ArtifactReferrer::Session(
+            request.session_id.clone(),
+        ))
+        .await
+        .unwrap();
     let report =
         crate::reclaim_unreferenced_attachments(handles.factory.as_ref(), bytes.as_ref(), policy)
             .await

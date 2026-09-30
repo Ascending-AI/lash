@@ -159,7 +159,9 @@ async fn commit_with_attachment_refs(
     let facade = Arc::new(crate::SessionAttachmentStore::new(
         Arc::clone(&handles.attachment_backend),
         Arc::new(
-            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(&store)),
+            lash_core::testing::conformance_support::PersistenceReferrersAdapter(Arc::clone(
+                &store,
+            )),
         ),
         crate::RuntimeOwner::Session(session_id.clone()),
     ));
@@ -283,7 +285,7 @@ async fn put_attachment_intent(
     };
     let facade = Arc::new(crate::SessionAttachmentStore::new(
         Arc::clone(&handles.attachment_backend),
-        Arc::new(lash_core::testing::conformance_support::PersistenceManifestAdapter(store)),
+        Arc::new(lash_core::testing::conformance_support::PersistenceReferrersAdapter(store)),
         owner,
     ));
     let _execution_binding = if owner_kind % 3 == 1 {

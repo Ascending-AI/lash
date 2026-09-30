@@ -19,7 +19,6 @@ pub(super) struct FaultingAttachmentStore {
     inner: Arc<dyn AttachmentStore>,
     fail_put: AtomicBool,
     fail_delete: AtomicBool,
-    vanish_after_list: AtomicBool,
 }
 
 impl FaultingAttachmentStore {
@@ -28,7 +27,6 @@ impl FaultingAttachmentStore {
             inner,
             fail_put: AtomicBool::new(false),
             fail_delete: AtomicBool::new(false),
-            vanish_after_list: AtomicBool::new(false),
         }
     }
 
@@ -38,10 +36,6 @@ impl FaultingAttachmentStore {
 
     pub(super) fn fail_delete(&self, fail: bool) {
         self.fail_delete.store(fail, Ordering::SeqCst);
-    }
-
-    fn vanish_after_next_list(&self) {
-        self.vanish_after_list.store(true, Ordering::SeqCst);
     }
 }
 
@@ -78,13 +72,7 @@ impl AttachmentStore for FaultingAttachmentStore {
     }
 
     async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
-        let listed = self.inner.list().await?;
-        if self.vanish_after_list.swap(false, Ordering::SeqCst) {
-            for blob in &listed {
-                self.inner.delete(&blob.id).await?;
-            }
-        }
-        Ok(listed)
+        self.inner.list().await
     }
 
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {

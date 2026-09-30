@@ -13,7 +13,7 @@ use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 use crate::store::{
     AttachmentCondemnation, AttachmentCondemnationAdoption, AttachmentCondemnationPhase,
     AttachmentCondemnationSettlement, AttachmentDeleteArming, AttachmentDeleteStallReason,
-    AttachmentManifest, AttachmentSettlementOutcome, AttachmentSweepGeneration, AttachmentWrite,
+    AttachmentReferrers, AttachmentSettlementOutcome, AttachmentSweepGeneration, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit, MAX_ATTACHMENT_DELETE_ATTEMPTS, StoreError,
 };
 
@@ -103,20 +103,20 @@ pub enum AttachmentStoreError {
         #[source]
         source: std::io::Error,
     },
-    /// A manifest operation failed for one attachment. The store cause keeps
+    /// A referrers operation failed for one attachment. The store cause keeps
     /// its classification and structured refusal fields.
-    #[error("attachment manifest {operation} for `{attachment_id}` failed: {source}")]
-    ManifestOperationFailed {
+    #[error("attachment referrers {operation} for `{attachment_id}` failed: {source}")]
+    ReferrersOperationFailed {
         operation: &'static str,
         attachment_id: AttachmentId,
         #[source]
         source: Box<StoreError>,
     },
     /// A blob write or its returned-id contract failed, then aborting the
-    /// manifest write failed too. The source chain follows the original write
+    /// referrers write failed too. The source chain follows the original write
     /// failure; `abort_error` retains the separate rollback cause.
     #[error(
-        "attachment write for `{attachment_id}` failed: {write_error}; manifest abort also failed: {abort_error}"
+        "attachment write for `{attachment_id}` failed: {write_error}; referrers abort also failed: {abort_error}"
     )]
     WriteRollbackFailed {
         attachment_id: AttachmentId,
@@ -168,7 +168,7 @@ pub enum AttachmentStoreError {
 
 impl AttachmentStoreError {
     /// Whether retrying the identical operation may succeed. A transient
-    /// blob backend, manifest or root-set failure is retryable when its source is
+    /// blob backend, referrers or root-set failure is retryable when its source is
     /// transient, as is a write refused by an in-flight reclamation: the
     /// retry re-puts the bytes once the delete settles.
     /// A contract violation or a terminal backend failure retries to the same
@@ -178,7 +178,7 @@ impl AttachmentStoreError {
         match self {
             Self::Backend { class, .. } => class.is_retryable(),
             Self::RootSetOperationFailed { source, .. }
-            | Self::ManifestOperationFailed { source, .. } => source.is_transient(),
+            | Self::ReferrersOperationFailed { source, .. } => source.is_transient(),
             Self::WriteRollbackFailed {
                 write_error,
                 abort_error,
@@ -236,7 +236,7 @@ pub enum AttachmentStorePersistence {
 /// notion of sessions — identical bytes written by any number of sessions
 /// resolve to one physical blob, and that dedup is intended. Reference
 /// tracking and the session boundary live one layer up in
-/// [`SessionAttachmentStore`] and the [`AttachmentManifest`]; lifecycle
+/// [`SessionAttachmentStore`] and the [`AttachmentReferrers`]; lifecycle
 /// (which blobs may be deleted) lives above that in the host, via
 /// [`reclaim_unreferenced_attachments`].
 ///
@@ -277,7 +277,7 @@ pub trait AttachmentStore: Send + Sync {
 
     /// Idempotent: deleting an absent blob is a no-op.
     /// This is the primitive mark-and-sweep GC uses to reclaim unreferenced content;
-    /// per-session lifecycle is expressed by dropping manifest refs, never by calling this
+    /// per-session lifecycle is expressed by dropping referrers refs, never by calling this
     /// directly for a live session.
     ///
     /// Namespaced-storage implementors must apply the trait-level id-shape
@@ -355,7 +355,7 @@ pub trait AttachmentRootSet: Send + Sync {
     /// full root set is snapshotted once, but a candidate blob can be re-referenced
     /// in the narrow window between the freshness re-check and the delete, so the
     /// sweep re-probes just that id. Unlike the snapshot, this is a read-only probe
-    /// — it must NOT reconcile (forget) aged intents. Backends answer with a single
+    /// — it does not mutate referrer edges or pending writes. Backends answer with a single
     /// indexed query / first-hit scan rather than materializing the whole set.
     async fn has_live_attachment_ref(&self, id: &AttachmentId) -> Result<bool, StoreError>;
 
@@ -372,20 +372,20 @@ pub trait AttachmentRootSet: Send + Sync {
     /// against the same durable store, with each transition a single
     /// conditional mutation:
     ///
-    /// 1. [`AttachmentManifest::begin_attachment_write`] — the **writer half**,
-    ///    on the manifest trait, not this one. Overriding the methods below
+    /// 1. [`AttachmentReferrers::begin_attachment_write`] — the **writer half**,
+    ///    on the referrers trait, not this one. Overriding the methods below
     ///    while leaving this at its default means writers record intents without
     ///    consulting the condemnation, so a sweep deletes bytes behind a live
     ///    intent while this method reports `Fenced`. There is no fence without
     ///    it.
-    /// 2. [`AttachmentManifest::complete_attachment_write`] and
-    ///    [`AttachmentManifest::abort_attachment_write`] — fenced and matched on
+    /// 2. [`AttachmentReferrers::complete_attachment_write`] and
+    ///    [`AttachmentReferrers::abort_attachment_write`] — fenced and matched on
     ///    the attempt identity the writer half minted.
     /// 3. [`Self::begin_attachment_sweep`] — mint a pass generation and hold
     ///    the liveness that proves the pass has not died.
     /// 4. [`Self::adopt_attachment_condemnations`] — claim a dead pass's rows.
     /// 5. [`Self::condemn_attachment`] — `Free -> Condemned`, conditional on
-    ///    the root predicate, clearing every manifest row for the digest.
+    ///    the root predicate, clearing every referrers row for the digest.
     /// 6. [`Self::arm_attachment_delete`] — `Condemned -> Deleting`,
     ///    conditional on the pass still owning the condemnation.
     /// 7. [`Self::settle_attachment_condemnation`] — retire, spare, or record
@@ -448,21 +448,12 @@ pub trait AttachmentRootSet: Send + Sync {
     /// `Free -> Condemned` for one digest, stamped with `generation`,
     /// conditional on there being no live root — the GC half of the fence.
     ///
-    /// The same mutation clears every manifest row for the digest. A digest with
-    /// no live root is one whose remaining rows are aged, owner-dead intents;
-    /// leaving them behind would leave upload evidence for bytes this sweep is
-    /// about to delete. Clearing them is what removes the need for a durable
-    /// byte-absence tombstone: adoption is gated on positive evidence, and after
-    /// condemnation there is none.
-    ///
-    /// This MUST be one conditional mutation in the same durable store as the
-    /// manifest: the root predicate (the same one
-    /// [`Self::has_live_attachment_ref`] answers, with the same cutoff) and the
-    /// condemnation insert are evaluated together, so a writer's
-    /// [`AttachmentManifest::begin_attachment_write`] either lands first (and
-    /// this returns [`AttachmentCondemnation::RootPresent`]) or lands after (and
-    /// revokes the condemnation this call created). A read-then-insert
-    /// implementation is not a fence.
+    /// The same transaction removes upload evidence. The root predicate is
+    /// the one [`Self::has_live_attachment_ref`] answers: an edge or pending
+    /// write is sufficient, regardless of age. Checking that predicate and
+    /// inserting the condemnation must serialize with writers on the digest.
+    /// A writer that wins first makes this return `RootPresent`; a writer
+    /// that follows may claim the unarmed condemnation.
     ///
     /// It never blocks: an existing condemnation returns
     /// [`AttachmentCondemnation::AlreadyCondemned`] and the digest is deferred.
@@ -505,7 +496,7 @@ pub trait AttachmentRootSet: Send + Sync {
     ///
     /// [`Deleted`](AttachmentCondemnationSettlement::Deleted) retires the
     /// `Deleting` row: the digest returns to `Free` holding no upload
-    /// evidence, because condemning it already cleared every manifest row.
+    /// evidence, because condemnation already removed its upload record.
     /// No byte-absence fact is retained, and none is needed: adoption finds no
     /// upload evidence and refuses with
     /// [`StoreError::UnknownAttachment`](crate::StoreError::UnknownAttachment)
@@ -537,14 +528,11 @@ pub trait AttachmentRootSet: Send + Sync {
     /// This is an explicit host-policy lever under ADR 0014 for a *writer* the
     /// host has stopped; a sweeper's own condemnations are recovered by the next
     /// sweep, never by a host. Before calling it, the host MUST establish
-    /// that no restoring writer for this digest is running. The operation clears
-    /// the claim and the precisely associated unstamped, uncommitted manifest
-    /// intent in one mutation; an intent already carrying upload evidence is
-    /// left alone. It preserves `Condemned` unless the associated intent became
-    /// a committed root while the claim was held; that newer root supersedes the
-    /// old unarmed condemnation, which returns to `Free` before an older sweep
-    /// can arm it. A fresh [`AttachmentManifest::begin_attachment_write`] can
-    /// claim a retained phase and re-put the bytes; a stale completion from the
+    /// that no restoring writer for this digest is running. Recovery applies
+    /// the same transition as abort to the pending attempt named by the
+    /// condemnation's foreign key. Other referrer edges or pending attempts
+    /// retire the condemnation; otherwise it remains available to a fresh
+    /// writer. A stale completion from the
     /// recovered attempt fails with
     /// [`StoreError::StaleWritePermit`](crate::StoreError::StaleWritePermit) and
     /// a stale abort is a no-op. There is no TTL and no elapsed-time authority.
@@ -733,7 +721,7 @@ pub struct AttachmentReclamationPolicy {
 ///    not garbage: skip it.
 /// 2. **The writer's intent is the fence on the other side.** Every `put`
 ///    records its intent through
-///    [`AttachmentManifest::begin_attachment_write`] *before* the bytes land, in
+///    [`AttachmentReferrers::begin_attachment_write`] *before* the bytes land, in
 ///    the same conditional mutation that reads the condemnation. So a writer
 ///    either records first (and the condemn CAS fails) or arrives to a condemned
 ///    digest and claims it with a write token (and the sweep's arm CAS fails).
@@ -741,11 +729,11 @@ pub struct AttachmentReclamationPolicy {
 /// 3. **Only an armed digest is deleted.** The physical backend delete is issued
 ///    exclusively for a digest [`AttachmentRootSet::arm_attachment_delete`]
 ///    moved to `Deleting`. A successful delete, or bytes already gone, retires
-///    the condemnation row outright, and condemnation has already cleared every
-///    manifest row for the digest, so the bytes are unadoptable until somebody
+///    the condemnation row outright, and condemnation has already removed the
+///    upload evidence for the digest, so the bytes are unadoptable until somebody
 ///    puts them again. A writer that arrives while the delete is in flight
 ///    records nothing and retries. A failed put preserves `Condemned` unless
-///    its intent became a committed root while the claim was held, in which
+///    another edge or pending attempt roots it, in which
 ///    case that root returns it to `Free`.
 ///    That is why no SQL/blob-store atomicity is needed: the authority's state
 ///    machine, not the backend, decides whether bytes may die.
@@ -1026,7 +1014,7 @@ where
                         "attachment root authority reported `Fenced` but answered \
                          `Unsupported` to condemn_attachment; this sweep's deletes are \
                          NOT fenced and are reported best-effort. Implement the complete \
-                         fence methods (including AttachmentManifest::begin_attachment_write) \
+                         fence methods (including AttachmentReferrers::begin_attachment_write) \
                          or report AttachmentGcFence::BestEffort"
                     );
                     fence = AttachmentGcFence::BestEffort;
@@ -1479,7 +1467,7 @@ pub enum AttachmentHolder {
 /// the holder's lasting referrer edge. Reclamation alone deletes bytes.
 pub struct SessionAttachmentStore {
     backend: Arc<dyn AttachmentStore>,
-    manifest: Arc<dyn AttachmentManifest>,
+    referrers: Arc<dyn AttachmentReferrers>,
     holder: AttachmentHolder,
     max_attachment_bytes: Option<u64>,
     upload_expiry_ms: u64,
@@ -1510,20 +1498,20 @@ impl Drop for AttachmentExecutionBinding {
 impl SessionAttachmentStore {
     pub fn new(
         backend: Arc<dyn AttachmentStore>,
-        manifest: Arc<dyn AttachmentManifest>,
+        referrers: Arc<dyn AttachmentReferrers>,
         owner: crate::runtime_owner::RuntimeOwner,
     ) -> Self {
-        Self::new_with_clock(backend, manifest, owner, Arc::new(crate::SystemClock))
+        Self::new_with_clock(backend, referrers, owner, Arc::new(crate::SystemClock))
     }
     pub fn new_with_clock(
         backend: Arc<dyn AttachmentStore>,
-        manifest: Arc<dyn AttachmentManifest>,
+        referrers: Arc<dyn AttachmentReferrers>,
         owner: crate::runtime_owner::RuntimeOwner,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
             backend,
-            manifest,
+            referrers,
             holder: AttachmentHolder::Runtime(owner),
             max_attachment_bytes: None,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
@@ -1534,7 +1522,7 @@ impl SessionAttachmentStore {
     pub fn ephemeral(backend: Arc<dyn AttachmentStore>) -> Self {
         Self {
             backend,
-            manifest: Arc::new(NoopAttachmentManifest),
+            referrers: Arc::new(NoopAttachmentReferrers),
             holder: AttachmentHolder::Ephemeral,
             max_attachment_bytes: None,
             upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
@@ -1549,8 +1537,8 @@ impl SessionAttachmentStore {
     pub fn backend(&self) -> &Arc<dyn AttachmentStore> {
         &self.backend
     }
-    pub fn manifest(&self) -> &Arc<dyn AttachmentManifest> {
-        &self.manifest
+    pub fn referrers(&self) -> &Arc<dyn AttachmentReferrers> {
+        &self.referrers
     }
     pub fn holder(&self) -> &AttachmentHolder {
         &self.holder
@@ -1572,7 +1560,7 @@ impl SessionAttachmentStore {
     pub fn reconfigured_max_attachment_bytes(&self, max_attachment_bytes: Option<u64>) -> Self {
         Self {
             backend: Arc::clone(&self.backend),
-            manifest: Arc::clone(&self.manifest),
+            referrers: Arc::clone(&self.referrers),
             holder: self.holder.clone(),
             max_attachment_bytes,
             upload_expiry_ms: self.upload_expiry_ms,
@@ -1680,10 +1668,10 @@ impl SessionAttachmentStore {
         let reference = loop {
             attempts += 1;
             let fence = self
-                .manifest
+                .referrers
                 .begin_attachment_write(&write)
                 .await
-                .map_err(|source| AttachmentStoreError::ManifestOperationFailed {
+                .map_err(|source| AttachmentStoreError::ReferrersOperationFailed {
                     operation: "begin_attachment_write",
                     attachment_id: attachment_id.clone(),
                     source: Box::new(source),
@@ -1715,7 +1703,7 @@ impl SessionAttachmentStore {
                 Ok(reference) => reference,
                 Err(backend_error) => {
                     if let Err(rollback_error) =
-                        self.manifest.abort_attachment_write(&write, permit).await
+                        self.referrers.abort_attachment_write(&write, permit).await
                     {
                         return Err(AttachmentStoreError::WriteRollbackFailed {
                             attachment_id,
@@ -1728,11 +1716,11 @@ impl SessionAttachmentStore {
             };
             if reference.id != attachment_id {
                 let backend_error = AttachmentStoreError::Contract(format!(
-                    "attachment store returned id `{}` after manifest intent for `{attachment_id}`",
+                    "attachment store returned id `{}` after a pending write for `{attachment_id}`",
                     reference.id
                 ));
                 if let Err(rollback_error) =
-                    self.manifest.abort_attachment_write(&write, permit).await
+                    self.referrers.abort_attachment_write(&write, permit).await
                 {
                     return Err(AttachmentStoreError::WriteRollbackFailed {
                         attachment_id,
@@ -1743,21 +1731,14 @@ impl SessionAttachmentStore {
                 return Err(backend_error);
             }
             match self
-                .manifest
+                .referrers
                 .complete_attachment_write(&write, permit)
                 .await
             {
                 Ok(()) => break reference,
-                // The manifest has no TTL and no elapsed-time authority, so an
-                // unstamped intent that is already past the sweep's grace cutoff
-                // reads as an abandoned attempt: a sweep that condemns this
-                // digest between the grant and the stamp deletes the row this
-                // permit names, and the stamp then certifies nothing. That is
-                // the documented recovery point for the writer, not a failure —
-                // re-acquire the fence (which claims the condemnation and stops
-                // the delete from arming) and re-put. The bytes are only ever
-                // written behind a granted permit, so nothing lands inside an
-                // armed delete.
+                // A permit explicitly retired by recovery or referrer ending
+                // cannot stamp evidence. Retry behind a fresh fence: a permanent
+                // end refuses the next begin, while a recovered write may resume.
                 Err(StoreError::StaleWritePermit { .. })
                     if attempts < RECLAMATION_FENCE_ATTEMPTS =>
                 {
@@ -1765,7 +1746,7 @@ impl SessionAttachmentStore {
                     continue;
                 }
                 Err(source) => {
-                    return Err(AttachmentStoreError::ManifestOperationFailed {
+                    return Err(AttachmentStoreError::ReferrersOperationFailed {
                         operation: "complete_attachment_write",
                         attachment_id,
                         source: Box::new(source),
@@ -1792,25 +1773,25 @@ impl SessionAttachmentStore {
                 crate::artifact_referrer::ArtifactReferrer::ProcessRecord(id.clone())
             }
         };
-        self.manifest
+        self.referrers
             .forget_attachment_ref(&referrer, id)
             .await
-            .map_err(|source| AttachmentStoreError::ManifestOperationFailed {
+            .map_err(|source| AttachmentStoreError::ReferrersOperationFailed {
                 operation: "forget_attachment_ref",
                 attachment_id: id.clone(),
                 source: Box::new(source),
             })
     }
 }
-pub struct NoopAttachmentManifest;
-crate::impl_noop_attachment_manifest!(NoopAttachmentManifest);
+pub struct NoopAttachmentReferrers;
+crate::impl_noop_attachment_referrers!(NoopAttachmentReferrers);
 fn now_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
 /// The attachment port of a runtime store.
-pub struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimeStore>);
+pub struct PersistenceReferrersAdapter(pub Arc<dyn crate::RuntimeStore>);
 #[async_trait::async_trait]
-impl AttachmentManifest for PersistenceManifestAdapter {
+impl AttachmentReferrers for PersistenceReferrersAdapter {
     async fn begin_attachment_write(
         &self,
         write: &AttachmentWrite,
@@ -2002,8 +1983,8 @@ pub fn degrade_unmaterializable_request_attachments(
 mod fail_closed_tests;
 
 #[cfg(test)]
-#[path = "attachments/manifest_failure_tests.rs"]
-mod manifest_failure_tests;
+#[path = "attachments/referrer_failure_tests.rs"]
+mod referrer_failure_tests;
 
 #[cfg(any(test, feature = "testing"))]
 #[path = "attachments/test_capability.rs"]

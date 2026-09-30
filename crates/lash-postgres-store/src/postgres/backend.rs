@@ -132,7 +132,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
         PostgresStoreSet::session_store_factory(self)
     }
-    fn attachment_manifest(&self) -> Arc<dyn lash_core_execution::AttachmentManifest> {
+    fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
         PostgresStoreSet::session_store_factory(self)
     }
 

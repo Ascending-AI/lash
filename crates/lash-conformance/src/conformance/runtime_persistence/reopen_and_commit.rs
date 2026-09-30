@@ -258,11 +258,6 @@ pub async fn attachment_acquisition_preserves_receiving_referrer(store: Arc<dyn 
     );
 }
 
-pub(super) fn sha256_of(bytes: &[u8]) -> impl std::fmt::LowerHex {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes)
-}
-
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

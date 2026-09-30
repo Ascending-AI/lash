@@ -331,7 +331,7 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
         SqliteStoreSet::session_store_factory(self)
     }
-    fn attachment_manifest(&self) -> Arc<dyn lash_core_execution::AttachmentManifest> {
+    fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
         SqliteStoreSet::session_store_factory(self)
     }
 

@@ -12,7 +12,7 @@
     reason = "FIG-2784 pass 1, a later PR in the chain"
 )]
 
-/// Re-exported so `impl_noop_attachment_manifest!` can paste an
+/// Re-exported so `impl_noop_attachment_referrers!` can paste an
 /// `#[async_trait]` impl into crates that do not depend on `async-trait`
 /// directly. Not part of the supported surface.
 #[doc(hidden)]
@@ -247,8 +247,8 @@ pub(crate) use session_graph::{
 #[allow(unused_imports)]
 pub(crate) use session_graph_integrity::graph_node_indices;
 #[allow(unused_imports)]
-pub(crate) use store::attachment_manifest::{
-    AttachmentCondemnation, AttachmentDeleteArming, AttachmentManifest, AttachmentWrite,
+pub(crate) use store::attachment_referrers::{
+    AttachmentCondemnation, AttachmentDeleteArming, AttachmentReferrers, AttachmentWrite,
     AttachmentWriteFence, AttachmentWritePermit,
 };
 #[allow(unused_imports)]

@@ -102,7 +102,7 @@ use lash_conformance::{
 use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use lash_core_execution::{
-    AttachmentManifest as _, DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry,
+    AttachmentReferrers as _, DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry,
     QueuedWorkStore as _, RuntimeStore, SessionCatalogStore as _, SessionCommitStore as _,
     StoreError, TriggerStore,
 };
@@ -1902,9 +1902,9 @@ lash_conformance::attachment_referrer_tests!({
                 .begin()
                 .await
                 .map_err(|error| StoreError::Backend(error.to_string()))?;
-            sqlx::query("ALTER TABLE lash_attachment_referrer_edges DROP CONSTRAINT IF EXISTS ck_attachment_edges_kind").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
+            sqlx::query("ALTER TABLE lash_attachment_referrer_edges DROP CONSTRAINT IF EXISTS ck_attachment_referrer_edges_kind").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
             sqlx::query("INSERT INTO lash_attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ($1, $2, $3)").bind(id.as_str()).bind(kind).bind(key).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
-            sqlx::query("ALTER TABLE lash_attachment_referrer_edges ADD CONSTRAINT ck_attachment_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')) NOT VALID").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
+            sqlx::query("ALTER TABLE lash_attachment_referrer_edges ADD CONSTRAINT ck_attachment_referrer_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'process_record')) NOT VALID").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
             tx.commit()
                 .await
                 .map_err(|error| StoreError::Backend(error.to_string()))

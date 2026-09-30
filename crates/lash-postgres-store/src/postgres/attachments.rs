@@ -592,7 +592,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
     tx.commit().await.map_err(store_sqlx_error)
 }
 #[async_trait::async_trait]
-impl AttachmentManifest for PostgresStore {
+impl AttachmentReferrers for PostgresStore {
     async fn begin_attachment_write(
         &self,
         write: &AttachmentWrite,

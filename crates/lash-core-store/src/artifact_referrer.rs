@@ -69,7 +69,7 @@ impl ArtifactReferrerKind {
     ];
 
     /// `frame_environment`, `process_record`, `subscription_revision`,
-    /// `start`, `execution`, `host_pin`, `definition_revision`.
+    /// `start`, `execution`, `host_pin`, `definition_revision`, `session`, `upload`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -1025,6 +1025,8 @@ mod tests {
                 DefinitionRevisionId::new("lash.process-definition:ns:name".to_owned(), 2)
                     .expect("revision"),
             ),
+            ArtifactReferrer::Session(SessionId::from("s-1")),
+            ArtifactReferrer::Upload(UploadReferrerId::mint(SessionId::from("s-1"))),
         ]
     }
 

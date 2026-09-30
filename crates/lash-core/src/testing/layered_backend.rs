@@ -410,8 +410,8 @@ impl StoreSet for LayeredStoreSet {
     fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
         Arc::clone(&self.session_store_factory)
     }
-    fn attachment_manifest(&self) -> Arc<dyn lash_core_execution::AttachmentManifest> {
-        self.inner.attachment_manifest()
+    fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
+        self.inner.attachment_referrers()
     }
 
     fn process_registry(&self) -> Arc<dyn ProcessRegistry> {

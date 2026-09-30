@@ -3,7 +3,7 @@
 //! The local durable persistence backend for the lash agent runtime. One
 //! [`SqliteStore`] owns the durable-core catalog for all sessions, with a
 //! writer connection and a fixed pool of WAL readers. It implements
-//! [`DeploymentStore`] and [`AttachmentManifest`].
+//! [`DeploymentStore`] and [`AttachmentReferrers`].
 //!
 //! It provides a `SqliteStoreSet` and storage ports for an effect engine such
 //! as Restate. SQLite uses WAL (`-wal`/`-shm` sidecars) for concurrent
@@ -36,7 +36,7 @@
 //! payloads before entering the catalog write transaction.
 //!
 //! [`DeploymentStore`]: lash_core_execution::DeploymentStore
-//! [`AttachmentManifest`]: lash_core_execution::AttachmentManifest
+//! [`AttachmentReferrers`]: lash_core_execution::AttachmentReferrers
 
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
@@ -71,7 +71,7 @@ use lash_core_execution::store::{
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
-    AttachmentId, AttachmentManifest, BlobRef, DeliveryPolicy, GcReport, PersistedSegmentHandover,
+    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, PersistedSegmentHandover,
     ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessContinuationStore, ProcessEvent,
     ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,

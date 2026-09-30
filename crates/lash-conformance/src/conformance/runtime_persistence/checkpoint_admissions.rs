@@ -1444,16 +1444,3 @@ pub(super) fn caller_frame_node_id(session_id: &SessionId, material: &str) -> cr
         crate::FrameKey::from_caller_material(material).expect("non-empty frame material");
     crate::frame_node_id(session_id, frame_key.as_str())
 }
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) fn attachment_intent(id: &str) -> AttachmentWrite {
-    crate::AttachmentWrite {
-        attachment_id: AttachmentId::parse(id).expect("valid attachment id"),
-        claim: crate::conformance::attachment_referrers::claim(crate::ArtifactReferrer::Session(
-            SessionId::from("root"),
-        )),
-    }
-}

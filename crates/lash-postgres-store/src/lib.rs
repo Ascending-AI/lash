@@ -49,7 +49,7 @@ use lash_core_execution::store::{
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
-    AttachmentId, AttachmentManifest, BlobRef, DeliveryPolicy, ExecutionScope, GcReport,
+    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, ExecutionScope, GcReport,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
@@ -115,7 +115,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 //
 // Bumped to 11 for the combined completion-authority (ADR 0027) and attachment
 // three-layer (ADR 0028) cutovers. This single component gates every table,
-// including `lash_process_events` and `lash_attachment_manifest`. Pre-cutover
+// including `lash_process_events` and the legacy attachment ownership table. Pre-cutover
 // terminal process events lack the `completion_authority` payload (so a
 // cross-version replay-key hash would mismatch), and pre-cutover manifest rows
 // name `sessions/<hash>/...` blob paths the flat layout cannot read. Rejecting
@@ -569,7 +569,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `lash_processes` drops `incarnation` and `registration_fingerprint` and
 // gains the nullable `start_key` with its partial unique index; the event,
 // wake-delivery, observer, tombstone and artifact-cleanup tables key by
-// `process_id` alone; `lash_attachment_manifest` drops `owner_incarnation`,
+// `process_id` alone; the legacy attachment ownership table drops `owner_incarnation`,
 // `lash_session_meta_pending_observer_intents` drops `process_incarnation`,
 // and `lash_trigger_deliveries.process_id` becomes nullable until the
 // delivery's start binds it. None of that is an expand step, so the migrate

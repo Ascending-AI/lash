@@ -322,10 +322,11 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
     ));
     connection
         .execute_batch(
-            "DELETE FROM attachment_condemnations;
+            "PRAGMA foreign_keys = OFF;
+             DELETE FROM attachment_condemnations;
              INSERT INTO attachment_condemnations
                  (attachment_id, phase, write_token, sweep_generation)
-             VALUES ('corrupt-condemnation', 'deleting', NULL, 1);",
+             VALUES ('corrupt-condemnation', 'deleting', '0123456789abcdef0123456789abcdef', 1);",
         )
         .expect("inject inconsistent persisted provenance");
     assert!(matches!(

@@ -377,6 +377,10 @@ where
             lash_core::DefinitionRevisionId::new("definition".into(), 1)
                 .expect("definition revision"),
         ),
+        ArtifactReferrer::Session(lash_core::SessionId::from("canonical-session")),
+        ArtifactReferrer::Upload(lash_core::UploadReferrerId::mint(
+            lash_core::SessionId::from("canonical-session"),
+        )),
     ];
     assert_eq!(values.len(), ArtifactReferrerKind::ALL.len());
     for value in values {
