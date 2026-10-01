@@ -23,7 +23,9 @@ const HELD_WAIT: Duration = Duration::from_secs(20);
 
 /// The ticks a rolling deploy's drain may take before the epoch reports the
 /// old generation stuck: five minutes of virtual time, and
-/// [`lapsed_claim_ticks`] more for each host death during the drain.
+/// [`lapsed_claim_ticks`] more for each host death during the drain. The
+/// drain takes a tick only once the engine's work has settled
+/// (`Driver::settle_work`), so the bound measures time, not the runner.
 pub(super) const DRAIN_TICKS: usize = 30;
 
 /// The ticks a claim a dead host held takes to lapse and be retaken: the
@@ -154,9 +156,14 @@ pub(super) fn soak_core(
 /// restart replays reaches the model again.
 pub(super) type Reached = Arc<tokio::sync::watch::Sender<BTreeSet<String>>>;
 
+/// How long the model takes, in wall time, to answer a `slow-` root.
+#[cfg(test)]
+const SLOW_ANSWER: Duration = Duration::from_millis(250);
+
 /// The crash matrix's scripted model, recording which held root reached it:
 /// a held root's call never answers, and every other root is answered from
-/// its input.
+/// its input. Under test a `slow-` root is answered after [`SLOW_ANSWER`],
+/// as every root is on a runner short of CPU; no plan names one.
 fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle {
     use crate::crash_matrix::invariants::{answer_text, input_roots};
     lash_core::testing::TestProvider::builder()
@@ -180,6 +187,10 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
                 if !held.is_empty() {
                     reached.send_modify(|seen| seen.extend(held));
                     std::future::pending::<()>().await;
+                }
+                #[cfg(test)]
+                if roots.iter().any(|root| root.starts_with("slow-")) {
+                    tokio::time::sleep(SLOW_ANSWER).await;
                 }
                 Ok::<_, lash_core::llm::transport::LlmTransportError>(
                     lash_core::llm::types::LlmResponse {
@@ -1043,8 +1054,7 @@ impl Driver {
         let crashes_before = self.counts.crashes;
         let mut tick = 0;
         loop {
-            self.world.quiesce().await;
-            self.settle_crash().await?;
+            self.settle_work().await?;
             let status = self
                 .world
                 .core()?
@@ -1076,19 +1086,64 @@ impl Driver {
             let bound = DRAIN_TICKS + crashes * lapsed_claim_ticks();
             if tick >= bound {
                 return Err(format!(
-                    "generation `{old}` never drained within {bound} ticks ({DRAIN_TICKS} and {crashes} host death(s) during the drain): it holds {} live process(es), {} parked process(es), {} parked turn(s), {} closing session(s), stalled {:?}; open invocations pinned to its build: {pinned:?}; closing: {:?}; {:?}",
+                    "generation `{old}` never drained within {bound} ticks ({DRAIN_TICKS} and {crashes} host death(s) during the drain): it holds {} live process(es), {} parked process(es), {} parked turn(s), {} closing session(s), stalled {:?}; open invocations pinned to its build: {pinned:?}; closing: {:?}; {:?}; every open invocation: {:?}",
                     status.live_processes,
                     status.parked_processes,
                     status.parked_turns,
                     status.closing_sessions,
                     status.stalled_obligations,
                     self.closing_sessions().await,
-                    super::checks::diagnose_recovery(&self.world, self.live_since_wall_ms).await
+                    super::checks::diagnose_recovery(&self.world, self.live_since_wall_ms).await,
+                    open_invocations(&self.world)
                 ));
             }
             self.tick().await?;
             tick += 1;
         }
+    }
+
+    /// Wait until the engine has run everything it can run without time
+    /// moving, and answer every crash that work fired.
+    ///
+    /// [`CrashWorld::quiesce`] gives up after a wall-time budget, because a
+    /// held root's model call never answers. A caller that counts ticks
+    /// against a bound must not take that budget for the end of the work:
+    /// a drive on a starved runner is still calling its roots when it runs
+    /// out, and each tick taken then is charged to work that needs no time
+    /// to pass. So this waits past the budget for as long as an attempt other
+    /// than a held root's run is working. An attempt that never stops working
+    /// runs the step into [`STEP_WALL_LIMIT`].
+    async fn settle_work(&mut self) -> Result<(), String> {
+        loop {
+            self.world.quiesce().await;
+            if self.settle_crash().await? {
+                continue;
+            }
+            if !self.works()? {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Whether an invocation that ends by itself is working right now: any
+    /// the engine is running but the run of a held root, which stays in its
+    /// model call until the root is cancelled or its session deleted.
+    fn works(&self) -> Result<bool, String> {
+        let held = |target: &str| {
+            target.starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
+                && self
+                    .ledger
+                    .held
+                    .iter()
+                    .any(|held| target.ends_with(&format!("{}{}/run", held.session, held.root)))
+        };
+        Ok(self
+            .world
+            .double()?
+            .server()
+            .working()
+            .iter()
+            .any(|view| !held(&view.target)))
     }
 
     /// Every session the host asked to delete that is still closing: its
@@ -1220,6 +1275,42 @@ pub(super) fn pinned_open(
         .collect()
 }
 
+/// Every invocation that has not completed, on any build, with where its
+/// journal stands: what a drain that never ends is waiting behind.
+fn open_invocations(world: &CrashWorld) -> Vec<String> {
+    let Ok(double) = world.double() else {
+        return Vec::new();
+    };
+    let server = double.server();
+    server
+        .invocations()
+        .into_iter()
+        .filter(|view| view.status != "completed")
+        .map(|view| {
+            let journal = server.journal(&view.id).unwrap_or_default();
+            let tail: Vec<String> = journal
+                .iter()
+                .skip(journal.len().saturating_sub(4))
+                .map(|entry| match &entry.name {
+                    Some(name) => format!("{:?} `{name}`", entry.ty),
+                    None => format!("{:?}", entry.ty),
+                })
+                .collect();
+            format!(
+                "{} {} on {}: attempt {}, {} suspension(s), blocked on the server {:?}, last failure {:?}, journal of {} ending {tail:?}",
+                view.target,
+                view.status,
+                view.pinned_deployment_id,
+                view.attempts,
+                view.suspensions,
+                view.blocked_on_server,
+                view.last_failure,
+                view.journal_len,
+            )
+        })
+        .collect()
+}
+
 /// The printable text of `invocation`'s input, for a report.
 fn invocation_input(
     double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
@@ -1242,6 +1333,69 @@ fn invocation_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rolling deploy's drain charges its ticks to time, never to work
+    /// (FIG-4624). One drive of the first build is calling a backlog of roots
+    /// when the build is rolled, and each root takes wall time: more of it,
+    /// in all, than thirty quiesce budgets. The drive needs no tick to end,
+    /// so the generation drains within [`DRAIN_TICKS`] however long the
+    /// roots take.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_drain_charges_no_tick_to_roots_the_old_build_is_still_driving() {
+        const ROOTS: usize = 32;
+        let seed = 0x4624;
+        let mut driver = Driver::new(seed).await.expect("world");
+        driver
+            .step(
+                seed,
+                &Step::Open {
+                    session: 0,
+                    lane: Lane::Plain,
+                    parent: None,
+                },
+            )
+            .await
+            .expect("open the session");
+        for root in 0..ROOTS {
+            driver
+                .step(
+                    seed,
+                    &Step::Send {
+                        session: 0,
+                        root: format!("slow-{root}"),
+                    },
+                )
+                .await
+                .expect("send a slow root");
+        }
+        let old = driver.deployment.clone();
+        let drive = format!("LashSession/{}/drive running", driver.ledger.sessions[0].id);
+        assert!(
+            pinned_open(&driver.world, &old).contains(&drive),
+            "the first build's drive is still calling the backlog"
+        );
+
+        let rolled = driver
+            .step(seed, &Step::Roll)
+            .await
+            .expect("the old generation drains");
+
+        assert!(pinned_open(&driver.world, &old).is_empty(), "{rolled}");
+        assert_eq!(driver.ledger.retired.len(), 1, "{rolled}");
+        let backend = driver.world.backend();
+        for root in 0..ROOTS {
+            let root = lash_core::TurnId::from(format!("slow-{root}"));
+            assert!(
+                backend
+                    .session_store_factory()
+                    .root_terminal(&driver.ledger.sessions[0].id, &root)
+                    .await
+                    .expect("read the root's terminal")
+                    .is_some(),
+                "`{root}` ran to its terminal before the build was removed"
+            );
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_host_answer_drives_its_manual_time_retry() {

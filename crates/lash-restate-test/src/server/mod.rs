@@ -1035,6 +1035,14 @@ impl RestateTestServer {
         }
     }
 
+    /// The invocations doing work of their own right now: a live attempt
+    /// that is not blocked reading its input, or one of whose `ctx.run`
+    /// closures is executing. [`settle`](Self::settle) returns once there is
+    /// none, so this names what a settle that does not return waits for.
+    pub fn working(&self) -> Vec<InvocationView> {
+        self.shared.lock().working().map(invocation_view).collect()
+    }
+
     // --- holds -------------------------------------------------------------
 
     /// Hold the virtual object or workflow `service/key`: from now until the

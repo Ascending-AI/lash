@@ -1415,15 +1415,21 @@ impl State {
     /// poll its input beside a running closure (`select!`), and that closure
     /// is work in progress.
     pub fn is_quiescent(&self) -> bool {
+        self.working().next().is_none()
+    }
+
+    /// The invocations whose live attempt is not blocked reading its input:
+    /// what keeps the server from being quiescent.
+    pub fn working(&self) -> impl Iterator<Item = &Invocation> {
         self.invocations
             .iter()
-            .all(|invocation| match &invocation.status {
+            .filter(|invocation| match &invocation.status {
                 Status::Running(attempt) => {
-                    attempt.is_open()
+                    !(attempt.is_open()
                         && attempt.probe.is_idle()
-                        && invocation.pending_runs.is_empty()
+                        && invocation.pending_runs.is_empty())
                 }
-                _ => true,
+                _ => false,
             })
     }
 
