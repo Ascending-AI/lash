@@ -138,12 +138,12 @@ impl LashRuntime {
     }
 }
 
-/// A turn's recorded model that this worker cannot bind: retried, never the
-/// turn's outcome (D3 Q3).
-pub(crate) fn model_unavailable(error: SessionError) -> RuntimeError {
+/// A turn whose recorded config selects no model has nothing to run a model
+/// call with: retried, never the turn's outcome (D3 Q3).
+pub(crate) fn model_unconfigured(error: SessionError) -> RuntimeError {
     RuntimeError::new(
         RuntimeErrorCode::ModelUnavailable,
-        format!("the turn's recorded model cannot be bound on this worker: {error}"),
+        format!("the turn's recorded config selects no model: {error}"),
     )
 }
 

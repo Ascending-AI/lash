@@ -3,12 +3,12 @@
 use super::{IngressReservedSourceKeyRefusal, RuntimeEffectControllerError, RuntimeErrorCode};
 use crate::SessionId;
 
-/// Typed terminal cause retained when a controller-owned runtime effect must
-/// abort through the generic runtime error boundary.
+/// Typed cause retained when a controller-owned runtime effect must abort
+/// through the generic runtime error boundary.
 ///
-/// Every cause is terminal by construction. [`RuntimeError::is_terminal`]
-/// therefore treats the presence of any cause as terminal, independently of
-/// the code's ordinary classification.
+/// Every cause but [`Self::ModelUnavailable`] is terminal by construction
+/// ([`Self::is_terminal`]), whatever the code's ordinary classification. An
+/// unbound model's cause only names the key: its error stays retryable.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -32,6 +32,11 @@ pub enum RuntimeErrorCause {
     /// The typed half of [`RuntimeErrorCode::RuntimeEffectGroupChildUnroutable`].
     EffectGroupChildUnroutable {
         missing: GroupChildCapability,
+    },
+    /// The recorded model key this worker could not bind (FIG-4404). The one
+    /// cause that is not terminal: a deployment serving the key repairs it.
+    ModelUnavailable {
+        model_key: Box<crate::ModelKey>,
     },
 }
 

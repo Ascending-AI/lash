@@ -445,6 +445,9 @@ pub enum RemoteParkReason {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_failure_code: Option<String>,
         message: String,
+        /// The recorded model key the failing attempts could not bind.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_key: Option<String>,
     },
 }
 

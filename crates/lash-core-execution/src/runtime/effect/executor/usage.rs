@@ -51,6 +51,7 @@ impl super::LocalDirectEffectRunner {
     /// record, failed attempts included, as that call's facts.
     pub(super) async fn run_direct_in_usage_run(
         &mut self,
+        provider: crate::ProviderHandle,
         request: crate::LlmRequest,
         usage_source: String,
         model_key: crate::ModelKey,
@@ -59,7 +60,7 @@ impl super::LocalDirectEffectRunner {
         let call = self
             .usage
             .call(usage_run, usage_source, model_key, &request.model)?;
-        let (result, call_record) = self.run_direct_llm_request(request, &call).await;
+        let (result, call_record) = self.run_direct_llm_request(provider, request, &call).await;
         if let Some(call_record) = &call_record {
             call.record(call_record);
         }
@@ -129,6 +130,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// direct completion a recorded tool attempt makes journals nothing of its
     /// own, so its provider call is a call of the attempt's run (ADR 0125).
     /// `None` refuses the call before dispatch.
+    ///
+    /// A recorded model this worker cannot bind is latched on that run
+    /// (FIG-4404): the body journals nothing of its own that could stay
+    /// unsealed, so the enclosing attempt ends with the fault and records
+    /// nothing, whatever its tool makes of the error returned here.
     pub async fn execute_within_run(
         self,
         envelope: RuntimeEffectEnvelope,
@@ -137,7 +143,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         if let Some(refusal) = self.served_only_refusal() {
             return Err(refusal);
         }
-        Box::pin(self.run_body(envelope, usage_run)).await
+        let outcome = Box::pin(self.run_body(envelope, usage_run.clone())).await;
+        if let (Err(fault), Some(usage_run)) = (&outcome, &usage_run)
+            && fault.code == crate::RuntimeErrorCode::ModelUnavailable
+            && fault.is_attempt_fault()
+        {
+            usage_run.fault_before_dispatch(fault.attempt_failure_text());
+        }
+        outcome
     }
 
     /// Executes the effect body for a controller that journals nothing of its

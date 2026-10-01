@@ -274,11 +274,17 @@ impl LashRuntime {
             return Ok(report);
         }
         let policy = self.state.effective_policy().clone();
+        // A reconciliation is live host work nothing records, so it binds
+        // the session's model now.
         let mut provider = self
             .host
             .resolve_session_policy(&session_id, policy)?
-            .provider()
-            .clone();
+            .binding()
+            .bind()
+            .map_err(|source| SessionError::ModelUnavailable {
+                session_id: session_id.clone(),
+                source,
+            })?;
         for attempt in outstanding {
             let Some(generation_id) = attempt.generation_id.clone() else {
                 report.unresolved.push(attempt);

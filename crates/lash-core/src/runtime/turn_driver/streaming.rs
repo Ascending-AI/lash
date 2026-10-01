@@ -188,6 +188,7 @@ impl RuntimeTurnDriver<'_> {
         Ok((current.unwrap_or(original), events))
     }
 
+    /// Runs one unjournaled model call on the transport its body bound.
     pub(in crate::runtime) async fn run_llm_call(
         &mut self,
         request: Arc<LlmRequest>,
@@ -195,8 +196,12 @@ impl RuntimeTurnDriver<'_> {
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
         cancel: &CancellationToken,
-        usage_call: crate::UsageCall,
+        dispatch: LlmCallDispatch,
     ) -> RuntimeLlmCallOutcome {
+        let LlmCallDispatch {
+            provider,
+            usage_call,
+        } = dispatch;
         let mut request = (*request).clone();
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
@@ -265,17 +270,17 @@ impl RuntimeTurnDriver<'_> {
                     self.session_id, self.turn_id, protocol_iteration
                 ),
             ),
-            stream_events: transport_stream_events(self.policy.provider(), Some(llm_stream_tx)),
+            stream_events: transport_stream_events(&provider, Some(llm_stream_tx)),
             provider_trace,
             generation: request.generation.clone(),
             ..request
         };
 
-        // Each call runs on its own copy of the provider the turn was admitted
-        // with. Nothing the provider object learns during a call reaches the
-        // next one: a replay, which never runs this body, must make the same
-        // next call as the live pass.
-        let mut call_provider = self.policy.provider().clone();
+        // Each call runs on its own copy of the provider its body bound.
+        // Nothing the provider object learns during a call reaches the next
+        // one: a replay, which never runs this body, must make the same next
+        // call as the live pass.
+        let mut call_provider = provider;
         let completion_sideband =
             crate::provider::prepare_completion(&call_provider, &mut llm_request);
         let task_sideband = completion_sideband.clone();
@@ -1485,6 +1490,13 @@ impl RuntimeTurnDriver<'_> {
         }
         Ok(())
     }
+}
+
+/// What the body of an unjournaled model call dispatches with: the transport
+/// it bound for the recorded model, and the call of its effect's usage run.
+pub(in crate::runtime) struct LlmCallDispatch {
+    pub(in crate::runtime) provider: crate::ProviderHandle,
+    pub(in crate::runtime) usage_call: crate::UsageCall,
 }
 
 #[cfg(test)]

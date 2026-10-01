@@ -72,8 +72,8 @@ impl RuntimeTurnDriver<'_> {
             };
         }
 
-        let mut session_policy = self.policy.clone();
-        let model = match self.prepare_provider(&mut session_policy).await {
+        let session_policy = self.policy.clone();
+        let model = match self.validate_recorded_selection() {
             Ok(model) => model,
             Err(event) => {
                 emit!(*event);
@@ -135,7 +135,6 @@ impl RuntimeTurnDriver<'_> {
             termination: self.protocol_turn_options.clone(),
             model_tool_calls,
         });
-        self.policy = session_policy;
         self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
         Ok(prepared.machine)
     }
@@ -347,20 +346,19 @@ impl RuntimeTurnDriver<'_> {
         )
     }
 
-    pub(super) async fn prepare_provider(
-        &mut self,
-        policy: &mut RuntimeSessionPolicy,
-    ) -> Result<String, Box<SessionStreamEvent>> {
-        let model = policy.model_config().model.wire_model().to_string();
-        let provider_kind = policy.provider().kind();
-        // Validate the recorded reasoning against the recorded capability.
+    /// The recorded wire model, once the recorded reasoning is judged
+    /// against the recorded capability. It reads recorded facts alone and
+    /// names the model by its recorded key, so a replay judges the same way
+    /// on a deployment that no longer serves the key (FIG-4404).
+    pub(super) fn validate_recorded_selection(&self) -> Result<String, Box<SessionStreamEvent>> {
+        let recorded = self.policy.model_config();
+        let model = recorded.model.wire_model().to_string();
         // Effort names match exactly, so the selection travels unchanged.
-        match policy
-            .model_config()
-            .metadata()
-            .capability
-            .validate_selection(&model, provider_kind, &policy.model_config().reasoning)
-        {
+        match recorded.metadata().capability.validate_selection(
+            &model,
+            recorded.key().as_str(),
+            &recorded.reasoning,
+        ) {
             Ok(()) => {}
             Err(error) => {
                 return Err(Box::new(make_error_event(

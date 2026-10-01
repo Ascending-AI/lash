@@ -260,7 +260,9 @@ impl DirectLlmClient {
 
         let output_for_validation = request.output.clone();
         let model = request.model.clone();
-        let llm_request = build_llm_request(&self.provider, request, model)?;
+        let mut llm_request = build_llm_request(request, model)?;
+        llm_request.stream_events =
+            transport_stream_events_for_direct(&self.provider, llm_request.stream_events.take());
         let request_model = llm_request.model.clone();
         let llm_call_id = if self.trace_sink.is_some() {
             let id = uuid::Uuid::new_v4().to_string();
@@ -347,8 +349,11 @@ impl DirectLlmClient {
     }
 }
 
+/// The provider request `request` describes. Nothing here reads a transport:
+/// the sender a caller asked for travels as given, and the caller that owns
+/// a bound transport adds the one it requires
+/// ([`transport_stream_events_for_direct`]).
 pub fn build_llm_request(
-    provider: &ProviderHandle,
     request: DirectRequest,
     model: String,
 ) -> Result<LlmRequest, DirectLlmError> {
@@ -359,7 +364,6 @@ pub fn build_llm_request(
     {
         return Err(DirectLlmError::LeadingSystemMessage);
     }
-    let stream_events = transport_stream_events_for_direct(provider, request.stream_events);
     let DirectRequest {
         instructions,
         model: _,
@@ -371,7 +375,7 @@ pub fn build_llm_request(
         messages,
         output,
         generation,
-        stream_events: _,
+        stream_events,
         session_id,
         caused_by: _,
         replay: _,
@@ -1073,9 +1077,8 @@ mod tests {
         request.stream_events = Some(requested_sender);
         let provider = TestProvider::default().into_handle();
 
-        let llm_request = build_llm_request(&provider, request, "model".to_string()).unwrap();
-        let sender = llm_request
-            .stream_events
+        let llm_request = build_llm_request(request, "model".to_string()).unwrap();
+        let sender = transport_stream_events_for_direct(&provider, llm_request.stream_events)
             .expect("explicit direct stream sender must be preserved");
         sender.send(LlmStreamEvent::Delta {
             block: lash_sansio::llm::types::StreamBlockIdentity::new("text:0", 0),
@@ -1087,30 +1090,26 @@ mod tests {
             .requires_streaming(true)
             .build()
             .into_handle();
-        let llm_request = build_llm_request(
-            &streaming_provider,
-            DirectRequest::text("model", "prompt"),
-            "model".to_string(),
-        )
-        .unwrap();
+        let llm_request =
+            build_llm_request(DirectRequest::text("model", "prompt"), "model".to_string()).unwrap();
         assert!(
-            llm_request.stream_events.is_some(),
+            llm_request.stream_events.is_none(),
+            "the request alone names no sender the caller did not ask for"
+        );
+        assert!(
+            transport_stream_events_for_direct(&streaming_provider, llm_request.stream_events)
+                .is_some(),
             "providers that require streaming need a no-op sender even when direct caller did not request one"
         );
     }
 
     #[test]
     fn direct_extra_body_is_per_call() {
-        let provider = TestProvider::default().into_handle();
         let mut first = DirectRequest::text("model", "first");
         first.extra_body = json!({"route":{"host":true}}).as_object().cloned().unwrap();
-        let first = build_llm_request(&provider, first, "model".into()).unwrap();
-        let second = build_llm_request(
-            &provider,
-            DirectRequest::text("model", "second"),
-            "model".into(),
-        )
-        .unwrap();
+        let first = build_llm_request(first, "model".into()).unwrap();
+        let second =
+            build_llm_request(DirectRequest::text("model", "second"), "model".into()).unwrap();
         assert_eq!(first.extra_body["route"], json!({"host":true}));
         assert!(second.extra_body.is_empty());
     }
@@ -1139,7 +1138,6 @@ mod runtime_feedback_tests {
 
     #[test]
     fn direct_explicit_instructions_keep_mid_conversation_feedback() {
-        let provider = crate::testing::TestProvider::default().into_handle();
         let mut request = DirectRequest::text("model", "user");
         request.instructions = Some(Arc::from("I"));
         request.messages.extend([
@@ -1152,7 +1150,7 @@ mod runtime_feedback_tests {
                 parts: vec![DirectPart::Text("retry".into())],
             },
         ]);
-        let normalized = build_llm_request(&provider, request, "model".into()).unwrap();
+        let normalized = build_llm_request(request, "model".into()).unwrap();
         assert_eq!(normalized.instructions.as_deref(), Some("I"));
         assert_eq!(
             normalized

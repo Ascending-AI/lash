@@ -305,7 +305,47 @@ pub enum ParkReason {
         last_failure_code: Option<String>,
         /// The last failure as the engine recorded it.
         message: String,
+        /// The recorded model key the failing attempts could not bind, when
+        /// that is why they failed (FIG-4404): a deployment that serves the
+        /// key again lets a resume proceed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_key: Option<crate::ModelKey>,
     },
+}
+
+impl ParkReason {
+    /// The park of work whose engine retries ran out, from what the engine
+    /// kept of its last failure. A typed fault the failure text carries is
+    /// decoded into the park's own fields, never read out of the prose.
+    #[must_use]
+    pub fn engine_retry_exhausted(
+        attempts: u32,
+        last_failure_code: Option<String>,
+        message: String,
+    ) -> Self {
+        let model_key = crate::runtime_error::model_unavailable::AttemptFault::in_failure(&message)
+            .map(
+                |crate::runtime_error::model_unavailable::AttemptFault::ModelUnavailable {
+                     model_key,
+                 }| model_key,
+            );
+        Self::EngineRetryExhausted {
+            attempts,
+            last_failure_code,
+            message,
+            model_key,
+        }
+    }
+
+    /// The recorded model key the parked work could not bind, when that is
+    /// why its engine retries ran out.
+    #[must_use]
+    pub fn model_key(&self) -> Option<&crate::ModelKey> {
+        match self {
+            Self::EngineRetryExhausted { model_key, .. } => model_key.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 /// The reason a park carries, as a plain code: the metric label and the query

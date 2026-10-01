@@ -568,14 +568,14 @@ pub(crate) fn exhausted_reason(invocation: &RestatePausedInvocation) -> ParkReas
         .retry_count
         .and_then(|count| u32::try_from(count).ok())
         .unwrap_or(0);
-    ParkReason::EngineRetryExhausted {
+    ParkReason::engine_retry_exhausted(
         attempts,
-        last_failure_code: invocation.last_failure_error_code.clone(),
-        message: invocation
+        invocation.last_failure_error_code.clone(),
+        invocation
             .last_failure
             .clone()
             .unwrap_or_else(|| format!("the engine stopped retrying after {attempts} attempts")),
-    }
+    )
 }
 
 #[cfg(test)]

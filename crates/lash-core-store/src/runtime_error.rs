@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 mod cause;
 mod classification;
 pub use cause::{GroupChildCapability, RuntimeErrorCause};
+pub(crate) mod model_unavailable;
 pub(crate) use classification::RuntimeErrorClass;
 pub use classification::TurnFailureCause;
 
@@ -1476,13 +1477,14 @@ impl RuntimeError {
             RuntimeErrorCause::ArtifactReferrerEnded { .. }
             | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
+            | RuntimeErrorCause::ModelUnavailable { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }
 
     /// Whether retrying this exact failure is explicitly safe.
     pub fn is_retryable(&self) -> bool {
-        self.cause.is_none() && self.code.is_retryable()
+        !self.has_terminal_cause() && self.code.is_retryable()
     }
 
     /// Whether this is a session-retirement refusal: the session was deleted,
@@ -1499,7 +1501,7 @@ impl RuntimeError {
 
     /// Whether retrying cannot succeed without a host-side change.
     pub fn is_terminal(&self) -> bool {
-        self.cause.is_some()
+        self.has_terminal_cause()
             || match self.foreign_cause {
                 Some(cause) => cause == TurnFailureCause::Outcome,
                 None => self.code.is_terminal(),
@@ -1686,7 +1688,9 @@ impl RuntimeEffectControllerError {
     /// cleanup, after its close) can consume derivation retry authority, as
     /// can any step whose cancellation watch was lost
     /// ([`Self::turn_cancel_watch_lost`]): that fault is about the attempt,
-    /// never the step.
+    /// never the step. A model call and a direct completion consume it for
+    /// one more fault alone: the recorded model this worker could not bind
+    /// before the call ([`Self::model_unavailable`], FIG-4404).
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalPolicy {
         if matches!(
             kind,
@@ -1709,6 +1713,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::AdmitTriggerDelivery
                 | RuntimeEffectKind::Process
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
+            || self.is_unbound_model_call(kind)
         {
             self.journal_disposition
         } else {
@@ -1754,7 +1759,7 @@ impl RuntimeEffectControllerError {
     /// cause, a foreign code its host minted as an outcome, or a terminal
     /// code.
     pub fn is_terminal(&self) -> bool {
-        self.cause.is_some()
+        self.has_terminal_cause()
             || match self.foreign_cause {
                 Some(cause) => cause == TurnFailureCause::Outcome,
                 None => self.code.is_terminal(),
@@ -1768,7 +1773,7 @@ impl RuntimeEffectControllerError {
     /// redrive replays it as the same recorded failure instead of aborting on
     /// it forever. Any other error is an outcome exactly when it is terminal.
     pub fn turn_failure_cause(&self) -> TurnFailureCause {
-        if self.journaled || self.cause.is_some() {
+        if self.journaled || self.has_terminal_cause() {
             return TurnFailureCause::Outcome;
         }
         match self.foreign_cause {

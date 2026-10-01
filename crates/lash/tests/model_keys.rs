@@ -5,6 +5,11 @@
 //! attempt with the typed `ModelUnavailable`, and never falls back to another
 //! registration or to today's catalog entry.
 //!
+//! A recorded model is bound lazily (FIG-4404): only the body of an
+//! unjournaled model call asks the host's models, so a replay of recorded
+//! work completes on a deployment that retired the key, and a bind fault is
+//! the attempt's, retried and never a recorded result.
+//!
 //! The host code below uses `lash::` paths only; the store tiers and the
 //! Restate server double beneath them are the test's own infrastructure.
 
@@ -15,6 +20,7 @@
     reason = "acceptance laws establish each step's result"
 )]
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash::direct::LlmOutputPart;
@@ -262,7 +268,7 @@ async fn await_model_unavailable(double: &Double) -> String {
                 .invocations()
                 .into_iter()
                 .filter_map(|view| view.last_failure.map(|(_, message)| message))
-                .find(|message| message.contains("code: ModelUnavailable"));
+                .find(|message| message.contains("model_unavailable"));
             if let Some(failure) = failure {
                 return failure;
             }
@@ -280,6 +286,198 @@ async fn await_model_unavailable(double: &Double) -> String {
             .collect::<Vec<_>>();
         panic!("an attempt ends with the typed model-unavailable refusal; saw {invocations:#?}")
     })
+}
+
+// ---- a catalog edited under a running core ----------------------------------
+
+/// A deployment's models whose catalog the test edits while one core serves
+/// it, counting every question the runtime asks it.
+#[derive(Default)]
+struct LiveCatalog {
+    served: Mutex<ModelRegistry>,
+    snapshots: AtomicUsize,
+    binds: AtomicUsize,
+}
+
+impl LiveCatalog {
+    fn serving(registry: ModelRegistry) -> Arc<Self> {
+        let catalog = Arc::new(Self::default());
+        catalog.serve(registry);
+        catalog
+    }
+
+    /// Replace the catalog, and count resolver calls from here on.
+    fn serve(&self, registry: ModelRegistry) {
+        *self.served.lock().expect("served catalog") = registry;
+        self.snapshots.store(0, Ordering::SeqCst);
+        self.binds.store(0, Ordering::SeqCst);
+    }
+
+    /// The `(snapshot, bind)` calls made since the catalog was last served.
+    fn resolver_calls(&self) -> (usize, usize) {
+        (
+            self.snapshots.load(Ordering::SeqCst),
+            self.binds.load(Ordering::SeqCst),
+        )
+    }
+}
+
+impl lash::RuntimeModels for LiveCatalog {
+    fn snapshot(&self, key: &ModelKey) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+        self.snapshots.fetch_add(1, Ordering::SeqCst);
+        self.served.lock().expect("served catalog").snapshot(key)
+    }
+
+    fn bind(
+        &self,
+        recorded: &lash::RecordedModel,
+    ) -> Result<ProviderHandle, lash::ModelUnavailable> {
+        self.binds.fetch_add(1, Ordering::SeqCst);
+        self.served.lock().expect("served catalog").bind(recorded)
+    }
+}
+
+fn registry_of(key: &str, wire_model: &str, provider: ProviderHandle) -> ModelRegistry {
+    ModelRegistry::new()
+        .register(
+            key,
+            RegisteredModel::new(metadata(wire_model, "r1"), provider),
+        )
+        .expect("the catalog names the key once")
+}
+
+fn text(text: &str) -> LlmResponse {
+    LlmResponse {
+        parts: vec![LlmOutputPart::Text {
+            text: text.to_string(),
+            response_meta: None,
+        }],
+        ..LlmResponse::default()
+    }
+}
+
+/// A core over `catalog`, whose default key is `KIMI`, with `plugins`.
+fn core_over(
+    double: &Double,
+    catalog: &Arc<LiveCatalog>,
+    plugins: Vec<Arc<dyn lash::plugins::PluginFactory>>,
+) -> LashCore {
+    let mut builder =
+        LashCore::standard_builder(double.double.lash_backend(), lash::TurnBudget::Unbounded)
+            .models(Arc::clone(catalog) as Arc<dyn lash::RuntimeModels>)
+            .model(KIMI)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1));
+    for plugin in plugins {
+        builder = builder.plugin(plugin);
+    }
+    builder
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "model-keys-worker",
+            "keys-live-catalog",
+        ))
+        .expect("the host core builds")
+}
+
+/// Wait until the engine stopped retrying an invocation whose attempts
+/// failed on the unbindable `key`, and return it: the eight-attempt park.
+/// An engine that instead settled every root recorded the fault.
+async fn await_parked_on(double: &Double, key: &str) -> lash_restate_test::InvocationView {
+    let turns = double
+        .double
+        .service_name(lash_restate_test::TURN_DRIVER_SERVICE);
+    let parked = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        loop {
+            let invocations = double.double.server().invocations();
+            if let Some(parked) = invocations.iter().find(|view| {
+                view.status == "paused"
+                    && view
+                        .last_failure
+                        .as_ref()
+                        .is_some_and(|(_, message)| message.contains(key))
+            }) {
+                return Some(parked.clone());
+            }
+            let roots = invocations
+                .iter()
+                .filter(|view| view.target.starts_with(&turns) && view.target.ends_with("/run"))
+                .collect::<Vec<_>>();
+            if !roots.is_empty() && roots.iter().all(|view| view.status == "completed") {
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    let invocations = || {
+        double
+            .double
+            .server()
+            .invocations()
+            .into_iter()
+            .map(|view| format!("{view:?}"))
+            .collect::<Vec<_>>()
+    };
+    match parked {
+        Ok(Some(parked)) => parked,
+        Ok(None) => panic!(
+            "the root settled although its model could not be bound: the bind fault was \
+             recorded instead of retried; saw {:#?}",
+            invocations()
+        ),
+        Err(_) => panic!(
+            "the engine parks the work whose model cannot be bound; saw {:#?}",
+            invocations()
+        ),
+    }
+}
+
+/// No `ctx.run` of `invocation` journaled anything that names the bind
+/// fault: the fault ended attempts and was never a step's recorded result.
+fn assert_no_recorded_bind_fault(double: &Double, invocation: &lash_restate_test::InvocationView) {
+    let journal = double
+        .double
+        .server()
+        .journal(&invocation.id)
+        .expect("the parked invocation keeps its journal");
+    for entry in journal {
+        let recorded = match entry.run_completion() {
+            None => continue,
+            Some(Ok(value)) => String::from_utf8_lossy(&value).into_owned(),
+            Some(Err((code, message))) => format!("{code}: {message}"),
+        };
+        assert!(
+            !recorded.contains("model_unavailable") && !recorded.contains("is unavailable"),
+            "a journaled step result carries the bind fault: {recorded}"
+        );
+    }
+}
+
+/// The park `handle`'s root is in: the park the exhausted retries of the
+/// `parked` invocation became.
+async fn park_of(
+    handle: lash::SendHandle,
+    parked: &lash_restate_test::InvocationView,
+) -> lash::ParkedTurn {
+    let settled = tokio::time::timeout(std::time::Duration::from_secs(60), handle.output())
+        .await
+        .unwrap_or_else(|_| panic!("the status of the root parked as {parked:?} is readable"));
+    let status = match settled {
+        Err(lash::EmbedError::Send(error)) => match *error {
+            lash::SendError::NotSettled { status, .. } => status,
+            other => panic!("the root is parked, got: {other:?}"),
+        },
+        other => panic!("the root is parked, got: {other:?}"),
+    };
+    let lash::TurnStatus::Parked(parked) = status else {
+        panic!("the root is parked, got: {status:?}");
+    };
+    assert_eq!(
+        parked.reason.code(),
+        lash::persistence::ParkReasonCode::EngineRetryExhausted,
+        "the root parked on its exhausted retries: {parked:?}"
+    );
+    parked
 }
 
 // ---- the laws ---------------------------------------------------------------
@@ -1003,6 +1201,383 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
     assert_eq!(thinker.calls(), 0);
 }
 
+/// A root whose model call is already journaled replays on a deployment
+/// that retired its key: the replay serves the recorded call, completes the
+/// root, and never asks the deployment's models for anything.
+async fn a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_calls(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+) {
+    let Some(double) = double(tier, replay, seed).await else {
+        return;
+    };
+    let catalog = Arc::new(LiveCatalog::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = {
+        // The key is retired while its one model call is in flight: the
+        // call's result is journaled, and everything after it is a replay
+        // or runs on the deployment without the key.
+        let retiring = Arc::clone(&catalog);
+        let calls = Arc::clone(&calls);
+        lash::testing::TestProvider::builder()
+            .kind(KIND)
+            .complete(move |_request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                retiring.serve(ModelRegistry::new());
+                async move { Ok(text("kimi answers")) }
+            })
+            .build()
+            .into_handle()
+    };
+    catalog.serve(registry_of(KIMI, "kimi-k3", provider));
+    let core = core_over(&double, &catalog, Vec::new());
+    let session = created_on(&core, "keys-replay-key-removed", KIMI).await;
+    // Cut the root's attempt after its model call is journaled, so the
+    // engine replays the root from its journal on a plain server too.
+    double
+        .double
+        .crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResultEnding {
+            suffix: REPLAY_CUT_AFTER_MODEL_CALL.to_string(),
+        });
+
+    let handle = session
+        .send(TurnInput::text("ask the session's model"))
+        .await
+        .expect("the recorded model is accepted");
+    assert_eq!(answer_of(handle).await, "kimi answers");
+    double
+        .double
+        .settle_session_drive(&lash::SessionId::from("keys-replay-key-removed"))
+        .await;
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the journaled model call is served from the journal, never made again"
+    );
+    let turns = double
+        .double
+        .service_name(lash_restate_test::TURN_DRIVER_SERVICE);
+    let roots = double
+        .double
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|view| view.target.starts_with(&turns))
+        .collect::<Vec<_>>();
+    assert!(
+        roots
+            .iter()
+            .any(|view| view.attempts > 1 || view.suspensions > 0),
+        "the root replayed its journal after the key was retired; its journals name {:#?}",
+        roots
+            .iter()
+            .map(|view| double
+                .double
+                .server()
+                .journal(&view.id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|entry| entry.name)
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        catalog.resolver_calls(),
+        (0, 0),
+        "the replay made no (snapshot, bind) call on the deployment that retired the key"
+    );
+}
+
+/// The journal run whose result the removed-key law cuts: the checkpoint
+/// that follows a root's journaled model call.
+const REPLAY_CUT_AFTER_MODEL_CALL: &str = ":checkpoint:3";
+
+/// A root whose model call is not journaled yet meets a deployment that
+/// retired its key: every attempt ends with the typed bind fault, nothing is
+/// journaled as the call's result, and the engine parks the root after its
+/// eight attempts. Once the key is served again the resumed root makes the
+/// call and answers.
+async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+) {
+    let Some(double) = double(tier, replay, seed).await else {
+        return;
+    };
+    let session_id = "keys-bind-fault-park";
+    let kimi = Route::new("kimi answers");
+    let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", kimi.handle()));
+    let core = core_over(&double, &catalog, Vec::new());
+    let session = created_on(&core, session_id, KIMI).await;
+    let hold = double
+        .double
+        .hold_session_drive(&lash::SessionId::from(session_id))
+        .await;
+    session
+        .send(TurnInput::text("ask the session's model"))
+        .id("keys-bind-fault-park-root")
+        .await
+        .expect("the held session accepts the input");
+    catalog.serve(ModelRegistry::new());
+    hold.release();
+
+    let parked = await_parked_on(&double, KIMI).await;
+    assert_eq!(
+        u64::from(parked.retry_count),
+        lash_restate::TURN_HANDLER_MAX_ATTEMPTS,
+        "the engine parks the root after its attempt budget: {parked:?}"
+    );
+    let (_, failure) = parked
+        .last_failure
+        .clone()
+        .expect("the park's last failure");
+    assert!(
+        failure.contains("model_unavailable") && failure.contains(KIMI),
+        "the park's failure is the typed bind fault and names the recorded key: {failure}"
+    );
+    assert_no_recorded_bind_fault(&double, &parked);
+    let park = park_of(session.attach_id("keys-bind-fault-park-root"), &parked).await;
+    assert_eq!(
+        park.reason.model_key(),
+        Some(&ModelKey::new(KIMI)),
+        "the root's park carries the unbindable key typed: {park:?}"
+    );
+    assert_eq!(kimi.calls(), 0, "no attempt reached a transport");
+    let (snapshots, binds) = catalog.resolver_calls();
+    assert_eq!(snapshots, 0, "a recorded model is never minted again");
+    assert!(binds >= 1, "the unjournaled call asked for its binding");
+
+    let restored = Route::new("restored kimi answers");
+    catalog.serve(registry_of(KIMI, "kimi-k3", restored.handle()));
+    core.parked_work()
+        .redrive(
+            &lash::ParkedWorkRef::Turn {
+                session_id: park.session_id.clone(),
+                turn_id: park.root.clone(),
+            },
+            park.park_id,
+        )
+        .await
+        .expect("the operator redrives the parked root");
+    // The redrive is accepted before the root moves: its park stands until
+    // the resumed attempt gets past the model call.
+    let answer = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            match session
+                .attach_id("keys-bind-fault-park-root")
+                .output()
+                .await
+            {
+                Ok(output) => return output,
+                Err(lash::EmbedError::Send(_)) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("the redriven root settles: {error:?}"),
+            }
+        }
+    })
+    .await
+    .expect("the redriven root leaves its park");
+    assert_eq!(
+        answer
+            .assistant_message()
+            .expect("the root answers with text"),
+        "restored kimi answers",
+        "the resumed root makes its model call once the key is served"
+    );
+    assert_eq!(
+        restored.seen(),
+        vec![Seen {
+            wire_model: "kimi-k3".to_string(),
+            revision: Some("r1".to_string()),
+        }],
+        "the restored transport serves the recorded metadata, once"
+    );
+    assert_eq!(kimi.calls(), 0);
+}
+
+const ASK_MODEL: &str = "ask_model";
+
+fn ask_model_definition() -> lash::tools::ToolDefinition {
+    lash::tools::ToolDefinition::raw(
+        "tool:ask_model",
+        ASK_MODEL,
+        "Ask the session's model one question through a direct completion.",
+        serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
+        serde_json::json!({"type": "string"}),
+    )
+}
+
+/// A tool whose attempt makes one direct completion on the session's model.
+/// Its first attempt retires the key first, and it reports a completion that
+/// failed as its own failed result, as a tool that swallows the error would.
+struct AskModel {
+    catalog: Arc<LiveCatalog>,
+    retired: AtomicBool,
+    settled: Arc<Mutex<Vec<Result<String, String>>>>,
+}
+
+#[async_trait::async_trait]
+impl lash::tools::ToolProvider for AskModel {
+    fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
+        vec![ask_model_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
+        (name == ASK_MODEL).then(|| Arc::new(ask_model_definition().contract()))
+    }
+
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        if !self.retired.swap(true, Ordering::SeqCst) {
+            self.catalog.serve(ModelRegistry::new());
+        }
+        let completed = call
+            .context
+            .direct_completions()
+            .complete(
+                lash::direct::DirectRequest::text("kimi-k3", "a direct question"),
+                "ask-model",
+            )
+            .await;
+        match completed {
+            Ok(completion) => {
+                self.settled
+                    .lock()
+                    .expect("settled attempts")
+                    .push(Ok(completion.text.clone()));
+                lash::tools::ToolOutcome::ok(serde_json::json!(completion.text)).into()
+            }
+            Err(error) => {
+                self.settled
+                    .lock()
+                    .expect("settled attempts")
+                    .push(Err(error.to_string()));
+                lash::tools::ToolOutcome::err_fmt(format!("the direct completion failed: {error}"))
+                    .into()
+            }
+        }
+    }
+}
+
+/// A direct completion follows the model call's rule. A tool attempt whose
+/// direct completion cannot bind the session's recorded model ends with the
+/// bind fault, whatever the tool made of the error: no tool result is
+/// journaled, and the engine parks the work after its attempts. Once the key
+/// is served again the resumed attempt completes, and the model is shown the
+/// completion, never the fault.
+async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_park(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+) {
+    let Some(double) = double(tier, replay, seed).await else {
+        return;
+    };
+    let session_id = "keys-direct-bind-fault";
+    // The session's transport, by call: the root's first model call asks for
+    // the tool, the tool's direct completion answers it, and the root's
+    // second model call answers with what it was shown of the tool.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let shown = Arc::new(Mutex::new(Vec::<String>::new()));
+    let provider = || {
+        let calls = Arc::clone(&calls);
+        let shown = Arc::clone(&shown);
+        lash::testing::TestProvider::builder()
+            .kind(KIND)
+            .complete(move |request| {
+                let response = match calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "ask-1".to_string(),
+                            tool_name: ASK_MODEL.to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        ..LlmResponse::default()
+                    },
+                    1 => text("the direct answer"),
+                    _ => {
+                        shown
+                            .lock()
+                            .expect("shown requests")
+                            .push(format!("{:?}", request.messages));
+                        text("kimi answers")
+                    }
+                };
+                async move { Ok(response) }
+            })
+            .build()
+            .into_handle()
+    };
+    let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", provider()));
+    let settled = Arc::new(Mutex::new(Vec::new()));
+    let tools: Arc<dyn lash::plugins::PluginFactory> =
+        Arc::new(lash::plugins::StaticPluginFactory::new(
+            "keys-ask-model",
+            lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskModel {
+                catalog: Arc::clone(&catalog),
+                retired: AtomicBool::new(false),
+                settled: Arc::clone(&settled),
+            })),
+        ));
+    let core = core_over(&double, &catalog, vec![tools]);
+    let session = created_on(&core, session_id, KIMI).await;
+    session
+        .send(TurnInput::text("ask the model through the tool"))
+        .id("keys-direct-bind-fault-root")
+        .await
+        .expect("the session accepts the input");
+
+    let parked = await_parked_on(&double, KIMI).await;
+    let (_, failure) = parked
+        .last_failure
+        .clone()
+        .expect("the park's last failure");
+    assert!(
+        failure.contains("model_unavailable") && failure.contains(KIMI),
+        "the park's failure is the typed bind fault and names the recorded key: {failure}"
+    );
+    assert_no_recorded_bind_fault(&double, &parked);
+    // The tool's group child is the invocation the engine stopped retrying.
+    // Its failure carries the fault's typed record, which is what a park of
+    // exhausted retries decodes its model key from.
+    let record = serde_json::json!({"fault": "lash.model_unavailable", "model_key": KIMI});
+    assert!(
+        failure.contains(&record.to_string()),
+        "the parked attempt's failure carries the unbindable key typed: {failure}"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "only the root's first model call reached the transport"
+    );
+
+    catalog.serve(registry_of(KIMI, "kimi-k3", provider()));
+    assert_eq!(
+        double.double.server().resume(&parked.id),
+        Some(true),
+        "the parked work resumes"
+    );
+    assert_eq!(
+        answer_of(session.attach_id("keys-direct-bind-fault-root")).await,
+        "kimi answers",
+        "the resumed root completes once the key is served"
+    );
+    assert_eq!(
+        settled.lock().expect("settled attempts").last(),
+        Some(&Ok("the direct answer".to_string())),
+        "the resumed attempt's direct completion ran"
+    );
+    let shown = shown.lock().expect("shown requests").join("\n");
+    assert!(
+        shown.contains("the direct answer") && !shown.contains("the direct completion failed"),
+        "the model is shown the completion and never the bind fault: {shown}"
+    );
+}
+
 // ---- registration -----------------------------------------------------------
 
 #[test]
@@ -1105,4 +1680,16 @@ tiered!(
 tiered!(
     an_unsupported_reasoning_selection_is_refused_where_it_is_stated,
     0x4531_1200
+);
+tiered!(
+    a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_calls,
+    0x4404_1100
+);
+tiered!(
+    an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park,
+    0x4404_1200
+);
+tiered!(
+    a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_park,
+    0x4404_1300
 );

@@ -1054,44 +1054,89 @@ pub async fn an_unbindable_model_retries_and_never_fails_the_turn(
     let mut unserved = served.clone();
     unserved.host.providers.models = Arc::new(crate::ModelRegistry::new());
     let root = TurnId::from(format!("{prefix}-turn-config-unbindable-root"));
-    let aborted = run_text_turn(&runner, &unserved, &root, "hello", BeforeSend::Nothing)
-        .await
-        .expect_err("a root whose recorded model cannot be bound aborts");
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
+    // The first attempt runs on the worker without the key; every later one,
+    // the tier's own retry of the unsealed model call included, on the one
+    // that serves it.
+    let attempt: crate::ConformanceTurnAttempt = {
+        let served = text_attempt(&served, &root, "hello", turn_tx.clone());
+        let unserved = text_attempt(&unserved, &root, "hello", turn_tx);
+        let attempts = Arc::clone(&attempts);
+        Arc::new(move |scope| {
+            if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                unserved(scope)
+            } else {
+                served(scope)
+            }
+        })
+    };
+    let scope = admit(crate::ExecutionScope::turn(&served.session_id, &root));
+    runner.run_turn(scope.clone(), Arc::clone(&attempt)).await;
+    // A tier that returns the unserved attempt's abort hands it back here; an
+    // engine that retries the step itself runs the served attempt before
+    // this run returns.
+    let mut turns = Vec::new();
+    while let Ok(turn) = turn_rx.try_recv() {
+        turns.push(turn);
+    }
+    if turns.iter().all(Result::is_err) {
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was asked");
+        assert!(
+            !served
+                .store
+                .committed_turn_exists(&served.session_id, &root)
+                .await
+                .expect("read the root's commit"),
+            "the aborted root recorded no outcome"
+        );
+        assert!(
+            served
+                .store
+                .load_turn_park(&served.session_id)
+                .await
+                .expect("read the session's park")
+                .is_none(),
+            "a retry is not a park"
+        );
+        runner.run_turn(scope, attempt).await;
+        while let Ok(turn) = turn_rx.try_recv() {
+            turns.push(turn);
+        }
+    }
+    assert!(
+        attempts.load(Ordering::SeqCst) >= 2,
+        "the unserved attempt did not end the root: {turns:?}"
+    );
+    for aborted in turns.iter().filter_map(|turn| turn.as_ref().err()) {
+        assert_eq!(
+            aborted.code,
+            crate::RuntimeErrorCode::ModelUnavailable,
+            "the abort names the unbindable model: {aborted:?}"
+        );
+        assert_eq!(
+            aborted.model_key(),
+            Some(&crate::ModelKey::new(FIRST_MODEL)),
+            "the abort carries the recorded key typed: {aborted:?}"
+        );
+        assert!(
+            aborted.is_retryable(),
+            "an unbindable model is retried, never the turn's outcome: {aborted:?}"
+        );
+    }
+    let finished = turns
+        .iter()
+        .filter_map(|turn| turn.as_ref().ok())
+        .collect::<Vec<_>>();
     assert_eq!(
-        aborted.code,
-        crate::RuntimeErrorCode::ModelUnavailable,
-        "the abort names the unbindable model: {aborted:?}"
+        finished.len(),
+        1,
+        "the attempt with the model back completes the root once: {turns:?}"
     );
     assert!(
-        aborted.is_retryable(),
-        "an unbindable model is retried, never the turn's outcome: {aborted:?}"
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was asked");
-    assert!(
-        !served
-            .store
-            .committed_turn_exists(&served.session_id, &root)
-            .await
-            .expect("read the root's commit"),
-        "the aborted root recorded no outcome"
-    );
-    assert!(
-        served
-            .store
-            .load_turn_park(&served.session_id)
-            .await
-            .expect("read the session's park")
-            .is_none(),
-        "a retry is not a park"
-    );
-
-    let turn = run_text_turn(&runner, &served, &root, "hello", BeforeSend::Nothing)
-        .await
-        .unwrap_or_else(|error| panic!("the redrive with the model back runs: {error:?}"));
-    assert!(
-        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        matches!(finished[0].outcome, crate::TurnOutcome::Finished(_)),
         "the redrive completes the root: {:?}",
-        turn.outcome
+        finished[0].outcome
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1, "the root ran once");
     assert!(
@@ -1101,6 +1146,15 @@ pub async fn an_unbindable_model_retries_and_never_fails_the_turn(
             .await
             .expect("read the root's commit"),
         "the redrive committed the root"
+    );
+    assert!(
+        served
+            .store
+            .load_turn_park(&served.session_id)
+            .await
+            .expect("read the session's park")
+            .is_none(),
+        "the recovered root leaves no park"
     );
 }
 

@@ -810,6 +810,7 @@ pub use session_graph::{
     SessionNodePayload, SessionNodeRecord,
 };
 
+pub use session_model::ModelBinding;
 pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{

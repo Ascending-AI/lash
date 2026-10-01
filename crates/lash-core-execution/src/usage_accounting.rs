@@ -152,10 +152,25 @@ impl UsageRun {
         })
     }
 
-    /// A store fault met by admission. The controller ends the attempt
+    /// A fault met before this run's effect could dispatch: a store fault
+    /// met by admission, or a recorded model this worker could not bind
+    /// ([`Self::fault_before_dispatch`]). The controller ends the attempt
     /// retryably and journals nothing: a fault is never a recorded outcome.
     pub fn admission_fault(&self) -> Option<String> {
         self.inner.progress.lock_recover().admission_fault.clone()
+    }
+
+    /// Latch a fault a call of this run met before it dispatched (FIG-4404):
+    /// the recorded model of a direct completion inside this run's effect
+    /// could not be bound on this worker. The effect's body may settle on
+    /// anything afterwards; its attempt still ends with this fault and
+    /// journals nothing. The first fault is kept.
+    pub fn fault_before_dispatch(&self, message: impl Into<String>) {
+        self.inner
+            .progress
+            .lock_recover()
+            .admission_fault
+            .get_or_insert_with(|| message.into());
     }
 
     /// What the recorded entry carries beside the outcome. `None` iff no call

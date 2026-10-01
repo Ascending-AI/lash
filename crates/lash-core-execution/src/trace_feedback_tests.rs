@@ -2,10 +2,9 @@ use super::*;
 
 #[test]
 fn runtime_feedback_is_not_part_of_initial_composition_identity() {
-    let provider = crate::testing::TestProvider::default().into_handle();
     let mut direct = crate::DirectRequest::text("model", "user");
     direct.instructions = Some(Arc::from("I"));
-    let mut request = crate::direct::build_llm_request(&provider, direct, "model".into()).unwrap();
+    let mut request = crate::direct::build_llm_request(direct, "model".into()).unwrap();
     let before = trace_composition_key(&request, &[]);
     request.messages.insert(
         0,
@@ -26,10 +25,9 @@ fn runtime_feedback_is_not_part_of_initial_composition_identity() {
 
 #[test]
 fn runtime_feedback_composition_identity_includes_instruction_authority() {
-    let provider = crate::testing::TestProvider::default().into_handle();
     let mut direct = crate::DirectRequest::text("model", "user");
     direct.instructions = Some(Arc::from("I"));
-    let mut request = crate::direct::build_llm_request(&provider, direct, "model".into()).unwrap();
+    let mut request = crate::direct::build_llm_request(direct, "model".into()).unwrap();
     let before = trace_composition_key(&request, &[]);
     request.model_capability.instruction_role = crate::InstructionRole::Developer;
     assert_ne!(trace_composition_key(&request, &[]), before);

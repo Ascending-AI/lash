@@ -349,6 +349,7 @@ impl From<&lash_core::store::ParkReason> for RemoteTurnParkReason {
         Self {
             code: value.code().as_str().to_string(),
             message: value.message().to_string(),
+            model_key: value.model_key().map(|key| key.as_str().to_string()),
         }
     }
 }

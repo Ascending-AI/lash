@@ -50,34 +50,112 @@ pub fn plugin_runtime_event_from_protocol(
 
 pub(crate) use lash_core_store::message_projection::plugin_message_to_message;
 
-/// Runtime-only policy: a session policy with its recorded model bound to the
-/// transport that executes it on this worker.
+/// The lazy binding of one recorded model to the transport that executes it
+/// on this worker (FIG-4404).
+///
+/// Nothing is resolved when the binding is made: [`Self::bind`] asks the
+/// host's models only when the body of an unjournaled model call runs. A
+/// fully journaled replay never runs such a body, so it never touches the
+/// registry, and a key the deployment retired cannot block work that is
+/// already recorded. The first bound transport is kept for the rest of the
+/// attempt; clones share it.
+#[derive(Clone)]
+pub struct ModelBinding {
+    recorded: crate::RecordedModel,
+    models: std::sync::Arc<dyn RuntimeModels>,
+    clock: std::sync::Arc<dyn crate::Clock>,
+    bound: std::sync::Arc<std::sync::OnceLock<ProviderHandle>>,
+}
+
+impl ModelBinding {
+    pub fn new(
+        recorded: crate::RecordedModel,
+        models: std::sync::Arc<dyn RuntimeModels>,
+        clock: std::sync::Arc<dyn crate::Clock>,
+    ) -> Self {
+        Self {
+            recorded,
+            models,
+            clock,
+            bound: std::sync::Arc::default(),
+        }
+    }
+
+    /// The recorded model this binding executes.
+    pub fn recorded(&self) -> &crate::RecordedModel {
+        &self.recorded
+    }
+
+    /// The transport that executes the recorded model. Only the body of an
+    /// unjournaled model call, or an observation nothing records, calls
+    /// this. A refusal is this deployment's fault and is never cached: the
+    /// next attempt asks again.
+    pub fn bind(&self) -> Result<ProviderHandle, ModelUnavailable> {
+        if let Some(provider) = self.bound.get() {
+            return Ok(provider.clone());
+        }
+        let provider = self
+            .models
+            .bind(&self.recorded)?
+            .with_clock(std::sync::Arc::clone(&self.clock));
+        Ok(self.bound.get_or_init(|| provider).clone())
+    }
+
+    /// [`Self::bind`] for the body of an unjournaled model call: a refusal
+    /// is the attempt's typed fault, which leaves the step unsealed and is
+    /// never the call's recorded result.
+    pub fn bind_for_unjournaled_call(
+        &self,
+    ) -> Result<ProviderHandle, crate::RuntimeEffectControllerError> {
+        self.bind()
+            .map_err(|error| crate::RuntimeEffectControllerError::model_unavailable(&error))
+    }
+}
+
+impl std::fmt::Debug for ModelBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelBinding")
+            .field("key", self.recorded.key())
+            .field("bound", &self.bound.get().is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Runtime-only policy: a session policy and the lazy binding of its recorded
+/// model to the transport that executes it on this worker.
 #[derive(Clone, Debug)]
 pub struct RuntimeSessionPolicy {
     pub policy: SessionPolicy,
     model: ModelConfig,
-    provider: ProviderHandle,
+    binding: ModelBinding,
 }
 
 impl RuntimeSessionPolicy {
-    /// `policy` bound to `provider`; `None` when the policy selects no
-    /// model, since there is nothing to bind.
-    pub fn new(policy: SessionPolicy, provider: ProviderHandle) -> Option<Self> {
+    /// `policy` with its recorded model bound lazily through `models`;
+    /// `None` when the policy selects no model, since there is nothing to
+    /// bind.
+    pub fn new(
+        policy: SessionPolicy,
+        models: std::sync::Arc<dyn RuntimeModels>,
+        clock: std::sync::Arc<dyn crate::Clock>,
+    ) -> Option<Self> {
         let model = policy.model.clone()?;
+        let binding = ModelBinding::new(model.model.clone(), models, clock);
         Some(Self {
             policy,
             model,
-            provider,
+            binding,
         })
     }
 
-    /// The recorded model selection this policy was bound for.
+    /// The recorded model selection this policy runs.
     pub fn model_config(&self) -> &ModelConfig {
         &self.model
     }
 
-    pub fn provider(&self) -> &ProviderHandle {
-        &self.provider
+    /// The lazy binding of the recorded model.
+    pub fn binding(&self) -> &ModelBinding {
+        &self.binding
     }
 }
 

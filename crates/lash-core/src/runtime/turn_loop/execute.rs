@@ -427,13 +427,13 @@ impl LashRuntime {
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
-        // The model binding is the turn's recorded config (D3 §2.1); it was
-        // adopted when it was set, so a binding this worker cannot serve is
-        // its deployment, retried and never the turn's outcome (Q3).
+        // The model binding is the turn's recorded config (D3 §2.1). Nothing
+        // binds it here: the body of an unjournaled model call does, so a
+        // fully journaled replay never asks this worker's models (FIG-4404).
         let resolved_turn_policy = self
             .host
             .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-            .map_err(crate::runtime::drive::model_unavailable)?;
+            .map_err(crate::runtime::drive::model_unconfigured)?;
         let manager = self
             .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
             .map_err(|err| {

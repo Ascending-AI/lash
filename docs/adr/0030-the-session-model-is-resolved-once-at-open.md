@@ -72,6 +72,17 @@ child's complete facts against it before the handoff, and the worker creates
 the child from that captured environment. A worker names no configuration of
 its own (ADR 0088).
 
+The recorded model is bound to its transport lazily. Only the body of an
+unjournaled model call or direct completion asks the host's models for the
+transport; a replay serves the recorded call and asks nothing, so a
+deployment that retired the key still completes recorded work (ADR 0105 §1).
+A bind the deployment refuses is the attempt's fault. It is never the call's
+recorded result: the step stays unsealed, the engine retries it, and after
+its attempts it parks the work with reason `EngineRetryExhausted` carrying the
+model key typed. A direct completion inside a tool attempt ends that attempt
+the same way, whatever the tool makes of the error. A deployment that serves
+the key again lets a resume proceed (FIG-4404).
+
 Input admission does not select a model. Child-session execution and direct
 LLM requests have explicit model selection at their own boundaries. An input
 may carry a `RunSpec` whose recorded overrides — route, model, generation,

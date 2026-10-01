@@ -352,6 +352,10 @@ pub struct RemoteTurnParkReason {
     pub code: String,
     /// The operator-facing refusal message.
     pub message: String,
+    /// The recorded model key the parked root could not bind, when that is
+    /// why its engine retries ran out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

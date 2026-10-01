@@ -1312,6 +1312,10 @@ pub mod runtime {
     /// The capability an unroutable effect-group child's deployment lacks,
     /// named by [`RuntimeErrorCause::EffectGroupChildUnroutable`].
     pub use lash_core::GroupChildCapability;
+    /// The lazy binding of a recorded model that
+    /// [`RuntimeEffectLocalExecutor::direct`] takes: bound only when an
+    /// unjournaled completion's body runs.
+    pub use lash_core::ModelBinding;
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
@@ -1327,7 +1331,6 @@ pub mod runtime {
     /// own process records. A host that mints a record the runtime will compare
     /// against uses the same reading rather than its own.
     pub use lash_core::runtime::current_epoch_ms;
-    /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
         AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePhase,
         AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,

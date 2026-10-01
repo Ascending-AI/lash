@@ -22,6 +22,7 @@ fn remote_turn_status_names_a_parked_root_and_refuses_the_retired_queued_tag() {
         reason: RemoteTurnParkReason {
             code: "binding_drift".to_string(),
             message: "tool `search` changed".to_string(),
+            model_key: None,
         },
         since_ms: 1_000,
         attempts: 2,
@@ -322,6 +323,7 @@ fn parked_status() -> RemoteTurnStatus {
         reason: RemoteTurnParkReason {
             code: "binding_drift".to_string(),
             message: "tool `search` changed".to_string(),
+            model_key: None,
         },
         since_ms: 1_000,
         attempts: 2,

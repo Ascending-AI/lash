@@ -54,6 +54,12 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 Ok(RuntimeEffectOutcome::BeforeLlmCall { decision })
             }
             RuntimeEffectCommand::LlmCall { model_key, request } => {
+                // This body runs only for an unjournaled call, so this is
+                // where the recorded model is bound (FIG-4404). A refusal is
+                // this deployment's fault: it leaves the step unsealed and
+                // the engine runs it again, and it is never the call's
+                // recorded result.
+                let provider = runner.driver.policy.binding().bind_for_unjournaled_call()?;
                 // The recorded body races the model call against the turn's
                 // gate itself: this is the engine's cooperative cancel for a
                 // step it cannot select away, and what the body saw is its
@@ -103,7 +109,10 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                             invocation,
                             &event_tx,
                             &stop,
-                            body_call,
+                            super::streaming::LlmCallDispatch {
+                                provider,
+                                usage_call: body_call,
+                            },
                         )
                         .await
                 }))

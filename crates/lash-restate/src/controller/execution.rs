@@ -160,8 +160,7 @@ pub(crate) fn restate_effect_execution(
             refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
-        command @ (RuntimeEffectCommand::Direct { .. }
-        | RuntimeEffectCommand::ToolAttempt { .. }
+        command @ (RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
@@ -209,6 +208,10 @@ pub(crate) fn restate_effect_execution(
         // session's retirement, is recorded (FIG-4361).
         // Presentation likewise retries when the recorded renderer is absent;
         // an unavailable deployment must not turn that fault into history.
+        // A model call and a direct completion whose recorded model this
+        // deployment cannot bind end the attempt the same way: the bind
+        // fault precedes the call, so it is never the call's recorded result
+        // (FIG-4404).
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
@@ -225,7 +228,8 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::BeforeLlmCall { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::PresentToolResult { .. }
-        | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {
+        | RuntimeEffectCommand::LlmCall { .. }
+        | RuntimeEffectCommand::Direct { .. }) => RestateEffectExecution::JournaledRun {
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,

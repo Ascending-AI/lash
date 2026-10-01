@@ -315,7 +315,7 @@ where
                                     .journal_disposition(effect_kind)
                                     .is_retryable_derivation() =>
                         {
-                            Err(fault.to_string())
+                            Err(fault.attempt_failure_text())
                         }
                         outcome => Ok(RecordedRuntimeEffect {
                             envelope: journaled_envelope,

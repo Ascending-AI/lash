@@ -189,7 +189,9 @@ impl Drop for DirectUnkeyedGuard<'_> {
 }
 
 struct DirectEffectPlan {
-    provider: crate::ProviderHandle,
+    /// The lazy binding of the session's recorded model: the effect's body
+    /// binds it, and only when the completion is unjournaled (FIG-4404).
+    binding: crate::ModelBinding,
     envelope: crate::RuntimeEffectEnvelope,
     request: Box<crate::LlmRequest>,
 }
@@ -208,14 +210,13 @@ impl DirectCompletionCapability {
     /// the same effect lane; they differ only in how the caller projects the
     /// resulting [`crate::LlmResponse`].
     ///
-    /// `model_key` is the recorded key `provider` was bound from. The
-    /// envelope carries it, so the journaled effect and the usage ledger
-    /// both name the selection the completion ran under.
+    /// The envelope carries the recorded key of `binding`'s model, so the
+    /// journaled effect and the usage ledger both name the selection the
+    /// completion ran under.
     async fn plan_direct_effect(
         &self,
         context: &DirectInvocationContext<'_>,
-        provider: crate::ProviderHandle,
-        model_key: crate::ModelKey,
+        binding: crate::ModelBinding,
         request: crate::LlmRequest,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
@@ -253,13 +254,13 @@ impl DirectCompletionCapability {
         let envelope = crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::Direct {
-                model_key,
+                model_key: binding.recorded().key().clone(),
                 request: Box::new(request_spec),
                 usage_source,
             },
         );
         Ok(DirectEffectPlan {
-            provider,
+            binding,
             envelope,
             request: Box::new(request),
         })
@@ -277,7 +278,7 @@ impl DirectCompletionCapability {
     {
         let current = context.current;
         let DirectEffectPlan {
-            provider,
+            binding,
             envelope,
             request,
         } = plan;
@@ -289,7 +290,7 @@ impl DirectCompletionCapability {
             Arc::clone(&current.host.core.clock),
         );
         let local_executor = crate::RuntimeEffectLocalExecutor::direct(
-            provider,
+            binding,
             current.policy.charge_safety.clone(),
             Arc::clone(&current.host.core.durability.attachment_store),
             crate::runtime::effect::DirectUsage {
@@ -321,15 +322,18 @@ impl DirectCompletionCapability {
         request: crate::DirectRequest,
         usage_source: &str,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
-        let resolved = context.current.resolve_policy()?;
-        let provider = resolved.provider().clone();
-        let model_key = resolved.model_config().key().clone();
+        let binding = context.current.resolve_policy()?.binding().clone();
         let model = request.model.clone();
         // Validate against the capability carried by the request before the
-        // provider sees it; the selection travels unchanged.
+        // request is built, naming the model by the session's recorded key;
+        // the selection travels unchanged.
         request
             .model_capability
-            .validate_selection(&model, provider.kind(), &request.model_variant)
+            .validate_selection(
+                &model,
+                binding.recorded().key().as_str(),
+                &request.model_variant,
+            )
             .map_err(|error| crate::PluginError::Session(error.message))?;
         let replay = request.replay.clone();
         let caused_by = request.caused_by.clone();
@@ -349,7 +353,7 @@ impl DirectCompletionCapability {
         } else {
             context.next_replay_ordinal(caused_by.as_ref(), usage_source)?
         };
-        let mut normalized = crate::direct::build_llm_request(&provider, request, model)
+        let mut normalized = crate::direct::build_llm_request(request, model)
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
         // A durable direct completion renders attachments under its session's
         // recorded acceptance rules, never a caller's.
@@ -358,8 +362,7 @@ impl DirectCompletionCapability {
         let plan = self
             .plan_direct_effect(
                 &context,
-                provider,
-                model_key,
+                binding,
                 normalized,
                 usage_source,
                 DirectReplayPosition {
@@ -384,19 +387,19 @@ impl DirectCompletionCapability {
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
-        let resolved = context.current.resolve_policy()?;
+        let binding = context.current.resolve_policy()?.binding().clone();
         if request.scope.request_id.trim().is_empty() {
             return Err(crate::PluginError::Session(
                 "direct LLM completion request_id must be non-empty for durable replay".to_string(),
             ));
         }
-        // Same variant validation the text lane applies before the provider
-        // sees the request.
+        // Same variant validation the text lane applies before the request
+        // is planned.
         request
             .model_capability
             .validate_selection(
                 &request.model,
-                resolved.provider().kind(),
+                binding.recorded().key().as_str(),
                 &request.model_variant,
             )
             .map_err(|error| crate::PluginError::Session(error.message))?;
@@ -407,8 +410,7 @@ impl DirectCompletionCapability {
         let plan = self
             .plan_direct_effect(
                 &context,
-                resolved.provider().clone(),
-                resolved.model_config().key().clone(),
+                binding,
                 request,
                 usage_source,
                 DirectReplayPosition {
@@ -470,26 +472,34 @@ mod tests {
         )
     }
 
-    /// FIG-4531: off the turn path, a recorded model this worker cannot bind
-    /// is the same typed, retryable `ModelUnavailable` the turn path answers.
-    /// A direct completion and a process owner resolve their policy here;
+    /// FIG-4531, FIG-4404: off the turn path, a recorded model this worker
+    /// cannot bind is the same typed, retryable `ModelUnavailable` the turn
+    /// path answers. A direct completion and a process owner resolve their
+    /// policy without binding; the body of the unjournaled call binds, and
     /// this deployment registers no models, so the recorded binding has no
     /// transport.
     #[tokio::test]
     async fn an_unbindable_model_off_the_turn_path_is_typed_model_unavailable() {
-        let (services, _) = session_services().await;
-        let error = services
+        let (services, policy) = session_services().await;
+        let resolved = services
             .current
             .resolve_policy()
+            .expect("resolving a policy binds nothing");
+        let fault = resolved
+            .binding()
+            .bind_for_unjournaled_call()
             .expect_err("a deployment with no models cannot bind the recorded model");
-        assert!(
-            matches!(
-                &error,
-                crate::PluginError::Runtime(runtime)
-                    if runtime.code == crate::RuntimeErrorCode::ModelUnavailable
-            ),
-            "the refusal is typed model_unavailable: {error:?}"
+        assert_eq!(fault.code, crate::RuntimeErrorCode::ModelUnavailable);
+        assert_eq!(
+            fault.model_key(),
+            policy.model.as_ref().map(crate::ModelConfig::key),
+            "the fault names the recorded key typed: {fault:?}"
         );
+        assert!(
+            fault.is_attempt_fault(),
+            "the fault is the attempt's, never the call's recorded result"
+        );
+        let error = crate::PluginError::RuntimeEffectController(fault);
         assert!(error.is_retryable() && !error.is_terminal());
     }
 

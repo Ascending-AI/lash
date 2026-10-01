@@ -804,6 +804,106 @@ fn session_retirement_never_takes_derivation_retry_authority() {
     );
 }
 
+/// FIG-4404: a recorded model this worker cannot bind is the attempt's fault
+/// on the two effects whose body binds it, and nowhere else; no other
+/// failure of a model call gains the retry authority.
+#[test]
+fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
+    use crate::runtime_error::{EffectErrorJournalPolicy, RuntimeEffectControllerError};
+    let key = crate::ModelKey::new("kimi-k3@tensorx");
+    let unavailable = crate::provider::ModelUnavailable::new(
+        key.clone(),
+        crate::provider::ModelUnavailableReason::UnknownKey,
+    );
+    let fault = RuntimeEffectControllerError::model_unavailable(&unavailable);
+    assert_eq!(fault.code, RuntimeErrorCode::ModelUnavailable);
+    assert_eq!(fault.model_key(), Some(&key));
+    assert!(fault.is_attempt_fault());
+    assert!(!fault.is_terminal(), "the fault is retried, never settled");
+    for kind in [
+        crate::RuntimeEffectKind::LlmCall,
+        crate::RuntimeEffectKind::Direct,
+    ] {
+        assert_eq!(
+            fault.journal_disposition(kind),
+            EffectErrorJournalPolicy::RetryUncommittedResponseDerivation,
+            "a pre-call bind fault is never the recorded result of {}",
+            kind.as_str()
+        );
+        // Any other failure of the call is its recorded result, marked or not.
+        let other = RuntimeEffectControllerError::new(
+            RuntimeErrorCode::UsageRunMissing,
+            "a call reached its provider outside any usage run",
+        )
+        .retryable_uncommitted_derivation();
+        assert_eq!(
+            other.journal_disposition(kind),
+            EffectErrorJournalPolicy::Terminal
+        );
+    }
+    assert_eq!(
+        fault.journal_disposition(crate::RuntimeEffectKind::ToolAttempt),
+        EffectErrorJournalPolicy::Terminal,
+        "the code alone grants no retry authority outside the model calls"
+    );
+
+    // The typed key survives both conversions and the wire.
+    let runtime = fault.clone().into_runtime_error();
+    assert_eq!(runtime.model_key(), Some(&key));
+    assert!(runtime.is_retryable());
+    assert!(!runtime.is_terminal());
+    let json = serde_json::to_value(&runtime).expect("serialize runtime error");
+    assert_eq!(
+        json["cause"],
+        serde_json::json!({"kind": "model_unavailable", "model_key": "kimi-k3@tensorx"})
+    );
+    let decoded: RuntimeError = serde_json::from_value(json).expect("decode runtime error");
+    assert_eq!(decoded.model_key(), Some(&key));
+    assert_eq!(
+        RuntimeEffectControllerError::from(decoded).model_key(),
+        Some(&key)
+    );
+    // An engine keeps only a failed attempt's text. The fault's typed record
+    // rides it, and the park of the exhausted retries decodes the key from
+    // the record, whatever the engine wrote before it.
+    let failure = fault.attempt_failure_text();
+    assert!(failure.starts_with(&fault.to_string()));
+    let park = crate::store::ParkReason::engine_retry_exhausted(
+        8,
+        Some("500".to_string()),
+        format!("[500] Handler failed with retryable error: {failure}"),
+    );
+    assert_eq!(park.model_key(), Some(&key));
+    let stored = serde_json::to_value(&park).expect("serialize the park reason");
+    assert_eq!(stored["model_key"], "kimi-k3@tensorx");
+    assert_eq!(
+        serde_json::from_value::<crate::store::ParkReason>(stored).expect("decode the park"),
+        park
+    );
+    // A failure that names the key only in prose carries no typed key.
+    let prose = crate::store::ParkReason::engine_retry_exhausted(
+        8,
+        None,
+        "model `kimi-k3@tensorx` is unavailable".to_string(),
+    );
+    assert_eq!(prose.model_key(), None);
+    assert!(
+        serde_json::to_value(&prose)
+            .expect("serialize the park reason")
+            .get("model_key")
+            .is_none()
+    );
+    let unmarked = RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeStore, "store");
+    assert_eq!(unmarked.attempt_failure_text(), unmarked.to_string());
+
+    let plain = serde_json::to_value(RuntimeError::new(
+        RuntimeErrorCode::ModelUnavailable,
+        "no key",
+    ))
+    .expect("serialize runtime error");
+    assert!(plain.get("cause").is_none());
+}
+
 #[test]
 fn store_refusals_keep_their_codes_and_fields_across_runtime_boundaries() {
     use crate::compat::{CompatRefusal, VersionRange};

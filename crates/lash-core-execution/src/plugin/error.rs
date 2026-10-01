@@ -511,7 +511,11 @@ impl PluginError {
             Self::SessionHeadOwned { .. } => true,
             Self::Runtime(error) => error.is_retryable(),
             Self::RuntimeEffectController(error) => {
-                error.cause.is_none() && error.code.is_retryable()
+                error
+                    .cause
+                    .as_ref()
+                    .is_none_or(|cause| !cause.is_terminal())
+                    && error.code.is_retryable()
             }
             _ => false,
         }

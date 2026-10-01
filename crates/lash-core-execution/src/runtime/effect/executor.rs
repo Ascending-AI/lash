@@ -202,7 +202,8 @@ pub struct ProcessDefinitionLocalExecution {
 }
 
 pub(super) struct LocalDirectEffectRunner {
-    provider: ProviderHandle,
+    /// Bound only when this body runs, never on a replay (FIG-4404).
+    binding: crate::ModelBinding,
     charge_safety: crate::ChargeSafetyPolicy,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     /// Who the call spends for (ADR 0125).
@@ -879,7 +880,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 
     pub fn direct(
-        provider: ProviderHandle,
+        binding: crate::ModelBinding,
         charge_safety: crate::ChargeSafetyPolicy,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         usage: DirectUsage,
@@ -888,7 +889,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                 LocalDirectEffectRunner {
-                    provider,
+                    binding,
                     charge_safety,
                     attachment_store,
                     usage,
@@ -1476,12 +1477,21 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                 request,
                 usage_source,
             } => {
+                // An unjournaled completion binds its recorded model here; a
+                // refusal leaves the step unsealed, never a recorded result.
+                let provider = self.binding.bind_for_unjournaled_call()?;
                 let request = (*request).into_request(
-                    crate::session_model::transport_stream_events(&self.provider, None),
+                    crate::session_model::transport_stream_events(&provider, None),
                     None,
                 );
-                self.run_direct_in_usage_run(request, usage_source, model_key, usage_run.as_ref())
-                    .await
+                self.run_direct_in_usage_run(
+                    provider,
+                    request,
+                    usage_source,
+                    model_key,
+                    usage_run.as_ref(),
+                )
+                .await
             }
             RuntimeEffectCommand::Sleep { spec } => {
                 let duration_ms = sleep_duration(spec, crate::SystemClock.timestamp_ms());
@@ -1540,6 +1550,7 @@ impl RuntimeEffectLocalRunner for RemoteEffectRunner {
 impl LocalDirectEffectRunner {
     async fn run_direct_llm_request(
         &mut self,
+        mut provider: ProviderHandle,
         request: CoreLlmRequest,
         call: &crate::UsageCall,
     ) -> RuntimeDirectLlmOutcome {
@@ -1568,8 +1579,7 @@ impl LocalDirectEffectRunner {
                 );
             }
         };
-        match self
-            .provider
+        match provider
             .complete_with_charge_safety(request, self.charge_safety.clone(), call)
             .await
         {

@@ -619,63 +619,48 @@ impl RuntimeHost {
         self.work.queued_arc()
     }
 
-    /// Bind `policy`'s recorded model to the transport that executes it.
+    /// `policy` with the lazy binding of its recorded model. Nothing is
+    /// resolved here: the binding asks this host's models only when an
+    /// unjournaled model call runs (FIG-4404).
     pub fn resolve_session_policy(
         &self,
         session_id: &SessionId,
         policy: crate::SessionPolicy,
     ) -> Result<crate::RuntimeSessionPolicy, crate::SessionError> {
-        self.resolve_policy_binding(policy)
-            .map_err(|err| match err {
-                None => crate::SessionError::ModelUnconfigured {
-                    session_id: session_id.clone(),
-                },
-                Some(source) => crate::SessionError::ModelUnavailable {
-                    session_id: session_id.clone(),
-                    source,
-                },
+        self.runtime_policy(policy)
+            .ok_or_else(|| crate::SessionError::ModelUnconfigured {
+                session_id: session_id.clone(),
             })
     }
 
-    /// Bind `policy`'s recorded model for `owner`, with its failures named
-    /// by the owner. A recorded model this worker cannot bind is the typed,
-    /// retryable [`RuntimeErrorCode::ModelUnavailable`](crate::RuntimeErrorCode::ModelUnavailable),
-    /// as it is on the turn path: the deployment is at fault, and a
-    /// deployment that serves the key repairs it (FIG-4531).
+    /// `policy` with the lazy binding of its recorded model for `owner`, its
+    /// failure named by the owner. Nothing binds here. A recorded model this
+    /// worker cannot bind is met by the body of the unjournaled call, as the
+    /// typed, retryable
+    /// [`RuntimeErrorCode::ModelUnavailable`](crate::RuntimeErrorCode::ModelUnavailable):
+    /// the deployment is at fault, and a deployment that serves the key
+    /// repairs it (FIG-4404, FIG-4531).
     pub fn resolve_owner_policy(
         &self,
         owner: &crate::RuntimeOwner,
         policy: crate::SessionPolicy,
     ) -> Result<crate::RuntimeSessionPolicy, crate::PluginError> {
-        self.resolve_policy_binding(policy).map_err(|err| {
+        self.runtime_policy(policy).ok_or_else(|| {
             let owner = match owner {
                 crate::RuntimeOwner::Session(session_id) => format!("session `{session_id}`"),
                 crate::RuntimeOwner::Process(process_id) => format!("process `{process_id}`"),
             };
-            match err {
-                None => crate::PluginError::Session(format!("{owner} has selected no model")),
-                Some(source) => crate::PluginError::Runtime(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::ModelUnavailable,
-                    format!("{owner} cannot run its model: {source}"),
-                )),
-            }
+            crate::PluginError::Session(format!("{owner} has selected no model"))
         })
     }
 
     /// `None` is a policy with no model selected.
-    fn resolve_policy_binding(
-        &self,
-        policy: crate::SessionPolicy,
-    ) -> Result<crate::RuntimeSessionPolicy, Option<crate::ModelUnavailable>> {
-        let model = policy.model.as_ref().ok_or(None)?;
-        let provider = self
-            .core
-            .providers
-            .models
-            .bind(&model.model)
-            .map_err(Some)?
-            .with_clock(Arc::clone(&self.core.clock));
-        crate::RuntimeSessionPolicy::new(policy, provider).ok_or(None)
+    fn runtime_policy(&self, policy: crate::SessionPolicy) -> Option<crate::RuntimeSessionPolicy> {
+        crate::RuntimeSessionPolicy::new(
+            policy,
+            Arc::clone(&self.core.providers.models),
+            Arc::clone(&self.core.clock),
+        )
     }
 }
 

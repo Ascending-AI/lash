@@ -863,6 +863,7 @@ pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
     SessionNodePayload, SessionNodeRecord,
 };
+pub use session_model::ModelBinding;
 pub(crate) use session_model::RuntimeSessionPolicy;
 
 pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};

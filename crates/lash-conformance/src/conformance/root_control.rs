@@ -1471,11 +1471,11 @@ pub async fn an_exhausted_root_parks_engine_retry_exhausted_via_reconcile_idempo
         session: parts.session_id.clone(),
         root: root.clone(),
     };
-    let reason = ParkReason::EngineRetryExhausted {
-        attempts: 8,
-        last_failure_code: Some("500".into()),
-        message: "engine retries exhausted".into(),
-    };
+    let reason = ParkReason::engine_retry_exhausted(
+        8,
+        Some("500".into()),
+        "engine retries exhausted".into(),
+    );
     let first = writer
         .record_engine_park(
             &target,
@@ -1738,11 +1738,7 @@ pub async fn a_stale_paused_listing_never_reparks_a_resumed_root(
         session: f.parts.session_id.clone(),
         root: f.root.clone(),
     };
-    let exhausted = ParkReason::EngineRetryExhausted {
-        attempts: 8,
-        last_failure_code: None,
-        message: "listed before the resume".into(),
-    };
+    let exhausted = ParkReason::engine_retry_exhausted(8, None, "listed before the resume".into());
     assert_eq!(
         writer
             .record_engine_park(

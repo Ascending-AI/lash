@@ -43,6 +43,67 @@ fn recorded_renderer_refusal_retries_the_uncommitted_presentation() {
     );
 }
 
+/// FIG-4404: a direct completion runs in the fault class of a model call, so
+/// a recorded model its body cannot bind ends the attempt and is never
+/// journaled as the completion's result.
+#[test]
+fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
+    let invocation = RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(
+            ExecutionScope::turn("direct-session", "direct-turn"),
+            "direct-completion",
+        )
+        .expect("effect address"),
+        lash_core::RuntimeAttribution::for_turn("direct-session", "direct-turn", 0, 0),
+        "direct-completion",
+    );
+    let route = execution::restate_effect_execution(RuntimeEffectEnvelope {
+        invocation,
+        command: RuntimeEffectCommand::Direct {
+            model_key: lash_core::ModelKey::new("kimi-k3@tensorx"),
+            request: Box::new(lash_core::LlmRequestSpec {
+                instructions: None,
+                model: "kimi-k3".to_string(),
+                messages: Vec::new(),
+                tools: Arc::new(Vec::new()),
+                tool_choice: Default::default(),
+                attachment_acceptance: Default::default(),
+                model_variant: Default::default(),
+                model_capability: lash_core::ModelCapability::default(),
+                extra_body: Default::default(),
+                request_defaults: Default::default(),
+                generation: lash_core::GenerationOptions::default(),
+                scope: lash_core::LlmRequestScope::new(
+                    "direct-session".to_string(),
+                    "direct-session:frame:test".to_string(),
+                    "direct-session:request:test".to_string(),
+                ),
+                output_spec: None,
+            }),
+            usage_source: "compaction".into(),
+        },
+        group: None,
+    })
+    .expect("direct route");
+    assert!(matches!(
+        route,
+        execution::RestateEffectExecution::JournaledRun {
+            engine_faults: EngineFaults::Retried,
+            ..
+        }
+    ));
+    let fault = RuntimeEffectControllerError::model_unavailable(&lash_core::ModelUnavailable::new(
+        lash_core::ModelKey::new("kimi-k3@tensorx"),
+        lash_core::ModelUnavailableReason::UnknownKey,
+    ));
+    for kind in [
+        lash_core::RuntimeEffectKind::Direct,
+        lash_core::RuntimeEffectKind::LlmCall,
+    ] {
+        assert!(fault.journal_disposition(kind).is_retryable_derivation());
+    }
+}
+
 #[test]
 fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
     let parent_address = lash_core::EffectAddress::new(

@@ -68,7 +68,7 @@ pub use relays::{
     ObligationRelayUnavailable, RelayNeed, RelayParts, RelaySupply, obligation_relays,
 };
 pub use scope_close::{ScopeCloseRelay, deliver_scope_close};
-pub(crate) use turn_config::model_unavailable;
+pub(crate) use turn_config::model_unconfigured;
 
 use std::sync::Arc;
 
