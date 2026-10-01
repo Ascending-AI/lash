@@ -550,8 +550,8 @@ pub use lash_sansio::{
     ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDefinitionBindingExt,
     ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
     ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
-    ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView,
-    ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
+    ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue,
+    ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,

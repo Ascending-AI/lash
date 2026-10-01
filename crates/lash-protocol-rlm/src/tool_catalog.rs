@@ -30,38 +30,53 @@ pub(crate) fn rlm_prompt_tool_docs(
     dialect: &crate::dialect::SessionDialect,
     features: crate::protocol::RlmPromptFeatures,
 ) -> String {
-    let entries = tool_catalog
+    let mut entries = Vec::new();
+    let mut modules =
+        std::collections::BTreeMap::<&str, (&lash_core::ToolModule, Vec<String>)>::new();
+    for tool in tool_catalog
         .tools
         .iter()
         .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
-        .map(|tool| {
-            let contract = &tool.contract;
-            let call_path = dialect
-                .tool_call_path(&tool.manifest)
-                .expect("RLM tool catalog registration validates the session dialect's binding");
-            let mut compact =
-                contract.compact_contract_with_signature_name(&tool.manifest, &call_path);
-            // Authored examples are Lashlang source; the dialect spells them,
-            // and leaves out the ones it cannot.
-            compact.examples = compact
-                .examples
-                .iter()
-                .filter_map(|example| dialect.render_tool_example(example))
-                .collect();
-            compact.parameters.retain(has_field_description);
-            if !schema_nests(contract.output_schema.canonical(), 0) {
-                compact.return_fields.retain(has_field_description);
-            }
-            let markdown = compact.render_markdown();
-            let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
-            let signature = dialect.language().tool_signature(
-                &call_path,
-                contract.input_schema.canonical(),
-                contract.output_schema.canonical(),
-            );
-            format!("`{signature}`\n{notes}")
-        })
-        .collect::<Vec<_>>();
+    {
+        let contract = &tool.contract;
+        let call_path = dialect
+            .tool_call_path(&tool.manifest)
+            .expect("RLM tool catalog registration validates the session dialect's binding");
+        let mut compact = contract.compact_contract_with_signature_name(&tool.manifest, &call_path);
+        // Authored examples are Lashlang source; the dialect spells them,
+        // and leaves out the ones it cannot.
+        compact.examples = compact
+            .examples
+            .iter()
+            .filter_map(|example| dialect.render_tool_example(example))
+            .collect();
+        compact.parameters.retain(has_field_description);
+        if !schema_nests(contract.output_schema.canonical(), 0) {
+            compact.return_fields.retain(has_field_description);
+        }
+        let markdown = compact.render_markdown();
+        let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
+        let signature = dialect.language().tool_signature(
+            &call_path,
+            contract.input_schema.canonical(),
+            contract.output_schema.canonical(),
+        );
+        let doc = format!("`{signature}`\n{notes}");
+        if let Some(module) = tool.manifest.module.as_deref() {
+            modules
+                .entry(module.name.as_str())
+                .or_insert_with(|| (module, Vec::new()))
+                .1
+                .push(doc);
+        } else {
+            entries.push(doc);
+        }
+    }
+    entries.extend(
+        modules.into_values().map(|(module, tools)| {
+            format!("{}\n\n{}", module.render_markdown(), tools.join("\n\n"))
+        }),
+    );
     entries.join("\n\n")
 }
 

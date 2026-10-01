@@ -15,6 +15,7 @@ enum Scenario {
 
 struct PeerState {
     scenario: Scenario,
+    initializations: AtomicUsize,
     calls: AtomicUsize,
     stalled: Notify,
     release: Notify,
@@ -43,6 +44,7 @@ impl HttpPeer {
         );
         let state = Arc::new(PeerState {
             scenario,
+            initializations: AtomicUsize::new(0),
             calls: AtomicUsize::new(0),
             stalled: Notify::new(),
             release: Notify::new(),
@@ -105,7 +107,8 @@ async fn answer(stream: tokio::net::TcpStream, state: Arc<PeerState>) {
     let body = match method {
         "initialize" => json!({"jsonrpc":"2.0", "id": id, "result": {
             "protocolVersion":"2025-11-25", "capabilities":{"tools":{"listChanged":true}},
-            "serverInfo":{"name":"catalog-http-peer","version":"1"}
+            "serverInfo":{"name":"catalog-http-peer","version":"1"},
+            "instructions": format!("HTTP guidance generation {}", state.initializations.fetch_add(1, Ordering::SeqCst) + 1)
         }})
         .to_string(),
         "tools/list" => {
@@ -255,6 +258,50 @@ async fn http_valid_catalog_refresh_installs_once() {
     entry.establish().await.expect("publication barrier");
     assert_eq!(fixture.state.calls.load(Ordering::SeqCst), 2);
     pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn http_server_instructions_follow_catalog_refresh_and_reconnect() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let fixture = HttpPeer::start(Scenario::Valid).await;
+        let pool =
+            McpConnectionPool::connect(BTreeMap::from([("http".to_string(), fixture.config())]))
+                .await
+                .expect("connected HTTP entry");
+        let instructions = || {
+            serde_json::to_value(&pool.advertised_tools()[0].manifest).expect("manifest record")
+                ["module"]["instructions"].clone()
+        };
+        let mut observed = vec![instructions()];
+        let entry = pool.entries.read_recover()["http"].clone();
+        let generation = entry.service_snapshot().expect("HTTP service").generation;
+        entry.request_tool_refresh(generation);
+        while pool.advertised_tools()[0].name() != naming::build_prefixed_name("http", "work-2").0 {
+            tokio::task::yield_now().await;
+        }
+        observed.push(instructions());
+        assert!(entry.mark_disconnected("instruction reconnect witness".to_string(), generation));
+        observed.push(instructions());
+        while entry
+            .service_snapshot()
+            .is_none_or(|service| service.generation == generation)
+        {
+            tokio::task::yield_now().await;
+        }
+        observed.push(instructions());
+        pool.shutdown_all().await;
+        assert_eq!(
+            observed,
+            [
+                json!("HTTP guidance generation 1"),
+                json!("HTTP guidance generation 1"),
+                json!("HTTP guidance generation 1"),
+                json!("HTTP guidance generation 2")
+            ]
+        );
+    })
+    .await
+    .expect("bounded instruction lifecycle witness");
 }
 
 #[tokio::test]

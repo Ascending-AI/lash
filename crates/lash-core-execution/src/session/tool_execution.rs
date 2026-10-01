@@ -457,6 +457,7 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
                 id,
                 name: _,
                 description: _,
+                module: _,
                 compact_contract: _,
                 bindings: _,
                 argument_projection: _,

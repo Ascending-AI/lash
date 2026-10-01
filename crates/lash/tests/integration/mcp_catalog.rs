@@ -17,6 +17,84 @@ use lash::plugins::PluginFactory;
 use lash::provider::LlmResponse;
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
 
+#[tokio::test]
+async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
+    const INSTRUCTIONS: &str = "Authenticate with login before searching. Follow every nextCursor.";
+    let initialize = serde_json::json!({
+        "jsonrpc":"2.0", "id":0, "result": {
+            "protocolVersion":"2025-11-25", "capabilities":{"tools":{}},
+            "serverInfo":{"name":"instructions-peer","version":"1"},
+            "instructions": INSTRUCTIONS
+        }
+    });
+    let tools = serde_json::json!({"jsonrpc":"2.0", "id":1, "result":{"tools":[
+        {"name":"login", "description":"Authenticate", "inputSchema":{"type":"object"}},
+        {"name":"search", "description":"Search records", "inputSchema":{"type":"object"}}
+    ]}});
+    let factory = Arc::new(McpPluginFactory::new(BTreeMap::from([(
+        "records".to_string(),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", vec![
+            "-c".to_string(),
+            "read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; read -r _; printf '%s\\n' \"$TOOLS\"; cat >/dev/null".to_string()
+        ]).with_env([("INITIALIZE", initialize.to_string()), ("TOOLS", tools.to_string())]))
+    )])).await.expect("instruction peer connects"));
+    assert_eq!(factory.pool().advertised_tools().len(), 2);
+    let double = lash_restate_test::backend(4548, Default::default())
+        .await
+        .expect("prompt backend");
+    let mut observations = Vec::new();
+    for surface in ["standard", "cell", "native"] {
+        let protocol: Arc<dyn PluginFactory> = if surface == "standard" {
+            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
+        } else {
+            Arc::new(
+                lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                    lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                        .channel(if surface == "cell" {
+                            lash_protocol_rlm::RlmChannel::Cell
+                        } else {
+                            lash_protocol_rlm::RlmChannel::NativeTool
+                        })
+                        .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1000))
+                        .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(1))
+                        .build(),
+                    Arc::new(lash_protocol_rlm::TypescriptDialect),
+                    &double.lash_backend(),
+                )
+                .with_process_lifecycle(false),
+            )
+        };
+        let session = lash_core::facade_support::PluginHost::new(vec![protocol, factory.clone()])
+            .build_session(lash_core::plugin::PluginSessionRequest::creation(
+                surface,
+                Default::default(),
+            ))
+            .expect("prompt session");
+        let catalog = session.resolved_tool_catalog().expect("captured catalog");
+        // The recorded catalog is sufficient to rebuild the prompt without consulting the peer.
+        let recorded = serde_json::to_vec(catalog.as_ref()).expect("record catalog");
+        let catalog = serde_json::from_slice(&recorded).expect("restore catalog");
+        let preamble = session
+            .protocol_driver()
+            .build_preamble(lash_core::ProtocolBuildInput {
+                tool_catalog: Arc::new(catalog),
+                plugin_extensions: Default::default(),
+                trigger_events: Default::default(),
+                extra_prompt_contributions: Vec::new(),
+                writer_formats: lash_core::build_newest_writer_formats(),
+            });
+        let prompt = lash_core::PromptTemplate::default().render(&lash::prompt::PromptContext {
+            execution_title: preamble.execution_title,
+            execution_prompt: preamble.execution_prompt,
+            tool_names: preamble.tool_names,
+            contributions: Arc::new(preamble.prompt_contributions),
+        });
+        observations.push((surface, prompt.matches(INSTRUCTIONS).count()));
+    }
+    factory.shutdown().await.expect("peer shutdown");
+    assert_eq!(observations, [("standard", 1), ("cell", 1), ("native", 1)]);
+}
+
 const PEER: &str = r#"
 import json, os, sys, threading, time
 lock = threading.Lock()

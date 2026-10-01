@@ -280,6 +280,32 @@ fn is_inline(value: &bool) -> bool {
     *value
 }
 
+/// Guidance shared by the tools of one module. Providers give every tool in
+/// the module the same metadata; the catalog and hosts present it once.
+/// It is recorded with the manifest, independently of execution bindings.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct ToolModule {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
+impl ToolModule {
+    pub fn render_markdown(&self) -> String {
+        let heading = format!("#### {}", self.name);
+        match self
+            .instructions
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+        {
+            Some(instructions) => format!("{heading}\n\n{instructions}"),
+            None => heading,
+        }
+    }
+}
+
 /// Tool metadata exposed to prompts, catalogs, and UI. Catalog membership —
 /// being present in a [`ToolProvider`]'s manifest list — is the execution gate;
 /// there is no per-manifest tier. The optional compact contract is the
@@ -295,6 +321,8 @@ pub struct ToolManifest {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<Arc<ToolModule>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_contract: Option<Arc<CompactToolContract>>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -702,6 +730,7 @@ impl ToolDefinition {
                 id: id.clone(),
                 name: name.clone(),
                 description: description.into(),
+                module: None,
                 compact_contract: None,
                 bindings: std::collections::BTreeMap::new(),
                 argument_projection: ToolArgumentProjectionPolicy::default(),

@@ -26,6 +26,11 @@
 //! a limit are refused without replacing the last installed catalog. A stalled
 //! refresh closes its service at the startup timeout and reconnects, retaining
 //! the last catalog while clearing unanswered protocol requests.
+//!
+//! Initialize instructions are captured as each server's tool-module metadata.
+//! Tool refreshes retain them; reconnects capture the new initialize response.
+//! Hosts can read them from advertised manifests for discovery. Standard and
+//! RLM prompts render them once per visible module from the recorded catalog.
 
 pub mod config;
 pub mod error;

@@ -516,8 +516,9 @@ pub use lash_sansio::{
     ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
     ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass,
     ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
-    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
+    ToolIntentRefusalReason, ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy,
+    ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
+    TurnOutputSource,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};
 /// Project a successful tool control into its terminal turn outcome.

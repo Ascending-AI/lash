@@ -541,11 +541,25 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
         let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
-        let catalog_specs = if self.config.discovery.is_some() {
-            input.tool_catalog.inline_tools().model_tool_specs()
+        let visible_catalog;
+        let catalog = if self.config.discovery.is_some() {
+            visible_catalog = input.tool_catalog.inline_tools();
+            &visible_catalog
         } else {
-            input.tool_catalog.model_tool_specs()
+            input.tool_catalog.as_ref()
         };
+        let catalog_specs = catalog.model_tool_specs();
+        let mut prompt_contributions = input.extra_prompt_contributions;
+        let module_guidance = catalog
+            .modules()
+            .map(|module| module.render_markdown())
+            .collect::<Vec<_>>();
+        if !module_guidance.is_empty() {
+            prompt_contributions.push(lash_core::PromptContribution::guidance(
+                "Tool modules",
+                module_guidance.join("\n\n"),
+            ));
+        }
         let tool_specs = match self.config.batch {
             BatchSugar::Enabled { max_members } => {
                 let definition = batch_tool_definition(max_members);
@@ -574,7 +588,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             tool_names_fingerprint,
             execution_title: Arc::from(STANDARD_EXECUTION_TITLE),
             execution_prompt: Arc::from(standard_execution_section(self.config.batch)),
-            prompt_contributions: input.extra_prompt_contributions,
+            prompt_contributions,
             writer_formats: input.writer_formats,
         }
     }

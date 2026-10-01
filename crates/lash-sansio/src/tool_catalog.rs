@@ -123,6 +123,16 @@ impl Default for ToolCatalog {
 }
 
 impl ToolCatalog {
+    /// Module metadata from this catalog's recorded members, once per name.
+    /// Filtering membership also filters modules; no live provider is read.
+    pub fn modules(&self) -> impl Iterator<Item = &crate::ToolModule> {
+        let mut names = std::collections::BTreeSet::new();
+        self.tools.iter().filter_map(move |entry| {
+            let module = entry.manifest.module.as_deref()?;
+            names.insert(module.name.as_str()).then_some(module)
+        })
+    }
+
     /// Prompt-only projection. The original catalogue retains execution authority.
     pub fn inline_tools(&self) -> Self {
         self.filtered(|entry| entry.manifest.inline)

@@ -565,7 +565,8 @@ impl LifecycleActor {
             }
         };
 
-        let imported = match import_tools(&server_name, tools) {
+        let instructions = peer.peer_info().and_then(|info| info.instructions.clone());
+        let imported = match import_tools(&server_name, tools, instructions.clone()) {
             Ok(imported) => imported,
             Err(error) => {
                 self.record_error(error.to_string());
@@ -625,7 +626,7 @@ impl LifecycleActor {
                         let shutdown = connection.cancel_and_reap(self, &server_name).await;
                         return if shutdown { ConnectionExit::Shutdown } else { ConnectionExit::Disconnected };
                     };
-                    match result.and_then(|tools| import_tools(&server_name, tools))
+                    match result.and_then(|tools| import_tools(&server_name, tools, instructions.clone()))
                         .and_then(|tools| self.entry.upgrade()
                             .ok_or(McpError::PoolShutDown)?
                             .replace_imported_tools(tools))

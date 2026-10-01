@@ -69,7 +69,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
     }))
     .expect("tool");
     let without_schema = advertised_tool("plain");
-    let tools = import_tools("test", vec![with_schema, without_schema]).expect("imports");
+    let tools = import_tools("test", vec![with_schema, without_schema], None).expect("imports");
     for tool in tools.values() {
         let schema = &tool.definition.contract.output_schema.canonical;
         assert_eq!(schema["required"], json!(["content"]));
@@ -210,6 +210,7 @@ fn import_refuses_a_forced_final_name_collision_without_overwriting() {
     let result = import_tools_with_name_builder(
         "directory",
         vec![advertised_tool("get-user"), advertised_tool("get_user")],
+        None,
         |server, tool| naming::build_prefixed_name_with_digest(server, tool, [7; 16]),
     );
     let error = match result {
@@ -245,6 +246,7 @@ async fn publication_refuses_a_forced_cross_server_collision_atomically() {
         import_tools_with_name_builder(
             server,
             vec![advertised_tool("abcdefghijklmnop")],
+            None,
             |server, tool| naming::build_prefixed_name_with_digest(server, tool, [9; 16]),
         )
         .expect("one-tool catalog")
@@ -283,7 +285,7 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     let pool = Arc::new(McpConnectionPool::empty());
     let server_name = "abcdefghijklmno-one";
     let forced_catalog = |server: &str, tool: &str| {
-        import_tools_with_name_builder(server, vec![advertised_tool(tool)], |server, tool| {
+        import_tools_with_name_builder(server, vec![advertised_tool(tool)], None, |server, tool| {
             naming::build_prefixed_name_with_digest(server, tool, [9; 16])
         })
         .expect("one-tool forced catalog")
@@ -376,6 +378,7 @@ async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations(
         import_tools_with_name_builder(
             server,
             vec![advertised_tool("abcdefghijklmnop")],
+            None,
             |server, tool| naming::build_prefixed_name_with_digest(server, tool, [9; 16]),
         )
         .expect("one-tool catalog")

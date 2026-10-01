@@ -1347,17 +1347,28 @@ impl Drop for AbortOnDrop {
 fn import_tools(
     server_name: &str,
     tools: Vec<rmcp::model::Tool>,
+    instructions: Option<String>,
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
-    import_tools_with_name_builder(server_name, tools, naming::build_prefixed_name)
+    import_tools_with_name_builder(
+        server_name,
+        tools,
+        instructions,
+        naming::build_prefixed_name,
+    )
 }
 
 fn import_tools_with_name_builder(
     server_name: &str,
     mut tools: Vec<rmcp::model::Tool>,
+    instructions: Option<String>,
     mut build_name: impl FnMut(&str, &str) -> (String, lash_tool_support::ToolBinding),
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
     tools.sort_by(|left, right| left.name.cmp(&right.name));
     let mut imported = BTreeMap::new();
+    let module = Arc::new(lash_core::ToolModule {
+        name: server_name.to_string(),
+        instructions,
+    });
     for tool in tools {
         let original_name = tool.name.to_string();
         let description = tool
@@ -1370,22 +1381,18 @@ fn import_tools_with_name_builder(
         let (prefixed, lashlang_binding) = build_name(server_name, &original_name);
         let tool_id = naming::durable_tool_id(server_name, &original_name);
 
-        let description = if description.is_empty() {
-            format!("MCP tool from server `{server_name}`")
-        } else {
-            format!("[MCP {server_name}] {description}")
-        };
-
+        let mut definition = ToolDefinition::raw(
+            tool_id,
+            prefixed.clone(),
+            description,
+            input_schema,
+            output_schema,
+        )
+        .with_tool_binding(lashlang_binding);
+        definition.manifest.module = Some(Arc::clone(&module));
         let imported_tool = ImportedTool {
             original_name,
-            definition: ToolDefinition::raw(
-                tool_id,
-                prefixed.clone(),
-                description,
-                input_schema,
-                output_schema,
-            )
-            .with_tool_binding(lashlang_binding),
+            definition,
         };
         match imported.entry(prefixed.clone()) {
             std::collections::btree_map::Entry::Vacant(slot) => {

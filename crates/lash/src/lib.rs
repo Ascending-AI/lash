@@ -404,11 +404,11 @@ pub mod tools {
         ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolExecutionGrant, ToolFailure,
         ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentExecutionOutcome,
         ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolIntents, ToolManifest,
-        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
-        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionModel, ToolValue, ToolView,
-        ToolViewBlock, ToolViewMeta, derive_tool_intent_identity, facade_support::ReconfigureError,
-        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
-        turn_outcome_from_tool_control,
+        ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall,
+        ToolPrepareContext, ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionModel,
+        ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
+        facade_support::ReconfigureError, facade_support::ToolSourceHandle,
+        facade_support::ToolStateFacadeOps, turn_outcome_from_tool_control,
     };
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
     /// Tool-execution request batches, replies, and child-process observation hooks.

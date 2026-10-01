@@ -159,8 +159,11 @@ fn tool_contract_types_are_nameable(record: ToolCallRecord, contract: ToolOutput
     let _ = (record, contract);
 }
 
-fn tool_catalog_types_are_nameable(contribution: ToolCatalogContribution) {
-    let _ = contribution;
+fn tool_catalog_types_are_nameable(
+    contribution: ToolCatalogContribution,
+    module: lash::tools::ToolModule,
+) {
+    let _ = (contribution, module);
 }
 
 fn message_role_type_is_nameable(role: MessageRole) -> &'static str {
