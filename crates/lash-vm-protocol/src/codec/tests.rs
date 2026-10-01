@@ -35,7 +35,6 @@ fn start_frame() -> ParentFrame {
                     heap: 1,
                     abi: 1,
                 },
-                29,
                 vec![1, 2, 3, 4],
             )),
             limits: VmLimits {
@@ -105,7 +104,6 @@ fn every_message_round_trips() {
             heap: 1,
             abi: 1,
         },
-        1,
         vec![9; 16],
     );
     let workers = [

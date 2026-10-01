@@ -54,15 +54,15 @@ impl WorkerSlots for PoolSlots {
                         waited: self.pool.config().deadlines.checkout,
                     },
                     crate::PoolError::RestartStorm => CheckoutRefusal::RestartStorm,
-                    crate::PoolError::Infrastructure(outcome) => {
-                        CheckoutRefusal::Infrastructure(outcome)
+                    error @ (crate::PoolError::Infrastructure(_)
+                    | crate::PoolError::RetryLimitExceeded
+                    | crate::PoolError::ProtocolVersion(_)
+                    | crate::PoolError::Recovery { .. }
+                    | crate::PoolError::InvalidConfiguration
+                    | crate::PoolError::UnsupportedPlatform
+                    | crate::PoolError::Io { .. }) => {
+                        CheckoutRefusal::Infrastructure(error.into_outcome())
                     }
-                    crate::PoolError::RetryLimitExceeded => CheckoutRefusal::Infrastructure(
-                        InfrastructureOutcome::WorkerLimitExceeded {
-                            limit: WorkerLimit::Deadline,
-                        },
-                    ),
-                    _ => CheckoutRefusal::Closed,
                 })?;
         #[cfg(feature = "testing")]
         if let Some(service) = &self.recovery {
@@ -117,25 +117,24 @@ impl WorkerSlots for PoolSlots {
                     drop(worker);
                     return;
                 };
-                let parent = match codec.decode_parent(&bytes) {
-                    Ok(parent) if incoming.admit(&parent.header).is_ok() => parent.message,
-                    _ => {
-                        let _ = outputs.blocking_send(WorkerRead::Failed(
-                            InfrastructureOutcome::ProtocolViolation {
-                                reason: "pool actor refused the parent frame or fence".into(),
-                            },
-                        ));
+                let admitted = codec
+                    .decode_parent(&bytes)
+                    .map_err(InfrastructureOutcome::from)
+                    .and_then(|parent| match incoming.admit(&parent.header) {
+                        Ok(()) => Ok(parent.message),
+                        Err(refusal) => Err(ProtocolBreach::from(refusal).into()),
+                    });
+                let parent = match admitted {
+                    Ok(parent) => parent,
+                    Err(outcome) => {
+                        let _ = outputs.blocking_send(WorkerRead::Failed(outcome));
                         return;
                     }
                 };
                 if let Some(service) = &recovery
                     && let Err(error) = runtime.block_on(service.mark_running())
                 {
-                    let _ = outputs.blocking_send(WorkerRead::Failed(
-                        InfrastructureOutcome::ProtocolViolation {
-                            reason: error.to_string(),
-                        },
-                    ));
+                    let _ = outputs.blocking_send(WorkerRead::Failed(error.into_outcome()));
                     return;
                 }
                 let response = match parent {
@@ -152,11 +151,7 @@ impl WorkerSlots for PoolSlots {
                     && let Some(service) = &recovery
                     && let Err(error) = runtime.block_on(service.checkpoint())
                 {
-                    let _ = outputs.blocking_send(WorkerRead::Failed(
-                        InfrastructureOutcome::ProtocolViolation {
-                            reason: error.to_string(),
-                        },
-                    ));
+                    let _ = outputs.blocking_send(WorkerRead::Failed(error.into_outcome()));
                     return;
                 }
                 let observations = worker.take_observations();
@@ -182,11 +177,7 @@ impl WorkerSlots for PoolSlots {
                     });
                     actor_released.store(true, std::sync::atomic::Ordering::Release);
                     if let Err(error) = result {
-                        let _ = outputs.blocking_send(WorkerRead::Failed(
-                            InfrastructureOutcome::ProtocolViolation {
-                                reason: error.to_string(),
-                            },
-                        ));
+                        let _ = outputs.blocking_send(WorkerRead::Failed(error.into_outcome()));
                         return;
                     }
                     for payload in observations {
@@ -200,15 +191,12 @@ impl WorkerSlots for PoolSlots {
                 for payload in observations {
                     send(WorkerMessage::Observations { payload }, &mut outgoing);
                 }
-                match response {
+                match response.map_err(crate::PoolError::into_outcome) {
                     Ok(response) => send(response, &mut outgoing),
-                    Err(crate::PoolError::Infrastructure(outcome)) => {
+                    Err(outcome) => {
                         match outcome {
                             InfrastructureOutcome::WorkerLimitExceeded { limit } => {
                                 send(WorkerMessage::LimitExceeded { limit }, &mut outgoing)
-                            }
-                            outcome @ InfrastructureOutcome::PayloadTooLarge { .. } => {
-                                let _ = outputs.blocking_send(WorkerRead::Failed(outcome));
                             }
                             InfrastructureOutcome::WorkerCrashed { evidence } => {
                                 let _ = outputs.blocking_send(WorkerRead::Ended(evidence));
@@ -217,18 +205,11 @@ impl WorkerSlots for PoolSlots {
                                 let _ =
                                     outputs.blocking_send(WorkerRead::Unresponsive { silent_ms });
                             }
-                            outcome @ InfrastructureOutcome::ProtocolViolation { .. } => {
+                            outcome @ (InfrastructureOutcome::ProtocolViolation { .. }
+                            | InfrastructureOutcome::RunRefused { .. }) => {
                                 let _ = outputs.blocking_send(WorkerRead::Failed(outcome));
                             }
                         }
-                        return;
-                    }
-                    Err(error) => {
-                        let _ = outputs.blocking_send(WorkerRead::Failed(
-                            InfrastructureOutcome::ProtocolViolation {
-                                reason: error.to_string(),
-                            },
-                        ));
                         return;
                     }
                 }
@@ -318,10 +299,5 @@ impl Drop for Transport {
 }
 
 fn recovery_refusal(error: crate::PoolError) -> CheckoutRefusal {
-    match error {
-        crate::PoolError::Infrastructure(outcome) => CheckoutRefusal::Infrastructure(outcome),
-        error => CheckoutRefusal::Infrastructure(InfrastructureOutcome::ProtocolViolation {
-            reason: error.to_string(),
-        }),
-    }
+    CheckoutRefusal::Infrastructure(error.into_outcome())
 }

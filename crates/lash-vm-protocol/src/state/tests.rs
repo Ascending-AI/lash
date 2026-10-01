@@ -15,7 +15,6 @@ fn state() -> OpaqueVmState {
         VmStateKind::Continuation,
         VmOwner::new("process-1"),
         CONTRACT,
-        29,
         b"continuation bytes".to_vec(),
     )
 }
@@ -91,17 +90,16 @@ fn tampered_bytes_fail_the_hash() {
     );
     let mut shortened = state();
     shortened.bytes.pop();
-    assert!(matches!(
+    assert_eq!(
         shortened.check(&expectation(&owner)),
-        Err(OpaqueStateRefusal::LengthMismatch { .. })
-    ));
+        Err(OpaqueStateRefusal::HashMismatch)
+    );
 }
 
 #[test]
 fn json_carries_the_bytes_as_base64_and_the_facts_readably() {
     let json = serde_json::to_value(state()).unwrap();
     assert_eq!(json["kind"], "continuation");
-    assert_eq!(json["format_version"], 29);
     assert_eq!(
         json["vm_contract"],
         serde_json::json!({"bytecode":30,"continuation":29,"snapshot":14,"accounting":3,"heap":3,"abi":14})
@@ -176,36 +174,45 @@ fn every_component_is_checked_against_both_range_bounds() {
     }
 }
 
+/// FIG-4645: the state stores its contract and its bytes once each. The
+/// format version is the contract component the kind names and the length is
+/// the bytes', so neither can disagree with what it is derived from.
 #[test]
-fn the_outer_format_agrees_with_its_contract_component() {
+fn the_format_version_and_length_are_derived_and_stored_nowhere() {
     let owner = VmOwner::new("process-1");
-    for (kind, component, format, contract) in [
-        (
-            VmStateKind::Continuation,
-            VmContractComponent::Continuation,
-            30,
-            29,
-        ),
-        (VmStateKind::Snapshot, VmContractComponent::Snapshot, 15, 14),
+    for (kind, version) in [
+        (VmStateKind::Continuation, CONTRACT.continuation),
+        (VmStateKind::Snapshot, CONTRACT.snapshot),
     ] {
-        let state = OpaqueVmState::seal(kind, owner.clone(), CONTRACT, format, Vec::new());
-        let reads = VmContractReads {
-            continuation: VersionRange::between(29, 30),
-            snapshot: VersionRange::between(14, 15),
-            ..READS
-        };
+        let state = OpaqueVmState::seal(kind, owner.clone(), CONTRACT, vec![1, 2, 3]);
+        assert_eq!(state.format_version(), version);
+        assert_eq!(state.len(), 3);
+        let json = serde_json::to_value(&state).unwrap();
+        let mut fields = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        fields.sort_unstable();
         assert_eq!(
-            state.check(&StateExpectation {
-                kind,
-                owner: &owner,
-                reads: &reads,
-                max_bytes: 1024
-            }),
-            Err(OpaqueStateRefusal::ConflictingFormatVersion {
-                component,
-                contract,
-                found: format
-            })
+            fields,
+            [
+                "bytes",
+                "definition_ids",
+                "hash",
+                "kind",
+                "owner",
+                "vm_contract"
+            ]
         );
+        for (duplicate, value) in [("format_version", version), ("len", 3)] {
+            let mut json = json.clone();
+            json[duplicate] = serde_json::json!(value);
+            assert!(
+                serde_json::from_value::<OpaqueVmState>(json).is_err(),
+                "a stored `{duplicate}` is a second copy and is refused"
+            );
+        }
     }
 }

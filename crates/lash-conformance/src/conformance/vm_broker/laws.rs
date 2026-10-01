@@ -8,7 +8,9 @@ use std::sync::Arc;
 use lash_sansio::{SessionId, ToolCallId, TurnId};
 use lash_vm_broker::testing::{Fault, MemoryCheckpoints, ScriptedProgram, Step};
 use lash_vm_broker::{BrokerFailure, BrokeredEnd, CodeCallIdentities, Invocation};
-use lash_vm_protocol::{EffectKind, InfrastructureOutcome};
+use lash_vm_protocol::{
+    EffectKind, InfrastructureOutcome, ProtocolBreach, RunRefusal, SequenceFault,
+};
 use pretty_assertions::assert_eq;
 
 use super::{CELL, HostStop, Phase, Scenario, echo, within_budget};
@@ -627,6 +629,101 @@ pub async fn stale_epoch_and_duplicate_worker_messages_are_refused(
             assert_eq!(result_calls(&redriven).len(), calls.len());
             runner.scenario_finished().await;
         }
+    })
+    .await;
+}
+
+/// A worker that refuses the run's own inputs refuses them on every attempt:
+/// the refusal crosses the pipe as its typed cause and is the run's terminal,
+/// which the turn settles with and the tier never re-drives. A breach of the
+/// exchange is the attempt's: the tier re-drives it, and each call runs once
+/// (FIG-4645).
+pub async fn a_refused_run_is_terminal_and_a_broken_exchange_is_redriven(
+    prefix: &str,
+    runner: Arc<dyn ConformanceTurnRunner>,
+) {
+    let law = "refused-run-is-terminal";
+    within_budget(law, async {
+        let name = format!("{law}/refused");
+        let scope = admitted(prefix, law, "refused");
+        let scenario = Arc::new(Scenario::new(name.clone(), matrix_program()));
+        runner
+            .run_turn(scope, scenario.refused(Fault::RefuseRun))
+            .await;
+        let refused = scenario.probe.end(Phase::Crashing);
+        let Some(Err(failure)) = &refused else {
+            panic!("{name}: the refused run fails typed: {refused:?}")
+        };
+        assert!(
+            matches!(
+                failure,
+                BrokerFailure::WorkerLost {
+                    outcome: InfrastructureOutcome::RunRefused {
+                        refusal: RunRefusal::UnknownContext,
+                    },
+                    ..
+                }
+            ),
+            "{name}: the refusal keeps its typed cause: {failure:?}"
+        );
+        assert!(
+            !failure.is_retryable(),
+            "{name}: no re-drive can change the refusal: {failure:?}"
+        );
+        assert_eq!(
+            failure.settlement(),
+            Some(&lash_vm_broker::Settlement::default()),
+            "{name}: nothing was admitted"
+        );
+        assert!(
+            scenario.probe.runs().is_empty(),
+            "{name}: a refused run dispatches nothing"
+        );
+        let pool = scenario.probe.pool(Phase::Crashing).unwrap_or_default();
+        assert_eq!(pool.discards, 1, "{name}: the refusing worker is discarded");
+        assert_eq!(pool.releases, 0, "{name}: it is never reused");
+        runner.scenario_finished().await;
+
+        let name = format!("{law}/breach");
+        let scope = admitted(prefix, law, "breach");
+        let calls = matrix_calls(&identities(&scope));
+        let scenario = Arc::new(Scenario::new(name.clone(), matrix_program()));
+        runner
+            .run_crashed_then_redriven_turn(
+                scope,
+                scenario.crashing(Some(Fault::BreachAtStart)),
+                scenario.healthy(),
+            )
+            .await;
+        let breached = scenario.probe.end(Phase::Crashing);
+        assert!(
+            matches!(
+                &breached,
+                Some(Err(failure @ BrokerFailure::WorkerLost {
+                    outcome: InfrastructureOutcome::ProtocolViolation {
+                        breach: ProtocolBreach::Sequence {
+                            fault: SequenceFault::StartBeforeReset,
+                        },
+                    },
+                    ..
+                })) if failure.is_retryable()
+            ),
+            "{name}: a breach is the attempt's, typed and retryable: {breached:?}"
+        );
+        let redriven = scenario
+            .probe
+            .end(Phase::Healthy)
+            .unwrap_or_else(|| panic!("{name}: the re-drive ran"))
+            .unwrap_or_else(|failure| panic!("{name}: the re-drive completes: {failure:?}"));
+        assert_eq!(
+            result_calls(&redriven),
+            calls
+                .iter()
+                .map(|call| (call.to_string(), 1))
+                .collect::<Vec<_>>(),
+            "{name}: the re-drive runs each call once"
+        );
+        runner.scenario_finished().await;
     })
     .await;
 }

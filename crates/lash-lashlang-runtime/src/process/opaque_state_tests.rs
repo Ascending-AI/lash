@@ -99,7 +99,6 @@ async fn parent_state_decode_never_compiles_regexp() {
         lash_vm_protocol::VmStateKind::Continuation,
         owner.clone(),
         vm_contract,
-        lashlang::VM_CONTINUATION_FORMAT_VERSION,
         worker_parked_continuation(bytes),
     );
     assert_eq!(
@@ -112,7 +111,6 @@ async fn parent_state_decode_never_compiles_regexp() {
             lash_vm_protocol::VmStateKind::Continuation,
             owner.clone(),
             vm_contract,
-            lashlang::VM_CONTINUATION_FORMAT_VERSION,
             worker_parked_continuation(poisoned),
         ),
         ordinals: ReplayOrdinalsState {
@@ -146,6 +144,156 @@ async fn parent_state_decode_never_compiles_regexp() {
     assert!(
         refusal.to_string().contains("RegExp"),
         "the refusal is the RegExp validation: {refusal}"
+    );
+}
+
+/// FIG-4645: the worker refuses a continuation it cannot decode the same way
+/// on every attempt. The refusal crosses the pipe and the broker as its typed
+/// cause, is not retryable, and ends the process instead of re-driving it
+/// into the same refusal.
+#[tokio::test(flavor = "current_thread")]
+async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried() {
+    use lashlang::testing::ast_builders as b;
+
+    let bytes = parked_regexp_continuation().await;
+    let text = String::from_utf8(bytes).expect("the continuation wire is JSON text");
+    let poisoned = text.replacen("\"ab+c\"", "\"ab+(c\"", 1).into_bytes();
+    let process_id = lash_sansio::ProcessId::fixture("refused-continuation");
+    let owner = segment_continuation_owner(&process_id);
+    let vm = lash_vm_protocol::OpaqueVmState::seal(
+        lash_vm_protocol::VmStateKind::Continuation,
+        owner.clone(),
+        lashlang::vm_contract_versions(),
+        worker_parked_continuation(poisoned),
+    );
+    assert_eq!(
+        vm.check(&segment_continuation_expectation(
+            &owner,
+            &lashlang::vm_contract_reads()
+        )),
+        Ok(()),
+        "the parent's structural check passes bytes the VM would refuse"
+    );
+    let artifact = lashlang::ModuleArtifact::from_program(b::program(vec![b::finish(b::null())]))
+        .expect("module artifact");
+    let failure = crate::WorkerRun {
+        service: &lash_vm_client::service::Service::default(),
+        host: &SleepHost,
+        identities: lash_vm_broker::CodeCallIdentities::process_body(process_id),
+        owner,
+        frame_epoch: lash_vm_protocol::FrameEpoch(0),
+        program: lash_vm_protocol::ProgramSource::Artifact {
+            module_ref: artifact.module_ref().to_string(),
+            entry: lash_vm_protocol::ProgramEntry::Main,
+            artifact: artifact.to_store_bytes().expect("artifact bytes"),
+        },
+        context: lash_vm_client::RunContext::default(),
+        projected: lashlang::ProjectedBindings::new(),
+        bounds: lashlang::ExecutionBounds::new(
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Unbounded,
+        ),
+        state: lash_vm_protocol::StartState::Continuation(vm),
+        boundary: &|| false,
+    }
+    .run()
+    .await
+    .expect_err("the worker refuses the continuation");
+    assert!(
+        !failure.is_retryable(),
+        "{failure:?} refuses every attempt the same way"
+    );
+    assert!(
+        matches!(
+            &failure,
+            lash_vm_broker::BrokerFailure::WorkerLost {
+                outcome: lash_vm_protocol::InfrastructureOutcome::RunRefused {
+                    refusal: lash_vm_protocol::RunRefusal::Undecodable {
+                        input: lash_vm_protocol::RunInput::State {
+                            kind: lash_vm_protocol::VmStateKind::Continuation,
+                        },
+                        ..
+                    },
+                },
+                ..
+            }
+        ),
+        "{failure:?}"
+    );
+    let terminal = super::execution_result::process_worker_failure(&failure)
+        .expect("a refused run is the process's terminal");
+    assert!(
+        matches!(
+            &terminal,
+            lash_core::ProcessAwaitOutput::Settled { output }
+                if matches!(&output.outcome, lash_core::ToolCallOutcome::Failure(failure)
+                    if failure.code == "process_run_refused")
+        ),
+        "{terminal:?}"
+    );
+}
+
+/// FIG-4645: the one mapping from a worker failure to a process. Only what
+/// meets every attempt the same way ends it; the attempt's own failures are
+/// re-driven.
+#[test]
+fn only_a_refusal_or_a_run_limit_ends_the_process() {
+    use lash_vm_broker::{BrokerFailure, CheckoutRefusal, Settlement};
+    use lash_vm_protocol::{
+        InfrastructureOutcome, OpaqueStateRefusal, ProtocolBreach, RunRefusal, SequenceFault,
+        SupervisorEvidence, WorkerLimit,
+    };
+    let code = |failure: &BrokerFailure| {
+        super::execution_result::process_worker_failure(failure).map(|output| match output {
+            lash_core::ProcessAwaitOutput::Settled { output } => match output.outcome {
+                lash_core::ToolCallOutcome::Failure(failure) => failure.code,
+                other => panic!("a failure terminal, got {other:?}"),
+            },
+            other => panic!("a settled terminal, got {other:?}"),
+        })
+    };
+    let lost = |outcome| BrokerFailure::WorkerLost {
+        outcome,
+        settlement: Settlement::default(),
+    };
+    let unavailable = |outcome| BrokerFailure::Unavailable {
+        refusal: CheckoutRefusal::Infrastructure(outcome),
+    };
+    let refused = InfrastructureOutcome::from(RunRefusal::ArtifactIdentityMismatch);
+    for failure in [
+        lost(refused.clone()),
+        unavailable(refused),
+        BrokerFailure::StateRefused {
+            refusal: OpaqueStateRefusal::HashMismatch,
+        },
+    ] {
+        assert!(!failure.is_retryable(), "{failure:?}");
+        assert_eq!(
+            code(&failure).as_deref(),
+            Some("process_run_refused"),
+            "{failure:?}"
+        );
+    }
+    for outcome in [
+        InfrastructureOutcome::WorkerCrashed {
+            evidence: SupervisorEvidence::EndOfStream,
+        },
+        InfrastructureOutcome::WorkerUnresponsive { silent_ms: 1 },
+        InfrastructureOutcome::WorkerLimitExceeded {
+            limit: WorkerLimit::Deadline,
+        },
+        ProtocolBreach::from(SequenceFault::WrongRequestId).into(),
+    ] {
+        for failure in [lost(outcome.clone()), unavailable(outcome)] {
+            assert!(failure.is_retryable(), "{failure:?}");
+            assert_eq!(code(&failure), None, "{failure:?} is re-driven");
+        }
+    }
+    assert_eq!(
+        code(&BrokerFailure::Unavailable {
+            refusal: CheckoutRefusal::QueueFull
+        }),
+        None
     );
 }
 

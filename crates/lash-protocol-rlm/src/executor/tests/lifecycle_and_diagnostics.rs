@@ -1228,7 +1228,6 @@ pub(super) async fn execute_with_projected(
                 lash_vm_protocol::VmStateKind::Snapshot,
                 owner.clone(),
                 lashlang::vm_contract_versions(),
-                lashlang::LASHLANG_SNAPSHOT_VERSION,
                 bytes,
             ))
         })

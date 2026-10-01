@@ -20,6 +20,7 @@ macro_rules! vm_broker_tests {
             worker_kill_after_complete_before_commit_commits_once,
             unauthorized_worker_effect_request_is_refused_without_invoking_a_tool,
             stale_epoch_and_duplicate_worker_messages_are_refused,
+            a_refused_run_is_terminal_and_a_broken_exchange_is_redriven,
             cancellation_winner_is_the_journaled_checkpoint_across_worker_kill,
             frame_open_retires_worker_state_and_old_globals_are_undefined,
             one_slot_nested_effect_does_not_deadlock,

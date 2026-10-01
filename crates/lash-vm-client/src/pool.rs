@@ -219,7 +219,7 @@ impl Pool {
         let deadline = deadline.min(Instant::now() + self.config.protocol.no_response_watchdog);
         let frame = worker.receive(deadline)?;
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
-        fence.admit(&frame.header).map_err(PoolError::protocol)?;
+        fence.admit(&frame.header).map_err(PoolError::breach)?;
         match frame.message {
             WorkerMessage::Ready {
                 protocol_version,
@@ -237,9 +237,10 @@ impl Pool {
                 }
                 Ok(worker)
             }
-            _ => Err(PoolError::protocol(
-                "worker did not send its protocol handshake",
-            )),
+            message => Err(PoolError::breach(ProtocolBreach::Unexpected {
+                exchange: Exchange::Handshake,
+                found: message.kind(),
+            })),
         }
     }
     fn failed(&self, state: &mut State) {
@@ -425,7 +426,7 @@ impl Checkout {
         mut start: Start,
     ) -> Result<WorkerMessage, PoolError> {
         if self.started {
-            return Err(PoolError::protocol("checkout already started"));
+            return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
         if let ProgramSource::Source { text, .. } = &start.program {
             self.bound(
@@ -447,7 +448,7 @@ impl Checkout {
             })
         {
             self.discard();
-            return Err(PoolError::Infrastructure(error.into()));
+            return Err(InfrastructureOutcome::input_state(error).into());
         }
         // The host configuration is the ceiling, never a worker's assertion.
         let cap = |asked: Option<u64>, max: Option<u64>| match (asked, max) {
@@ -489,7 +490,7 @@ impl Checkout {
         request: EncodedPayload,
     ) -> Result<EncodedPayload, PoolError> {
         if self.started {
-            return Err(PoolError::protocol("checkout already started"));
+            return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
         self.owner = Some(owner.clone());
         self.started = true;
@@ -498,7 +499,10 @@ impl Checkout {
             self.pool.config.protocol.no_response_watchdog,
         )? {
             WorkerMessage::Prepared { response } => Ok(response),
-            _ => Err(PoolError::protocol("pure worker work returned no response")),
+            message => Err(PoolError::breach(ProtocolBreach::Unexpected {
+                exchange: Exchange::Prepare,
+                found: message.kind(),
+            })),
         }
     }
     /// Host effect work may take any time. No worker/CPU deadline runs while
@@ -525,9 +529,7 @@ impl Checkout {
         result: EffectResponse,
     ) -> Result<WorkerMessage, PoolError> {
         if self.pending.map(|p| p.0) != Some(result.id) {
-            return Err(PoolError::protocol(
-                "result does not answer the current request",
-            ));
+            return Err(PoolError::breach(SequenceFault::WrongRequestId));
         }
         if let EffectOutcome::Value(value) | EffectOutcome::Failed(value) = &result.outcome
             && value.0.len() as u64 > self.pool.config.protocol.max_effect_value_bytes
@@ -555,7 +557,7 @@ impl Checkout {
     /// run issues its request again on this checkout.
     pub fn park(&mut self) -> Result<ParkOutcome, PoolError> {
         if !self.pending.is_some_and(|(_, kind)| kind.parkable()) {
-            return Err(PoolError::protocol("park answers no parkable request"));
+            return Err(PoolError::breach(SequenceFault::ParkWithoutParkableRequest));
         }
         self.pending = None;
         match self.exchange::<false>(
@@ -566,11 +568,12 @@ impl Checkout {
             WorkerMessage::EffectRequest(request) if request.kind == EffectKind::ParkDeclined => {
                 Ok(ParkOutcome::Declined(request))
             }
-            _ => {
+            message => {
                 self.discard();
-                Err(PoolError::protocol(
-                    "the worker answered a park with neither its state nor a declined park",
-                ))
+                Err(PoolError::breach(ProtocolBreach::Unexpected {
+                    exchange: Exchange::Park,
+                    found: message.kind(),
+                }))
             }
         }
     }
@@ -589,7 +592,7 @@ impl Checkout {
     pub fn release(mut self) -> Result<(), PoolError> {
         if self.started && !self.resettable {
             self.discard();
-            return Err(PoolError::protocol("failed worker cannot reset"));
+            return Err(PoolError::breach(SequenceFault::FailedWorkerReset));
         }
         self.send::<false>(
             ParentMessage::Reset,
@@ -601,7 +604,7 @@ impl Checkout {
                 lock(&self.pool.measurements).counters.resets += 1;
                 if cpu_nanos < self.credited_cpu {
                     self.discard();
-                    return Err(PoolError::protocol("reset CPU accounting regressed"));
+                    return Err(PoolError::breach(SequenceFault::CpuAccountingRegressed));
                 }
                 if let Err(error) = self.charge_cpu(cpu_nanos) {
                     self.discard();
@@ -623,9 +626,12 @@ impl Checkout {
                 }
                 Ok(())
             }
-            Ok(_) => {
+            Ok(message) => {
                 self.discard();
-                Err(PoolError::protocol("reset did not return ResetDone"))
+                Err(PoolError::breach(ProtocolBreach::Unexpected {
+                    exchange: Exchange::Reset,
+                    found: message.kind(),
+                }))
             }
             Err(error) => {
                 self.discard();
@@ -635,7 +641,10 @@ impl Checkout {
     }
     fn bound(&self, size: u64, bound: u64) -> Result<(), PoolError> {
         if size > bound {
-            return Err(InfrastructureOutcome::PayloadTooLarge { limit: bound, size }.into());
+            return Err(PoolError::refused(RunRefusal::PayloadTooLarge {
+                limit: bound,
+                size,
+            }));
         }
         Ok(())
     }
@@ -675,7 +684,7 @@ impl Checkout {
             .receive(Instant::now() + timeout)?;
         self.incoming
             .admit(&frame.header)
-            .map_err(PoolError::protocol)?;
+            .map_err(PoolError::breach)?;
         Ok(frame.message)
     }
     fn exchange<const MEASURE: bool>(
@@ -751,7 +760,7 @@ impl Checkout {
             };
             self.incoming
                 .admit(&frame.header)
-                .map_err(PoolError::protocol)?;
+                .map_err(PoolError::breach)?;
             match frame.message {
                 WorkerMessage::ExchangeTiming {
                     response_started_ns,
@@ -760,7 +769,7 @@ impl Checkout {
                     guest_ns,
                 } => {
                     if !MEASURE {
-                        return Err(PoolError::protocol("unexpected exchange timing"));
+                        return Err(PoolError::breach(SequenceFault::UnexpectedExchangeTiming));
                     }
                     let timing = &mut self
                         .worker
@@ -783,10 +792,11 @@ impl Checkout {
                             | (Some(WorkerPhase::Computing), WorkerPhase::Serializing)
                             | (Some(WorkerPhase::Serializing), WorkerPhase::Responding)
                     );
-                    if !allowed || cpu_nanos < self.credited_cpu {
-                        return Err(PoolError::protocol(
-                            "invalid worker phase or CPU accounting",
-                        ));
+                    if !allowed {
+                        return Err(PoolError::breach(SequenceFault::InvalidPhase));
+                    }
+                    if cpu_nanos < self.credited_cpu {
+                        return Err(PoolError::breach(SequenceFault::CpuAccountingRegressed));
                     }
                     self.charge_cpu(cpu_nanos)?;
                     self.credited_cpu = cpu_nanos;
@@ -797,7 +807,7 @@ impl Checkout {
                             let owner = self
                                 .owner
                                 .as_ref()
-                                .ok_or_else(|| PoolError::protocol("execution has no owner"))?;
+                                .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
                             lock(&self.pool.measurements).execution(ExecutionReceipt {
                                 lease: self.lease().0,
                                 class_name,
@@ -820,7 +830,9 @@ impl Checkout {
                             WorkerPhase::Responding => timeout,
                         };
                 }
-                WorkerMessage::Refused { outcome } => return Err(outcome.into()),
+                WorkerMessage::Refused { refusal } => {
+                    return Err(refusal.into_outcome().into());
+                }
                 WorkerMessage::Observations { payload } => {
                     // Each chunk crossed in one frame; the step's stream is
                     // held to the run's heap budget, never to a transport
@@ -868,14 +880,13 @@ impl Checkout {
                         state
                             .check(&StateExpectation {
                                 kind,
-                                owner: self
-                                    .owner
-                                    .as_ref()
-                                    .ok_or_else(|| PoolError::protocol("response has no owner"))?,
+                                owner: self.owner.as_ref().ok_or_else(|| {
+                                    PoolError::breach(SequenceFault::MissingOwner)
+                                })?,
                                 reads: &lashlang::vm_contract_reads(),
                                 max_bytes: self.pool.config.protocol.max_vm_state_bytes,
                             })
-                            .map_err(|refusal| PoolError::Infrastructure(refusal.into()))?;
+                            .map_err(InfrastructureOutcome::output_state)?;
                     }
                     self.resettable = !matches!(message, WorkerMessage::GuestError { .. });
                     if !self.resettable {
@@ -894,7 +905,12 @@ impl Checkout {
                     lock(&self.budget.0).replacement = false;
                     return Ok(WorkerMessage::Cancelled);
                 }
-                _ => return Err(PoolError::protocol("unexpected worker response")),
+                message @ (WorkerMessage::Ready { .. } | WorkerMessage::ResetDone { .. }) => {
+                    return Err(PoolError::breach(ProtocolBreach::Unexpected {
+                        exchange: Exchange::Run,
+                        found: message.kind(),
+                    }));
+                }
             }
         }
     }
@@ -1043,7 +1059,7 @@ pub mod runtime_ops {
                     state.next_lease = state
                         .next_lease
                         .checked_add(1)
-                        .ok_or_else(|| PoolError::protocol("lease space exhausted"))?;
+                        .ok_or_else(|| PoolError::breach(SequenceFault::LeaseSpaceExhausted))?;
                     {
                         let mut measurements = lock(&self.0.measurements);
                         measurements.counters.checkouts += 1;

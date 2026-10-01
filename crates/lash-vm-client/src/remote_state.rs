@@ -56,18 +56,21 @@ impl RemoteState {
     ) -> Result<lashlang::ExecutionOutcome, crate::PoolError> {
         let codec = lash_vm_protocol::FrameCodec::new(self.service.config().protocol.decode);
         codec.check_payload(&value.0)?;
-        let completion: CellCompletion =
-            rmp_serde::from_slice(&value.0).map_err(crate::PoolError::protocol)?;
+        let completion: CellCompletion = rmp_serde::from_slice(&value.0).map_err(|error| {
+            crate::PoolError::payload(lash_vm_protocol::PayloadKind::Completion, error)
+        })?;
         codec.check_payload(&completion.state.0)?;
         let metadata: StateMetadata =
-            rmp_serde::from_slice(&completion.state.0).map_err(crate::PoolError::protocol)?;
+            rmp_serde::from_slice(&completion.state.0).map_err(|error| {
+                crate::PoolError::payload(lash_vm_protocol::PayloadKind::Completion, error)
+            })?;
         if !metadata
             .definition_ids
             .iter()
             .eq(snapshot.definition_ids().iter())
         {
-            return Err(crate::PoolError::protocol(
-                "completion metadata names different definitions than its snapshot",
+            return Err(crate::PoolError::breach(
+                lash_vm_protocol::SequenceFault::CompletionDefinitionsMismatch,
             ));
         }
         self.view = StateView {
@@ -185,8 +188,8 @@ impl RemoteState {
                 Ok(baseline)
             }
             Response::SnapshotRefused(error) => Err(RemoteRestoreError::Snapshot(error)),
-            other => Err(RemoteRestoreError::Worker(crate::PoolError::protocol(
-                format!("worker returned {other:?}"),
+            _ => Err(RemoteRestoreError::Worker(crate::PoolError::breach(
+                lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
             ))),
         }
     }
@@ -239,7 +242,6 @@ mod tests {
             VmStateKind::Snapshot,
             VmOwner::new("completed-cell"),
             lashlang::vm_contract_versions(),
-            lashlang::LASHLANG_SNAPSHOT_VERSION,
             vec![4, 5, 6],
         );
         let mismatched = CellCompletion {
@@ -256,7 +258,13 @@ mod tests {
             assert!(matches!(
                 state.install_completion(&snapshot, &EncodedPayload(bytes)),
                 Err(crate::PoolError::Infrastructure(
-                    InfrastructureOutcome::ProtocolViolation { .. }
+                    InfrastructureOutcome::ProtocolViolation {
+                        breach: lash_vm_protocol::ProtocolBreach::Frame { .. }
+                            | lash_vm_protocol::ProtocolBreach::Sequence {
+                                fault:
+                                    lash_vm_protocol::SequenceFault::CompletionDefinitionsMismatch,
+                            }
+                    }
                 ))
             ));
             assert_eq!(state.bytes(), Some([1, 2, 3].as_slice()));

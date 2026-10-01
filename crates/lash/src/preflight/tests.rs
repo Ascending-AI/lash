@@ -193,7 +193,10 @@ impl StorePreflight for FakeStore {
 fn segment_item(process: &str, session: &str, segment: u32, continuation: u32) -> DurableItem {
     let engine_state = serde_json::to_vec(&serde_json::json!({
         "version": segment,
-        "vm": {"format_version": continuation},
+        "vm": {"vm_contract": {
+            "continuation": continuation,
+            "heap": crate::formats::HEAP_SIZE_SCHEDULE_VERSION,
+        }},
     }))
     .expect("the fixture encodes");
     DurableItem {

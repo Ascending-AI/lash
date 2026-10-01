@@ -214,9 +214,10 @@ fn as_u32(value: Option<&serde_json::Value>) -> Option<u32> {
         .and_then(|version| u32::try_from(version).ok())
 }
 
-/// A parked segment handover carries three of the enumerated formats at once:
-/// its own envelope version, the VM continuation nested inside it, and the
-/// program identity the process resumes against.
+/// A parked segment handover carries four of the enumerated formats at once:
+/// its own envelope version, the VM continuation nested inside it with the
+/// heap schedule it was charged under, and the program identity the process
+/// resumes against.
 fn parked_segment(payload: Payload<'_>, owner_record: Option<&str>) -> Vec<Extraction> {
     let handover = DurableFormat::LashlangSegmentHandover;
     let root = match payload.json(handover) {
@@ -264,16 +265,22 @@ fn parked_segment(payload: Payload<'_>, owner_record: Option<&str>) -> Vec<Extra
                         version: 0,
                     }),
                 }
-                let continuation = DurableFormat::VmContinuation;
-                match as_u32(state.get("vm").and_then(|vm| vm.get("format_version"))) {
-                    Some(version) => found.push(Extraction::Found {
-                        format: continuation,
-                        version,
-                    }),
-                    None => found.push(Extraction::Undecodable {
-                        format: continuation,
-                        reason: "segment engine state carries no `vm.format_version`".to_string(),
-                    }),
+                // The sealed VM state stores each version once, in the contract
+                // it was written under; the worker admits every component of it.
+                let contract = state.get("vm").and_then(|vm| vm.get("vm_contract"));
+                for (format, component) in [
+                    (DurableFormat::VmContinuation, "continuation"),
+                    (DurableFormat::HeapSizeSchedule, "heap"),
+                ] {
+                    match as_u32(contract.and_then(|contract| contract.get(component))) {
+                        Some(version) => found.push(Extraction::Found { format, version }),
+                        None => found.push(Extraction::Undecodable {
+                            format,
+                            reason: format!(
+                                "segment engine state carries no `vm.vm_contract.{component}`"
+                            ),
+                        }),
+                    }
                 }
             }
         },
@@ -538,7 +545,7 @@ mod tests {
     fn segment_handover(segment_version: u32, continuation_version: u32) -> String {
         let engine_state = serde_json::json!({
             "version": segment_version,
-            "vm": {"format_version": continuation_version},
+            "vm": {"vm_contract": {"continuation": continuation_version, "heap": 3}},
         });
         let bytes = serde_json::to_vec(&engine_state).expect("the fixture encodes");
         serde_json::json!({
@@ -568,6 +575,34 @@ mod tests {
             versions(&extractions, DurableFormat::VmContinuation),
             vec![8]
         );
+        assert_eq!(
+            versions(&extractions, DurableFormat::HeapSizeSchedule),
+            vec![3]
+        );
+    }
+
+    /// FIG-4645: the sealed state stores each version once, in its contract.
+    /// A `format_version` beside it is no writer's shape and answers nothing.
+    #[test]
+    fn a_parked_segment_is_read_from_its_contract_and_never_from_a_duplicate() {
+        let engine_state = serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "vm": {"format_version": 8},
+        }))
+        .expect("the fixture encodes");
+        let payload = serde_json::json!({
+            "handover": {"program_hash": "sha256:abc", "engine_state": engine_state},
+        })
+        .to_string();
+        let extractions = extract(&item(
+            DurableSurface::ParkedSegment,
+            DurablePayload::Json(payload),
+        ));
+        assert!(versions(&extractions, DurableFormat::VmContinuation).is_empty());
+        assert_eq!(
+            undecodable(&extractions, DurableFormat::VmContinuation),
+            vec!["segment engine state carries no `vm.vm_contract.continuation`"]
+        );
     }
 
     #[test]
@@ -575,8 +610,10 @@ mod tests {
         // The engine's decoder reads an absent version as zero and refuses it;
         // a probe that reported "no version, cannot say" would be gentler than
         // the boundary the host will actually hit.
-        let engine_state = serde_json::to_vec(&serde_json::json!({"vm": {"format_version": 8}}))
-            .expect("the fixture encodes");
+        let engine_state = serde_json::to_vec(
+            &serde_json::json!({"vm": {"vm_contract": {"continuation": 8, "heap": 3}}}),
+        )
+        .expect("the fixture encodes");
         let payload = serde_json::json!({
             "handover": {
                 "program_hash": "sha256:abc",
@@ -873,7 +910,10 @@ mod tests {
                 program_hash: current,
                 engine_state: serde_json::to_vec(&serde_json::json!({
                     "version": crate::formats::LASHLANG_SEGMENT_STATE_VERSION,
-                    "vm": {"format_version": crate::formats::VM_CONTINUATION_FORMAT_VERSION},
+                    "vm": {"vm_contract": {
+                        "continuation": crate::formats::VM_CONTINUATION_FORMAT_VERSION,
+                        "heap": crate::formats::HEAP_SIZE_SCHEDULE_VERSION,
+                    }},
                 }))
                 .expect("the engine state serializes"),
             },

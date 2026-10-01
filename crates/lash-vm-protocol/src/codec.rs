@@ -21,11 +21,12 @@
 //! only declared lengths, so a hostile length is refused before the typed
 //! decode allocates anything for it.
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::message::{ParentFrame, WorkerFrame};
+use crate::outcome::Detail;
 
 pub const FRAME_MAGIC: [u8; 4] = *b"LVMP";
 
@@ -70,7 +71,8 @@ impl DecodeLimits {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CodecRefusal {
     #[error("frame is truncated: {needed} bytes needed, {available} available")]
     Truncated { needed: u64, available: u64 },
@@ -85,7 +87,7 @@ pub enum CodecRefusal {
     #[error("payload would allocate {requested} bytes, over the {limit}-byte bound")]
     AllocationExceeded { limit: u64, requested: u64 },
     #[error("frame is malformed: {reason}")]
-    Malformed { reason: String },
+    Malformed { reason: Detail },
     #[error("frame is followed by {extra} unread bytes")]
     TrailingBytes { extra: u64 },
 }
@@ -146,7 +148,7 @@ impl FrameCodec {
             return Err(CodecRefusal::FrameTooLarge { limit, declared });
         }
         result.map_err(|error| CodecRefusal::Malformed {
-            reason: format!("frame does not encode: {error}"),
+            reason: Detail::new(format_args!("frame does not encode: {error}")),
         })?;
         if limit < FRAME_HEADER_BYTES as u64 {
             return Err(CodecRefusal::FrameTooLarge {
@@ -216,7 +218,7 @@ impl FrameCodec {
         let payload = &bytes[FRAME_HEADER_BYTES..total];
         charge_structure(payload, self.limits)?;
         rmp_serde::from_slice(payload).map_err(|error| CodecRefusal::Malformed {
-            reason: error.to_string(),
+            reason: Detail::new(error),
         })
     }
 }
@@ -626,9 +628,9 @@ impl StructureWalk<'_> {
                 self.container(len * 2)
             }
             0xc1 | 0xc7..=0xc9 | 0xd4..=0xd8 => Err(CodecRefusal::Malformed {
-                reason: format!(
+                reason: Detail::new(format_args!(
                     "payload uses marker 0x{marker:02x}, which the protocol never writes"
-                ),
+                )),
             }),
         }
     }
@@ -639,7 +641,9 @@ impl StructureWalk<'_> {
         let left = (self.payload.len() - self.position) as u64;
         if values > left {
             return Err(CodecRefusal::Malformed {
-                reason: format!("a container declares {values} values with {left} bytes left"),
+                reason: Detail::new(format_args!(
+                    "a container declares {values} values with {left} bytes left"
+                )),
             });
         }
         self.charge(values * CONTAINER_ELEMENT_CHARGE)?;
@@ -650,7 +654,9 @@ impl StructureWalk<'_> {
         let left = (self.payload.len() - self.position) as u64;
         if len > left {
             return Err(CodecRefusal::Malformed {
-                reason: format!("a string declares {len} bytes with {left} bytes left"),
+                reason: Detail::new(format_args!(
+                    "a string declares {len} bytes with {left} bytes left"
+                )),
             });
         }
         self.charge(len)?;
@@ -682,7 +688,7 @@ impl StructureWalk<'_> {
             .filter(|end| *end <= self.payload.len());
         let Some(end) = end else {
             return Err(CodecRefusal::Malformed {
-                reason: "a value runs past the end of the payload".to_string(),
+                reason: Detail::new("a value runs past the end of the payload"),
             });
         };
         let bytes = &self.payload[self.position..end];

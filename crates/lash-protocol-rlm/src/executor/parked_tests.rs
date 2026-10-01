@@ -135,7 +135,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
                 VmStateKind::Snapshot,
                 owner.clone(),
                 lashlang::vm_contract_versions(),
-                lashlang::LASHLANG_SNAPSHOT_VERSION,
                 bytes.to_vec(),
             ))
         })
@@ -192,7 +191,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
         VmStateKind::Continuation,
         owner.clone(),
         lashlang::vm_contract_versions(),
-        lashlang::VM_CONTINUATION_FORMAT_VERSION,
         wire,
     );
     let finish = match run(StartState::Continuation(resumed), &|| false)

@@ -252,7 +252,10 @@ pub use lash_lashlang_runtime::{
 pub use lash_sansio::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::service::CompiledModule;
 pub use lash_vm_client::{
-    CodecRefusal, DecodeLimits, ExecutionClass, ExecutionReceipt, InfrastructureOutcome,
-    InspectedArtifact, PoolCounters, PoolError, PoolMeasurements, ProcessMetadata, ProtocolBounds,
-    ProtocolVersionRefusal, SupervisorEvidence, VmLimits, WorkerLimit,
+    BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionClass, ExecutionLease,
+    ExecutionReceipt, FrameEpoch, HeaderRefusal, InfrastructureOutcome, InspectedArtifact,
+    OpaqueStateRefusal, OwnerEpoch, PayloadKind, PoolCounters, PoolError, PoolFault,
+    PoolMeasurements, ProcessMetadata, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal,
+    RunInput, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence,
+    VmContractComponent, VmLimits, VmOwner, VmStateKind, WorkerLimit,
 };

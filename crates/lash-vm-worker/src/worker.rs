@@ -107,11 +107,19 @@ pub(crate) struct RecordedRequest {
 
 impl ParkedRun {
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self, PoolError> {
-        rmp_serde::from_slice(bytes).map_err(PoolError::protocol)
+        rmp_serde::from_slice(bytes).map_err(|error| {
+            PoolError::refused(RunRefusal::Undecodable {
+                input: RunInput::State {
+                    kind: VmStateKind::Continuation,
+                },
+                detail: Detail::new(error),
+            })
+        })
     }
 
     pub(crate) fn encode(&self) -> Result<Vec<u8>, PoolError> {
-        rmp_serde::to_vec_named(self).map_err(PoolError::protocol)
+        rmp_serde::to_vec_named(self)
+            .map_err(|error| PoolError::payload(PayloadKind::ParkedRun, error))
     }
 }
 
@@ -163,20 +171,13 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             Instant::now() + Duration::from_secs(30),
         )
     }
+    /// Tells the parent why the worker stops, where that is the worker's to
+    /// say. A lost pipe is the parent's own evidence, and nothing is sent.
     pub(crate) fn refuse(&mut self, error: &PoolError) -> Result<(), PoolError> {
-        self.send(match error {
-            PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
-                WorkerMessage::LimitExceeded { limit: *limit }
-            }
-            PoolError::Infrastructure(outcome) => WorkerMessage::Refused {
-                outcome: outcome.clone(),
-            },
-            error => WorkerMessage::Refused {
-                outcome: InfrastructureOutcome::ProtocolViolation {
-                    reason: error.to_string(),
-                },
-            },
-        })
+        match WorkerRefusal::testimony(error.clone().into_outcome()) {
+            Some(message) => self.send(message),
+            None => Ok(()),
+        }
     }
     fn progress(&mut self, phase: WorkerPhase) -> Result<(), PoolError> {
         if MEASURE && self.timing.active && phase == WorkerPhase::Serializing {
@@ -261,9 +262,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                         | ParentMessage::Cancel
                         | ParentMessage::Shutdown
                 ) {
-                    return Err(PoolError::protocol(
-                        "idle worker expects Start or lifecycle control",
-                    ));
+                    return Err(PoolError::breach(SequenceFault::IdleWithoutStart));
                 }
                 fences.incoming = Some(MessageFence::new(
                     frame.header.lease,
@@ -279,9 +278,9 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             fences
                 .incoming
                 .as_mut()
-                .ok_or_else(|| PoolError::protocol("missing lease"))?
+                .ok_or_else(|| PoolError::breach(SequenceFault::MissingLease))?
                 .admit(&frame.header)
-                .map_err(PoolError::protocol)?;
+                .map_err(PoolError::breach)?;
             drop(fences);
             if let Some(hook) = hook.as_mut() {
                 hook(&frame.message);
@@ -289,7 +288,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             match frame.message {
                 ParentMessage::Start(start) => {
                     if self.owner.is_some() {
-                        return Err(PoolError::protocol("Start before reset"));
+                        return Err(PoolError::breach(SequenceFault::StartBeforeReset));
                     }
                     self.owner = Some(start.owner.clone());
                     self.progress(WorkerPhase::Computing)?;
@@ -298,7 +297,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 }
                 ParentMessage::Prepare { owner, request } => {
                     if self.owner.is_some() {
-                        return Err(PoolError::protocol("Prepare before reset"));
+                        return Err(PoolError::breach(SequenceFault::PrepareBeforeReset));
                     }
                     self.owner = Some(owner);
                     self.progress(WorkerPhase::Computing)?;
@@ -312,9 +311,9 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     let request = self
                         .pending
                         .take()
-                        .ok_or_else(|| PoolError::protocol("no pending effect"))?;
+                        .ok_or_else(|| PoolError::breach(SequenceFault::NoPendingRequest))?;
                     if result.id != request.id {
-                        return Err(PoolError::protocol("effect result has wrong request id"));
+                        return Err(PoolError::breach(SequenceFault::WrongRequestId));
                     }
                     self.progress(WorkerPhase::Computing)?;
                     let resume = match (request.kind, result.outcome) {
@@ -330,7 +329,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                             | EffectKind::ProcessBoundary
                             | EffectKind::ParkDeclined,
                             _,
-                        ) => return Err(PoolError::protocol("wrong control result")),
+                        ) => return Err(PoolError::breach(SequenceFault::WrongControlResult)),
                         (_, EffectOutcome::Cancelled) => VmResume::EffectCancelled,
                         (_, EffectOutcome::Value(value)) => {
                             let value: AbilityOutcome = self.decode(&value)?;
@@ -345,13 +344,11 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                             VmResume::Effect(Err(self.decode(&error)?))
                         }
                         (_, EffectOutcome::Checkpoint { .. }) => {
-                            return Err(PoolError::protocol(
-                                "checkpoint result answered an effect",
-                            ));
+                            return Err(PoolError::breach(SequenceFault::CheckpointAnsweredEffect));
                         }
                     };
                     let guest_started = (MEASURE && self.timing.active).then(Instant::now);
-                    let step = self.instance.resume(resume).map_err(PoolError::protocol)?;
+                    let step = self.instance.resume(resume).map_err(vm_breach)?;
                     if let Some(guest_started) = guest_started {
                         self.timing.guest_ns = guest_started.elapsed().as_nanos() as u64;
                     }
@@ -365,13 +362,10 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                         .as_ref()
                         .is_some_and(|request| request.kind.parkable())
                     {
-                        return Err(PoolError::protocol("park answers no parkable request"));
+                        return Err(PoolError::breach(SequenceFault::ParkWithoutParkableRequest));
                     }
                     self.progress(WorkerPhase::Computing)?;
-                    let step = self
-                        .instance
-                        .resume(VmResume::Park)
-                        .map_err(PoolError::protocol)?;
+                    let step = self.instance.resume(VmResume::Park).map_err(vm_breach)?;
                     self.deliver(step)?;
                 }
                 ParentMessage::Cancel => {
@@ -437,7 +431,8 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         }
         let measured = (MEASURE && self.timing.active).then(Instant::now);
         self.codec.check_payload(&payload.0)?;
-        let result = rmp_serde::from_slice(&payload.0).map_err(PoolError::protocol);
+        let result = rmp_serde::from_slice(&payload.0)
+            .map_err(|error| PoolError::payload(PayloadKind::EffectOutcome, error));
         if let Some(measured) = measured {
             self.timing
                 .decode_ns
@@ -449,10 +444,15 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         let mut context = RunContext::default();
         for description in &start.contexts {
             if description.kind != "vm_run" {
-                return Err(PoolError::protocol("unknown VM context description"));
+                return Err(PoolError::refused(RunRefusal::UnknownContext));
             }
             self.codec.check_payload(&description.body.0)?;
-            context = rmp_serde::from_slice(&description.body.0).map_err(PoolError::protocol)?;
+            context = rmp_serde::from_slice(&description.body.0).map_err(|error| {
+                PoolError::refused(RunRefusal::Undecodable {
+                    input: RunInput::Context,
+                    detail: Detail::new(error),
+                })
+            })?;
         }
         self.projection_namespace = context.projection_namespace;
         self.wire = None;
@@ -465,7 +465,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 let snapshot = self
                     .instance
                     .open_snapshot(state.bytes())
-                    .map_err(PoolError::protocol)?;
+                    .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
                 self.instance.replace_state(State::from_snapshot(snapshot));
                 VmExecutionStart::Session
             }
@@ -479,26 +479,34 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 VmExecutionStart::Continuation(Box::new(
                     self.instance
                         .open_continuation(&parked.vm.0)
-                        .map_err(PoolError::protocol)?,
+                        .map_err(|error| undecodable_state(VmStateKind::Continuation, error))?,
                 ))
             }
         };
         let program = match start.program {
             ProgramSource::Source { dialect, text } => {
-                if dialect != self.frontend.language_id()
-                    || text.len() as u64 > self.bootstrap.source
-                {
-                    return Err(PoolError::protocol("source dialect or size refused"));
+                if dialect != self.frontend.language_id() {
+                    return Err(PoolError::refused(RunRefusal::SourceDialect));
+                }
+                if text.len() as u64 > self.bootstrap.source {
+                    return Err(PoolError::refused(RunRefusal::PayloadTooLarge {
+                        limit: self.bootstrap.source,
+                        size: text.len() as u64,
+                    }));
                 }
                 let ast = self
                     .frontend
                     .parse(&text, Some(&context.environment))
-                    .map_err(|refusal| PoolError::protocol(refusal.error))?;
+                    .map_err(|refusal| {
+                        PoolError::refused(RunRefusal::Parse {
+                            detail: Detail::new(refusal.error),
+                        })
+                    })?;
                 let linked = self
                     .instance
                     .linked_programs_mut()
                     .get_or_compile_ast(&text, ast, &context.environment)
-                    .map_err(PoolError::protocol)?;
+                    .map_err(compile_refusal)?;
                 linked.compiled_program().clone()
             }
             ProgramSource::Artifact {
@@ -506,10 +514,14 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 entry,
                 artifact,
             } => {
-                let artifact =
-                    ModuleArtifact::from_store_bytes(&artifact).map_err(PoolError::protocol)?;
+                let artifact = ModuleArtifact::from_store_bytes(&artifact).map_err(|error| {
+                    PoolError::refused(RunRefusal::Undecodable {
+                        input: RunInput::Artifact,
+                        detail: Detail::new(error),
+                    })
+                })?;
                 if artifact.module_ref().as_str() != module_ref {
-                    return Err(PoolError::protocol("artifact identity mismatch"));
+                    return Err(PoolError::refused(RunRefusal::ArtifactIdentityMismatch));
                 }
                 let process_ref;
                 let entry = match entry {
@@ -525,7 +537,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                         Entry::Process(&process_ref)
                     }
                 };
-                lashlang::compile(&artifact, entry, None).map_err(PoolError::protocol)?
+                lashlang::compile(&artifact, entry, None).map_err(compile_refusal)?
             }
         };
         let bound = |v: Option<u64>| -> Result<ExecutionBound<std::num::NonZeroU64>, PoolError> {
@@ -533,11 +545,11 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 None => Ok(ExecutionBound::Unbounded),
                 Some(v) => std::num::NonZeroU64::new(v)
                     .map(ExecutionBound::Bounded)
-                    .ok_or(PoolError::InvalidConfiguration),
+                    .ok_or_else(|| PoolError::refused(RunRefusal::ZeroLimit)),
             }
         };
         let depth = std::num::NonZeroU64::new(start.limits.max_frame_depth)
-            .ok_or(PoolError::InvalidConfiguration)?;
+            .ok_or_else(|| PoolError::refused(RunRefusal::ZeroLimit))?;
         let mut config = VmRunConfig::new(
             context.mode,
             ExecutionBounds::new(
@@ -567,14 +579,22 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             config
                 .projected
                 .try_insert(description.name, value)
-                .map_err(PoolError::protocol)?;
+                .map_err(|error| {
+                    PoolError::refused(RunRefusal::ProjectedBinding {
+                        detail: Detail::new(error),
+                    })
+                })?;
         }
         config.projected = config
             .projected
             .with_resolver(Arc::new(move |value| wire.resolve(value)));
         self.instance
             .start(Arc::new(program), execution_start, config)
-            .map_err(PoolError::protocol)
+            .map_err(|error| {
+                PoolError::refused(RunRefusal::Start {
+                    detail: Detail::new(error),
+                })
+            })
     }
     fn check(&self, state: &OpaqueVmState, kind: VmStateKind) -> Result<(), PoolError> {
         state
@@ -583,11 +603,11 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 owner: self
                     .owner
                     .as_ref()
-                    .ok_or_else(|| PoolError::protocol("missing owner"))?,
+                    .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?,
                 reads: &lashlang::vm_contract_reads(),
                 max_bytes: self.bootstrap.state,
             })
-            .map_err(|refusal| PoolError::Infrastructure(refusal.into()))
+            .map_err(|refusal| InfrastructureOutcome::input_state(refusal).into())
     }
     fn seal(&self, kind: VmStateKind, bytes: Vec<u8>) -> Result<OpaqueVmState, PoolError> {
         if bytes.len() as u64 > self.bootstrap.state {
@@ -603,12 +623,8 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             kind,
             self.owner
                 .clone()
-                .ok_or_else(|| PoolError::protocol("missing owner"))?,
+                .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?,
             lashlang::vm_contract_versions(),
-            match kind {
-                VmStateKind::Snapshot => lashlang::LASHLANG_SNAPSHOT_VERSION,
-                VmStateKind::Continuation => lashlang::VM_CONTINUATION_FORMAT_VERSION,
-            },
             bytes,
         )
         .with_definition_ids(self.instance.state().referenced_definition_ids()))
@@ -620,7 +636,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 .state()
                 .snapshot()
                 .to_canonical_bytes()
-                .map_err(PoolError::protocol)?,
+                .map_err(|error| PoolError::payload(PayloadKind::Snapshot, error))?,
         )
     }
     /// Sends the step's answer, and hands its message back.
@@ -719,7 +735,8 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         }
         let mut chunker = self.codec.observation_chunker()?;
         for observation in observations {
-            let encoded = rmp_serde::to_vec_named(observation).map_err(PoolError::protocol)?;
+            let encoded = rmp_serde::to_vec_named(observation)
+                .map_err(|error| PoolError::payload(PayloadKind::Observation, error))?;
             match chunker.push(&encoded) {
                 Ok(()) => {}
                 Err(
@@ -728,7 +745,12 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     | CodecRefusal::DepthExceeded { .. }
                     | CodecRefusal::AllocationExceeded { .. },
                 ) => return Ok(None),
-                Err(refusal) => return Err(PoolError::protocol(refusal)),
+                Err(
+                    refusal @ (CodecRefusal::Truncated { .. }
+                    | CodecRefusal::BadMagic
+                    | CodecRefusal::Malformed { .. }
+                    | CodecRefusal::TrailingBytes { .. }),
+                ) => return Err(refusal.into()),
             }
             if self
                 .observation_budget
@@ -785,22 +807,27 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                                 (recorded.kind, recorded.payload.0)
                             }
                             Some(_) => {
-                                return Err(PoolError::protocol("parked request kind changed"));
+                                return Err(PoolError::refused(RunRefusal::ParkedRequestChanged));
                             }
                             None => (
                                 kind,
-                                rmp_serde::to_vec_named(&op).map_err(PoolError::protocol)?,
+                                rmp_serde::to_vec_named(&op).map_err(|error| {
+                                    PoolError::payload(PayloadKind::EffectRequest, error)
+                                })?,
                             ),
                         }
                     }
                     VmRequest::CancelCheckpoint(n) => (
                         EffectKind::CancelCheckpoint,
-                        rmp_serde::to_vec_named(&n).map_err(PoolError::protocol)?,
+                        rmp_serde::to_vec_named(&n).map_err(|error| {
+                            PoolError::payload(PayloadKind::CancelCheckpoint, error)
+                        })?,
                     ),
                     VmRequest::Boundary => (EffectKind::ProcessBoundary, Vec::new()),
                     VmRequest::ParkDeclined(error) => (
                         EffectKind::ParkDeclined,
-                        rmp_serde::to_vec_named(&error.to_string()).map_err(PoolError::protocol)?,
+                        rmp_serde::to_vec_named(&error.to_string())
+                            .map_err(|error| PoolError::payload(PayloadKind::ParkDecline, error))?,
                     ),
                 };
                 if payload.len() as u64 > self.bootstrap.effect {
@@ -828,23 +855,21 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 })
             }
             VmStep::Parked(parked) => {
-                let bytes = ParkedRun {
-                    vm: EncodedPayload(
-                        parked
-                            .continuation
-                            .to_bytes()
-                            .map_err(PoolError::protocol)?,
-                    ),
-                    request: self
-                        .pending
-                        .take()
-                        .filter(|request| request.kind != EffectKind::ProcessBoundary)
-                        .map(|request| RecordedRequest {
-                            kind: request.kind,
-                            payload: request.payload,
-                        }),
-                }
-                .encode()?;
+                let bytes =
+                    ParkedRun {
+                        vm: EncodedPayload(parked.continuation.to_bytes().map_err(|error| {
+                            PoolError::payload(PayloadKind::Continuation, error)
+                        })?),
+                        request: self
+                            .pending
+                            .take()
+                            .filter(|request| request.kind != EffectKind::ProcessBoundary)
+                            .map(|request| RecordedRequest {
+                                kind: request.kind,
+                                payload: request.payload,
+                            }),
+                    }
+                    .encode()?;
                 WorkerMessage::Suspended {
                     state: self
                         .seal(VmStateKind::Continuation, bytes)?
@@ -860,13 +885,13 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                             rmp_serde::to_vec_named(&crate::service::state_metadata(
                                 &self.instance,
                             ))
-                            .map_err(PoolError::protocol)?,
+                            .map_err(|error| PoolError::payload(PayloadKind::Completion, error))?,
                         ),
                     })
                 } else {
                     rmp_serde::to_vec_named(&complete.outcome)
                 }
-                .map_err(PoolError::protocol)?;
+                .map_err(|error| PoolError::payload(PayloadKind::Completion, error))?;
                 WorkerMessage::Complete {
                     state,
                     value: EncodedPayload(value),
@@ -885,7 +910,9 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     None => WorkerMessage::GuestError {
                         state: Some(self.snapshot()?),
                         error: EncodedPayload(
-                            rmp_serde::to_vec_named(&error.failure).map_err(PoolError::protocol)?,
+                            rmp_serde::to_vec_named(&error.failure).map_err(|error| {
+                                PoolError::payload(PayloadKind::GuestError, error)
+                            })?,
                         ),
                     },
                 }
@@ -913,6 +940,28 @@ pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {
         .saturating_add(time.tv_nsec as u64))
 }
 
+/// How deep a run's terminal value may nest.
+const TERMINAL_VALUE_DEPTH: usize = 64;
+
+fn vm_breach(error: impl std::fmt::Display) -> PoolError {
+    PoolError::breach(ProtocolBreach::Vm {
+        detail: Detail::new(error),
+    })
+}
+
+fn undecodable_state(kind: VmStateKind, error: impl std::fmt::Display) -> PoolError {
+    PoolError::refused(RunRefusal::Undecodable {
+        input: RunInput::State { kind },
+        detail: Detail::new(error),
+    })
+}
+
+fn compile_refusal(error: impl std::fmt::Display) -> PoolError {
+    PoolError::refused(RunRefusal::Compile {
+        detail: Detail::new(error),
+    })
+}
+
 fn materialize_outcome(
     outcome: lashlang::ExecutionOutcome,
 ) -> Result<lashlang::ExecutionOutcome, PoolError> {
@@ -928,13 +977,20 @@ fn materialize_outcome(
 }
 fn materialize(value: lashlang::Value, depth: usize) -> Result<lashlang::Value, PoolError> {
     use lashlang::{Record, Value};
-    if depth > 64 {
-        return Err(PoolError::protocol("terminal value exceeds depth bound"));
+    if depth > TERMINAL_VALUE_DEPTH {
+        return Err(PoolError::refused(RunRefusal::ValueTooDeep {
+            limit: TERMINAL_VALUE_DEPTH as u32,
+        }));
     }
     Ok(match value {
         Value::Projected(value) => Value::Projected(lashlang::ProjectedValue::scalar(
             value.name().to_owned(),
-            materialize(value.materialize().map_err(PoolError::protocol)?, depth + 1)?,
+            materialize(
+                value
+                    .materialize()
+                    .map_err(|error| PoolError::payload(PayloadKind::ProjectedValue, error))?,
+                depth + 1,
+            )?,
         )),
         Value::List(values) => Value::List(
             values
@@ -985,10 +1041,8 @@ mod tests {
         fence
             .admit(&codec.decode_worker(&ready).expect("ready frame").header)
             .expect("ready fence");
-        let message = WorkerMessage::Refused {
-            outcome: InfrastructureOutcome::ProtocolViolation {
-                reason: "x".repeat(2048),
-            },
+        let message = WorkerMessage::Prepared {
+            response: EncodedPayload(vec![0; 2048]),
         };
         let size = rmp_serde::to_vec_named(&WorkerFrame {
             header: fence.next_header_copy(),
@@ -1012,7 +1066,7 @@ mod tests {
             serde_json::to_value(&outcome).expect("cause"),
             serde_json::json!({
                 "worker_limit_exceeded": { "limit": { "frame": {
-                    "kind": "refused", "size": size, "bound": 1024
+                    "kind": "prepared", "size": size, "bound": 1024
                 } } }
             })
         );

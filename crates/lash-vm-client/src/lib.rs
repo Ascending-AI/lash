@@ -17,8 +17,11 @@ pub use error::PoolError;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes
 /// name.
 pub use lash_vm_protocol::{
-    CodecRefusal, DecodeLimits, InfrastructureOutcome, ProtocolBounds, ProtocolVersionRefusal,
-    SupervisorEvidence, VmLimits, WorkerLimit,
+    BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionLease, FrameEpoch,
+    HeaderRefusal, InfrastructureOutcome, OpaqueStateRefusal, OwnerEpoch, PayloadKind, PoolFault,
+    ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunInput, RunRefusal, SequenceFault,
+    SupervisorEvidence, TransportSequence, VmContractComponent, VmLimits, VmOwner, VmStateKind,
+    WorkerLimit,
 };
 pub use measurements::{ExecutionClass, ExecutionReceipt, PoolCounters, PoolMeasurements};
 /// Runtime-only checkout on [`WorkerPool`]; the lash facade does not export it.

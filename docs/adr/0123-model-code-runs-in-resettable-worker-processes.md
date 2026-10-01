@@ -133,8 +133,10 @@ policy.
 ### 5. The parent never decodes VM state
 
 At the broker boundary, VM state is `lash_vm_protocol::OpaqueVmState`: a kind, an
-owner, the VM component versions (`lashlang::vm_contract_versions()`), a format
-version, a length, a BLAKE3 digest and the bytes. The parent checks those
+owner, the VM component versions (`lashlang::vm_contract_versions()`), a BLAKE3
+digest and the bytes. Each version is stored once: the bytes' format version is
+the contract component their kind names, and their length is the bytes' own
+(FIG-4645). The parent checks those
 structurally, admitting each component against its declared read range
 (`lashlang::vm_contract_reads()`, ADR 0115). The semantic decoders,
 which restore guest values and compile regular expressions, are reachable
@@ -204,10 +206,22 @@ transport or pool:
   process terminal retains it in its structured failure data (FIG-4475,
   FIG-4476).
 - **Infrastructure outcomes.** `WorkerCrashed`, `WorkerUnresponsive`,
-  `ProtocolViolation`, `PayloadTooLarge` and `WorkerLimitExceeded` are kept
+  `ProtocolViolation`, `RunRefused` and `WorkerLimitExceeded` are kept
   apart from guest errors. EOF or exit is supervisor evidence, never worker
   testimony; a fully received `Complete` wins over a later EOF; a partial
   frame is refused and the last committed checkpoint kept.
+- **Typed causes.** Every cause crosses the pipe as a variant, never as
+  text. `ProtocolViolation` carries a `ProtocolBreach`: a broken frame,
+  fence, sequence or payload, which a fresh worker may keep, so it is
+  retried. `RunRefused` carries a `RunRefusal`: an input of the run the
+  worker reads when it starts (its state, context, source, artifact or
+  limits, or a payload over its bound) is refused the same way on every
+  attempt, so it is terminal: the RLM cell records a Host failure and the
+  process ends `process_run_refused` with the refusal as its failure data.
+  A worker's `Refused` frame carries one of the two and nothing else; it
+  cannot name a crash, silence or limit. The diagnostic beside a cause is a
+  `Detail` cut to a fixed bound, so a refusal's text never changes its
+  class (FIG-4645).
 
 ### 7. Durability
 
@@ -303,6 +317,7 @@ the synthetic-next tier. The broker law macro registers:
 - `worker_kill_after_complete_before_commit_commits_once`
 - `unauthorized_worker_effect_request_is_refused_without_invoking_a_tool`
 - `stale_epoch_and_duplicate_worker_messages_are_refused`
+- `a_refused_run_is_terminal_and_a_broken_exchange_is_redriven`
 - `cancellation_winner_is_the_journaled_checkpoint_across_worker_kill`
 - `frame_open_retires_worker_state_and_old_globals_are_undefined`
 - `one_slot_nested_effect_does_not_deadlock`
@@ -452,7 +467,9 @@ setup as during execution. A crashed or unresponsive worker, or a broken
 protocol, fails the attempt retryably, including during source
 analysis and compilation. `PoolError::is_host_verdict` uses the infrastructure
 outcome's retryability classification. The cell records no Host failure for
-it, and its retry runs the same cell on a replacement worker (FIG-4459).
+it, and its retry runs the same cell on a replacement worker (FIG-4459). A
+`RunRefused` is not retryable: the cell records its Host failure, since a
+retry would meet the same refusal (FIG-4645).
 
 An owned child also installs a kernel CPU ceiling before guest work, from its
 current process CPU and the configured execution CPU budget. It remains

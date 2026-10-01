@@ -255,17 +255,7 @@ fn bound(bound: lashlang::ExecutionBound<std::num::NonZeroU64>) -> Option<u64> {
 }
 
 fn pool_failure(error: lash_vm_client::PoolError) -> BrokerFailure {
-    match error {
-        lash_vm_client::PoolError::Infrastructure(outcome) => BrokerFailure::Unavailable {
-            refusal: CheckoutRefusal::Infrastructure(outcome),
-        },
-        lash_vm_client::PoolError::RetryLimitExceeded => BrokerFailure::Unavailable {
-            refusal: CheckoutRefusal::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
-                limit: WorkerLimit::Deadline,
-            }),
-        },
-        error => BrokerFailure::Parent {
-            fault: ParentFault(error.to_string()),
-        },
+    BrokerFailure::Unavailable {
+        refusal: CheckoutRefusal::Infrastructure(error.into_outcome()),
     }
 }

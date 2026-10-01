@@ -85,7 +85,7 @@ impl Wire {
                 kind: EffectKind::ProjectionRead,
                 payload: EncodedPayload(
                     rmp_serde::to_vec_named(&ProjectionRead { key, request })
-                        .map_err(PoolError::protocol)?,
+                        .map_err(|error| PoolError::payload(PayloadKind::ProjectionRead, error))?,
                 ),
             }),
         )?;
@@ -104,22 +104,22 @@ impl Wire {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .incoming
             .as_mut()
-            .ok_or_else(|| PoolError::protocol("projection has no run fence"))?
+            .ok_or_else(|| PoolError::breach(SequenceFault::MissingLease))?
             .admit(&frame.header)
-            .map_err(PoolError::protocol)?;
+            .map_err(PoolError::breach)?;
         let ParentMessage::EffectResponse(EffectResponse {
             id: response_id,
             outcome: EffectOutcome::Value(payload),
         }) = frame.message
         else {
-            return Err(PoolError::protocol("projection received another control"));
+            return Err(PoolError::breach(SequenceFault::ProjectionOtherControl));
         };
         if response_id != id {
-            return Err(PoolError::protocol("projection response has another ID"));
+            return Err(PoolError::breach(SequenceFault::WrongRequestId));
         }
         self.codec.check_payload(&payload.0)?;
-        let response: Option<ProjectedReadResponse> =
-            rmp_serde::from_slice(&payload.0).map_err(PoolError::protocol)?;
+        let response: Option<ProjectedReadResponse> = rmp_serde::from_slice(&payload.0)
+            .map_err(|error| PoolError::payload(PayloadKind::ProjectionResponse, error))?;
         self.send(
             &mut pipe,
             WorkerMessage::Progress {
@@ -137,22 +137,9 @@ impl Wire {
             .pipe
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let _ = self.send(
-            &mut pipe,
-            match error {
-                PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
-                    WorkerMessage::LimitExceeded { limit: *limit }
-                }
-                PoolError::Infrastructure(outcome) => WorkerMessage::Refused {
-                    outcome: outcome.clone(),
-                },
-                error => WorkerMessage::Refused {
-                    outcome: InfrastructureOutcome::ProtocolViolation {
-                        reason: error.to_string(),
-                    },
-                },
-            },
-        );
+        if let Some(message) = WorkerRefusal::testimony(error.clone().into_outcome()) {
+            let _ = self.send(&mut pipe, message);
+        }
     }
     pub fn resolve(self: &Arc<Self>, value: &ProjectedValue) -> Option<ProjectedValue> {
         let rest = value.name().strip_prefix("worker-projection/")?;

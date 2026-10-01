@@ -16,7 +16,8 @@
 //!   bounded decoding that charges frame size, depth, node count and
 //!   cumulative allocation before anything is allocated.
 //! - [`outcome`]: the typed infrastructure outcomes a worker's failure maps
-//!   to, kept apart from guest errors.
+//!   to, kept apart from guest errors: a [`ProtocolBreach`] is retried, and a
+//!   [`RunRefusal`] of the run's own inputs is terminal.
 //! - [`bounds`]: [`ProtocolBounds`], every bound a host states for its
 //!   workers, with the measured `standard()` preset.
 //!
@@ -40,7 +41,11 @@ pub use message::{
     OwnerEpoch, ParentFrame, ParentMessage, ProgramEntry, ProgramSource, Start, StartState,
     TransportSequence, VmLimits, WorkerFrame, WorkerMessage, WorkerPhase,
 };
-pub use outcome::{InfrastructureOutcome, SupervisorEvidence, WorkerFrameKind, WorkerLimit};
+pub use outcome::{
+    BootstrapFault, Detail, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
+    ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerFrameKind,
+    WorkerLimit, WorkerRefusal,
+};
 pub use state::{
     OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner, VmStateKind,
 };

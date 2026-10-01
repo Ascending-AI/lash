@@ -195,8 +195,13 @@ impl CompiledModule {
     /// Decode a fixture's artifact for low-level VM assertions.
     #[cfg(feature = "testing")]
     pub fn into_fixture_output(self) -> Result<lashlang::ModuleCompileOutput, PoolError> {
-        let artifact = lashlang::ModuleArtifact::from_store_bytes(&self.artifact.bytes)
-            .map_err(PoolError::protocol)?;
+        let artifact =
+            lashlang::ModuleArtifact::from_store_bytes(&self.artifact.bytes).map_err(|error| {
+                PoolError::refused(lash_vm_protocol::RunRefusal::Undecodable {
+                    input: lash_vm_protocol::RunInput::Artifact,
+                    detail: lash_vm_protocol::Detail::new(error),
+                })
+            })?;
         Ok(lashlang::ModuleCompileOutput {
             module_ref: self.module_ref,
             host_requirements_ref: self.host_requirements_ref,
@@ -284,14 +289,14 @@ impl Service {
         worker: &crate::Checkout,
     ) -> Result<(), PoolError> {
         if let Some(receipts) = &self.receipts {
-            let pid = worker
-                .pid()
-                .ok_or_else(|| PoolError::protocol("worker receipt has no live child"))?;
+            let pid = worker.pid().ok_or_else(PoolError::eof)?;
             let mut receipts = receipts
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if receipts.len() >= 1024 {
-                return Err(PoolError::protocol("worker receipt probe overflow"));
+                return Err(PoolError::breach(
+                    lash_vm_protocol::SequenceFault::ReceiptProbeOverflow,
+                ));
             }
             receipts.push(WorkerReceipt { path, pid });
         }
@@ -432,8 +437,8 @@ pub mod runtime_ops {
             let store = self
                 .recovery
                 .as_ref()
-                .ok_or_else(|| {
-                    PoolError::protocol("worker execution requires its backend recovery store")
+                .ok_or_else(|| PoolError::Recovery {
+                    message: "worker execution requires its backend recovery store".into(),
                 })?
                 .clone();
             let limits = WorkerRecoveryLimits {
@@ -502,7 +507,11 @@ pub mod runtime_ops {
             let service = self.clone();
             let response = tokio::task::spawn_blocking(move || service.request(request))
                 .await
-                .map_err(PoolError::protocol)?;
+                .map_err(|error| {
+                    PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
+                        detail: lash_vm_protocol::Detail::new(error),
+                    })
+                })?;
             self.checkpoint().await?;
             response
         }
@@ -554,13 +563,16 @@ pub mod runtime_ops {
             if let Some(source) = source
                 && source.len() as u64 > self.config.protocol.max_source_bytes
             {
-                return Err(lash_vm_protocol::InfrastructureOutcome::PayloadTooLarge {
-                    limit: self.config.protocol.max_source_bytes,
-                    size: source.len() as u64,
-                }
-                .into());
+                return Err(PoolError::refused(
+                    lash_vm_protocol::RunRefusal::PayloadTooLarge {
+                        limit: self.config.protocol.max_source_bytes,
+                        size: source.len() as u64,
+                    },
+                ));
             }
-            let bytes = rmp_serde::to_vec_named(&request).map_err(PoolError::protocol)?;
+            let bytes = rmp_serde::to_vec_named(&request).map_err(|error| {
+                PoolError::payload(lash_vm_protocol::PayloadKind::ServiceRequest, error)
+            })?;
             let mut worker = self.pool()?.checkout(
                 bytes.len().saturating_add(4096),
                 OwnerEpoch(0),
@@ -586,7 +598,9 @@ pub mod runtime_ops {
                 worker.prepare(VmOwner::new("pure-worker-work"), EncodedPayload(bytes))?;
             lash_vm_protocol::FrameCodec::new(self.config.protocol.decode)
                 .check_payload(&response.0)?;
-            let response = rmp_serde::from_slice(&response.0).map_err(PoolError::protocol)?;
+            let response = rmp_serde::from_slice(&response.0).map_err(|error| {
+                PoolError::payload(lash_vm_protocol::PayloadKind::ServiceResponse, error)
+            })?;
             worker.release()?;
             Ok(response)
         }

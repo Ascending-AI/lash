@@ -35,13 +35,13 @@ fn worker_entry_inner(
         return Ok(false);
     };
     if std::env::vars_os().next().is_some() {
-        return Err(PoolError::protocol("worker environment is not empty"));
+        return Err(PoolError::breach(BootstrapFault::EnvironmentNotEmpty));
     }
     let fd = args
         .get(index + 1)
-        .ok_or_else(|| PoolError::protocol("missing IPC descriptor"))?
+        .ok_or_else(|| PoolError::breach(BootstrapFault::MissingDescriptor))?
         .parse::<i32>()
-        .map_err(PoolError::protocol)?;
+        .map_err(|_| PoolError::breach(BootstrapFault::InvalidDescriptor))?;
     // SAFETY: this is the early re-exec entry. The launcher transfers one
     // socket to this process. No host initialization has run.
     #[expect(
@@ -51,9 +51,9 @@ fn worker_entry_inner(
     let pipe = unsafe { inherited_pipe(fd)? };
     let bootstrap: Bootstrap = serde_json::from_str(
         args.get(index + 2)
-            .ok_or_else(|| PoolError::protocol("missing IPC bounds"))?,
+            .ok_or_else(|| PoolError::breach(BootstrapFault::MissingBounds))?,
     )
-    .map_err(PoolError::protocol)?;
+    .map_err(|_| PoolError::breach(BootstrapFault::InvalidBounds))?;
     let codec = FrameCodec::new(DecodeLimits {
         max_frame_bytes: bootstrap.frame,
         max_depth: bootstrap.depth,
@@ -83,14 +83,12 @@ fn run_server<const MEASURE: bool>(
                 .map(String::as_str)
                 .or_else(|| panic.downcast_ref::<&str>().copied())
                 .unwrap_or("non-string panic");
-            Err(PoolError::protocol(format!(
-                "native worker panic: {reason}"
-            )))
+            Err(PoolError::breach(ProtocolBreach::Panicked {
+                detail: Detail::new(reason),
+            }))
         });
     if let Err(error) = result {
-        if let PoolError::Infrastructure(_) = &error {
-            server.refuse(&error)?;
-        }
+        server.refuse(&error)?;
         return Err(error);
     }
     Ok(())

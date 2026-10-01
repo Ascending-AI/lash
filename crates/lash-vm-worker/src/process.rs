@@ -1,4 +1,5 @@
 use crate::PoolError;
+use lash_vm_protocol::BootstrapFault;
 use std::os::fd::FromRawFd;
 use std::os::unix::net::UnixStream;
 
@@ -9,7 +10,7 @@ use std::os::unix::net::UnixStream;
 )]
 pub(crate) unsafe fn inherited_pipe(fd: i32) -> Result<UnixStream, PoolError> {
     if fd < 3 {
-        return Err(PoolError::protocol("IPC descriptor must be above stdio"));
+        return Err(PoolError::breach(BootstrapFault::InvalidDescriptor));
     }
     let mut socket_type: libc::c_int = 0;
     let mut length = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
@@ -23,9 +24,7 @@ pub(crate) unsafe fn inherited_pipe(fd: i32) -> Result<UnixStream, PoolError> {
         )
     };
     if valid != 0 || socket_type != libc::SOCK_STREAM {
-        return Err(PoolError::protocol(
-            "IPC descriptor is not a valid stream socket",
-        ));
+        return Err(PoolError::breach(BootstrapFault::InvalidDescriptor));
     }
     let core_limit = libc::rlimit {
         rlim_cur: 0,
@@ -74,9 +73,7 @@ pub(crate) unsafe fn inherited_pipe(fd: i32) -> Result<UnixStream, PoolError> {
                 )
             };
             if read <= 0 || read as usize % width != 0 {
-                return Err(PoolError::protocol(
-                    "cannot enumerate inherited descriptors",
-                ));
+                return Err(PoolError::breach(BootstrapFault::DescriptorEnumeration));
             }
             if read == bytes {
                 slots = slots

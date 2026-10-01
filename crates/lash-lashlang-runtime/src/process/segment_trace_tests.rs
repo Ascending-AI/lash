@@ -625,7 +625,6 @@ fn sealed_continuation(
         lash_vm_protocol::VmStateKind::Continuation,
         super::segment_continuation_owner(process_id),
         lashlang::vm_contract_versions(),
-        lashlang::VM_CONTINUATION_FORMAT_VERSION,
         continuation.to_bytes().expect("encode the continuation"),
     )
 }
@@ -684,7 +683,7 @@ fn the_v11_envelope_is_refused_by_the_current_envelope_version() {
 
 /// The predecessor's v10 continuation, sealed as the opaque state a current
 /// envelope carries, is refused twice: the parent's structural check refuses
-/// its format version without decoding it, and the worker's semantic decode
+/// its contract's continuation version without decoding it, and the worker's semantic decode
 /// refuses the bytes on their own.
 #[test]
 fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
@@ -703,8 +702,10 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
     let sealed = lash_vm_protocol::OpaqueVmState::seal(
         lash_vm_protocol::VmStateKind::Continuation,
         owner.clone(),
-        lashlang::vm_contract_versions(),
-        10,
+        lash_vm_protocol::VmContract {
+            continuation: 10,
+            ..lashlang::vm_contract_versions()
+        },
         worker_parked_continuation(bytes),
     );
 
@@ -850,7 +851,6 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
         lash_vm_protocol::VmStateKind::Continuation,
         super::segment_continuation_owner(&lash_sansio::ProcessId::fixture("fixture")),
         lashlang::vm_contract_versions(),
-        lashlang::VM_CONTINUATION_FORMAT_VERSION,
         worker_parked_continuation(continuation),
     ))
     .expect("the sealed continuation encodes");

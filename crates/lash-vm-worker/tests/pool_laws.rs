@@ -880,11 +880,6 @@ fn state_kind_mismatch_is_refused_before_worker_dispatch() {
             kind,
             input.owner.clone(),
             lashlang::vm_contract_versions(),
-            if kind == VmStateKind::Snapshot {
-                lashlang::LASHLANG_SNAPSHOT_VERSION
-            } else {
-                lashlang::VM_CONTINUATION_FORMAT_VERSION
-            },
             vec![1, 2, 3],
         );
         input.state = match kind {
@@ -894,9 +889,197 @@ fn state_kind_mismatch_is_refused_before_worker_dispatch() {
         assert!(matches!(
             worker.start(input),
             Err(PoolError::Infrastructure(
-                InfrastructureOutcome::ProtocolViolation { .. }
+                InfrastructureOutcome::RunRefused {
+                    refusal: RunRefusal::State {
+                        refusal: OpaqueStateRefusal::WrongKind { .. }
+                    }
+                }
             ))
         ));
+        assert_reaped(pid);
+        let replacement = checkout(&pool);
+        assert_ne!(replacement.pid(), Some(pid));
+        replacement.release().expect("replacement reset");
+    }
+}
+
+/// FIG-4645: an input of the run the worker cannot read is refused the same
+/// way on every attempt. Each refusal crosses the pipe as its typed cause and
+/// is terminal: never the attempt's host verdict, which would re-drive the
+/// run into the same refusal for ever.
+#[test]
+fn a_deterministic_refusal_of_a_runs_inputs_is_terminal_and_typed() {
+    let fresh = || start("finish(1);", ExecutionMode::Foreground);
+    let sealed = |kind, owner: &str, bytes: Vec<u8>| {
+        OpaqueVmState::seal(
+            kind,
+            VmOwner::new(owner),
+            lashlang::vm_contract_versions(),
+            bytes,
+        )
+    };
+    let artifact = || artifact_start(b::program(vec![b::finish(b::num(1.0))]));
+    let state = |kind| RunInput::State { kind };
+    type Refused = fn(&RunRefusal) -> bool;
+    type Typed = Box<dyn Fn(&RunRefusal) -> bool>;
+    let cases: Vec<(&str, Start, Typed)> = vec![
+        (
+            "a continuation that does not decode",
+            Start {
+                state: StartState::Continuation(sealed(
+                    VmStateKind::Continuation,
+                    "session-A",
+                    vec![0xc1],
+                )),
+                ..fresh()
+            },
+            Box::new(move |refusal| {
+                matches!(refusal, RunRefusal::Undecodable { input, .. }
+                    if *input == state(VmStateKind::Continuation))
+            }),
+        ),
+        (
+            "a snapshot that does not decode",
+            Start {
+                state: StartState::Snapshot(sealed(
+                    VmStateKind::Snapshot,
+                    "session-A",
+                    vec![1, 2, 3],
+                )),
+                ..fresh()
+            },
+            Box::new(move |refusal| {
+                matches!(refusal, RunRefusal::Undecodable { input, .. }
+                    if *input == state(VmStateKind::Snapshot))
+            }),
+        ),
+        (
+            "state of another owner",
+            Start {
+                state: StartState::Snapshot(sealed(
+                    VmStateKind::Snapshot,
+                    "session-B",
+                    vec![1, 2, 3],
+                )),
+                ..fresh()
+            },
+            Box::new(
+                (|refusal| {
+                    matches!(
+                        refusal,
+                        RunRefusal::State {
+                            refusal: OpaqueStateRefusal::WrongOwner { .. }
+                        }
+                    )
+                }) as Refused,
+            ),
+        ),
+        (
+            "source that does not parse",
+            start("finish(", ExecutionMode::Foreground),
+            Box::new((|refusal| matches!(refusal, RunRefusal::Parse { .. })) as Refused),
+        ),
+        (
+            "source in another dialect",
+            Start {
+                program: ProgramSource::Source {
+                    dialect: "another-dialect".into(),
+                    text: "finish(1);".into(),
+                },
+                ..fresh()
+            },
+            Box::new((|refusal| matches!(refusal, RunRefusal::SourceDialect)) as Refused),
+        ),
+        (
+            "an artifact that does not decode",
+            Start {
+                program: ProgramSource::Artifact {
+                    module_ref: "lashlang:v2:blake3:00".into(),
+                    entry: ProgramEntry::Main,
+                    artifact: b"not an artifact".to_vec(),
+                },
+                ..fresh()
+            },
+            Box::new(
+                (|refusal| {
+                    matches!(
+                        refusal,
+                        RunRefusal::Undecodable {
+                            input: RunInput::Artifact,
+                            ..
+                        }
+                    )
+                }) as Refused,
+            ),
+        ),
+        (
+            "an artifact under another module's name",
+            {
+                let mut input = artifact();
+                let ProgramSource::Artifact { module_ref, .. } = &mut input.program else {
+                    panic!("an artifact start")
+                };
+                module_ref.push_str("-another");
+                input
+            },
+            Box::new(
+                (|refusal| matches!(refusal, RunRefusal::ArtifactIdentityMismatch)) as Refused,
+            ),
+        ),
+        (
+            "a context the worker does not know",
+            {
+                let mut input = fresh();
+                input.contexts[0].kind = "another-context".into();
+                input
+            },
+            Box::new((|refusal| matches!(refusal, RunRefusal::UnknownContext)) as Refused),
+        ),
+        (
+            "a context that does not decode",
+            {
+                let mut input = fresh();
+                input.contexts[0].body = EncodedPayload(vec![0x90]);
+                input
+            },
+            Box::new(
+                (|refusal| {
+                    matches!(
+                        refusal,
+                        RunRefusal::Undecodable {
+                            input: RunInput::Context,
+                            ..
+                        }
+                    )
+                }) as Refused,
+            ),
+        ),
+        (
+            "a zero frame depth",
+            {
+                let mut input = fresh();
+                input.limits.max_frame_depth = 0;
+                input
+            },
+            Box::new((|refusal| matches!(refusal, RunRefusal::ZeroLimit)) as Refused),
+        ),
+    ];
+    for (name, input, typed) in cases {
+        let pool = WorkerPool::new(config("")).expect("pool");
+        let mut worker = checkout(&pool);
+        let pid = worker.pid().expect("pid");
+        let error = worker.start(input).expect_err(name);
+        let PoolError::Infrastructure(outcome) = &error else {
+            panic!("{name}: a typed cause, got {error:?}")
+        };
+        assert!(
+            !outcome.is_retryable() && !error.is_host_verdict(),
+            "{name}: {outcome:?} refuses every attempt the same way"
+        );
+        let InfrastructureOutcome::RunRefused { refusal } = outcome else {
+            panic!("{name}: the run is refused, got {outcome:?}")
+        };
+        assert!(typed(refusal), "{name}: {refusal:?}");
         assert_reaped(pid);
         let replacement = checkout(&pool);
         assert_ne!(replacement.pid(), Some(pid));

@@ -350,6 +350,27 @@ impl Scenario {
         })
     }
 
+    /// The attempt whose worker refuses the run at `fault`. A refusal that no
+    /// re-drive can change is the run's terminal, so the attempt settles its
+    /// turn with it; any other failure fails the attempt, as
+    /// [`Self::crashing`] does.
+    pub(crate) fn refused(self: &Arc<Self>, fault: Fault) -> ConformanceTurnAttempt {
+        let scenario = Arc::clone(self);
+        Arc::new(move |scoped| {
+            let scenario = Arc::clone(&scenario);
+            let fault = fault.clone();
+            Box::pin(async move {
+                match scenario.run(scoped, Phase::Crashing, Some(fault)).await {
+                    Err(failure) if !failure.is_retryable() => ConformanceTurnEnd::Settled,
+                    end => panic!(
+                        "{}: the attempt is not the run's terminal ({end:?}); the substrate re-drives the invocation",
+                        scenario.name
+                    ),
+                }
+            })
+        })
+    }
+
     /// A healthy attempt: the tier's re-drive, or a law's plain turn.
     pub(crate) fn healthy(self: &Arc<Self>) -> ConformanceTurnAttempt {
         let scenario = Arc::clone(self);

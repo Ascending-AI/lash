@@ -86,15 +86,16 @@ impl<'de> Deserialize<'de> for StateDigest {
 /// VM state the parent stores, forwards and receives without understanding.
 ///
 /// The parent may check the structure: the byte count, the owner, the VM
-/// contract the bytes were written under, the format version, the kind and
-/// the hash. It never decodes the bytes. Decoding them means restoring guest
+/// contract the bytes were written under, the kind and the hash. It never decodes the bytes. Decoding them means restoring guest
 /// values, which validates and compiles regular expressions and checks
 /// artifacts against guest-controlled input, and that work belongs in the
 /// worker's crash domain, not the parent's. This type offers no decoder, and
 /// this crate depends on nothing that has one.
 ///
-/// `vm_contract` carries the version of each VM component. A reader admits
-/// every component against its own declared read range. A live transfer
+/// `vm_contract` carries the version of each VM component, and the bytes'
+/// own format version is the component their kind names
+/// ([`Self::format_version`]). A reader admits every component against its
+/// own declared read range. A live transfer
 /// between a parent and its worker also checks the wire protocol version;
 /// parked state can cross builds within these VM contract ranges.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,8 +105,6 @@ pub struct OpaqueVmState {
     kind: VmStateKind,
     owner: VmOwner,
     vm_contract: VmContract,
-    format_version: u32,
-    len: u64,
     hash: StateDigest,
     #[serde(
         serialize_with = "serialize_bytes",
@@ -124,7 +123,8 @@ pub struct StateExpectation<'a> {
 }
 
 /// Why opaque state failed a structural check.
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OpaqueStateRefusal {
     #[error("opaque VM state is {found:?}, expected {expected:?}")]
     WrongKind {
@@ -139,18 +139,8 @@ pub enum OpaqueStateRefusal {
         found: u32,
         reads: VersionRange,
     },
-    #[error(
-        "opaque VM state format version {found} disagrees with its {component} contract version {contract}"
-    )]
-    ConflictingFormatVersion {
-        component: VmContractComponent,
-        contract: u32,
-        found: u32,
-    },
     #[error("opaque VM state is {len} bytes, over the {limit}-byte bound")]
     TooLarge { limit: u64, len: u64 },
-    #[error("opaque VM state declares {declared} bytes but carries {actual}")]
-    LengthMismatch { declared: u64, actual: u64 },
     #[error("opaque VM state hash does not match its bytes")]
     HashMismatch,
 }
@@ -162,7 +152,6 @@ impl OpaqueVmState {
         kind: VmStateKind,
         owner: VmOwner,
         vm_contract: VmContract,
-        format_version: u32,
         bytes: Vec<u8>,
     ) -> Self {
         Self {
@@ -170,8 +159,6 @@ impl OpaqueVmState {
             kind,
             owner,
             vm_contract,
-            format_version,
-            len: bytes.len() as u64,
             hash: StateDigest::of(&bytes),
             bytes,
         }
@@ -195,17 +182,10 @@ impl OpaqueVmState {
 
     /// The structural check, and the only check the parent makes.
     pub fn check(&self, expected: &StateExpectation<'_>) -> Result<(), OpaqueStateRefusal> {
-        let actual = self.bytes.len() as u64;
-        if self.len != actual {
-            return Err(OpaqueStateRefusal::LengthMismatch {
-                declared: self.len,
-                actual,
-            });
-        }
-        if actual > expected.max_bytes {
+        if self.len() > expected.max_bytes {
             return Err(OpaqueStateRefusal::TooLarge {
                 limit: expected.max_bytes,
-                len: actual,
+                len: self.len(),
             });
         }
         if self.kind != expected.kind {
@@ -221,32 +201,6 @@ impl OpaqueVmState {
             });
         }
         expected.reads.admit(self.vm_contract)?;
-        let (component, contract, reads) = match self.kind {
-            VmStateKind::Continuation => (
-                VmContractComponent::Continuation,
-                self.vm_contract.continuation,
-                expected.reads.continuation,
-            ),
-            VmStateKind::Snapshot => (
-                VmContractComponent::Snapshot,
-                self.vm_contract.snapshot,
-                expected.reads.snapshot,
-            ),
-        };
-        if !reads.contains(self.format_version) {
-            return Err(OpaqueStateRefusal::ComponentOutsideReadRange {
-                component,
-                reads,
-                found: self.format_version,
-            });
-        }
-        if self.format_version != contract {
-            return Err(OpaqueStateRefusal::ConflictingFormatVersion {
-                component,
-                contract,
-                found: self.format_version,
-            });
-        }
         if StateDigest::of(&self.bytes) != self.hash {
             return Err(OpaqueStateRefusal::HashMismatch);
         }
@@ -265,16 +219,21 @@ impl OpaqueVmState {
         &self.vm_contract
     }
 
+    /// The version the bytes were written under: the contract component
+    /// their kind names.
     pub fn format_version(&self) -> u32 {
-        self.format_version
+        match self.kind {
+            VmStateKind::Continuation => self.vm_contract.continuation,
+            VmStateKind::Snapshot => self.vm_contract.snapshot,
+        }
     }
 
     pub fn len(&self) -> u64 {
-        self.len
+        self.bytes.len() as u64
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.bytes.is_empty()
     }
 
     pub fn hash(&self) -> StateDigest {

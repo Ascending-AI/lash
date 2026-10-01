@@ -51,7 +51,8 @@ pub struct MessageHeader {
 }
 
 /// Why a receiver refused a header.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HeaderRefusal {
     #[error("message runs under lease {found:?}, expected {expected:?}")]
     StaleLease {
@@ -348,9 +349,10 @@ pub enum WorkerMessage {
         encode_ns: u64,
         guest_ns: u64,
     },
-    /// The worker refused a malformed request. Run limits use `LimitExceeded`.
+    /// The worker refuses the exchange or the run. Run limits use
+    /// `LimitExceeded`, and how a worker ended is never its own to say.
     Refused {
-        outcome: crate::InfrastructureOutcome,
+        refusal: crate::WorkerRefusal,
     },
     /// A bounded phase, with cumulative process CPU usage. It does not grant
     /// extra time when repeated: the parent owns the absolute phase deadline.

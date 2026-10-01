@@ -55,7 +55,6 @@ async fn n_parked_state_resumes_on_synthetic_next() {
         VmStateKind::Continuation,
         owner.clone(),
         predecessor,
-        29,
         serde_json::to_vec(&wire).expect("encode N's continuation"),
     );
     assert_eq!(
@@ -92,7 +91,6 @@ fn a_component_outside_its_range_is_refused_typed() {
         VmStateKind::Continuation,
         owner.clone(),
         contract,
-        VM_CONTINUATION_FORMAT_VERSION,
         Vec::new(),
     );
     let refusal = parked
@@ -140,7 +138,6 @@ fn rollback_admits_only_versions_inside_n_ranges() {
         VmStateKind::Continuation,
         owner.clone(),
         next_heap,
-        predecessor.continuation,
         Vec::new(),
     );
     assert_eq!(
@@ -176,7 +173,7 @@ fn rollback_admits_only_versions_inside_n_ranges() {
             VmStateKind::Continuation => contract.continuation = format,
             VmStateKind::Snapshot => contract.snapshot = format,
         }
-        let state = OpaqueVmState::seal(kind, owner.clone(), contract, format, Vec::new());
+        let state = OpaqueVmState::seal(kind, owner.clone(), contract, Vec::new());
         assert_eq!(
             state.check(&StateExpectation {
                 kind,
@@ -190,11 +187,7 @@ fn rollback_admits_only_versions_inside_n_ranges() {
                 reads: range
             }),
         );
-        let format = match kind {
-            VmStateKind::Continuation => predecessor.continuation,
-            VmStateKind::Snapshot => predecessor.snapshot,
-        };
-        let compatible = OpaqueVmState::seal(kind, owner.clone(), predecessor, format, Vec::new());
+        let compatible = OpaqueVmState::seal(kind, owner.clone(), predecessor, Vec::new());
         assert_eq!(
             compatible.check(&StateExpectation {
                 kind,
@@ -259,7 +252,7 @@ fn n_snapshot_reaches_the_guarded_decoder_on_synthetic_next() {
     contract.snapshot = 14;
     contract.heap = 3;
     let owner = VmOwner::new("session:upgrade-witness");
-    let parked = OpaqueVmState::seal(VmStateKind::Snapshot, owner.clone(), contract, 14, bytes);
+    let parked = OpaqueVmState::seal(VmStateKind::Snapshot, owner.clone(), contract, bytes);
     assert_eq!(
         parked.check(&StateExpectation {
             kind: VmStateKind::Snapshot,

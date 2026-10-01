@@ -6,7 +6,8 @@ use std::sync::Arc;
 use lash_vm_protocol::{
     EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EncodedPayload, ExecutionLease,
     FrameCodec, FrameEpoch, MessageFence, OpaqueVmState, OwnerEpoch, ParentMessage, ProgramSource,
-    StartState, SupervisorEvidence, VmOwner, VmStateKind, WorkerFrame, WorkerMessage,
+    RunRefusal, SequenceFault, StartState, SupervisorEvidence, VmOwner, VmStateKind, WorkerFrame,
+    WorkerMessage, WorkerRefusal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +100,13 @@ impl ScriptedProgram {
 pub enum Fault {
     /// The worker dies as its `Start` arrives: nothing of the run happens.
     DieBeforeStart,
+    /// The worker refuses the run as its `Start` arrives, as one that cannot
+    /// read an input of the run does: nothing of the run happens, and every
+    /// attempt is refused the same way.
+    RefuseRun,
+    /// The worker answers its `Start` with a breach of the exchange, as one
+    /// that met a message out of order does.
+    BreachAtStart,
     /// The worker dies at the program's first `Compute` step.
     DieMidCompute,
     /// The worker sends its request number `n` (counting from zero), then
@@ -227,6 +235,18 @@ impl FakeWorker {
             ParentMessage::Start(start) => {
                 if self.fault == Some(Fault::DieBeforeStart) {
                     self.die(Self::crash());
+                    return;
+                }
+                let refusal = match self.fault {
+                    Some(Fault::RefuseRun) => Some(WorkerRefusal::Run(RunRefusal::UnknownContext)),
+                    Some(Fault::BreachAtStart) => Some(WorkerRefusal::Breach(
+                        SequenceFault::StartBeforeReset.into(),
+                    )),
+                    _ => None,
+                };
+                if let Some(refusal) = refusal {
+                    self.emit(WorkerMessage::Refused { refusal });
+                    self.die(SupervisorEvidence::Exited { code: 1 });
                     return;
                 }
                 self.shared.record_start();
@@ -481,7 +501,6 @@ impl FakeWorker {
             kind,
             owner,
             FAKE_VM_CONTRACT,
-            FAKE_STATE_FORMAT,
             serde_json::to_vec(&self.state).unwrap_or_default(),
         );
         let frame = WorkerFrame {

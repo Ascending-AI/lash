@@ -3,7 +3,7 @@ use lash_vm_client::{
     PoolError,
     service::{Capture, CompiledModule, Request, Response, StateAction, StateMetadata, StateView},
 };
-use lash_vm_protocol::EncodedPayload;
+use lash_vm_protocol::{Detail, EncodedPayload, PayloadKind, RunInput, RunRefusal, VmStateKind};
 use lashlang::VmInstance;
 
 pub(crate) fn perform(
@@ -11,7 +11,8 @@ pub(crate) fn perform(
     vm: &mut VmInstance,
     payload: &EncodedPayload,
 ) -> Result<EncodedPayload, PoolError> {
-    let request: Request = rmp_serde::from_slice(&payload.0).map_err(PoolError::protocol)?;
+    let request: Request = rmp_serde::from_slice(&payload.0)
+        .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))?;
     let response = match request {
         Request::VerifyArtifact { bytes } => {
             use lash_vm_client::service::ArtifactVerification;
@@ -56,7 +57,7 @@ pub(crate) fn perform(
             inputs,
         } => {
             let artifact =
-                lashlang::ModuleArtifact::from_store_bytes(&bytes).map_err(PoolError::protocol)?;
+                lashlang::ModuleArtifact::from_store_bytes(&bytes).map_err(undecodable_artifact)?;
             match lashlang::check_trigger_compatibility(lashlang::TriggerCompatibilityRequest {
                 artifact: &artifact,
                 definition: &definition,
@@ -76,19 +77,19 @@ pub(crate) fn perform(
         } => match compile_module(frontend, &source, &environment, false)? {
             Response::Module(module) => {
                 let artifact = lashlang::ModuleArtifact::from_store_bytes(&module.artifact.bytes)
-                    .map_err(PoolError::protocol)?;
+                    .map_err(undecodable_artifact)?;
                 let mut processes = artifact.exports().processes.keys();
                 match (processes.next(), processes.next()) {
                     (Some(name), None) => {
                         let identity = lashlang::ProcessDefinitionIdentity::from_artifact_export(
                             &artifact, name,
                         )
-                        .ok_or_else(|| PoolError::protocol("missing process export"))?;
+                        .ok_or_else(|| inconsistent_artifact("missing process export"))?;
                         let signature = lash_core_execution::ProcessSignature::known(
                             lashlang::type_expr_to_json_schema(
                                 &identity
                                     .resolve_process_type(&artifact)
-                                    .map_err(PoolError::protocol)?,
+                                    .map_err(inconsistent_artifact)?,
                             ),
                         );
                         let draft = lash_core_execution::ProcessDefinitionDraft::new(
@@ -99,7 +100,7 @@ pub(crate) fn perform(
                                 artifact_ref: artifact.module_ref().to_string(),
                             }],
                         )
-                        .map_err(PoolError::protocol)?;
+                        .map_err(inconsistent_artifact)?;
                         Response::Definition(lash_vm_client::service::CreatedDefinition {
                             draft,
                             signature,
@@ -107,7 +108,7 @@ pub(crate) fn perform(
                             module: lash_core_execution::DeclaredModuleArtifact {
                                 module_ref: artifact.module_ref().to_string(),
                                 bytes: String::from_utf8(module.artifact.bytes)
-                                    .map_err(PoolError::protocol)?,
+                                    .map_err(inconsistent_artifact)?,
                             },
                         })
                     }
@@ -130,7 +131,7 @@ pub(crate) fn perform(
         Request::CompileAst { program, .. } => {
             match lashlang::ModuleArtifact::from_program(program) {
                 Ok(artifact) => {
-                    let introspection = artifact.introspect().map_err(PoolError::protocol)?;
+                    let introspection = artifact.introspect().map_err(inconsistent_artifact)?;
                     Response::Module(compiled_output(lashlang::ModuleCompileOutput {
                         module_ref: artifact.module_ref().clone(),
                         host_requirements_ref: artifact.host_requirements_ref().clone(),
@@ -152,7 +153,7 @@ pub(crate) fn perform(
             let mut parked = crate::worker::ParkedRun::decode(&bytes)?;
             let mut continuation = vm
                 .open_continuation(&parked.vm.0)
-                .map_err(PoolError::protocol)?;
+                .map_err(|error| undecodable_state(VmStateKind::Continuation, error))?;
             let root = continuation
                 .operand_stack
                 .iter_mut()
@@ -162,7 +163,11 @@ pub(crate) fn perform(
             if remove_first_reference && let Some(root) = root {
                 *root = lashlang::Value::Null;
             }
-            parked.vm = EncodedPayload(continuation.to_bytes().map_err(PoolError::protocol)?);
+            parked.vm = EncodedPayload(
+                continuation
+                    .to_bytes()
+                    .map_err(|error| PoolError::payload(PayloadKind::Continuation, error))?,
+            );
             Response::ContinuationProbe {
                 bytes: parked.encode()?,
                 closure_root,
@@ -171,7 +176,7 @@ pub(crate) fn perform(
         Request::ContinuationInfo { bytes } => match crate::worker::ParkedRun::decode(&bytes)
             .and_then(|parked| {
                 vm.open_continuation(&parked.vm.0)
-                    .map_err(PoolError::protocol)
+                    .map_err(|error| undecodable_state(VmStateKind::Continuation, error))
             }) {
             Ok(continuation) => Response::ContinuationInfo {
                 iterator_count: continuation.iterator_stack.len(),
@@ -192,7 +197,9 @@ pub(crate) fn perform(
         } => compile_module(frontend, &source, &environment, cell)?,
         Request::State { snapshot, action } => {
             if let Some(snapshot) = snapshot {
-                let snapshot = vm.open_snapshot(&snapshot).map_err(PoolError::protocol)?;
+                let snapshot = vm
+                    .open_snapshot(&snapshot)
+                    .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
                 vm.replace_state(lashlang::State::from_snapshot(snapshot));
             }
             match action {
@@ -200,7 +207,7 @@ pub(crate) fn perform(
                 StateAction::Insert { name, value } => {
                     vm.state_mut()
                         .insert_global(name, value)
-                        .map_err(PoolError::protocol)?;
+                        .map_err(refused_global)?;
                 }
                 StateAction::Remove { names } => {
                     for name in names {
@@ -211,13 +218,10 @@ pub(crate) fn perform(
                     let mut next = vm.state().clone();
                     for (name, value) in values {
                         if protected.contains(&name) || name == "history" {
-                            return Err(PoolError::protocol(
-                                "a protected global cannot be patched",
-                            ));
+                            return Err(PoolError::refused(RunRefusal::ProtectedGlobal));
                         }
                         if !next.binding_names().any(|bound| bound == name) {
-                            next.insert_global(name, value)
-                                .map_err(PoolError::protocol)?;
+                            next.insert_global(name, value).map_err(refused_global)?;
                         }
                     }
                     vm.replace_state(next);
@@ -249,14 +253,39 @@ pub(crate) fn perform(
             baseline,
             fleet,
         } => {
-            let snapshot = vm.open_snapshot(&snapshot).map_err(PoolError::protocol)?;
+            let snapshot = vm
+                .open_snapshot(&snapshot)
+                .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
             vm.replace_state(lashlang::State::from_snapshot(snapshot));
             Response::Captured(capture(vm, &baseline, fleet)?)
         }
     };
-    Ok(EncodedPayload(
-        rmp_serde::to_vec_named(&response).map_err(PoolError::protocol)?,
-    ))
+    Ok(EncodedPayload(rmp_serde::to_vec_named(&response).map_err(
+        |error| PoolError::payload(PayloadKind::ServiceResponse, error),
+    )?))
+}
+fn undecodable_artifact(error: impl std::fmt::Display) -> PoolError {
+    PoolError::refused(RunRefusal::Undecodable {
+        input: RunInput::Artifact,
+        detail: Detail::new(error),
+    })
+}
+fn undecodable_state(kind: VmStateKind, error: impl std::fmt::Display) -> PoolError {
+    PoolError::refused(RunRefusal::Undecodable {
+        input: RunInput::State { kind },
+        detail: Detail::new(error),
+    })
+}
+/// The artifact decoded and yet contradicts itself: the same on every attempt.
+fn inconsistent_artifact(error: impl std::fmt::Display) -> PoolError {
+    PoolError::refused(RunRefusal::Artifact {
+        detail: Detail::new(error),
+    })
+}
+fn refused_global(error: impl std::fmt::Display) -> PoolError {
+    PoolError::refused(RunRefusal::Global {
+        detail: Detail::new(error),
+    })
 }
 fn refusal(error: crate::FrontendRefusal) -> Response {
     Response::CompileRefused {
@@ -284,7 +313,7 @@ fn linked_module(
     match lashlang::LinkedModule::link(program, environment) {
         Ok(linked) => {
             let artifact = linked.artifact;
-            let introspection = artifact.introspect().map_err(PoolError::protocol)?;
+            let introspection = artifact.introspect().map_err(inconsistent_artifact)?;
             Ok(Response::Module(compiled_output(
                 lashlang::ModuleCompileOutput {
                     module_ref: artifact.module_ref().clone(),
@@ -333,7 +362,7 @@ fn view(vm: &VmInstance) -> Result<StateView, PoolError> {
             .state()
             .snapshot()
             .to_canonical_bytes()
-            .map_err(PoolError::protocol)?,
+            .map_err(|error| PoolError::payload(PayloadKind::Snapshot, error))?,
         metadata: state_metadata(vm),
     })
 }
@@ -356,7 +385,7 @@ fn capture(
     let parts = vm
         .state()
         .durable_parts(&Default::default(), FleetFormat::from_version(fleet))
-        .map_err(PoolError::protocol)?;
+        .map_err(|error| PoolError::payload(PayloadKind::Snapshot, error))?;
     let mut baseline = std::collections::BTreeMap::new();
     let fragments = parts
         .fragments
@@ -404,7 +433,7 @@ fn inspect(
         let process = artifact
             .ir()
             .process(name)
-            .ok_or_else(|| PoolError::protocol("missing artifact export"))?;
+            .ok_or_else(|| inconsistent_artifact("missing artifact export"))?;
         let signals = process
             .signals
             .iter()
@@ -413,7 +442,7 @@ fn inspect(
                     name: lash_core_execution::facade_support::process_signal_event_type(
                         signal.name.as_str(),
                     )
-                    .map_err(PoolError::protocol)?,
+                    .map_err(inconsistent_artifact)?,
                     payload_schema: lash_core_execution::LashSchema::new(
                         lashlang::type_expr_to_json_schema(&artifact.resolve_type(&signal.ty)),
                     ),
@@ -436,7 +465,7 @@ fn inspect(
         );
     }
     Ok(lash_vm_client::InspectedArtifact {
-        bytes: artifact.to_store_bytes().map_err(PoolError::protocol)?,
+        bytes: artifact.to_store_bytes().map_err(inconsistent_artifact)?,
         module_ref: artifact.module_ref().clone(),
         host_requirements_ref: artifact.host_requirements_ref().clone(),
         host_requirements: artifact.host_requirements().clone(),

@@ -906,7 +906,6 @@ async fn execute_code_in_worker_scope(
                 lash_vm_protocol::VmStateKind::Snapshot,
                 owner.clone(),
                 lashlang::vm_contract_versions(),
-                lashlang::LASHLANG_SNAPSHOT_VERSION,
                 bytes.to_vec(),
             ))
         })

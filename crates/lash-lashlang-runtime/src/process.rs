@@ -1,6 +1,8 @@
 mod execution_result;
 mod segment_state;
-use execution_result::{process_lashlang_execution_result, process_lashlang_failure};
+use execution_result::{
+    process_lashlang_execution_result, process_lashlang_failure, process_worker_failure,
+};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use segment_state::capture_segment;
 mod definition_holds;
@@ -785,7 +787,6 @@ async fn execute_lashlang(
                 lash_vm_protocol::VmStateKind::Snapshot,
                 owner.clone(),
                 lashlang::vm_contract_versions(),
-                lashlang::LASHLANG_SNAPSHOT_VERSION,
                 state.bytes().unwrap_or_default().to_vec(),
             ))
         }
@@ -828,35 +829,14 @@ async fn execute_lashlang(
     }
     .run()
     .await;
-    // Only a run limit is the body's terminal. A host verdict (its deadline,
-    // CPU or attempt accounting) fails the attempt retryably below (FIG-4451).
     let run = match run {
         Ok(run) => run,
-        Err(
-            lash_vm_broker::BrokerFailure::WorkerLost {
-                outcome: lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
-                ..
-            }
-            | lash_vm_broker::BrokerFailure::Unavailable {
-                refusal:
-                    lash_vm_broker::CheckoutRefusal::Infrastructure(
-                        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
-                    ),
-            },
-        ) if !limit.is_host_verdict() => {
-            #[cfg(any(test, feature = "testing"))]
-            assert!(
-                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
-                "confidence durable process exhausted a required Lashlang bound: {limit:?}"
-            );
-            return Ok(process_lashlang_failure(
-                LashlangProcessFailureCode::ProcessExecutionBoundExhausted,
-                format!("worker execution bound exhausted: {limit}"),
-                Some(serde_json::json!({ "worker_limit": limit })),
-            )
-            .into());
+        Err(failure) => {
+            return match process_worker_failure(&failure) {
+                Some(terminal) => Ok(terminal.into()),
+                None => Err(infra(failure.to_string())),
+            };
         }
-        Err(error) => return Err(infra(error.to_string())),
     };
     Ok(match run {
         lash_vm_broker::BrokeredEnd::Complete { value, .. } => process_lashlang_execution_result(

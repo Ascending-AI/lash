@@ -68,6 +68,69 @@ pub(super) fn process_lashlang_execution_result(
     }
 }
 
+/// What a worker failure is to the process it ran: its terminal, or `None`
+/// for a failure of the attempt, which is re-driven.
+///
+/// A limit the run itself exhausted and a refusal of the run's own inputs
+/// meet every attempt the same way, so they end the process. A host verdict
+/// (its deadline, CPU or attempt accounting, FIG-4451), a lost worker and a
+/// broken exchange are this attempt's.
+pub(super) fn process_worker_failure(
+    failure: &lash_vm_broker::BrokerFailure,
+) -> Option<lash_core::ProcessAwaitOutput> {
+    use lash_vm_broker::{BrokerFailure, CheckoutRefusal};
+    use lash_vm_protocol::{InfrastructureOutcome, RunRefusal};
+    let refused = |refusal: &RunRefusal| {
+        process_lashlang_failure(
+            LashlangProcessFailureCode::ProcessRunRefused,
+            format!("the worker refuses the run: {refusal}"),
+            Some(serde_json::json!({ "run_refusal": refusal })),
+        )
+    };
+    let outcome = match failure {
+        BrokerFailure::WorkerLost { outcome, .. }
+        | BrokerFailure::Unavailable {
+            refusal: CheckoutRefusal::Infrastructure(outcome),
+        } => outcome,
+        BrokerFailure::StateRefused { refusal } => {
+            return Some(refused(&RunRefusal::State {
+                refusal: refusal.clone(),
+            }));
+        }
+        BrokerFailure::Unavailable {
+            refusal:
+                CheckoutRefusal::QueueFull
+                | CheckoutRefusal::TimedOut { .. }
+                | CheckoutRefusal::RestartStorm
+                | CheckoutRefusal::Closed,
+        }
+        | BrokerFailure::Interrupted { .. }
+        | BrokerFailure::FrameRetired
+        | BrokerFailure::RetainedRequestDrift { .. }
+        | BrokerFailure::Parent { .. }
+        | BrokerFailure::Checkpoint { .. } => return None,
+    };
+    match outcome {
+        InfrastructureOutcome::WorkerLimitExceeded { limit } if !limit.is_host_verdict() => {
+            #[cfg(any(test, feature = "testing"))]
+            assert!(
+                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
+                "confidence durable process exhausted a required Lashlang bound: {limit:?}"
+            );
+            Some(process_lashlang_failure(
+                LashlangProcessFailureCode::ProcessExecutionBoundExhausted,
+                format!("worker execution bound exhausted: {limit}"),
+                Some(serde_json::json!({ "worker_limit": limit })),
+            ))
+        }
+        InfrastructureOutcome::RunRefused { refusal } => Some(refused(refusal)),
+        InfrastructureOutcome::WorkerLimitExceeded { .. }
+        | InfrastructureOutcome::WorkerCrashed { .. }
+        | InfrastructureOutcome::WorkerUnresponsive { .. }
+        | InfrastructureOutcome::ProtocolViolation { .. } => None,
+    }
+}
+
 pub(super) fn process_lashlang_failure(
     code: LashlangProcessFailureCode,
     message: impl Into<String>,

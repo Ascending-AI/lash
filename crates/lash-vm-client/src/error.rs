@@ -1,4 +1,7 @@
-use lash_vm_protocol::{CodecRefusal, InfrastructureOutcome, SupervisorEvidence};
+use lash_vm_protocol::{
+    CodecRefusal, Detail, InfrastructureOutcome, PayloadKind, PoolFault, ProtocolBreach,
+    RunRefusal, SupervisorEvidence, WorkerLimit,
+};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
@@ -48,11 +51,44 @@ impl PoolError {
             | Self::Io { .. } => false,
         }
     }
-    pub fn protocol(error: impl std::fmt::Display) -> Self {
-        InfrastructureOutcome::ProtocolViolation {
-            reason: error.to_string(),
-        }
-        .into()
+    /// A broken exchange: retried on a fresh worker.
+    pub fn breach(breach: impl Into<ProtocolBreach>) -> Self {
+        InfrastructureOutcome::from(breach.into()).into()
+    }
+    /// A typed payload that did not encode or decode.
+    pub fn payload(payload: PayloadKind, error: impl std::fmt::Display) -> Self {
+        Self::breach(ProtocolBreach::Payload {
+            payload,
+            detail: Detail::new(error),
+        })
+    }
+    /// A refusal of the run's own inputs: terminal.
+    pub fn refused(refusal: RunRefusal) -> Self {
+        InfrastructureOutcome::from(refusal).into()
+    }
+    /// The typed outcome this failure is to the run it met: the one mapping
+    /// a transport read, a refused checkout and a worker's own refusal share.
+    pub fn into_outcome(self) -> InfrastructureOutcome {
+        let fault = match self {
+            Self::Infrastructure(outcome) => return outcome,
+            Self::ProtocolVersion(refusal) => return ProtocolBreach::Version { refusal }.into(),
+            // The attempt budget is the host's clock, like a deadline.
+            Self::RetryLimitExceeded => {
+                return InfrastructureOutcome::WorkerLimitExceeded {
+                    limit: WorkerLimit::Deadline,
+                };
+            }
+            Self::Recovery { .. } => PoolFault::Recovery,
+            Self::QueueFull { bytes } => PoolFault::QueueFull {
+                bytes: bytes as u64,
+            },
+            Self::CheckoutTimedOut => PoolFault::CheckoutTimedOut,
+            Self::RestartStorm => PoolFault::RestartStorm,
+            Self::InvalidConfiguration => PoolFault::InvalidConfiguration,
+            Self::UnsupportedPlatform => PoolFault::UnsupportedPlatform,
+            Self::Io { code, .. } => PoolFault::Io { code },
+        };
+        ProtocolBreach::Pool { fault }.into()
     }
     pub fn eof() -> Self {
         InfrastructureOutcome::WorkerCrashed {
@@ -84,25 +120,19 @@ impl From<CodecRefusal> for PoolError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_vm_protocol::WorkerLimit;
 
     #[test]
     fn retryable_worker_faults_are_host_verdicts() {
         assert!(
-            !PoolError::Infrastructure(InfrastructureOutcome::PayloadTooLarge {
-                limit: 1,
-                size: 2,
-            })
-            .is_host_verdict()
+            !PoolError::refused(RunRefusal::PayloadTooLarge { limit: 1, size: 2 })
+                .is_host_verdict()
         );
         for outcome in [
             InfrastructureOutcome::WorkerCrashed {
                 evidence: SupervisorEvidence::EndOfStream,
             },
             InfrastructureOutcome::WorkerUnresponsive { silent_ms: 10 },
-            InfrastructureOutcome::ProtocolViolation {
-                reason: "lost worker response".into(),
-            },
+            ProtocolBreach::from(lash_vm_protocol::SequenceFault::UnexpectedServiceResponse).into(),
             InfrastructureOutcome::WorkerLimitExceeded {
                 limit: WorkerLimit::Deadline,
             },

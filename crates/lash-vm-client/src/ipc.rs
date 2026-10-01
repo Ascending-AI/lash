@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::{PoolConfig, PoolError};
 use lash_vm_protocol::{
-    FRAME_HEADER_BYTES, FrameCodec, InfrastructureOutcome, ParentFrame, WorkerFrame, WorkerMessage,
-    WorkerPhase,
+    FRAME_HEADER_BYTES, FrameCodec, InfrastructureOutcome, ParentFrame, PayloadKind, SequenceFault,
+    WorkerFrame, WorkerMessage, WorkerPhase,
 };
 
 /// Counters for one measured exchange, used only by the measured transport specialization.
@@ -52,7 +52,10 @@ impl Worker {
             .args(&config.entry.args)
             .arg("--lash-vm-worker")
             .arg(fd.to_string())
-            .arg(serde_json::to_string(&Bootstrap::from(config)).map_err(PoolError::protocol)?)
+            .arg(
+                serde_json::to_string(&Bootstrap::from(config))
+                    .map_err(|error| PoolError::payload(PayloadKind::Bootstrap, error))?,
+            )
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -355,7 +358,7 @@ impl FrameSource {
         let len = codec
             .frame_len(unread)
             .map_err(PoolError::from)?
-            .ok_or_else(|| PoolError::protocol("incomplete frame header"))?;
+            .ok_or_else(|| PoolError::breach(SequenceFault::IncompleteFrameHeader))?;
         if len <= unread.len() {
             let frame = unread[..len].to_vec();
             self.start += len;
@@ -388,7 +391,7 @@ pub fn read_frame(
     let len = codec
         .frame_len(&bytes)
         .map_err(PoolError::from)?
-        .ok_or_else(|| PoolError::protocol("incomplete frame header"))?;
+        .ok_or_else(|| PoolError::breach(SequenceFault::IncompleteFrameHeader))?;
     bytes.resize(len, 0);
     read_until(pipe, &mut bytes[FRAME_HEADER_BYTES..], deadline, true)?;
     Ok(bytes)
@@ -416,7 +419,7 @@ fn read_some(
         count_socket_call();
         count_socket_call();
         match pipe.read(bytes) {
-            Ok(0) if partial => return Err(PoolError::protocol("EOF in a partial frame")),
+            Ok(0) if partial => return Err(PoolError::breach(SequenceFault::EndInPartialFrame)),
             Ok(0) => return Err(PoolError::eof()),
             Ok(n) => return Ok(n),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
