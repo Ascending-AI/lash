@@ -744,6 +744,55 @@ lash_conformance::wake_delivery_crash_tests!({
     )
 });
 
+/// Reads a receiver's wake redelivery floor straight from the server
+/// double's SQLite memory catalog.
+struct DoubleWakeRedeliveryFloors(Arc<lash_sqlite_store::SqliteStoreSet>);
+
+#[async_trait::async_trait]
+impl lash_conformance::WakeRedeliveryFloorProbe for DoubleWakeRedeliveryFloors {
+    async fn receiver_floor(
+        &self,
+        session_id: &lash_core::SessionId,
+        process_id: &lash_core::ProcessId,
+    ) -> Option<u64> {
+        use rusqlite::OptionalExtension as _;
+        rusqlite::Connection::open(
+            self.0
+                .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+        )
+        .expect("open the memory catalog")
+        .query_row(
+            "SELECT allocation_floor FROM wake_redelivery_fences
+             WHERE session_id = ?1 AND process_id = ?2",
+            rusqlite::params![session_id.as_str(), process_id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .expect("read the receiver floor")
+        .map(|floor| u64::try_from(floor).expect("non-negative receiver floor"))
+    }
+}
+
+// The wake content-conflict law (FIG-4487) on the engine-driven path: the
+// wake driver asks the Restate engine for the later wake's drive, over the
+// server double's own store set and virtual clock.
+lash_conformance::wake_delivery_conflict_tests!({
+    let backend = lash_restate_test::backend(0x4487, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("start the wake-conflict server double");
+    let stores = Arc::clone(backend.engine_stores());
+    let floors = Arc::new(DoubleWakeRedeliveryFloors(Arc::clone(backend.stores())))
+        as Arc<dyn lash_conformance::WakeRedeliveryFloorProbe>;
+    (
+        backend.clone(),
+        stores.session_store_factory(),
+        stores.process_registry(),
+        backend.test_clock(),
+        backend.explicit_reconcile_session_work(),
+        floors,
+    )
+});
+
 // A Restate host resolves its group children at the endpoint, so it is never
 // an unregistered host: `effect_group_unwired_host_tests!` does not apply.
 lash_conformance::effect_group_host_tests!(

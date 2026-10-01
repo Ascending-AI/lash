@@ -3,6 +3,7 @@
 //! withdrawal, the command receipt, and the open-work reads.
 
 use super::*;
+use lash_core_execution::store_backend_support as support;
 
 impl PostgresStore {
     pub(super) async fn enqueue_queued_work_pg(
@@ -15,7 +16,15 @@ impl PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
-        let queued = enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
+        let queued = match enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await
+        {
+            // A changed wake's refusal commits the floor it raised (FIG-4487).
+            Err(error) if support::conflicting_process_wake(&batch, &error).is_some() => {
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Err(error);
+            }
+            queued => queued?,
+        };
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
     }
@@ -31,7 +40,16 @@ impl PostgresStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued =
-            enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
+            match enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms())
+                .await
+            {
+                // A changed wake's refusal commits the floor it raised (FIG-4487).
+                Err(error) if support::conflicting_process_wake(&batch, &error).is_some() => {
+                    tx.commit().await.map_err(store_sqlx_error)?;
+                    return Err(error);
+                }
+                queued => queued?,
+            };
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
     }

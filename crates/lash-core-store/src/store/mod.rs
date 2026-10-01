@@ -1498,6 +1498,12 @@ pub trait QueuedWorkStore: Send + Sync {
     /// [`Existing`](crate::QueuedWorkEnqueueOutcome::Existing) when the
     /// digests are equal, and nothing reopens; a changed digest is
     /// [`StoreError::QueuedWorkSourceKeyConflict`] and nothing is stored.
+    ///
+    /// A changed process wake is that wake's terminal (FIG-4487): the
+    /// refusing transaction raises the session's redelivery floor to
+    /// `max(floor, sequence)` and commits before the conflict is returned,
+    /// leaving the stored wake untouched. After vacuum, a retry at or below
+    /// the floor is refused with [`StoreError::ProcessWakeSequenceRewound`].
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: crate::QueuedWorkBatchDraft,

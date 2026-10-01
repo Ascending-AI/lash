@@ -34,6 +34,7 @@ pub struct WakeDeliveryDriveReport {
     pub discarded_target_gone: usize,
     pub discarded_sequence_rewound: usize,
     pub discarded_source_unreadable: usize,
+    pub discarded_content_conflict: usize,
     pub floor_absorbed: usize,
     pub retryable_failures: usize,
 }
@@ -461,6 +462,34 @@ impl WakeDeliveryDriver {
                 )
                 .await?;
             }
+            // The receiver holds a different wake under this process and
+            // sequence. Its refusal raised the receiver's redelivery floor to
+            // the sequence in the refusing transaction, so the delivery can
+            // never be admitted: it ends here, behind nothing and blocking
+            // nothing, and the receiver's own wake is untouched (FIG-4487).
+            Err(StoreError::QueuedWorkSourceKeyConflict {
+                existing_batch_id, ..
+            }) => {
+                tracing::warn!(
+                    delivery_id = %delivery.delivery_id,
+                    target_session_id = %target_session_id,
+                    process_id = %delivery.wake.process_id,
+                    sequence = delivery.wake.sequence,
+                    existing_batch_id = %existing_batch_id,
+                    "process wake content conflicts with the receiver's wake"
+                );
+                Self::settle(
+                    registry,
+                    delivery,
+                    claim_token,
+                    clock,
+                    WakeDeliverySettlement::Discard(WakeDiscardReason::ContentConflict),
+                    None,
+                    work_cadence,
+                    report,
+                )
+                .await?;
+            }
             Err(error) => {
                 tracing::warn!(
                     delivery_id = %delivery.delivery_id,
@@ -584,6 +613,7 @@ impl WakeDeliveryDriver {
             WakeDiscardReason::TargetGone => report.discarded_target_gone += 1,
             WakeDiscardReason::SequenceRewound => report.discarded_sequence_rewound += 1,
             WakeDiscardReason::SourceUnreadable => report.discarded_source_unreadable += 1,
+            WakeDiscardReason::ContentConflict => report.discarded_content_conflict += 1,
             WakeDiscardReason::Retargeted => {
                 unreachable!("the wake delivery driver does not produce retargeted discards")
             }
@@ -647,6 +677,7 @@ impl WakeDeliveryDriver {
                 + report.discarded_target_gone
                 + report.discarded_sequence_rewound
                 + report.discarded_source_unreadable
+                + report.discarded_content_conflict
                 > 0;
             let delay = if made_progress
                 && report.retryable_failures == 0

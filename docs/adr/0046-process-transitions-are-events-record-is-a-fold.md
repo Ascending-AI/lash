@@ -73,6 +73,13 @@ A `SourceUnreadable` head remains an ordering barrier. After repairing the
 source, the host calls `redrive_wake_delivery` with the delivery id named by
 `wake_delivery_report`.
 
+A delivery whose process fact differs from the wake its receiver already holds
+under the same process and sequence records the typed `content_conflict`
+discard, once the receiver has refused it and raised its redelivery floor
+(ADR 0101 §9). Like `sequence_rewound`, it is not an ordering barrier: later
+deliveries in its group proceed, and it is never retried. Transient receiver
+faults still release the claim with backoff.
+
 Pruning and tombstone compaction require an explicit
 `ProjectionWatermark::{UpTo, NoProjector}` choice. Session deletion does not
 implicitly cancel processes; hosts compose cancellation policy explicitly.

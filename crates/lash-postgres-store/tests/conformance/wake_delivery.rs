@@ -154,3 +154,54 @@ lash_conformance::wake_delivery_isolation_tests!({
         backend as Arc<dyn lash_conformance::WakeDeliveryIsolationBackend>,
     )
 });
+
+struct PostgresWakeRedeliveryFloors {
+    pool: sqlx::PgPool,
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::WakeRedeliveryFloorProbe for PostgresWakeRedeliveryFloors {
+    async fn receiver_floor(&self, session_id: &SessionId, process_id: &ProcessId) -> Option<u64> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT allocation_floor FROM lash_wake_redelivery_fences
+             WHERE session_id = $1 AND process_id = $2",
+        )
+        .bind(session_id.as_str())
+        .bind(process_id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .expect("read Postgres receiver floor")
+        .map(|floor| u64::try_from(floor).expect("non-negative receiver floor"))
+    }
+}
+
+lash_conformance::wake_delivery_conflict_tests!({
+    let Some((database_fixture, storage)) = storage().await else {
+        panic!("wake conflict conformance requires LASH_POSTGRES_DATABASE_URL");
+    };
+    reset(storage.pool()).await;
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
+    let factory = Arc::new(storage.session_store_factory().with_clock(clock.clone()))
+        as Arc<dyn DeploymentStore>;
+    let registry = Arc::new(
+        storage
+            .process_registry_with_wake_delivery_config(
+                lash_core_execution::WakeDeliveryConfig::new(60_000).expect("valid wake expiry"),
+            )
+            .with_clock(clock.clone()),
+    ) as Arc<dyn ProcessRegistry>;
+    let floors = Arc::new(PostgresWakeRedeliveryFloors {
+        pool: storage.pool().clone(),
+    }) as Arc<dyn lash_conformance::WakeRedeliveryFloorProbe>;
+    (
+        database_fixture,
+        factory,
+        registry,
+        clock,
+        Arc::new(lash_core_execution::NoSessionWork::new())
+            as Arc<dyn lash_core_execution::SessionWorkEngine>,
+        floors,
+    )
+});

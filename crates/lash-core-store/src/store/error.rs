@@ -642,7 +642,10 @@ pub enum StoreError {
     /// A queued-work submission reused session `session_id`'s source key
     /// `source_key` with a digest other than the one batch
     /// `existing_batch_id` recorded (ADR 0101 §8). Nothing was stored; the
-    /// existing batch, open or a tombstone, is unchanged.
+    /// existing batch, open or a tombstone, is unchanged. A process wake's
+    /// refusal is that wake's terminal: the session's redelivery floor rose
+    /// to its sequence in the refusing transaction, which committed
+    /// (FIG-4487).
     #[error(
         "queued work source_key `{source_key}` for session `{session_id}` is already bound to batch `{existing_batch_id}` with different submitted content"
     )]

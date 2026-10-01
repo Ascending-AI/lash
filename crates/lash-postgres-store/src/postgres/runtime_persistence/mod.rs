@@ -225,9 +225,23 @@ async fn enqueue_queued_work_with_outcome_tx(
                 .fetch_optional(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
-        if let support::QueuedWorkDraftAdmission::Existing { batch_id } =
-            support::decide_queued_work_draft_admission(batch, &submission_digest, by_source_key)?
-        {
+        // A changed process wake's refusal is that wake's terminal: the
+        // fence rises here and the caller commits it with the refusal
+        // (FIG-4487).
+        let admission = match support::decide_queued_work_draft_admission(
+            batch,
+            &submission_digest,
+            by_source_key,
+        ) {
+            Ok(admission) => admission,
+            Err(refusal) => {
+                if let Some(wake) = support::conflicting_process_wake(batch, &refusal) {
+                    raise_wake_redelivery_fence_tx(tx, &batch.session_id, &wake).await?;
+                }
+                return Err(refusal);
+            }
+        };
+        if let support::QueuedWorkDraftAdmission::Existing { batch_id } = admission {
             let existing = load_queued_batch(tx, batch_id.as_str())
                 .await?
                 .ok_or_else(|| {
@@ -340,8 +354,9 @@ async fn lock_process_wake_source_tx(
 /// for a wake whose row is leaving the queue in this transaction.
 ///
 /// The one home of the invariant that every terminal transition of a wake —
-/// settlement by its root and host cancel — raises the floor with the row's
-/// removal (FIG-1065, FIG-3545). The wake source's advisory lock serializes
+/// settlement by its root, host cancel and a content conflict's refusal —
+/// raises the floor with the row's removal or the refusal (FIG-1065,
+/// FIG-3545, FIG-4487). The wake source's advisory lock serializes
 /// the fence against a concurrent enqueue of the same source, which takes
 /// the same lock before it reads the floor. Callers write the fence before
 /// the delete.

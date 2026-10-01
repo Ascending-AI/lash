@@ -186,6 +186,7 @@ pub fn wake_discard_reason_from_label(
         Some("retargeted") => Ok(Some(WakeDiscardReason::Retargeted)),
         Some("sequence_rewound") => Ok(Some(WakeDiscardReason::SequenceRewound)),
         Some("source_unreadable") => Ok(Some(WakeDiscardReason::SourceUnreadable)),
+        Some("content_conflict") => Ok(Some(WakeDiscardReason::ContentConflict)),
         Some(reason) => Err(PluginError::Session(format!(
             "wake delivery `{delivery_id}` has unknown discard reason `{reason}`"
         ))),

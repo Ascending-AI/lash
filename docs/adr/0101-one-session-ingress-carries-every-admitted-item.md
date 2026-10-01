@@ -318,7 +318,13 @@ Evidence: `crates/lash-core-store/src/store/ingress_terminal.rs`,
 ### 9. The floor invariant
 
 Every terminal wake transition raises the receiver redelivery floor to at least
-its sequence in the same transaction: delivery, drop, or host withdrawal.
+its sequence in the same transaction: delivery, drop, host withdrawal, or the
+refusal of a changed process fact under the wake's process and sequence. That
+refusal stores no row and leaves the receiver's own wake untouched; its
+transaction commits the floor before `QueuedWorkSourceKeyConflict` is returned,
+so the sender can only acknowledge a conflict whose floor is durable. The two
+stores share no transaction: a sender that loses its acknowledgement retries
+and reaches the same refusal.
 `Defer` retains position and does not advance the floor. Until host vacuum a
 redelivery answers the wake's tombstone; after it, redelivery at or below the
 floor is refused `ProcessWakeSequenceRewound`. Neither recreates work. Process-owned allocation floors

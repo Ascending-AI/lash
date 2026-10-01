@@ -30,10 +30,11 @@ impl SqliteStore {
                     })
                     .and_then(|()| enqueue_queued_work_conn(tx, &batch, now, nonce));
                 // Roll back the partially-inserted batch/items on a
-                // `StoreError` while still returning the typed error.
+                // `StoreError` while still returning the typed error. A
+                // changed wake's refusal commits the floor it raised.
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
-                    Err(err) => Ok(TxOutcome::Rollback(Err(err))),
+                    Err(err) => Ok(refused_enqueue(&batch, err)),
                 }
             })
             .await
@@ -66,7 +67,7 @@ impl SqliteStore {
                     .and_then(|()| enqueue_queued_work_conn_with_outcome(tx, &batch, now, nonce));
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
-                    Err(err) => Ok(TxOutcome::Rollback(Err(err))),
+                    Err(err) => Ok(refused_enqueue(&batch, err)),
                 }
             })
             .await
@@ -305,5 +306,20 @@ impl SqliteStore {
             })
             .await
             .map_err(sqlite_error)?
+    }
+}
+
+/// How a refused enqueue of `batch` ends its transaction: rolled back,
+/// except a changed process wake's refusal, which commits the redelivery
+/// floor it raised (FIG-4487).
+fn refused_enqueue<T>(
+    batch: &QueuedWorkBatchDraft,
+    error: StoreError,
+) -> TxOutcome<Result<T, StoreError>> {
+    if lash_core_execution::store_backend_support::conflicting_process_wake(batch, &error).is_some()
+    {
+        TxOutcome::Commit(Err(error))
+    } else {
+        TxOutcome::Rollback(Err(error))
     }
 }

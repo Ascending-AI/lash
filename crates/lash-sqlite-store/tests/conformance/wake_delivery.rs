@@ -48,3 +48,44 @@ lash_conformance::wake_delivery_isolation_tests!({
             as Arc<dyn lash_conformance::WakeDeliveryIsolationBackend>,
     )
 });
+
+struct SqliteWakeRedeliveryFloors(TestBackend);
+
+#[async_trait::async_trait]
+impl lash_conformance::WakeRedeliveryFloorProbe for SqliteWakeRedeliveryFloors {
+    async fn receiver_floor(
+        &self,
+        session_id: &lash_sansio::SessionId,
+        process_id: &lash_sansio::ProcessId,
+    ) -> Option<u64> {
+        use rusqlite::OptionalExtension as _;
+        self.0
+            .raw(SqliteDatabase::DurableCore)
+            .query_row(
+                "SELECT allocation_floor FROM wake_redelivery_fences
+                 WHERE session_id = ?1 AND process_id = ?2",
+                [session_id.as_str(), process_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .expect("read SQLite receiver floor")
+            .map(|floor| u64::try_from(floor).expect("non-negative receiver floor"))
+    }
+}
+
+lash_conformance::wake_delivery_conflict_tests!({
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
+    let backend = TestBackend::open_with(SUBSTRATE, |options| options, clock.clone()).await;
+    (
+        backend.clone(),
+        backend.session_store_factory() as Arc<dyn DeploymentStore>,
+        backend.process_registry() as Arc<dyn ProcessRegistry>,
+        clock,
+        Arc::new(lash_core_execution::NoSessionWork::new())
+            as Arc<dyn lash_core_execution::SessionWorkEngine>,
+        Arc::new(SqliteWakeRedeliveryFloors(backend))
+            as Arc<dyn lash_conformance::WakeRedeliveryFloorProbe>,
+    )
+});

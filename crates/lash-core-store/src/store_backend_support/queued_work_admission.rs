@@ -93,6 +93,35 @@ pub fn decide_queued_work_draft_admission(
     }
 }
 
+/// The wake a refused process-wake `draft` ends, when `error` is its content
+/// conflict (FIG-4487).
+///
+/// A changed process fact under a wake's `(process, sequence)` can never be
+/// admitted, so the refusal is that delivery's terminal transition. Like
+/// every other wake terminal (ADR 0101 §9), it raises the receiver's
+/// redelivery floor to the sequence: the backend writes the floor in the
+/// refusing transaction and commits it with the refusal, before the sender
+/// can hear the conflict and acknowledge its discard. The receiver's own
+/// wake under the source key is untouched. After vacuum, a retry at or
+/// below the floor is [`StoreError::ProcessWakeSequenceRewound`].
+#[must_use]
+pub fn conflicting_process_wake(
+    draft: &QueuedWorkBatchDraft,
+    error: &StoreError,
+) -> Option<crate::store::TerminalProcessWake> {
+    let StoreError::QueuedWorkSourceKeyConflict { .. } = error else {
+        return None;
+    };
+    draft
+        .process_wake_source
+        .as_ref()
+        .map(|source| crate::store::TerminalProcessWake {
+            source_key: draft.source_key.clone(),
+            process_id: source.process_id.clone(),
+            sequence: source.sequence,
+        })
+}
+
 /// The digest `draft` is admitted and compared under.
 pub fn queued_work_submission_digest(draft: &QueuedWorkBatchDraft) -> Result<String, StoreError> {
     draft.submission_digest().map_err(|err| {

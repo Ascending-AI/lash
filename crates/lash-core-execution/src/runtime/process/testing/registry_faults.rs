@@ -40,6 +40,7 @@ struct ReadFaultPlan {
     delete_error: Option<crate::PluginError>,
     error: Option<crate::PluginError>,
     wake_defer_error: Option<crate::PluginError>,
+    wake_discard_error: Option<crate::PluginError>,
     error_after: Option<(usize, crate::PluginError)>,
     absent: bool,
     record_override: Option<crate::ProcessRecord>,
@@ -341,6 +342,13 @@ impl ProcessRegistryFaults {
     /// Fail the next wake defer write, without touching its durable claim.
     pub fn set_wake_defer_error(&self, error: Option<crate::PluginError>) {
         self.faults.lock_recover().wake_defer_error = error;
+    }
+
+    /// Fail the next wake discard write before it reaches the wrapped
+    /// registry, so the delivery keeps its claim as if the sender's
+    /// acknowledgement were lost.
+    pub fn fail_next_wake_discard(&self, error: crate::PluginError) {
+        self.faults.lock_recover().wake_discard_error = Some(error);
     }
 
     fn faulted_read(&self) -> Option<Result<Option<crate::ProcessRecord>, crate::PluginError>> {
@@ -865,6 +873,10 @@ impl super::super::registry_concerns::ProcessWakeOutbox for ProcessRegistryFault
         claim_token: &str,
         reason: crate::WakeDiscardReason,
     ) -> Result<crate::WakeDeliveryClaimOutcome, crate::PluginError> {
+        let injected = self.faults.lock_recover().wake_discard_error.take();
+        if let Some(error) = injected {
+            return Err(error);
+        }
         self.inner
             .discard_wake_delivery(delivery_id, claim_token, reason)
             .await

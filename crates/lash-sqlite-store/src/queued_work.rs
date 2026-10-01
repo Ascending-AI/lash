@@ -211,6 +211,11 @@ pub(crate) fn enqueue_queued_work_conn(
 /// source key, open or a tombstone, answers an identical submission and
 /// refuses a changed one; otherwise the draft is inserted at the next
 /// position of the session's ingress sequence with its submission digest.
+///
+/// A changed process wake's refusal is that wake's terminal: the
+/// redelivery fence rises to its sequence here, and the caller commits the
+/// transaction with the refusal
+/// ([`conflicting_process_wake`](lash_core_execution::store_backend_support::conflicting_process_wake)).
 pub(crate) fn enqueue_queued_work_conn_with_outcome(
     conn: &Connection,
     batch: &QueuedWorkBatchDraft,
@@ -230,9 +235,20 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             )
             .optional()
             .map_err(sqlite_error)?;
-        if let support::QueuedWorkDraftAdmission::Existing { batch_id } =
-            support::decide_queued_work_draft_admission(batch, &submission_digest, by_source_key)?
-        {
+        let admission = match support::decide_queued_work_draft_admission(
+            batch,
+            &submission_digest,
+            by_source_key,
+        ) {
+            Ok(admission) => admission,
+            Err(refusal) => {
+                if let Some(wake) = support::conflicting_process_wake(batch, &refusal) {
+                    raise_wake_redelivery_fence_conn(conn, &batch.session_id, &wake)?;
+                }
+                return Err(refusal);
+            }
+        };
+        if let support::QueuedWorkDraftAdmission::Existing { batch_id } = admission {
             let existing =
                 load_queued_batch_by_id_conn(conn, batch_id.as_str())?.ok_or_else(|| {
                     StoreError::Backend("queued work source row disappeared".to_string())
@@ -450,8 +466,9 @@ pub(crate) fn settle_open_command_conn(
 /// for a wake whose row is leaving the queue in this transaction.
 ///
 /// The one home of the invariant that every terminal transition of a wake —
-/// settlement by its root and host cancel — raises the floor with the row's
-/// removal (FIG-1065, FIG-3545). Callers write the fence before the delete.
+/// settlement by its root, host cancel and a content conflict's refusal —
+/// raises the floor with the row's removal or the refusal (FIG-1065,
+/// FIG-3545, FIG-4487). Callers write the fence before the delete.
 pub(crate) fn raise_wake_redelivery_fence_conn(
     conn: &Connection,
     session_id: &SessionId,

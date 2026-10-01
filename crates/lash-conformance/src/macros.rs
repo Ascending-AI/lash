@@ -2147,6 +2147,29 @@ macro_rules! wake_delivery_isolation_tests {
     };
 }
 
+/// Register the wake content-conflict law (FIG-4487) on a backend. The
+/// fixture returns its guard, the deployment and process registry on one
+/// test clock, the session-work engine the wake driver asks for drives, and
+/// the backend's receiver-floor probe.
+#[macro_export]
+macro_rules! wake_delivery_conflict_tests {
+    ($fixture:block) => {
+        $crate::wake_delivery_conflict_tests!(@laws $fixture; [
+            conflicting_wake_delivery_is_terminal_and_later_delivery_progresses,
+        ]);
+    };
+    (@laws $fixture:block; [$($law:ident),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, factory, registry, clock, work, floors) = $fixture;
+                $crate::registration_macro_support::$law(factory, registry, clock, work, floors)
+                    .await;
+            }
+        )*
+    };
+}
+
 /// Owner-scoped usage accounting laws. The fixture returns its guard and store handles.
 #[macro_export]
 macro_rules! usage_ledger_store_tests {

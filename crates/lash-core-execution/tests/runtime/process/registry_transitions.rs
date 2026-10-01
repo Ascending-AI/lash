@@ -155,6 +155,7 @@ mod tests {
             WakeDiscardReason::Retargeted,
             WakeDiscardReason::SequenceRewound,
             WakeDiscardReason::SourceUnreadable,
+            WakeDiscardReason::ContentConflict,
         ] {
             assert_eq!(
                 wake_discard_reason_from_label("delivery", Some(reason.as_str()))
