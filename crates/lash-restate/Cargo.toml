@@ -65,7 +65,7 @@ http-body-util = { version = "0.1", features = ["channel"] }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 lash = { package = "lash-runtime", path = "../lash", features = ["restate", "testing"] }
 lash-core = { workspace = true, features = ["testing"] }
-lash-lashlang-runtime = { workspace = true }
+lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash-typescript = { workspace = true }
 lash-llm-tools = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
