@@ -216,6 +216,15 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
             .await
     }
 
+    async fn forget_trigger_tombstones(
+        &self,
+        written_before_epoch_ms: u64,
+    ) -> std::result::Result<usize, lash_core::StoreError> {
+        self.inner
+            .forget_trigger_tombstones(written_before_epoch_ms)
+            .await
+    }
+
     async fn prune_mutation_receipts(
         &self,
         cutoff_epoch_ms: u64,
@@ -1098,6 +1107,42 @@ impl Processes {
             "completed trigger retention after process prune"
         );
         Ok(report)
+    }
+
+    /// Reclaim terminal trigger occurrences armed no later than the cutoff.
+    /// Each delete writes a tombstone on the store's clock. Reclaim never
+    /// deletes a tombstone, including when the cutoff is `u64::MAX`.
+    pub async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> lash_core::TriggerOccurrenceReclamationResult {
+        self.core
+            .env
+            .core
+            .trigger_store()
+            .reclaim_trigger_occurrences(cutoff_epoch_ms)
+            .await
+    }
+
+    /// Delete exactly the trigger-occurrence tombstones written strictly
+    /// before `written_before_epoch_ms` on the configured store's clock.
+    /// Returns the number removed. Tombstones are never deleted automatically.
+    ///
+    /// The host vouches that its trigger source will no longer redeliver those
+    /// occurrences. A later redelivery of a forgotten occurrence runs as a
+    /// new occurrence; identities whose tombstones remain are still refused.
+    ///
+    /// Store failures, including writer-fence and contention causes, remain
+    /// typed as [`EmbedError::Store`](crate::EmbedError::Store). A failed
+    /// transaction removes nothing.
+    pub async fn forget_trigger_tombstones(&self, written_before_epoch_ms: u64) -> Result<usize> {
+        self.core
+            .env
+            .core
+            .trigger_store()
+            .forget_trigger_tombstones(written_before_epoch_ms)
+            .await
+            .map_err(Into::into)
     }
 
     /// Compact payload-free process tombstones while structurally excluding

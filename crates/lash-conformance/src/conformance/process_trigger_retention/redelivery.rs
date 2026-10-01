@@ -7,10 +7,11 @@
 //! tombstone the reclaim left: it refuses the ingest as reclaimed and writes
 //! nothing, so the emission reserves and starts nothing.
 //!
-//! The tombstone outlives every redelivery (FIG-4573): no reclaim cutoff
-//! compacts it inside `TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS`.
+//! Reclaim never deletes the tombstone (FIG-4610). Only an explicit host
+//! forget allows its identity to run again.
 
 use super::*;
+use crate::ClockWallTime as _;
 use pretty_assertions::assert_eq;
 
 const SOURCE_TYPE: &str = "ui.button.pressed";
@@ -155,36 +156,41 @@ async fn assert_redelivery_writes_nothing(
     );
 }
 
-/// A reclaim pass at the widest cutoff a host can name, `u64::MAX`, run inside
-/// the redelivery horizon: it compacts no tombstone.
+/// The widest reclaim cutoff retains the redelivery fence.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn assert_the_widest_cutoff_compacts_nothing(triggers: &Arc<dyn TriggerStore>, case: &str) {
+async fn assert_the_widest_cutoff_reclaims_nothing(triggers: &Arc<dyn TriggerStore>, case: &str) {
     let pass = triggers
         .reclaim_trigger_occurrences(u64::MAX)
         .await
         .expect("run the reclaim pass");
     assert_eq!(
-        (
-            pass.reclaimed_occurrence_count,
-            pass.compacted_tombstone_count
-        ),
-        (0, 0),
-        "{case}: a pass inside the redelivery horizon compacted a tombstone"
+        pass.reclaimed_occurrence_count, 0,
+        "{case}: no occurrence remains to reclaim"
     );
 }
 
 /// A matched emission whose process was pruned, and whose occurrence and
 /// delivery retention then reclaimed.
+pub(super) async fn a_redelivered_emission_writes_no_reclaimed_delivery_back(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    let request = reclaimed_matched_occurrence(&handles, "redelivery-matched-occurrence").await;
+    assert_redelivery_writes_nothing(&handles, &request, "matched").await;
+    assert_the_widest_cutoff_reclaims_nothing(&handles.triggers, "matched").await;
+    assert_redelivery_writes_nothing(&handles, &request, "matched, again").await;
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn a_redelivered_emission_writes_no_reclaimed_delivery_back(
-    handles: ProcessTriggerRetentionHandles,
-) {
+async fn reclaimed_matched_occurrence(
+    handles: &ProcessTriggerRetentionHandles,
+    occurrence_key: &str,
+) -> crate::TriggerOccurrenceRequest {
     let session = SessionId::from("redelivery-matched-session");
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
@@ -227,10 +233,10 @@ pub(super) async fn a_redelivered_emission_writes_no_reclaimed_delivery_back(
         SOURCE_TYPE,
         "redelivery-matched-source",
         serde_json::json!({ "button": "Blue" }),
-        "redelivery-matched-occurrence",
+        occurrence_key,
     );
 
-    let report = deliver(&handles, &request)
+    let report = deliver(handles, &request)
         .await
         .expect("the first delivery emits");
     assert_eq!(report.deliveries.len(), 1, "one subscription matches");
@@ -252,8 +258,8 @@ pub(super) async fn a_redelivered_emission_writes_no_reclaimed_delivery_back(
         )
         .await
         .expect("end the delivery's process");
-    prune_with_trigger_cleanup(&handles).await;
-    let reclaimed = held(&handles).await;
+    prune_with_trigger_cleanup(handles).await;
+    let reclaimed = held(handles).await;
     assert_eq!(
         (reclaimed.occurrences.len(), reclaimed.deliveries.len()),
         (0, 0),
@@ -267,11 +273,7 @@ pub(super) async fn a_redelivered_emission_writes_no_reclaimed_delivery_back(
         "the delivery's process is pruned"
     );
 
-    assert_redelivery_writes_nothing(&handles, &request, "matched").await;
-    // The guard is idempotent: every further redelivery answers the same,
-    // and no cutoff the host's reclaim pass names takes it away.
-    assert_the_widest_cutoff_compacts_nothing(&handles.triggers, "matched").await;
-    assert_redelivery_writes_nothing(&handles, &request, "matched, again").await;
+    request
 }
 
 /// An emission no subscription matched, reclaimed by the host's occurrence
@@ -303,11 +305,7 @@ pub(super) async fn a_redelivered_zero_match_emission_writes_no_reclaimed_occurr
         .await
         .expect("reclaim the zero-match occurrence");
     assert_eq!(
-        (
-            pass.reclaimed_occurrence_count,
-            pass.compacted_tombstone_count
-        ),
-        (1, 0),
+        pass.reclaimed_occurrence_count, 1,
         "the pass reclaimed the occurrence and kept its tombstone"
     );
     assert!(held(&handles).await.occurrences.is_empty());
@@ -316,7 +314,7 @@ pub(super) async fn a_redelivered_zero_match_emission_writes_no_reclaimed_occurr
 
     // A later pass whose cutoff is past the tombstone, and the same cutoff
     // on the pass that reclaims, leave the guard standing.
-    assert_the_widest_cutoff_compacts_nothing(&handles.triggers, "zero-match").await;
+    assert_the_widest_cutoff_reclaims_nothing(&handles.triggers, "zero-match").await;
     assert_redelivery_writes_nothing(&handles, &request, "zero-match, after a pass").await;
 
     let widest = crate::TriggerOccurrenceRequest::new(
@@ -334,11 +332,7 @@ pub(super) async fn a_redelivered_zero_match_emission_writes_no_reclaimed_occurr
         .await
         .expect("reclaim at the widest cutoff");
     assert_eq!(
-        (
-            pass.reclaimed_occurrence_count,
-            pass.compacted_tombstone_count
-        ),
-        (1, 0),
+        pass.reclaimed_occurrence_count, 1,
         "the widest cutoff reclaimed the occurrence and kept every tombstone"
     );
     assert_eq!(
@@ -386,18 +380,16 @@ pub(super) async fn a_redelivered_audit_emission_writes_no_pruned_occurrence_bac
     assert!(held(&handles).await.occurrences.is_empty());
 
     assert_redelivery_writes_nothing(&handles, &request, "audit").await;
-    assert_the_widest_cutoff_compacts_nothing(&handles.triggers, "audit").await;
+    assert_the_widest_cutoff_reclaims_nothing(&handles.triggers, "audit").await;
     assert_redelivery_writes_nothing(&handles, &request, "audit, after a pass").await;
 }
 
-/// A tombstone lasts the redelivery horizon whatever cutoff the reclaim pass
-/// names, and a cutoff can only keep it longer. `make` opens a trigger store
-/// on the clock it is given.
+/// Even decades past the former expiry, every cutoff retains the fence.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn a_tombstone_outlives_the_redelivery_horizon_whatever_the_cutoff<F, Fut>(make: F)
+pub(super) async fn tombstones_survive_every_reclaim<F, Fut>(make: F)
 where
     F: Fn(Arc<dyn crate::Clock>) -> Fut,
     Fut: Future<Output = Arc<dyn TriggerStore>>,
@@ -407,88 +399,221 @@ where
     let triggers = make(Arc::clone(&clock) as Arc<dyn crate::Clock>).await;
     let request = crate::TriggerOccurrenceRequest::new(
         SOURCE_TYPE,
-        "redelivery-horizon-source",
+        "retained-source",
         serde_json::json!({ "button": "Blue" }),
-        "redelivery-horizon-occurrence",
+        "retained-occurrence",
     );
-    let passes = |cutoff_epoch_ms: u64| {
-        let triggers = Arc::clone(&triggers);
-        async move {
-            let pass = triggers
-                .reclaim_trigger_occurrences(cutoff_epoch_ms)
+    triggers
+        .ingest_occurrence(request.clone())
+        .await
+        .expect("ingest first occurrence");
+    assert_eq!(
+        triggers
+            .reclaim_trigger_occurrences(u64::MAX)
+            .await
+            .expect("reclaim occurrence")
+            .reclaimed_occurrence_count,
+        1
+    );
+    for advance in [
+        0,
+        7 * 24 * 60 * 60 * 1000 + 1,
+        100 * 365 * 24 * 60 * 60 * 1000,
+    ] {
+        clock.advance(advance);
+        for cutoff in [0, RECLAIMED_AT_MS, clock.timestamp_ms(), u64::MAX] {
+            assert_eq!(
+                triggers
+                    .reclaim_trigger_occurrences(cutoff)
+                    .await
+                    .expect("reclaim at every age and cutoff")
+                    .reclaimed_occurrence_count,
+                0
+            );
+            let error = triggers
+                .ingest_occurrence(request.clone())
                 .await
-                .expect("run the reclaim pass");
-            (
-                pass.reclaimed_occurrence_count,
-                pass.compacted_tombstone_count,
-            )
-        }
-    };
-    let assert_refused = |case: &'static str| {
-        let triggers = Arc::clone(&triggers);
-        let request = request.clone();
-        async move {
-            match triggers.ingest_occurrence(request).await {
-                Err(error) => assert!(
-                    crate::is_trigger_occurrence_reclaimed(&error),
-                    "{case}: the redelivery is refused as reclaimed, got {error:?}"
-                ),
-                Ok(receipt) => panic!("{case}: the redelivery was ingested again: {receipt:?}"),
-            }
+                .expect_err("every reclaim retains the redelivery fence");
+            assert!(
+                crate::is_trigger_occurrence_reclaimed(&error),
+                "typed refusal at age/cutoff {advance}/{cutoff}: {error:?}"
+            );
             assert!(
                 triggers
                     .list_occurrences(crate::TriggerOccurrenceFilter::default())
                     .await
                     .expect("list occurrences")
-                    .is_empty(),
-                "{case}: the redelivery wrote the occurrence back"
+                    .is_empty()
+            );
+            assert!(
+                triggers
+                    .list_deliveries()
+                    .await
+                    .expect("list deliveries")
+                    .is_empty()
             );
         }
-    };
+    }
+}
 
-    triggers
-        .ingest_occurrence(request.clone())
-        .await
-        .expect("the first delivery records the occurrence");
-    assert_eq!(
-        passes(u64::MAX).await,
-        (1, 0),
-        "the pass that reclaims keeps the tombstone it writes"
-    );
-    assert_refused("at the reclaim").await;
-
-    // The horizon's last instant: the tombstone is exactly as old as the
-    // horizon, and the widest cutoff still leaves it.
-    clock.advance(crate::TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS);
-    assert_eq!(passes(u64::MAX).await, (0, 0), "inside the horizon");
-    assert_refused("at the horizon's last instant").await;
-
-    // Past the horizon a cutoff still defers: one at the tombstone's own
-    // instant keeps it.
-    clock.advance(1);
-    assert_eq!(
-        passes(RECLAIMED_AT_MS).await,
-        (0, 0),
-        "a cutoff keeps a tombstone longer than the horizon"
-    );
-    assert_refused("past the horizon, under an earlier cutoff").await;
-
-    // Past both, the pass compacts it, and the identity is a new emission.
-    assert_eq!(
-        passes(u64::MAX).await,
-        (0, 1),
-        "past the horizon and the cutoff"
-    );
-    triggers
-        .ingest_occurrence(request)
-        .await
-        .expect("an emission past the horizon records a new occurrence");
+/// Forgetting is an exclusive cutoff on the tombstone's write time, not the
+/// occurrence's ingest time. Rows at the cutoff survive and counts are exact.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn forgetting_selects_exactly_the_tombstones_written_before_the_cutoff<F, Fut>(
+    make: F,
+) where
+    F: Fn(Arc<dyn crate::Clock>) -> Fut,
+    Fut: Future<Output = Arc<dyn TriggerStore>>,
+{
+    const INGESTED_AT_MS: u64 = 4_000_000_000_000;
+    let clock = Arc::new(crate::testing::TestClock::new(INGESTED_AT_MS));
+    let triggers = make(Arc::clone(&clock) as Arc<dyn crate::Clock>).await;
+    let requests = ["older-one", "older-two", "at-cutoff"].map(|key| {
+        crate::TriggerOccurrenceRequest::new(
+            SOURCE_TYPE,
+            "forget-source",
+            serde_json::json!({ "button": "Blue" }),
+            key,
+        )
+    });
+    for request in &requests[..2] {
+        triggers
+            .ingest_occurrence(request.clone())
+            .await
+            .expect("ingest older occurrence");
+    }
+    clock.advance(10);
     assert_eq!(
         triggers
-            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .reclaim_trigger_occurrences(u64::MAX)
             .await
-            .expect("list occurrences")
-            .len(),
+            .expect("write older tombstones")
+            .reclaimed_occurrence_count,
+        2
+    );
+    triggers
+        .ingest_occurrence(requests[2].clone())
+        .await
+        .expect("ingest newer occurrence");
+    clock.advance(10);
+    assert_eq!(
+        triggers
+            .reclaim_trigger_occurrences(u64::MAX)
+            .await
+            .expect("write newer tombstone")
+            .reclaimed_occurrence_count,
         1
     );
+    assert_eq!(
+        triggers
+            .forget_trigger_tombstones(0)
+            .await
+            .expect("empty cutoff"),
+        0
+    );
+    assert_eq!(
+        triggers
+            .forget_trigger_tombstones(INGESTED_AT_MS + 10)
+            .await
+            .expect("exclusive older write time"),
+        0
+    );
+    assert_eq!(
+        triggers
+            .forget_trigger_tombstones(INGESTED_AT_MS + 20)
+            .await
+            .expect("forget exactly older writes"),
+        2
+    );
+    assert_eq!(
+        triggers
+            .forget_trigger_tombstones(INGESTED_AT_MS + 20)
+            .await
+            .expect("repeat forget"),
+        0
+    );
+    for request in &requests[..2] {
+        triggers
+            .ingest_occurrence(request.clone())
+            .await
+            .expect("forgotten identities ingest again");
+    }
+    let error = triggers
+        .ingest_occurrence(requests[2].clone())
+        .await
+        .expect_err("the tombstone at the cutoff survives");
+    assert!(
+        crate::is_trigger_occurrence_reclaimed(&error),
+        "typed retained refusal: {error:?}"
+    );
+    assert_eq!(
+        triggers
+            .forget_trigger_tombstones(u64::MAX)
+            .await
+            .expect("forget remaining tombstone"),
+        1
+    );
+    let max_clock_ms = chrono::DateTime::<chrono::Utc>::MAX_UTC.timestamp_millis() as u64;
+    clock.set(max_clock_ms);
+    assert_eq!(
+        triggers
+            .reclaim_trigger_occurrences(u64::MAX)
+            .await
+            .expect("write at greatest clock timestamp")
+            .reclaimed_occurrence_count,
+        2
+    );
+    assert_eq!(
+        triggers
+            .forget_trigger_tombstones(max_clock_ms)
+            .await
+            .expect("exclusive greatest clock timestamp"),
+        0
+    );
+    assert_eq!(
+        triggers
+            .forget_trigger_tombstones(u64::MAX)
+            .await
+            .expect("forget greatest clock timestamp"),
+        2
+    );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn a_forgotten_redelivery_starts_again_while_a_retained_one_is_refused(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    let forgotten = reclaimed_matched_occurrence(&handles, "forgotten-matched-occurrence").await;
+    assert_redelivery_writes_nothing(&handles, &forgotten, "before forget").await;
+    assert_eq!(
+        handles
+            .triggers
+            .forget_trigger_tombstones(u64::MAX)
+            .await
+            .expect("host forgets first occurrence"),
+        1
+    );
+    let retained = reclaimed_matched_occurrence(&handles, "retained-matched-occurrence").await;
+    assert_redelivery_writes_nothing(&handles, &retained, "retained tombstone").await;
+    let before = held(&handles).await;
+    let report = deliver(&handles, &forgotten)
+        .await
+        .expect("forgotten redelivery emits again");
+    assert_eq!(report.deliveries.len(), 1);
+    assert!(
+        report.deliveries[0].process_id.is_some(),
+        "the forgotten redelivery starts a process"
+    );
+    let after = held(&handles).await;
+    assert_eq!(after.processes, before.processes + 1);
+    assert_eq!(after.occurrences.len(), before.occurrences.len() + 1);
+    assert_eq!(after.deliveries.len(), before.deliveries.len() + 1);
+    assert_redelivery_writes_nothing(&handles, &retained, "retained after forgotten redelivery")
+        .await;
 }

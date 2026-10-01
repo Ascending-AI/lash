@@ -1728,12 +1728,6 @@ pub struct TriggerOccurrenceReclamationReport {
     /// them; a fresh pass must re-inspect the scope before reporting witnessed
     /// emptiness.
     pub reinspection_deferred_count: usize,
-    /// Tombstones of reclaimed occurrences this pass compacted: those written
-    /// before the cutoff and older than
-    /// [`crate::TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS`] (FIG-4513, FIG-4573). An
-    /// ingest that presents a compacted identity records a new occurrence.
-    #[serde(default)]
-    pub compacted_tombstone_count: usize,
 }
 
 impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
@@ -1747,7 +1741,7 @@ impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
             || self.reinspection_deferred_count > 0
         {
             crate::store::MaintenanceSweep::Incomplete
-        } else if self.reclaimed_occurrence_count > 0 || self.compacted_tombstone_count > 0 {
+        } else if self.reclaimed_occurrence_count > 0 {
             crate::store::MaintenanceSweep::Swept
         } else {
             crate::store::MaintenanceSweep::NothingToDo
@@ -1840,14 +1834,14 @@ pub trait TriggerStore: Send + Sync {
     /// the occurrence and reservations already held under its idempotency
     /// key.
     ///
-    /// An identity retention has reclaimed is never written back
-    /// (FIG-4513). Every delete of an occurrence leaves a tombstone under
-    /// its id in the same transaction, and an ingest that finds the
+    /// An identity retention has reclaimed is never written back while its
+    /// tombstone remains (FIG-4513, FIG-4610). Every occurrence delete leaves
+    /// a tombstone under its id in the same transaction. An ingest that finds the
     /// tombstone writes nothing and refuses with
     /// [`trigger_occurrence_reclaimed`](crate::trigger_occurrence_reclaimed):
     /// it is a redelivery of an emission that already ran, on a host with no
-    /// journal to answer it from. The tombstone lasts its redelivery horizon,
-    /// and then until [`Self::reclaim_trigger_occurrences`] compacts it.
+    /// journal to answer it from. The tombstone remains until the host
+    /// explicitly deletes it with [`Self::forget_trigger_tombstones`].
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
@@ -1934,14 +1928,28 @@ pub trait TriggerStore: Send + Sync {
     /// The cutoff only defers eligibility. The complete scope is witnessed
     /// before deletion; later failure returns the partial report accumulated.
     ///
-    /// The pass then compacts every reclaimed occurrence's tombstone written
-    /// before [`crate::trigger_occurrence_tombstone_compaction_bound`], whichever
-    /// delete wrote it: no cutoff compacts one a redelivery can still present.
-    /// An ingest that presents a compacted identity records a new occurrence.
+    /// Every occurrence delete writes its tombstone on the store's clock.
+    /// The pass never deletes a tombstone, whatever the cutoff, including
+    /// `u64::MAX`. Only [`Self::forget_trigger_tombstones`] deletes them.
     async fn reclaim_trigger_occurrences(
         &self,
         cutoff_epoch_ms: u64,
     ) -> TriggerOccurrenceReclamationResult;
+
+    /// Delete exactly the occurrence tombstones written strictly before
+    /// `written_before_epoch_ms` on this store's clock, returning the count.
+    ///
+    /// The host vouches that its trigger source will no longer redeliver the
+    /// selected occurrences. A later redelivery of a forgotten identity runs
+    /// as a new occurrence. Tombstones are never deleted automatically.
+    ///
+    /// The deletion is one fenced transaction. A failure rolls it back and
+    /// returns the typed store error, including writer-fence and contention
+    /// causes.
+    async fn forget_trigger_tombstones(
+        &self,
+        written_before_epoch_ms: u64,
+    ) -> Result<usize, crate::StoreError>;
 
     /// Low-level primitive for dropping host- and platform-scoped mutation
     /// idempotency receipts older than an explicit cutoff. Session-scoped
@@ -1964,6 +1972,5 @@ pub trait TriggerStore: Send + Sync {
     -> Result<usize, PluginError>;
 }
 
-pub(crate) mod redelivery_horizon;
 mod target_admission;
 pub use target_admission::admit_trigger_registration_target;

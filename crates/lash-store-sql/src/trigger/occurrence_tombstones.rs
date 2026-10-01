@@ -3,8 +3,9 @@
 //! again writes nothing back.
 //!
 //! The trigger store owns the row. It is written in the transaction that
-//! deletes its occurrence, and the host's occurrence reclaim pass compacts it
-//! once it is older than that pass's cutoff and than the redelivery horizon.
+//! deletes its occurrence. Reclaim never deletes a tombstone. The host
+//! explicitly forgets rows written before a store-clock cutoff after vouching
+//! that its source will no longer redeliver those occurrences.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "trigger_occurrence_tombstones";
@@ -21,9 +22,9 @@ crate::statements! {
              FROM trigger_occurrence_tombstones
              WHERE occurrence_id = ?1";
 
-        /// Compact every tombstone written before `?1`, the pass's
-        /// compaction bound.
-        compact = "DELETE FROM trigger_occurrence_tombstones
-             WHERE reclaimed_at_ms < ?1";
+        /// Forget tombstones written strictly before `?1`. `?2` states that
+        /// the unsigned host cutoff exceeds SQL's signed timestamp range.
+        forget_written_before = "DELETE FROM trigger_occurrence_tombstones
+             WHERE reclaimed_at_ms < ?1 OR ?2";
     }
 }

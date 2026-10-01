@@ -524,9 +524,6 @@ pub use attachments::{
     EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_core_execution::turn_outcome_from_tool_control;
-pub use lash_core_execution::{
-    TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS, trigger_occurrence_tombstone_compaction_bound,
-};
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,

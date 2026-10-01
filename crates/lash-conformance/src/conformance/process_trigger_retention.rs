@@ -129,15 +129,34 @@ where
     redelivery::a_redelivered_audit_emission_writes_no_pruned_occurrence_back(make().await).await;
 }
 
-/// A reclaimed occurrence's tombstone outlives its redelivery horizon
-/// whatever cutoff the reclaim pass names, `u64::MAX` included (FIG-4573).
+/// A reclaimed occurrence's tombstone survives every reclaim cutoff,
+/// `u64::MAX` included, at any age (FIG-4610).
 /// `make` opens a trigger store on the clock it is given.
-pub async fn trigger_occurrence_tombstone_outlives_redelivery_horizon<F, Fut>(make: F)
+pub async fn trigger_occurrence_tombstones_survive_every_reclaim<F, Fut>(make: F)
 where
     F: Fn(Arc<dyn crate::Clock>) -> Fut,
     Fut: Future<Output = Arc<dyn TriggerStore>>,
 {
-    redelivery::a_tombstone_outlives_the_redelivery_horizon_whatever_the_cutoff(make).await;
+    redelivery::tombstones_survive_every_reclaim(make).await;
+}
+
+/// Forget deletes exactly the tombstones written before the host's cutoff.
+pub async fn trigger_tombstone_forget_has_an_exclusive_write_time_cutoff<F, Fut>(make: F)
+where
+    F: Fn(Arc<dyn crate::Clock>) -> Fut,
+    Fut: Future<Output = Arc<dyn TriggerStore>>,
+{
+    redelivery::forgetting_selects_exactly_the_tombstones_written_before_the_cutoff(make).await;
+}
+
+/// A forgotten identity starts again; a retained identity still refuses.
+pub async fn trigger_redelivery_after_forget_starts_again<F, Fut>(make: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ProcessTriggerRetentionHandles>,
+{
+    redelivery::a_forgotten_redelivery_starts_again_while_a_retained_one_is_refused(make().await)
+        .await;
 }
 
 /// A reserved Engine target with a non-object payload cannot start. Its
@@ -1855,6 +1874,15 @@ impl TriggerStore for BindCrashesOnce {
     ) -> crate::TriggerOccurrenceReclamationResult {
         self.inner
             .reclaim_trigger_occurrences(cutoff_epoch_ms)
+            .await
+    }
+
+    async fn forget_trigger_tombstones(
+        &self,
+        written_before_epoch_ms: u64,
+    ) -> std::result::Result<usize, crate::StoreError> {
+        self.inner
+            .forget_trigger_tombstones(written_before_epoch_ms)
             .await
     }
 

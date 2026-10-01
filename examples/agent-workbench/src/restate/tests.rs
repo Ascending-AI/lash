@@ -326,6 +326,13 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
         self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
     }
 
+    async fn forget_trigger_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, lash::persistence::StoreError> {
+        self.inner.forget_trigger_tombstones(cutoff_epoch_ms).await
+    }
+
     async fn prune_non_fired_occurrences(
         &self,
         cutoff_epoch_ms: u64,

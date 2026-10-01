@@ -1066,7 +1066,6 @@ impl TriggerStore for PostgresTriggerStore {
         cutoff_epoch_ms: u64,
     ) -> lash_core_execution::TriggerOccurrenceReclamationResult {
         let sql = trigger_sql();
-        let requested_cutoff_epoch_ms = cutoff_epoch_ms;
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         let rows = sqlx::query(sql.occurrence_postgres.select_reclamation_scope.sql())
             .bind(cutoff_epoch_ms)
@@ -1118,34 +1117,28 @@ impl TriggerStore for PostgresTriggerStore {
                 report.reclaimed_occurrence_count += deleted;
             }
         }
-        // No cutoff reaches a tombstone inside the redelivery horizon, the
-        // ones this pass wrote included.
-        let compact_before_ms = i64::try_from(
-            lash_core_execution::trigger_occurrence_tombstone_compaction_bound(
-                requested_cutoff_epoch_ms,
-                self.clock.timestamp_ms(),
-            ),
-        )
-        .unwrap_or(i64::MAX);
-        report.compacted_tombstone_count =
-            crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
-                Box::pin(async move {
-                    sqlx::query(sql.tombstone.compact.sql())
-                        .bind(compact_before_ms)
-                        .execute(tx.as_mut())
-                        .await
-                        .map_err(crate::store_sqlx_error)
-                })
-            })
-            .await
-            .map_err(|error| {
-                lash_core_execution::MaintenanceFailure::failed(
-                    Box::new(crate::plugin_store_error(error)),
-                    report.clone(),
-                )
-            })?
-            .rows_affected() as usize;
         Ok(report)
+    }
+
+    async fn forget_trigger_tombstones(
+        &self,
+        written_before_epoch_ms: u64,
+    ) -> Result<usize, StoreError> {
+        let signed_cutoff = i64::try_from(written_before_epoch_ms);
+        let beyond_sql_range = signed_cutoff.is_err();
+        let written_before_ms = signed_cutoff.unwrap_or(i64::MAX);
+        let forgotten = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(trigger_sql().tombstone.forget_written_before.sql())
+                    .bind(written_before_ms)
+                    .bind(beyond_sql_range)
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(crate::store_sqlx_error)
+            })
+        })
+        .await?;
+        Ok(forgotten.rows_affected() as usize)
     }
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {

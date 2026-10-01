@@ -1727,10 +1727,10 @@ lash_conformance::process_trigger_retention_tests!({
     })
 });
 
-lash_conformance::trigger_occurrence_tombstone_horizon_tests!({
+lash_conformance::trigger_occurrence_tombstone_retention_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(
-            "skipping Postgres trigger-occurrence tombstone horizon law: LASH_POSTGRES_DATABASE_URL is not set"
+            "skipping Postgres trigger-occurrence tombstone retention laws: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };

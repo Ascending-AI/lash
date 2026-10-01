@@ -64,4 +64,10 @@ fn process_change_subscription_signature_is_public(
     hub.subscribe(process_id)
 }
 
+async fn trigger_retention_signatures_are_public(processes: &Processes) {
+    let _: lash::triggers::TriggerOccurrenceReclamationResult =
+        processes.reclaim_trigger_occurrences(u64::MAX).await;
+    let _: lash::Result<usize> = processes.forget_trigger_tombstones(u64::MAX).await;
+}
+
 fn main() {}

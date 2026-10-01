@@ -1275,6 +1275,15 @@ impl lash_core::TriggerStore for RecordingTriggerStore {
             .await
     }
 
+    async fn forget_trigger_tombstones(
+        &self,
+        written_before_epoch_ms: u64,
+    ) -> std::result::Result<usize, lash_core::StoreError> {
+        self.inner
+            .forget_trigger_tombstones(written_before_epoch_ms)
+            .await
+    }
+
     async fn prune_mutation_receipts(
         &self,
         cutoff_epoch_ms: u64,

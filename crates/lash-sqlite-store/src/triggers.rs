@@ -12,7 +12,6 @@
 //! reached through an `ATTACH`ed name; this one does not.
 
 use super::*;
-use lash_core_execution::trigger_occurrence_tombstone_compaction_bound as compaction_bound;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_store_sql::trigger::deliveries::DeliveryStatements;
@@ -1312,7 +1311,6 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         &self,
         cutoff_epoch_ms: u64,
     ) -> lash_core_execution::TriggerOccurrenceReclamationResult {
-        let compact_before_ms = compaction_bound(cutoff_epoch_ms, self.clock.timestamp_ms());
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         // The scope read stays a single autocommit statement; each candidate's
         // delete is its own gated write transaction, so a mid-loop failure
@@ -1402,23 +1400,26 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                 report.reclaimed_occurrence_count += deleted;
             }
         }
-        report.compacted_tombstone_count = self
-            .conn
+        Ok(report)
+    }
+
+    async fn forget_trigger_tombstones(
+        &self,
+        written_before_epoch_ms: u64,
+    ) -> Result<usize, lash_core_execution::StoreError> {
+        let signed_cutoff = i64::try_from(written_before_epoch_ms);
+        let beyond_sql_range = signed_cutoff.is_err();
+        let written_before_ms = signed_cutoff.unwrap_or(i64::MAX);
+        self.conn
             .write(move |tx| {
                 crate::conn::cached_execute(
                     tx,
-                    trigger_sql().tombstone.compact.sql(),
-                    params![i64::try_from(compact_before_ms).unwrap_or(i64::MAX)],
+                    trigger_sql().tombstone.forget_written_before.sql(),
+                    params![written_before_ms, beyond_sql_range],
                 )
             })
             .await
-            .map_err(|error| {
-                lash_core_execution::MaintenanceFailure::failed(
-                    Box::new(process_sqlite_error(error)),
-                    report.clone(),
-                )
-            })?;
-        Ok(report)
+            .map_err(crate::sqlite_error)
     }
 
     async fn prune_mutation_receipts(

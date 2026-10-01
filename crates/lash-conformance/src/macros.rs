@@ -968,6 +968,7 @@ macro_rules! process_trigger_retention_tests {
             (trigger_delivery_start_admission, "trigger-delivery-start-admission"),
             (trigger_delivery_refusal, "trigger-delivery-refusal"),
             (trigger_occurrence_redelivery_after_reclaim, "trigger-occurrence-redelivery-after-reclaim"),
+            (trigger_redelivery_after_forget_starts_again, "trigger-redelivery-after-forget"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -982,13 +983,14 @@ macro_rules! process_trigger_retention_tests {
     };
 }
 
-/// Register the trigger-occurrence tombstone horizon law. The fixture yields
-/// a guard and a constructor from a clock to a trigger store on that clock.
+/// Register the trigger-occurrence tombstone retention and forget laws. The
+/// fixture yields a guard and a constructor from a clock to a trigger store.
 #[macro_export]
-macro_rules! trigger_occurrence_tombstone_horizon_tests {
+macro_rules! trigger_occurrence_tombstone_retention_tests {
     ($fixture:block) => {
-        $crate::trigger_occurrence_tombstone_horizon_tests!(@catalogue $fixture; [
-            (trigger_occurrence_tombstone_outlives_redelivery_horizon, "trigger-occurrence-tombstone-horizon"),
+        $crate::trigger_occurrence_tombstone_retention_tests!(@catalogue $fixture; [
+            (trigger_occurrence_tombstones_survive_every_reclaim, "trigger-occurrence-tombstone-retention"),
+            (trigger_tombstone_forget_has_an_exclusive_write_time_cutoff, "trigger-tombstone-forget-cutoff"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

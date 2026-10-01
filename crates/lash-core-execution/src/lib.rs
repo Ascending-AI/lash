@@ -577,9 +577,6 @@ pub use tool_result::{
     ToolOutcome,
 };
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
-pub use triggers::redelivery_horizon::{
-    TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS, trigger_occurrence_tombstone_compaction_bound,
-};
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryAdmission, TriggerDeliveryReservation,
     TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog,

@@ -177,6 +177,7 @@ const STORE_WRITES: &[&str] = &[
     "reconcile_trigger_retention",
     "delete_delivery_retention_candidates",
     "reclaim_trigger_occurrences",
+    "forget_trigger_tombstones",
     "prune_mutation_receipts",
     "prune_non_fired_occurrences",
 ];
