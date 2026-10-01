@@ -49,9 +49,7 @@ pub enum CoreConfigRefusal {
         provider_id: String,
         model: String,
     },
-    /// A charge-safety policy that accepts more unsafe retries than Lash
-    /// ever buys: recorded, it would claim retries the provider handle
-    /// clamps away.
+    /// A charge-safety policy that accepts more unsafe retries than Lash admits.
     UnsafeRetriesAboveCeiling { requested: u8, ceiling: u8 },
 }
 
@@ -72,6 +70,27 @@ impl std::fmt::Display for CoreConfigRefusal {
                 "charge safety accepts {requested} unsafe retries, above the ceiling of {ceiling}"
             ),
         }
+    }
+}
+
+impl std::error::Error for CoreConfigRefusal {}
+
+impl CoreConfigOwner {
+    /// Validate the charge safety stated at creation or by `SetChargeSafety`.
+    pub fn validate_charge_safety(
+        policy: &crate::ChargeSafetyPolicy,
+    ) -> Result<(), CoreConfigRefusal> {
+        if let crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries, ..
+        } = policy
+            && *max_unsafe_retries > crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES
+        {
+            return Err(CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+                requested: *max_unsafe_retries,
+                ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -401,16 +420,7 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
         })
     })?;
     reg.command::<SetChargeSafety>(|core, command| {
-        if let crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-            max_unsafe_retries, ..
-        } = command.charge_safety
-            && max_unsafe_retries > crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES
-        {
-            return Err(CoreConfigRefusal::UnsafeRetriesAboveCeiling {
-                requested: max_unsafe_retries,
-                ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
-            });
-        }
+        CoreConfigOwner::validate_charge_safety(&command.charge_safety)?;
         changed(CoreConfig {
             charge_safety: command.charge_safety,
             ..core.clone()

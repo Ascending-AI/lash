@@ -39,6 +39,13 @@ replays and a recovered follow-on run under that snapshot, so a later
 configuration change reaches the next root, never a running or replayed one.
 An urgent stop is a recorded cancellation, not a configuration change.
 
+Remote process environments carry the recorded no-progress budget and charge
+safety alongside the turn budget and autonomy. A peer requires both fields;
+it never substitutes its defaults. Session creation and `SetChargeSafety`
+share the ceiling check and refuse `UnsafeRetriesAboveCeiling` before
+publishing a configuration. The provider handle applies the admitted retry
+limit without a separate clamp (FIG-4480).
+
 The opener owns only the session binding: the store and the worker wiring
 it runs on. An open, including the engine's own reopen, overrides no recorded
 fact. A session-turn process's worker names the configuration that process's

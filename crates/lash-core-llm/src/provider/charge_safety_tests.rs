@@ -84,7 +84,7 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
 }
 
 #[tokio::test]
-async fn configured_unsafe_retry_limit_is_hard_clamped_to_five() {
+async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceiling() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let mut handle = paid_partial_handle(Arc::clone(&attempts), 100, 10, None);
 
@@ -92,23 +92,23 @@ async fn configured_unsafe_retry_limit_is_hard_clamped_to_five() {
         .complete_with_charge_safety(
             empty_request(),
             crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-                max_unsafe_retries: 200,
+                max_unsafe_retries: 6,
                 max_duplicate_cost_tokens: None,
             },
             <dyn DispatchAdmission>::host_owned(),
         )
         .await
-        .expect_err("the sixth unsafe retry must be denied by the hard clamp");
+        .expect_err("the seventh unsafe retry exceeds the supplied policy");
 
-    assert_eq!(attempts.load(Ordering::SeqCst), 6);
+    assert_eq!(attempts.load(Ordering::SeqCst), 7);
     assert_eq!(
-        failure.call_record.attempts[5]
+        failure.call_record.attempts[6]
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.charge_safety.as_ref()),
         Some(&crate::ChargeSafetyDecision::Denied {
             tokens_at_stake: 10,
-            attempt_number: 6,
+            attempt_number: 7,
             reason: crate::ChargeSafetyDenialReason::UnsafeRetryLimitExceeded,
         })
     );

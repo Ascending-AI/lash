@@ -382,15 +382,8 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             session_id,
             autonomous,
             turn_budget,
-            // The no-progress budget is absent from the remote process wire:
-            // its default is bounded, so a peer that never hears the value
-            // resolves to the bound. Omission can therefore only fail safe —
-            // it can drop an explicit `Unbounded` opt-out, never an explicit
-            // bound.
-            no_progress_budget: _,
-            // Charge appetite is likewise absent: a remote peer resolves the
-            // charge-safe default.
-            charge_safety: _,
+            no_progress_budget,
+            charge_safety,
             prompt,
             generation,
         } = value;
@@ -400,6 +393,8 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             session_id,
             autonomous,
             turn_budget: turn_budget.into(),
+            no_progress_budget: no_progress_budget.into(),
+            charge_safety: charge_safety.into(),
             prompt: prompt.into(),
             generation: generation.into(),
         }
@@ -424,6 +419,54 @@ impl From<RemoteTurnBudget> for lash_core::TurnBudget {
     }
 }
 
+impl From<lash_core::NoProgressBudget> for RemoteNoProgressBudget {
+    fn from(value: lash_core::NoProgressBudget) -> Self {
+        match value {
+            lash_core::NoProgressBudget::Bounded(limit) => Self::Bounded(limit),
+            lash_core::NoProgressBudget::Unbounded => Self::Unbounded,
+        }
+    }
+}
+
+impl From<RemoteNoProgressBudget> for lash_core::NoProgressBudget {
+    fn from(value: RemoteNoProgressBudget) -> Self {
+        match value {
+            RemoteNoProgressBudget::Bounded(limit) => Self::Bounded(limit),
+            RemoteNoProgressBudget::Unbounded => Self::Unbounded,
+        }
+    }
+}
+
+impl From<lash_core::ChargeSafetyPolicy> for RemoteChargeSafetyPolicy {
+    fn from(value: lash_core::ChargeSafetyPolicy) -> Self {
+        match value {
+            lash_core::ChargeSafetyPolicy::RequireGuarantee => Self::RequireGuarantee,
+            lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
+                max_unsafe_retries,
+                max_duplicate_cost_tokens,
+            } => Self::AcceptDuplicateBilling {
+                max_unsafe_retries,
+                max_duplicate_cost_tokens,
+            },
+        }
+    }
+}
+
+impl From<RemoteChargeSafetyPolicy> for lash_core::ChargeSafetyPolicy {
+    fn from(value: RemoteChargeSafetyPolicy) -> Self {
+        match value {
+            RemoteChargeSafetyPolicy::RequireGuarantee => Self::RequireGuarantee,
+            RemoteChargeSafetyPolicy::AcceptDuplicateBilling {
+                max_unsafe_retries,
+                max_duplicate_cost_tokens,
+            } => Self::AcceptDuplicateBilling {
+                max_unsafe_retries,
+                max_duplicate_cost_tokens,
+            },
+        }
+    }
+}
+
 impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
     type Error = RemoteProtocolError;
 
@@ -434,6 +477,8 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             session_id,
             autonomous,
             turn_budget,
+            no_progress_budget,
+            charge_safety,
             prompt,
             generation,
         } = value;
@@ -443,8 +488,8 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             session_id,
             autonomous,
             turn_budget: turn_budget.into(),
-            no_progress_budget: lash_core::NoProgressBudget::default(),
-            charge_safety: lash_core::ChargeSafetyPolicy::default(),
+            no_progress_budget: no_progress_budget.into(),
+            charge_safety: charge_safety.into(),
             prompt: prompt.into(),
             generation: generation.try_into()?,
         })

@@ -23,6 +23,9 @@ mod observation_projection;
 #[path = "core_conversions_tests/registration_parity.rs"]
 mod registration_parity;
 
+#[path = "core_conversions_tests/recorded_execution_controls.rs"]
+mod recorded_execution_controls;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]

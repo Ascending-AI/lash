@@ -1,7 +1,8 @@
 use lash_remote_protocol::{
     REMOTE_PROTOCOL_VERSION, RemoteConfigCommandCatalog, RemoteConfigTransactionOutcome,
-    RemoteConfigTransactionRequest, RemoteProcessEventsRequest, RemoteProcessEventsResponse,
-    RemoteProcessObservationItem, RemoteProcessObservationRequest, RemoteSessionObservationEvent,
+    RemoteConfigTransactionRequest, RemotePersistProcessEnvRequest, RemoteProcessEventsRequest,
+    RemoteProcessEventsResponse, RemoteProcessObservationItem, RemoteProcessObservationRequest,
+    RemoteSessionObservationEvent,
 };
 use lash_trace::TRACE_SCHEMA_VERSION;
 use schemars::JsonSchema;
@@ -60,8 +61,9 @@ fn document<T: JsonSchema>(shape: &'static str) -> Result<Document, String> {
     })
 }
 
-fn documents() -> Result<[Document; 8], String> {
+fn documents() -> Result<[Document; 9], String> {
     Ok([
+        document::<RemotePersistProcessEnvRequest>("remote-persist-process-env-request")?,
         document::<RemoteConfigTransactionRequest>("remote-config-transaction-request")?,
         document::<RemoteConfigTransactionOutcome>("remote-config-transaction-outcome")?,
         document::<RemoteConfigCommandCatalog>("remote-config-command-catalog")?,
@@ -85,6 +87,38 @@ fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn execution_policy_schema_requires_both_recorded_controls() {
+        use lash_remote_protocol::{RemoteProcessExecutionEnvSpec, RemoteTurnBudget};
+
+        let schema =
+            document::<RemotePersistProcessEnvRequest>("remote-persist-process-env-request")
+                .expect("environment schema generates")
+                .schema;
+        let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+        let request = RemotePersistProcessEnvRequest {
+            env_spec: RemoteProcessExecutionEnvSpec::new(RemoteTurnBudget::Unbounded),
+        };
+        let value = serde_json::to_value(request).expect("environment serializes");
+        assert!(validator.is_valid(&value));
+        for field in ["no_progress_budget", "charge_safety"] {
+            let mut incomplete = value.clone();
+            incomplete["env_spec"]["policy"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(!validator.is_valid(&incomplete), "schema requires {field}");
+            assert!(
+                serde_json::from_value::<RemotePersistProcessEnvRequest>(incomplete).is_err(),
+                "the peer decoder requires {field}"
+            );
+        }
+        let mut zero = value;
+        zero["env_spec"]["policy"]["no_progress_budget"] = json!({"bounded": 0});
+        assert!(!validator.is_valid(&zero));
+        assert!(serde_json::from_value::<RemotePersistProcessEnvRequest>(zero).is_err());
+    }
 
     #[test]
     fn published_integer_schemas_preserve_their_existing_validation_range() {

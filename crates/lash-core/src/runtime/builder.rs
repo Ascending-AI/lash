@@ -291,6 +291,11 @@ impl EmbeddedRuntimeBuilder {
 
     pub async fn build(self) -> Result<LashRuntime, SessionError> {
         let (mut state, created) = self.resolve_state().await?;
+        if created {
+            crate::CoreConfigOwner::validate_charge_safety(&state.policy.charge_safety)
+                .map_err(crate::SessionConfigRefusal::new)
+                .map_err(SessionError::SessionConfigRefused)?;
+        }
         let plugins = self.resolve_plugins(&state)?;
         if created {
             // A new session records what every installed owner resolves for

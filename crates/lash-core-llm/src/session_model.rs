@@ -23,21 +23,18 @@ pub enum ChargeSafetyPolicy {
     RequireGuarantee,
     /// Permit bounded duplicate billing when no provider guarantee exists.
     AcceptDuplicateBilling {
-        /// Maximum unsafe retries per logical LLM call. Lash hard-clamps this
-        /// value to [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`].
+        /// Maximum unsafe retries per logical LLM call. Session creation and
+        /// `SetChargeSafety` refuse values above [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`].
         max_unsafe_retries: u8,
         /// Skip the unsafe retry when provider-reported tokens already billed
         /// for the abandoned generation exceed this bound. When the provider
         /// reports no partial usage, Lash treats the tokens at stake as zero,
-        /// so this cost bound does not bind; the hard clamp of at most
-        /// [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`] unsafe retries still
-        /// applies.
+        /// so this cost bound does not bind; `max_unsafe_retries` still applies.
         max_duplicate_cost_tokens: Option<u64>,
     },
 }
 
 impl ChargeSafetyPolicy {
-    /// The most unsafe retries Lash buys for one logical LLM call, whatever
-    /// the policy states.
+    /// The most unsafe retries session configuration admits per logical LLM call.
     pub const MAX_UNSAFE_RETRIES: u8 = 5;
 }

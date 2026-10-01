@@ -252,6 +252,130 @@ fn charge_safety_above_the_ceiling() -> crate::config::SetChargeSafety {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_session() -> Result<()>
+{
+    const ID: &str = "creation-charge-safety-ceiling";
+    let calls = Arc::new(AtomicUsize::new(0));
+    let core = core_over(double_backend().await, looping_provider(&calls))?;
+    for requested in [crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1, u8::MAX] {
+        let error = core
+            .session(ID)
+            .create(crate::SessionCreation {
+                spec: crate::SessionSpec::default().charge_safety(
+                    crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+                        max_unsafe_retries: requested,
+                        max_duplicate_cost_tokens: Some(0),
+                    },
+                ),
+                ..Default::default()
+            })
+            .await
+            .err()
+            .expect("creation must refuse an over-ceiling charge safety");
+        let crate::EmbedError::Session(lash_core::SessionError::SessionConfigRefused(refusal)) =
+            error
+        else {
+            panic!("expected a typed config refusal, got {error:?}");
+        };
+        assert_eq!(
+            refusal.downcast_ref::<crate::config::CoreConfigRefusal>(),
+            Some(
+                &crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+                    requested,
+                    ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+                }
+            )
+        );
+        assert!(
+            lash_core::SessionCommitStore::load_session_head_meta(
+                core.store_factory.as_ref(),
+                &SessionId::from(ID),
+            )
+            .await?
+            .is_none()
+        );
+        let mut policy = core.policy.clone();
+        policy.charge_safety = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries: requested,
+            max_duplicate_cost_tokens: None,
+        };
+        let error = lash_core::runtime::EmbeddedRuntimeBuilder::new(
+            core.env.core.clone(),
+            crate::testing::runtime_lease_owner(),
+        )
+        .with_session_id(ID)
+        .with_policy(policy)
+        .build()
+        .await
+        .err()
+        .expect("direct runtime creation must refuse the same policy");
+        let lash_core::SessionError::SessionConfigRefused(refusal) = error else {
+            panic!("expected a typed core config refusal, got {error:?}");
+        };
+        assert_eq!(
+            refusal.downcast_ref::<crate::config::CoreConfigRefusal>(),
+            Some(
+                &crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+                    requested,
+                    ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+                }
+            )
+        );
+    }
+    core.session(ID)
+        .create(crate::SessionCreation {
+            spec: crate::SessionSpec::default().charge_safety(
+                crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+                    max_unsafe_retries: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+                    max_duplicate_cost_tokens: None,
+                },
+            ),
+            ..Default::default()
+        })
+        .await?;
+    assert_eq!(
+        recorded_config(&core, ID).await?.charge_safety,
+        crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+            max_duplicate_cost_tokens: None,
+        }
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let inherited = explicit_ephemeral_facets(LashCore::standard_builder(
+        double_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(looping_provider(&calls))
+    .session_spec(
+        crate::SessionSpec::default()
+            .turn_budget(crate::TurnBudget::Unbounded)
+            .charge_safety(charge_safety_above_the_ceiling().charge_safety),
+    )
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let error = inherited
+        .session(ID)
+        .create(crate::SessionCreation::default())
+        .await
+        .err()
+        .expect("creation must validate inherited defaults too");
+    let crate::EmbedError::Session(lash_core::SessionError::SessionConfigRefused(refusal)) = error
+    else {
+        panic!("expected a typed inherited config refusal, got {error:?}");
+    };
+    assert_eq!(
+        refusal.downcast_ref::<crate::config::CoreConfigRefusal>(),
+        Some(
+            &crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+                requested: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1,
+                ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+            }
+        )
+    );
+    Ok(())
+}
+
 /// A session created with the core's defaults, open on a core over the
 /// server double.
 async fn created_session(id: &str) -> Result<(LashCore, crate::LashSession)> {

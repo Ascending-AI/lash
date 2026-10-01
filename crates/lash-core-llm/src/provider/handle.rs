@@ -887,9 +887,7 @@ pub(super) fn charge_safety_decision(
             max_unsafe_retries,
             max_duplicate_cost_tokens,
         } => {
-            if attempt_number
-                > (*max_unsafe_retries).min(crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES)
-            {
+            if attempt_number > *max_unsafe_retries {
                 return denied(ChargeSafetyDenialReason::UnsafeRetryLimitExceeded);
             }
             if max_duplicate_cost_tokens.is_some_and(|maximum| tokens_at_stake > maximum) {

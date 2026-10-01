@@ -260,6 +260,10 @@ impl SessionBuilder {
     /// budget is refused with the store's typed
     /// [`CommitByteBudgetExceeded`](lash_core::StoreError::CommitByteBudgetExceeded),
     /// and nothing is written.
+    ///
+    /// Charge safety above [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`](crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES)
+    /// is refused before admission as [`CoreConfigRefusal::UnsafeRetriesAboveCeiling`](crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling)
+    /// inside [`SessionError::SessionConfigRefused`].
     pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
         let SessionCreation {
             spec,
@@ -267,6 +271,9 @@ impl SessionBuilder {
             plugin_options,
         } = creation;
         let mut policy = spec.resolve_against(&self.core.policy);
+        lash_core::CoreConfigOwner::validate_charge_safety(&policy.charge_safety)
+            .map_err(lash_core::SessionConfigRefusal::new)
+            .map_err(lash_core::SessionError::SessionConfigRefused)?;
         policy.session_id = Some(self.session_id.clone());
         let mut config = lash_core::PersistedSessionConfig::from(&policy);
         // Every plugin the core installs resolves its recorded namespace —
