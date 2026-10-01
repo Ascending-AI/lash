@@ -464,10 +464,8 @@ mod tests {
         )
         .with_session_id("child-session");
         child_request.subagent = Some(SubagentSessionContext {
-            parent_session_id: SessionId::from("labels"),
             capability: "researcher".to_string(),
             depth: 1,
-            max_depth: 4,
         });
         let cases = [
             (

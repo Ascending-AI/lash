@@ -29,22 +29,26 @@ impl lash_core::plugin::runtime_host::SessionStateService for NamedSnapshots {
     }
 }
 
-struct SourcedCapability(lash_core::SessionPluginSource);
+struct SourcedCapability(crate::ChildPluginSource);
 
 impl crate::Capability for SourcedCapability {
     fn name(&self) -> &str {
         "default"
     }
 
+    fn plugin_source(&self) -> crate::ChildPluginSource {
+        self.0
+    }
+
     fn build_session_request(
         &self,
         ctx: crate::SubagentSpawnContext<'_>,
     ) -> Result<lash_core::SessionCreateRequest, String> {
-        ctx.rlm_request(self.name(), &SessionSpec::inherit(), self.0)
+        ctx.rlm_request(self.name(), &SessionSpec::inherit())
     }
 }
 
-fn provider(source: lash_core::SessionPluginSource) -> RlmSubagentToolsProvider {
+fn provider(source: crate::ChildPluginSource) -> RlmSubagentToolsProvider {
     RlmSubagentToolsProvider {
         registry: Arc::new(CapabilityRegistry::new().with(Arc::new(SourcedCapability(source)))),
         session_spec: SessionSpec::inherit(),
@@ -72,7 +76,7 @@ fn process_owner() -> lash_core::RuntimeOwner {
 }
 
 async fn prepare(
-    source: lash_core::SessionPluginSource,
+    source: crate::ChildPluginSource,
     owner: lash_core::RuntimeOwner,
     originator: Option<lash_core::ProcessOriginator>,
     sessions: Arc<NamedSnapshots>,
@@ -107,7 +111,7 @@ fn refusal_code(outcome: ToolOutcome) -> String {
 async fn a_process_spawn_parents_under_its_originator_session() {
     let sessions = Arc::new(NamedSnapshots::default());
     let prepared = prepare(
-        lash_core::SessionPluginSource::CurrentHostFresh,
+        crate::ChildPluginSource::CurrentHostFresh,
         process_owner(),
         Some(lash_core::ProcessOriginator::Session {
             session_id: lash_core::SessionId::from("originator"),
@@ -142,7 +146,7 @@ async fn a_process_spawn_parents_under_its_originator_session() {
 async fn a_host_originated_process_spawn_is_refused() {
     let sessions = Arc::new(NamedSnapshots::default());
     let refused = prepare(
-        lash_core::SessionPluginSource::CurrentHostFresh,
+        crate::ChildPluginSource::CurrentHostFresh,
         process_owner(),
         Some(lash_core::ProcessOriginator::host()),
         Arc::clone(&sessions),
@@ -160,7 +164,7 @@ async fn a_host_originated_process_spawn_is_refused() {
 #[tokio::test]
 async fn a_parent_fork_spawn_inside_a_process_is_refused() {
     let refused = prepare(
-        lash_core::SessionPluginSource::ParentFork,
+        crate::ChildPluginSource::ParentFork,
         process_owner(),
         Some(lash_core::ProcessOriginator::Session {
             session_id: lash_core::SessionId::from("originator"),
@@ -178,7 +182,7 @@ async fn a_parent_fork_spawn_inside_a_process_is_refused() {
 async fn a_session_spawn_parents_under_its_own_session() {
     let sessions = Arc::new(NamedSnapshots::default());
     let prepared = prepare(
-        lash_core::SessionPluginSource::CurrentHostFresh,
+        crate::ChildPluginSource::CurrentHostFresh,
         lash_core::RuntimeOwner::Session(lash_core::SessionId::from("spawner")),
         None,
         Arc::clone(&sessions),

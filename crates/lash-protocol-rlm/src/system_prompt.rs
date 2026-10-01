@@ -110,7 +110,9 @@ pub(crate) fn execution_section(
 fn subagent_description(subagent: &lash_core::SubagentSessionContext) -> String {
     format!(
         "Subagent capability: {}. Depth: {}/{}.",
-        subagent.capability, subagent.depth, subagent.max_depth
+        subagent.capability,
+        subagent.depth,
+        lash_core::SubagentSessionContext::MAX_DEPTH
     )
 }
 

@@ -1734,7 +1734,7 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     let tier = lash_subagents::TierCapability::new(
         "inherited",
         None,
-        lash_subagents::TierPluginSource::ParentFork,
+        lash_subagents::ChildPluginSource::ParentFork,
     );
     let parent_snapshot = state.to_snapshot();
     let session_spec = lash_core::facade_support::SessionSpec::inherit();

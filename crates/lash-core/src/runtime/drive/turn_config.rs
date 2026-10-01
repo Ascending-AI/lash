@@ -423,10 +423,8 @@ mod tests {
             .with_hidden_tools(["hidden-by-root-view"])
             .expect("valid hidden tool");
         let subagent = crate::SubagentSessionContext {
-            parent_session_id: crate::SessionId::from("root-view-parent"),
             capability: "root-view-capability".to_string(),
             depth: 1,
-            max_depth: 3,
         };
         let mut view = crate::store::persisted_session_config_from_state(&runtime.state);
         assert_ne!(view.tool_access, tool_access);

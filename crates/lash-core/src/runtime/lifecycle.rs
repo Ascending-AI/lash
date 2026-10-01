@@ -1,6 +1,32 @@
 use super::*;
 use crate::plugin::PluginSessionRequest;
 
+pub(super) async fn recorded_parent_session_id(
+    store: Option<&crate::store::SessionStore>,
+) -> Result<Option<SessionId>, SessionError> {
+    let Some(store) = store else {
+        return Ok(None);
+    };
+    let meta = store
+        .store()
+        .lookup_session(store.session_id())
+        .await
+        .and_then(|lookup| match lookup {
+            crate::store::SessionLookup::Live(meta) => Ok(meta),
+            crate::store::SessionLookup::Absent => Err(crate::StoreError::SessionNotFound {
+                session_id: store.session_id().clone(),
+            }),
+            crate::store::SessionLookup::Deleted => Err(crate::StoreError::SessionDeleted {
+                session_id: store.session_id().clone(),
+            }),
+        })
+        .map_err(|source| SessionError::Store {
+            context: "failed to read session relation".to_string(),
+            source,
+        })?;
+    Ok(meta.relation.parent_session_id().map(SessionId::from))
+}
+
 pub(in crate::runtime) fn initial_park_preview(
     state: &crate::RuntimeSessionState,
     commit_budget: crate::CommitBudget,
@@ -513,11 +539,7 @@ impl LashRuntime {
                 "RuntimeEnvironment.plugin_host is required for from_environment".to_string(),
             )
         })?;
-        let parent_session_id = state
-            .authority
-            .subagent
-            .as_ref()
-            .map(|subagent| subagent.parent_session_id.clone());
+        let parent_session_id = recorded_parent_session_id(store.as_ref()).await?;
         // The session's recorded plugin configuration, as recorded: every
         // open delivers it unchanged (FIG-4379).
         let authority = crate::plugin::SessionAuthorityContext {

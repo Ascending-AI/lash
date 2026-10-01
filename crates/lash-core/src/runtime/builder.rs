@@ -216,6 +216,7 @@ impl EmbeddedRuntimeBuilder {
     fn resolve_plugins(
         &self,
         state: &RuntimeSessionState,
+        parent_session_id: Option<SessionId>,
     ) -> Result<Arc<PluginSession>, SessionError> {
         match &self.plugin_source {
             PluginSource::Session(session) => Ok(Arc::clone(session)),
@@ -223,11 +224,7 @@ impl EmbeddedRuntimeBuilder {
                 .clone()
                 .isolated_registry()
                 .build_session(PluginSessionRequest {
-                    parent_session_id: state
-                        .authority
-                        .subagent
-                        .as_ref()
-                        .map(|subagent| subagent.parent_session_id.clone()),
+                    parent_session_id,
                     ..PluginSessionRequest::creation(
                         state.session_id.clone(),
                         crate::plugin::SessionAuthorityContext {
@@ -248,7 +245,10 @@ impl EmbeddedRuntimeBuilder {
                 .map_err(crate::CoreConfigOwner::creation_refusal)
                 .map_err(SessionError::SessionConfigRefused)?;
         }
-        let plugins = self.resolve_plugins(&state)?;
+        let parent_session_id =
+            super::lifecycle::recorded_parent_session_id(self.store.as_ref()).await?;
+        let is_root_session = parent_session_id.is_none();
+        let plugins = self.resolve_plugins(&state, parent_session_id)?;
         if created {
             // A new session records what every installed owner resolves for
             // it, under the protocol its plugins registered (FIG-4379).
@@ -256,7 +256,7 @@ impl EmbeddedRuntimeBuilder {
                 Some(plugins.protocol_plugin_id()),
                 &crate::PluginOptions::default(),
                 None,
-                state.authority.subagent.is_none(),
+                is_root_session,
             )?;
             plugins.publish_plugin_config(state.admitted_plugin_config());
         }

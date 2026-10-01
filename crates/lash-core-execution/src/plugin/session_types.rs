@@ -29,12 +29,11 @@ pub struct PluginOwned<T> {
     pub value: T,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionPluginSource {
     CurrentHostFresh,
-    #[default]
-    ParentFork,
+    ParentFork(SessionPluginInit),
 }
 
 /// Serialized upper bound on a captured [`SessionPluginInit`]. The payload
@@ -87,8 +86,67 @@ impl SessionPluginInit {
 
 #[cfg(test)]
 mod session_plugin_init_tests {
-    use super::{SESSION_PLUGIN_INIT_MAX_BYTES, SessionPluginInit};
+    use super::{SESSION_PLUGIN_INIT_MAX_BYTES, SessionCreateRequest, SessionPluginInit};
     use crate::PluginError;
+
+    #[test]
+    fn fig4669_creation_requires_an_explicit_complete_plugin_source() {
+        let request = SessionCreateRequest::child_session(
+            "parent",
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        );
+        let mut omitted = serde_json::to_value(&request).expect("request");
+        omitted
+            .as_object_mut()
+            .expect("object")
+            .remove("plugin_source");
+        assert!(serde_json::from_value::<SessionCreateRequest>(omitted).is_err());
+
+        let mut uncaptured = serde_json::to_value(&request).expect("request");
+        uncaptured["plugin_source"] = serde_json::json!("parent_fork");
+        assert!(serde_json::from_value::<SessionCreateRequest>(uncaptured).is_err());
+
+        let mut ignored = serde_json::to_value(&request).expect("request");
+        ignored["plugin_init"] = serde_json::json!({});
+        assert!(serde_json::from_value::<SessionCreateRequest>(ignored).is_err());
+
+        let init = SessionPluginInit::captured(
+            crate::PluginState::default(),
+            crate::ToolCatalogContribution::default(),
+            crate::ToolState::default(),
+        )
+        .expect("capture");
+        let expected = serde_json::to_value(&init).expect("capture fixture");
+        let fork = request.with_plugin_source(super::SessionPluginSource::ParentFork(init));
+        let encoded = serde_json::to_value(&fork).expect("request fixture");
+        assert_eq!(encoded["plugin_source"]["parent_fork"], expected);
+        assert!(encoded.get("plugin_init").is_none());
+        let decoded: SessionCreateRequest = serde_json::from_value(encoded).expect("fork request");
+        let super::SessionPluginSource::ParentFork(captured) = decoded.plugin_source else {
+            panic!("a fork retains its capture");
+        };
+        assert_eq!(
+            serde_json::to_value(captured).expect("decoded capture"),
+            expected
+        );
+    }
+
+    #[test]
+    fn fig4669_subagent_context_cannot_record_parentage_or_a_second_depth_limit() {
+        let duplicate = serde_json::json!({
+            "capability": "peer", "depth": 1,
+            "parent_session_id": "different-parent", "max_depth": 3,
+        });
+        assert!(serde_json::from_value::<super::SubagentSessionContext>(duplicate).is_err());
+        let context: super::SubagentSessionContext =
+            serde_json::from_value(serde_json::json!({"capability": "peer", "depth": 1}))
+                .expect("only capability and depth are recorded");
+        assert_eq!(
+            serde_json::to_value(context).expect("context"),
+            serde_json::json!({"capability": "peer", "depth": 1})
+        );
+    }
 
     fn oversize_plugin_state() -> crate::PluginState {
         let mut plugins = std::collections::BTreeMap::new();
@@ -184,6 +242,7 @@ mod frame_node_id_tests {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionCreateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
@@ -206,7 +265,6 @@ pub struct SessionCreateRequest {
     /// only when neither its policy nor its starter records a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) default_model: Option<crate::ModelConfig>,
-    #[serde(default)]
     pub plugin_source: SessionPluginSource,
     #[serde(default)]
     pub initial_nodes: Vec<SessionAppendNode>,
@@ -224,12 +282,6 @@ pub struct SessionCreateRequest {
     /// creation time. Each plugin decodes only the entry keyed by its id.
     #[serde(default)]
     pub plugin_options: PluginOptions,
-    /// Required when `plugin_source` is [`SessionPluginSource::ParentFork`]; ignored
-    /// otherwise.
-    /// Materialization initializes the peer from this payload alone and never reads a live
-    /// parent session.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_init: Option<SessionPluginInit>,
 }
 
 impl SessionCreateRequest {
@@ -245,7 +297,6 @@ impl SessionCreateRequest {
             tool_access: SessionToolAccess::default(),
             subagent: None,
             plugin_options,
-            plugin_init: None,
             model: None,
             default_model: None,
         }
@@ -270,7 +321,6 @@ impl SessionCreateRequest {
             tool_access: SessionToolAccess::default(),
             subagent: None,
             plugin_options,
-            plugin_init: None,
             model: None,
             default_model: None,
         }
@@ -296,7 +346,6 @@ impl SessionCreateRequest {
             tool_access: SessionToolAccess::default(),
             subagent: None,
             plugin_options,
-            plugin_init: None,
             model: None,
             default_model: None,
         }
@@ -383,14 +432,6 @@ impl SessionCreateRequest {
         {
             *cause = Some(caused_by);
         }
-        self
-    }
-
-    /// Attaches the spawn-time plugin init capture carried by a
-    /// `SessionCreateRequest` for store and process-engine implementors while
-    /// preparing or materializing a forked session.
-    pub fn with_plugin_init(mut self, plugin_init: SessionPluginInit) -> Self {
-        self.plugin_init = Some(plugin_init);
         self
     }
 }

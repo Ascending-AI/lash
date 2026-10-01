@@ -324,10 +324,8 @@ async fn park_resume_restores_tool_and_subagent_authority() {
             .with_hidden_tools([hidden.name])
             .expect("valid hidden name"),
         subagent: Some(lash_core::SubagentSessionContext {
-            parent_session_id: SessionId::from("authority-parent"),
             capability: "authority-capability".to_string(),
             depth: 2,
-            max_depth: 4,
         }),
         ..SessionAuthorityContext::default()
     };
@@ -380,10 +378,8 @@ async fn park_resume_restores_tool_and_subagent_authority() {
         .plugins()
         .subagent_context()
         .expect("persisted subagent context");
-    assert_eq!(resumed_subagent.parent_session_id, "authority-parent");
     assert_eq!(resumed_subagent.capability, "authority-capability");
     assert_eq!(resumed_subagent.depth, 2);
-    assert_eq!(resumed_subagent.max_depth, 4);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1542,8 +1538,7 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("fork-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init)
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init))
             .with_tool_access(
                 lash_core::SessionToolAccess::ambient()
                     .with_hidden_tools([hidden.name])

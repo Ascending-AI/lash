@@ -378,10 +378,8 @@ mod tests {
             .expect("bind the session's read-only variable");
         let catalog = lash_core::ToolCatalog::from_tool_definitions(Vec::new());
         let subagent = lash_core::SubagentSessionContext {
-            parent_session_id: "parent".into(),
             capability: "research".to_string(),
             depth: 1,
-            max_depth: 3,
         };
 
         let running = admitted(lash_rlm_types::RlmPrompt::default(), 0);
@@ -410,7 +408,7 @@ mod tests {
         for prompt in [&running_prompt, &next_prompt] {
             assert!(prompt.contains("### Read-Only Variables"));
             assert!(prompt.contains("- `current_query`: `string`, read-only"));
-            assert!(prompt.contains("Subagent capability: research. Depth: 1/3."));
+            assert!(prompt.contains("Subagent capability: research. Depth: 1/5."));
         }
         assert_eq!(
             session

@@ -45,10 +45,8 @@ fn spawn_rejects_child_depth_past_limit() {
         SessionSpec::inherit(),
     )));
     let parent = SubagentSessionContext {
-        parent_session_id: "root".into(),
         capability: "child".into(),
         depth: 5,
-        max_depth: 5,
     };
     let snapshot = lash_core::runtime::RuntimeSessionState::new(lash_core::SessionPolicy::new(
         lash_core::TurnBudget::Unbounded,

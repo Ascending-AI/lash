@@ -165,8 +165,7 @@ async fn inherited_child_session_carries_parent_tool_state() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("dynamic-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
         )
         .await
         .expect("child session");
@@ -185,36 +184,6 @@ async fn inherited_child_session_carries_parent_tool_state() {
     assert!(
         !tool_names.contains(&"memory_probe"),
         "inherited child should receive the parent's membership policy, got {tool_names:?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn parent_fork_without_plugin_init_is_refused() {
-    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
-    let backend = double.lash_backend();
-    let runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
-        .build()
-        .await;
-    let lifecycle = runtime
-        .session_lifecycle_service()
-        .expect("session lifecycle");
-
-    let err = lifecycle
-        .create_session(
-            lash_core::SessionCreateRequest::child_session(
-                "root",
-                lash_core::SessionStartPoint::Empty,
-                lash_core::PluginOptions::default(),
-            )
-            .with_session_id("fork-without-init")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork),
-        )
-        .await
-        .expect_err("a ParentFork without the captured payload must be refused");
-
-    assert!(
-        format!("{err}").contains("captured plugin init"),
-        "expected a missing-capture refusal, got {err}"
     );
 }
 
@@ -281,8 +250,7 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("spawn-time-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
         )
         .await
         .expect("child session");
@@ -390,8 +358,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("attachment-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
         )
         .await
         .expect("durable child session");
@@ -539,8 +506,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("process-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
         )
         .await
         .expect("durable child session");
@@ -679,8 +645,7 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("filtered-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init)
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init))
             .with_tool_access(
                 lash_core::SessionToolAccess::ambient()
                     .with_hidden_tools(["memory_probe"])
@@ -842,8 +807,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("subagent-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
         )
         .await
         .expect("child session");
@@ -1037,8 +1001,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("subagent-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
         )
         .await
         .expect("child session");

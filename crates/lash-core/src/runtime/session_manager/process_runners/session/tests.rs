@@ -215,8 +215,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         crate::PluginOptions::default(),
     )
     .with_session_id(&child_session_id)
-    .with_plugin_source(crate::SessionPluginSource::ParentFork)
-    .with_plugin_init(plugin_init);
+    .with_plugin_source(crate::SessionPluginSource::ParentFork(plugin_init));
 
     // Rewrite the recorded request's `start` to the predecessor durable
     // spelling — what a pre-FIG-3378 `ProcessInput::SessionTurn` row

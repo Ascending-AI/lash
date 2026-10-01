@@ -197,13 +197,6 @@ pub enum PluginError {
     /// A store compatibility refusal, preserved through plugin-facing ports.
     #[error(transparent)]
     StoreRefusal(#[from] crate::store::StoreRefusal),
-    /// A `ParentFork` creation request carried no captured init payload.
-    /// The capture is taken once at spawn; materialization never reads a live
-    /// parent session, so there is nothing to fall back to.
-    #[error(
-        "session `{session_id}` requested a parent fork but carries no captured plugin init payload"
-    )]
-    MissingSessionInit { session_id: SessionId },
     /// A captured plugin init payload exceeded the durable-request bound.
     #[error("captured session init payload is {bytes} bytes, exceeding the {limit}-byte bound")]
     SessionInitTooLarge { bytes: usize, limit: usize },
@@ -505,7 +498,6 @@ impl PluginError {
             | Self::Invoke(_)
             | Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }
-            | Self::MissingSessionInit { .. }
             | Self::SessionInitTooLarge { .. }
             | Self::MissingRecordedSessionConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }

@@ -17,7 +17,7 @@ use lash_tool_support::{StaticToolExecute, StaticToolProvider};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::capability::CapabilityRegistry;
+use crate::capability::{CapabilityRegistry, ChildPluginSource};
 use crate::rlm_support::{
     self, SpawnCreateRequestInput, build_spawn_create_request, capability_list_for_description,
     example_capability_name, finalise_tool_result, render_task_prompt, required_string,
@@ -63,11 +63,13 @@ impl RlmSubagentToolsProvider {
             .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         let capability_name = capability_name_from_args(args, &self.registry)
             .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
-        if self.registry.get(&capability_name).is_none() {
-            return Err(ToolOutcome::err(serde_json::json!(
-                unknown_capability_message(&capability_name, &self.registry)
-            )));
-        }
+        let capability = self.registry.get(&capability_name).ok_or_else(|| {
+            ToolOutcome::err(serde_json::json!(unknown_capability_message(
+                &capability_name,
+                &self.registry
+            )))
+        })?;
+        let plugin_source = capability.plugin_source();
         let output_schema = lash_sansio::schema_contract::parse_output_schema(args.get("output"))
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         let seed = lash_protocol_rlm::RlmSeed::from_tool_args(args)
@@ -95,25 +97,25 @@ impl RlmSubagentToolsProvider {
         // A `ParentFork` peer initializes from this spawn-time capture alone;
         // it is journaled inside the durable creation request so a worker
         // restart rebuilds the child identically without reading the parent.
-        if matches!(
-            create_request.plugin_source,
-            lash_core::SessionPluginSource::ParentFork
-        ) {
-            if let lash_core::RuntimeOwner::Process(process_id) = context.owner() {
-                return Err(spawn_refusal(
-                    SPAWN_PARENT_FORK_IN_PROCESS,
-                    format!(
-                        "spawn_agent: a `ParentFork` capability forks its parent's conversation, \
+        create_request.plugin_source = match plugin_source {
+            ChildPluginSource::CurrentHostFresh => lash_core::SessionPluginSource::CurrentHostFresh,
+            ChildPluginSource::ParentFork => {
+                if let lash_core::RuntimeOwner::Process(process_id) = context.owner() {
+                    return Err(spawn_refusal(
+                        SPAWN_PARENT_FORK_IN_PROCESS,
+                        format!(
+                            "spawn_agent: a `ParentFork` capability forks its parent's conversation, \
                          and process `{process_id}` has none to fork"
-                    ),
-                ));
+                        ),
+                    ));
+                }
+                let plugin_init = context
+                    .session_plugin_init()
+                    .await
+                    .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
+                lash_core::SessionPluginSource::ParentFork(plugin_init)
             }
-            let plugin_init = context
-                .session_plugin_init()
-                .await
-                .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
-            create_request = create_request.with_plugin_init(plugin_init);
-        }
+        };
         // The child session is the process's own, derived from the id its
         // start mints (ADR 0107), so the request names none.
         create_request.session_id = None;

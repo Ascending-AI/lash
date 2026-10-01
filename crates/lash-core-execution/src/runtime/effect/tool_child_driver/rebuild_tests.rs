@@ -43,10 +43,8 @@ fn serving_context(path: Path, dispatch: &ToolDispatchContext<'static>) -> LiveO
 
 fn max_depth_subagent() -> crate::SubagentSessionContext {
     crate::SubagentSessionContext {
-        parent_session_id: crate::SessionId::from("parent-session"),
         capability: "explore".to_string(),
-        depth: 3,
-        max_depth: 3,
+        depth: crate::SubagentSessionContext::MAX_DEPTH,
     }
 }
 
@@ -58,7 +56,7 @@ fn plugins_under(
         .build_session(PluginSessionRequest {
             parent_session_id: subagent
                 .as_ref()
-                .map(|subagent| subagent.parent_session_id.clone()),
+                .map(|_| crate::SessionId::from("parent-session")),
             ..PluginSessionRequest::creation(
                 "opener-session",
                 crate::plugin::SessionAuthorityContext {

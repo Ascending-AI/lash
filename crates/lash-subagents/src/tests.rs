@@ -76,11 +76,7 @@ impl Capability for BoundaryValidationCapability {
         mut ctx: SubagentSpawnContext<'_>,
     ) -> Result<lash_core::SessionCreateRequest, String> {
         ctx.output_schema = None;
-        ctx.rlm_request(
-            self.name(),
-            &SessionSpec::inherit(),
-            lash_core::SessionPluginSource::CurrentHostFresh,
-        )
+        ctx.rlm_request(self.name(), &SessionSpec::inherit())
     }
 }
 

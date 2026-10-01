@@ -504,10 +504,8 @@ fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
         .hide_tool("hidden")
         .expect("valid hidden name");
     state.authority.subagent = Some(crate::SubagentSessionContext {
-        parent_session_id: SessionId::from("parent"),
         capability: "research".to_string(),
         depth: 1,
-        max_depth: 3,
     });
 
     let mut value = serde_json::to_value(&state).expect("serialize runtime state");
@@ -516,7 +514,10 @@ fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
         value["tool_access"]["hidden_tools"],
         serde_json::json!(["hidden"])
     );
-    assert_eq!(value["subagent"]["parent_session_id"], "parent");
+    assert_eq!(
+        value["subagent"],
+        serde_json::json!({"capability": "research", "depth": 1})
+    );
 
     let object = value.as_object_mut().expect("runtime state object");
     object.remove("tool_access");

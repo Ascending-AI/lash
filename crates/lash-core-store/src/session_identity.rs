@@ -560,11 +560,15 @@ impl<'de> Deserialize<'de> for SessionToolAccess {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SubagentSessionContext {
-    pub parent_session_id: SessionId,
     pub capability: String,
     pub depth: u8,
-    pub max_depth: u8,
+}
+
+impl SubagentSessionContext {
+    /// Maximum child depth used by spawn admission and prompt rendering.
+    pub const MAX_DEPTH: u8 = 5;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

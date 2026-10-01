@@ -5,8 +5,8 @@ mod rlm_support;
 use std::sync::Arc;
 
 pub use capability::{
-    Capability, CapabilityRegistry, StaticCapability, SubagentSpawnContext, TierCapability,
-    TierPluginSource, default_explore_plugin_source, default_registry,
+    Capability, CapabilityRegistry, ChildPluginSource, StaticCapability, SubagentSpawnContext,
+    TierCapability, default_explore_plugin_source, default_registry,
 };
 pub use lash_rlm_types::RlmFinalAnswerFormat;
 

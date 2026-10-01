@@ -530,8 +530,9 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init.clone()),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(
+                plugin_init.clone(),
+            )),
         )
         .await
         .expect("child session");
@@ -592,8 +593,9 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child-store")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init.clone()),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(
+                plugin_init.clone(),
+            )),
         )
         .await
         .expect("child session");
@@ -670,8 +672,9 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("ordinary-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init.clone()),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(
+                plugin_init.clone(),
+            )),
         )
         .await
         .expect("child session");
@@ -718,8 +721,9 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init.clone()),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(
+                plugin_init.clone(),
+            )),
         )
         .await
         .expect("first child session");
@@ -731,8 +735,9 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init.clone()),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(
+                plugin_init.clone(),
+            )),
         )
         .await
         .expect_err("duplicate child session should fail");

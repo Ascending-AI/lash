@@ -32,11 +32,9 @@ pub(in crate::runtime::session_manager) struct SessionInitPlan {
     session_id: SessionId,
     relation: SessionRelation,
     pending_observer_intents: Vec<crate::SessionObserverIntent>,
-    parent_session_id: Option<SessionId>,
     policy: SessionPolicy,
     initial_runtime_state: RuntimeSessionState,
     plugin_config: crate::plugin::SessionAuthorityContext,
-    plugin_source: crate::SessionPluginSource,
     protocol_request: SessionCreateRequest,
     /// The `SessionTurn` process whose start creates this session, recorded
     /// on the session's metadata as its owner (FIG-3607 R1). `None` for a
@@ -148,7 +146,6 @@ fn plan_session_init(
     session_id: SessionId,
     facts: ChildFacts,
 ) -> Result<SessionInitPlan, crate::PluginError> {
-    let parent_session_id = request.relation.parent_session_id().map(ToOwned::to_owned);
     // Every session initializes empty: `SessionStartPoint::Empty` is the only
     // start point initialisation admits. Durable forks and resumed sessions
     // get their state from the store, not from the create request.
@@ -191,11 +188,9 @@ fn plan_session_init(
         session_id,
         relation: request.relation.clone(),
         pending_observer_intents,
-        parent_session_id: parent_session_id.map(Into::into),
         policy,
         initial_runtime_state,
         plugin_config,
-        plugin_source: request.plugin_source,
         protocol_request: request,
         owning_process_id: None,
     })
@@ -465,10 +460,10 @@ fn build_session_plugins<'a>(
     ),
     crate::PluginError,
 > {
-    match plan.plugin_source {
+    match &plan.protocol_request.plugin_source {
         crate::SessionPluginSource::CurrentHostFresh => Ok((
             current.plugins.host().build_session(PluginSessionRequest {
-                parent_session_id: plan.parent_session_id.clone(),
+                parent_session_id: plan.relation.parent_session_id().map(SessionId::from),
                 ..PluginSessionRequest::creation(&plan.session_id, plan.plugin_config.clone())
             })?,
             None,
@@ -477,14 +472,9 @@ fn build_session_plugins<'a>(
         // deliberately no read of the running session that created this
         // request — on a process worker that session is a synthetic runtime
         // carrying fresh host plugins, not the real parent.
-        crate::SessionPluginSource::ParentFork => {
-            let init = plan.protocol_request.plugin_init.as_ref().ok_or(
-                crate::PluginError::MissingSessionInit {
-                    session_id: plan.session_id.clone(),
-                },
-            )?;
+        crate::SessionPluginSource::ParentFork(init) => {
             let session = current.plugins.host().build_session(PluginSessionRequest {
-                parent_session_id: plan.parent_session_id.clone(),
+                parent_session_id: plan.relation.parent_session_id().map(SessionId::from),
                 tool_catalog_overlay: init.tool_catalog_overlay.clone(),
                 tool_snapshot: Some(init.tool_state.clone()),
                 materialization: PluginSessionMaterializationRequest::Creation {
@@ -626,7 +616,7 @@ async fn commit_initialized_session(
             .await?;
     let handle = SessionHandle {
         session_id: plan.session_id,
-        parent_session_id: plan.parent_session_id,
+        parent_session_id: plan.relation.parent_session_id().map(SessionId::from),
         policy: plan.policy,
         observed_processes,
     };

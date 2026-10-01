@@ -521,10 +521,8 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
     assert_eq!(live_subagent(&runtime), None);
 
     let head_subagent = lash_core::SubagentSessionContext {
-        parent_session_id: SessionId::from("durable-parent"),
         capability: "durable-capability".to_string(),
         depth: 1,
-        max_depth: 3,
     };
     advance_session_head(store.as_ref(), |state| {
         state.authority.subagent = Some(head_subagent.clone());

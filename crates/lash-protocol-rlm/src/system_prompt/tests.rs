@@ -69,10 +69,8 @@ fn bindings() -> RlmProjectedBindings {
 
 fn subagent() -> lash_core::SubagentSessionContext {
     lash_core::SubagentSessionContext {
-        parent_session_id: "parent".into(),
         capability: "research".to_string(),
         depth: 1,
-        max_depth: 3,
     }
 }
 
@@ -184,7 +182,7 @@ fn a_customised_prompt_renders_the_hosts_text_around_the_declarations() {
             "You are the release assistant of the tracker team.\n\n\
              ## Guidance\n\nAnswer in British English.\n\nNever close an issue without a linked change.\n\n\
              ## TypeScript execution\n\n{}\n\n{}\n\n{}\n\n\
-             Subagent capability: research. Depth: 1/3.\n\n\
+             Subagent capability: research. Depth: 1/5.\n\n\
              ## Context\n\nRelease 4.2 freezes on Friday.",
             EXECUTION_PROSE, DECLARATIONS, READ_ONLY_VARIABLES,
         )

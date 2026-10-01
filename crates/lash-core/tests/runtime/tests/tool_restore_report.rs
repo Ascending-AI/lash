@@ -1036,8 +1036,7 @@ async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member(
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("fig3367-child")
-            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
-            .with_plugin_init(plugin_init),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork(plugin_init)),
         )
         .await
     {
