@@ -175,6 +175,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectControllerTaskClosed,
         Self::WriterFenced,
         Self::StoreIncompatible,
+        Self::TurnCancelBindingMismatch,
         Self::RuntimeStore,
         Self::RuntimeStoreCorrupt,
         Self::SessionCommandRun,
@@ -820,6 +821,11 @@ fn store_refusals_keep_their_codes_and_fields_across_runtime_boundaries() {
                 component: "sqlite-registry".into(),
                 writing_release: None,
             },
+        },
+        StoreRefusal::TurnCancelBindingMismatch {
+            session_id: crate::SessionId::from("bound-elsewhere"),
+            expected: "the admitted authority".into(),
+            presented: "another authority".into(),
         },
     ] {
         let code = refusal.code();

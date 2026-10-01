@@ -147,11 +147,7 @@ impl CoreSessionDriver {
                         session_id, error,
                     )));
                 }
-                Err(error) => {
-                    return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
-                        error.to_string(),
-                    )));
-                }
+                Err(error) => return Err(OpenFailure::of_store_read(error)),
             };
         let state = match crate::session::load_state_from_store(session_id, &policy, &store).await {
             Ok(state) => state,
@@ -176,11 +172,7 @@ impl CoreSessionDriver {
                     ),
                 ));
             }
-            Err(error) => {
-                return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                )));
-            }
+            Err(error) => return Err(OpenFailure::of_store_read(error)),
         };
         let plugin_host = build_plugin_host(
             self.config.protocol_factory.as_ref(),
@@ -281,19 +273,38 @@ enum OpenFailure {
     /// The session's catalog row has no head, so its creation recorded no
     /// config to open with (FIG-4553).
     CreationUnrecorded(lash_core::RuntimeError),
+    /// The store refused the read with a refusal that stays typed past it
+    /// ([`StoreRefusal`](lash_core::store::StoreRefusal)): the drive is
+    /// refused with its code and cause, which a sender reads (FIG-4597).
+    StoreRefused(lash_core::RuntimeError),
     Terminal(lash_core::PluginError),
 }
 
 impl OpenFailure {
+    /// Why a read of the session's catalog row or recorded state failed the
+    /// open, once contention and retirement are answered.
+    fn of_store_read(error: crate::EmbedError) -> Self {
+        match error {
+            crate::EmbedError::Store(error)
+                if lash_core::store::StoreRefusal::of_store_error(&error).is_some() =>
+            {
+                Self::StoreRefused(
+                    lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                )
+            }
+            error => Self::Terminal(lash_core::PluginError::Session(error.to_string())),
+        }
+    }
+
     fn into_abort(self) -> lash_core::engine::DriveAbort {
         match self {
             Self::Contended => lash_core::engine::DriveAbort::Retry(lash_core::RuntimeError::new(
                 lash_core::RuntimeErrorCode::StoreCommitContended,
                 "the session's runtime is contended; the drive is retried",
             )),
-            Self::SessionRetired(error) | Self::CreationUnrecorded(error) => {
-                lash_core::engine::DriveAbort::Refused(error)
-            }
+            Self::SessionRetired(error)
+            | Self::CreationUnrecorded(error)
+            | Self::StoreRefused(error) => lash_core::engine::DriveAbort::Refused(error),
             Self::Terminal(error) => {
                 lash_core::engine::DriveAbort::Refused(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::PluginSessionManager,

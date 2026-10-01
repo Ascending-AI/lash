@@ -303,27 +303,6 @@ async fn drain_an_append(
     })
 }
 
-/// Every invocation the double holds, with its status and last failure.
-fn invocations(double: &lash_restate_test::RestateTestBackend) -> Vec<String> {
-    double
-        .server()
-        .invocations()
-        .into_iter()
-        .map(|view| {
-            format!(
-                "{} {} attempts={} failure={:?} outcome={:?}",
-                view.target,
-                view.status,
-                view.attempts,
-                view.last_failure,
-                double.server().outcome(&view.id).map(
-                    |outcome| outcome.map(|value| String::from_utf8_lossy(&value).into_owned())
-                ),
-            )
-        })
-        .collect()
-}
-
 /// How the drained append settled.
 #[derive(Clone, Copy, Debug)]
 enum Append {

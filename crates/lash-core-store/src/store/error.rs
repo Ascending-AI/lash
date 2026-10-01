@@ -27,9 +27,11 @@ pub enum AnchorUnavailable {
     Tombstoned,
 }
 
-/// A compatibility refusal with the same fields as its store error.
-/// Plugin errors are cloned and journaled, so this representation carries
-/// only the terminal refusals rather than backend failures and sources.
+/// A store refusal that stays typed past the store, with the same fields as
+/// its store error: a compatibility refusal, or a cancellation authority the
+/// session was not admitted under. Plugin errors are cloned and journaled, so
+/// this representation carries only the terminal refusals rather than backend
+/// failures and sources.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -40,6 +42,14 @@ pub enum StoreRefusal {
     WriterFenced {
         recorded: u32,
         writable: crate::compat::VersionRange,
+    },
+    /// The deployment presented another cancellation authority than the one
+    /// the session durably admitted: it runs over these stores under an
+    /// authority they were not written under, and no retry changes that.
+    TurnCancelBindingMismatch {
+        session_id: SessionId,
+        expected: String,
+        presented: String,
     },
 }
 
@@ -54,6 +64,15 @@ impl StoreRefusal {
                 recorded: *recorded,
                 writable: *writable,
             }),
+            StoreError::TurnCancelBindingMismatch {
+                session_id,
+                expected,
+                presented,
+            } => Some(Self::TurnCancelBindingMismatch {
+                session_id: session_id.clone(),
+                expected: expected.clone(),
+                presented: presented.clone(),
+            }),
             _ => None,
         }
     }
@@ -63,6 +82,9 @@ impl StoreRefusal {
         match self {
             Self::Incompatible { .. } => crate::RuntimeErrorCode::StoreIncompatible,
             Self::WriterFenced { .. } => crate::RuntimeErrorCode::WriterFenced,
+            Self::TurnCancelBindingMismatch { .. } => {
+                crate::RuntimeErrorCode::TurnCancelBindingMismatch
+            }
         }
     }
 
@@ -73,6 +95,15 @@ impl StoreRefusal {
             Self::WriterFenced { recorded, writable } => {
                 StoreError::WriterFenced { recorded, writable }
             }
+            Self::TurnCancelBindingMismatch {
+                session_id,
+                expected,
+                presented,
+            } => StoreError::TurnCancelBindingMismatch {
+                session_id,
+                expected,
+                presented,
+            },
         }
     }
 }

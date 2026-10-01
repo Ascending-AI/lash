@@ -407,6 +407,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectControllerTaskClosed => Redrivable,
             // store I/O failed.
             Self::WriterFenced | Self::StoreIncompatible => Terminal,
+            // the session admitted another cancellation authority.
+            Self::TurnCancelBindingMismatch => Terminal,
             Self::RuntimeStore => Retryable,
             // durable state is corrupt or a counter is exhausted.
             Self::RuntimeStoreCorrupt => Terminal,

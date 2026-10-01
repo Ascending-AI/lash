@@ -206,6 +206,27 @@ pub(crate) async fn redeploy(
         .expect("restart the Restate double's deployment")
 }
 
+/// Every invocation the double holds, with its status and last failure.
+pub(crate) fn invocations(double: &lash_restate_test::RestateTestBackend) -> Vec<String> {
+    double
+        .server()
+        .invocations()
+        .into_iter()
+        .map(|view| {
+            format!(
+                "{} {} attempts={} failure={:?} outcome={:?}",
+                view.target,
+                view.status,
+                view.attempts,
+                view.last_failure,
+                double.server().outcome(&view.id).map(
+                    |outcome| outcome.map(|value| String::from_utf8_lossy(&value).into_owned())
+                ),
+            )
+        })
+        .collect()
+}
+
 /// A PostgreSQL store set on a database of its own, with what must outlive
 /// it. A selected PostgreSQL test requires the service URL.
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the gate's database URL is host configuration.

@@ -483,6 +483,9 @@ pub enum RuntimeErrorCode {
     WriterFenced,
     /// The store's compatibility stamp or fleet format cannot be admitted.
     StoreIncompatible,
+    /// The deployment runs over stores whose session admitted another
+    /// cancellation authority.
+    TurnCancelBindingMismatch,
     RuntimeStore,
     /// Durable state is corrupt or an authoritative monotonic counter has
     /// exhausted its representable domain. Retrying unchanged cannot heal it.
@@ -538,7 +541,8 @@ pub enum RuntimeErrorCode {
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
         err @ (crate::store::StoreError::WriterFenced { .. }
-        | crate::store::StoreError::Incompatible { .. }) => {
+        | crate::store::StoreError::Incompatible { .. }
+        | crate::store::StoreError::TurnCancelBindingMismatch { .. }) => {
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
@@ -576,7 +580,8 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
         err @ (crate::store::StoreError::WriterFenced { .. }
-        | crate::store::StoreError::Incompatible { .. }) => {
+        | crate::store::StoreError::Incompatible { .. }
+        | crate::store::StoreError::TurnCancelBindingMismatch { .. }) => {
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
@@ -878,6 +883,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectWrongOutcome => "runtime_effect_wrong_outcome",
             Self::RuntimeEffectControllerTaskClosed => "runtime_effect_controller_task_closed",
             Self::WriterFenced => "writer_fenced",
+            Self::TurnCancelBindingMismatch => "turn_cancel_binding_mismatch",
             Self::StoreIncompatible => "store_incompatible",
             Self::RuntimeStore => "runtime_store",
             Self::RuntimeStoreCorrupt => "runtime_store_corrupt",
@@ -1154,6 +1160,7 @@ impl RuntimeErrorCode {
             "runtime_effect_wrong_outcome" => Self::RuntimeEffectWrongOutcome,
             "runtime_effect_controller_task_closed" => Self::RuntimeEffectControllerTaskClosed,
             "writer_fenced" => Self::WriterFenced,
+            "turn_cancel_binding_mismatch" => Self::TurnCancelBindingMismatch,
             "store_incompatible" => Self::StoreIncompatible,
             "runtime_store" => Self::RuntimeStore,
             "runtime_store_corrupt" => Self::RuntimeStoreCorrupt,
@@ -1853,6 +1860,9 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
         let code = match &err {
             crate::StoreError::WriterFenced { .. } => RuntimeErrorCode::WriterFenced,
             crate::StoreError::Incompatible { .. } => RuntimeErrorCode::StoreIncompatible,
+            crate::StoreError::TurnCancelBindingMismatch { .. } => {
+                RuntimeErrorCode::TurnCancelBindingMismatch
+            }
             crate::StoreError::StoredDataCorrupt { .. }
             | crate::StoreError::MonotonicCounterOverflow { .. } => {
                 crate::RuntimeErrorCode::RuntimeStoreCorrupt

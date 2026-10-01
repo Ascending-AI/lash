@@ -1170,11 +1170,12 @@ mod harness;
 pub(crate) use harness::{
     AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend,
     double_backend_explicit_reconcile, double_backend_over, double_backend_over_explicit_reconcile,
-    explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, latest_double,
-    mock_model_spec, model_spec, output_into_cancelled_by, postgres_store_set, recorded_model,
-    redeploy, restate_double, retry_when_claim_frees, run_async_test_on_stack_budget,
-    serve_processes, settle_session_drive, sqlite_memory_store_backend, sqlite_memory_store_set,
-    store_backend_with_clock, test_catalog, turn_input_states,
+    explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, invocations,
+    latest_double, mock_model_spec, model_spec, output_into_cancelled_by, postgres_store_set,
+    recorded_model, redeploy, restate_double, retry_when_claim_frees,
+    run_async_test_on_stack_budget, serve_processes, settle_session_drive,
+    sqlite_memory_store_backend, sqlite_memory_store_set, store_backend_with_clock, test_catalog,
+    turn_input_states,
 };
 #[cfg(feature = "rlm")]
 mod adr_claims;
@@ -1204,6 +1205,7 @@ mod response_phase_replay;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
 mod send_handle;
+mod send_open_failures;
 mod session_control;
 mod session_drive;
 #[cfg(feature = "rlm")]
@@ -1216,3 +1218,4 @@ mod turn_streaming;
 mod usage_durability;
 #[cfg(feature = "rlm")]
 mod withheld_follow_on;
+mod wrong_authority_redeploy;

@@ -403,6 +403,7 @@ impl PluginError {
                         error.code,
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
+                            | crate::RuntimeErrorCode::TurnCancelBindingMismatch
                             | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                             | crate::RuntimeErrorCode::MissingRecordedProcessConfig
@@ -417,6 +418,7 @@ impl PluginError {
                         error.code,
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
+                            | crate::RuntimeErrorCode::TurnCancelBindingMismatch
                             | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                             | crate::RuntimeErrorCode::MissingRecordedProcessConfig
@@ -638,6 +640,11 @@ mod classification_tests {
                     component: "postgres".into(),
                     writing_release: None,
                 },
+            },
+            StoreRefusal::TurnCancelBindingMismatch {
+                session_id: crate::SessionId::from("bound-elsewhere"),
+                expected: "the admitted authority".into(),
+                presented: "another authority".into(),
             },
         ] {
             let plugin = PluginError::from(refusal.clone().into_store_error());
