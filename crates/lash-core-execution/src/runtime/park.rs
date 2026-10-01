@@ -29,6 +29,12 @@ pub async fn record_root_park(
 /// is stale, and re-parking from it would clear the redrive while the root
 /// runs.
 ///
+/// Stopped work a root waits on ([`ParkTarget::RootChild`](crate::engine::ParkTarget::RootChild))
+/// parks its root with no engine handle. A root already parked keeps its
+/// park as it is, so any number of stopped children of one root, over any
+/// number of passes, write one park; a child still stopped after a settled
+/// redrive re-parks the root, so the operator can act again.
+///
 /// Processes park through their registry, which the engine's own process
 /// reconcile writes; this writer refuses a process target.
 pub struct StoreParkRecovery<'a> {
@@ -53,8 +59,9 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
         execution: &dyn crate::engine::StalledExecution,
     ) -> Result<crate::engine::EngineParkRecorded, StoreError> {
         use crate::engine::{EngineParkRecorded, ParkTarget};
-        let (session, root) = match target {
-            ParkTarget::Root { session, root } => (session, root),
+        let (session, root, engine) = match target {
+            ParkTarget::Root { session, root } => (session, root, Some(engine)),
+            ParkTarget::RootChild { session, root } => (session, root, None),
             ParkTarget::Drive { session } => {
                 return self.record_drive_park(session, reason, execution).await;
             }
@@ -85,28 +92,56 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             .load_turn_park(session)
             .await?
             .filter(|park| park.turn_id == root);
-        let mut after_redrive = None;
-        if let Some(intent) = held.as_ref().and_then(|park| park.resume_intent)
-            && !self
-                .sessions
-                .load_intent(intent)
-                .await?
-                .is_some_and(|intent| intent.state.is_open())
-        {
-            // The redrive already resumed the execution: the engine listed
-            // it before or after. Only an execution still stopped now
-            // stopped again after the resume.
-            if !execution
+        let still_stopped = || async {
+            execution
                 .still_stopped()
                 .await
-                .map_err(|refusal| StoreError::Backend(refusal.to_string()))?
-            {
+                .map_err(|refusal| StoreError::Backend(refusal.to_string()))
+        };
+        let mut after_redrive = None;
+        match held.as_ref() {
+            Some(park) => match park.resume_intent {
+                Some(intent) => {
+                    let open = self
+                        .sessions
+                        .load_intent(intent)
+                        .await?
+                        .is_some_and(|intent| intent.state.is_open());
+                    if open {
+                        // The redrive owns the root's stopped children until
+                        // it resumes them. A write without a handle reads as
+                        // the execution's own refusal and would clear the
+                        // redrive.
+                        if engine.is_none() {
+                            return Ok(EngineParkRecorded::Redriven);
+                        }
+                    } else {
+                        // The redrive already resumed the execution: the
+                        // engine listed it before or after. Only an execution
+                        // still stopped now stopped again after the resume.
+                        if !still_stopped().await? {
+                            return Ok(EngineParkRecorded::Redriven);
+                        }
+                        after_redrive = Some(intent);
+                    }
+                }
+                // The root is parked and no redrive ran since: a child that
+                // stopped behind the park, or one a pass already parked, adds
+                // nothing to it.
+                None if engine.is_none() => {
+                    return Ok(EngineParkRecorded::AttachedToExisting(park.park_id));
+                }
+                None => {}
+            },
+            // A listing read before an operator resumed the child is stale:
+            // parking from it would park a running root.
+            None if engine.is_none() && !still_stopped().await? => {
                 return Ok(EngineParkRecorded::Redriven);
             }
-            after_redrive = Some(intent);
+            None => {}
         }
         let write = crate::store::TurnParkWrite {
-            engine: Some(engine),
+            engine,
             after_redrive,
             ..crate::store::TurnParkWrite::refusal(
                 session.clone(),

@@ -535,6 +535,82 @@ async fn park_of(
     parked
 }
 
+/// The answer of the redriven `root`. The redrive is accepted before the root
+/// moves: its park stands until the resumed attempt gets past the model call.
+async fn answer_after_redrive(session: &lash::LashSession, root: &str) -> String {
+    let output = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            match session.attach_id(root).output().await {
+                Ok(output) => return output,
+                Err(lash::EmbedError::Send(_)) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("the redriven root settles: {error:?}"),
+            }
+        }
+    })
+    .await
+    .expect("the redriven root leaves its park");
+    output
+        .assistant_message()
+        .expect("the root answers with text")
+        .to_string()
+}
+
+/// Every live park, as the host's park surface lists it: the work, its park,
+/// and the refusals the park counts.
+async fn listed_parks(
+    core: &LashCore,
+) -> Vec<(lash::ParkedWorkRef, lash::persistence::ParkId, u32, u64)> {
+    let limit = std::num::NonZeroUsize::new(8).expect("non-zero");
+    core.parked_work()
+        .list(&lash::ParkedWorkQuery::all(limit))
+        .await
+        .expect("the park surface lists parked work")
+        .records
+        .into_iter()
+        .map(|record| {
+            (
+                record.target,
+                record.park_id,
+                record.attempts,
+                record.last_refused_ms,
+            )
+        })
+        .collect()
+}
+
+/// One park reconcile pass of the engine, run until a pass read the engine
+/// without a failure, as the recovery interval retries one.
+async fn reconcile_pass(double: &Double) -> lash_core::engine::ParkReconcileReport {
+    let backend = double.double.lash_backend();
+    let sessions = backend.session_store_factory();
+    let clock = backend.clock();
+    let writer = lash_core::drive::StoreParkRecovery::new(sessions.as_ref(), clock.as_ref());
+    let control = backend.session_work().control();
+    let mut last = None;
+    for _ in 0..20 {
+        let pass = control
+            .reconcile_parks(
+                &writer,
+                lash_core::engine::EnginePage {
+                    after: None,
+                    limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
+                    budget: std::time::Duration::from_secs(5),
+                },
+            )
+            .await;
+        if let Ok(report) = &pass
+            && report.failed.is_empty()
+        {
+            return report.clone();
+        }
+        last = Some(pass);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("a reconcile pass reads the engine: {last:?}");
+}
+
 // ---- the laws ---------------------------------------------------------------
 
 /// Two keys served by transports of one provider kind: each send's model
@@ -1417,29 +1493,8 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(
         )
         .await
         .expect("the operator redrives the parked root");
-    // The redrive is accepted before the root moves: its park stands until
-    // the resumed attempt gets past the model call.
-    let answer = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        loop {
-            match session
-                .attach_id("keys-bind-fault-park-root")
-                .output()
-                .await
-            {
-                Ok(output) => return output,
-                Err(lash::EmbedError::Send(_)) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
-                Err(error) => panic!("the redriven root settles: {error:?}"),
-            }
-        }
-    })
-    .await
-    .expect("the redriven root leaves its park");
     assert_eq!(
-        answer
-            .assistant_message()
-            .expect("the root answers with text"),
+        answer_after_redrive(&session, "keys-bind-fault-park-root").await,
         "restored kimi answers",
         "the resumed root makes its model call once the key is served"
     );
@@ -1520,9 +1575,15 @@ impl lash::tools::ToolProvider for AskModel {
 /// A direct completion follows the model call's rule. A tool attempt whose
 /// direct completion cannot bind the session's recorded model ends with the
 /// bind fault, whatever the tool made of the error: no tool result is
-/// journaled, and the engine parks the work after its attempts. Once the key
-/// is served again the resumed attempt completes, and the model is shown the
-/// completion, never the fault.
+/// journaled, and the engine stops retrying the attempt's group child after
+/// its attempts.
+///
+/// The paused child is parked like any other stopped work (FIG-4607): the
+/// root that waits for it holds a park with the typed cause, the park surface
+/// lists it, and a later reconcile pass over the same paused child writes
+/// nothing. Once the key is served again the operator's redrive of that park
+/// resumes the child: the attempt completes, the root answers, the park ends,
+/// and the model is shown the completion, never the fault.
 async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_park(
     tier: Tier,
     replay: bool,
@@ -1610,16 +1671,87 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
         "only the root's first model call reached the transport"
     );
 
-    catalog.serve(registry_of(KIMI, "kimi-k3", provider()));
+    // The root's own run is not stopped, it waits for the child: the child's
+    // pause is what parks the root.
+    let dispatch = double.double.service_name("EffectGroupDispatch");
+    assert!(
+        parked.target.starts_with(&dispatch) && parked.target.ends_with("/child"),
+        "the engine stopped the tool's group child: {parked:?}"
+    );
+    let root = lash::TurnId::from("keys-direct-bind-fault-root");
+    let work = lash::ParkedWorkRef::Turn {
+        session_id: lash::SessionId::from(session_id),
+        turn_id: root.clone(),
+    };
+    let child = lash_core::engine::ParkTarget::RootChild {
+        session: lash::SessionId::from(session_id),
+        root,
+    };
+    let first = reconcile_pass(&double).await;
+    assert!(
+        first.parked == vec![child] || (first.parked.is_empty() && first.attached == 1),
+        "a reconcile pass parks the paused child's root, unless the recovery interval already \
+         did: {first:?}"
+    );
+    let limit = std::num::NonZeroUsize::new(8).expect("non-zero");
+    let records = core
+        .parked_work()
+        .list(&lash::ParkedWorkQuery::all(limit))
+        .await
+        .expect("the park surface lists parked work")
+        .records;
+    let [park] = records.as_slice() else {
+        panic!("the park surface lists the root the paused child parked: {records:?}");
+    };
+    assert_eq!(park.target, work, "the park names the waiting root");
+    assert_eq!(park.attempts, 1, "one park, written once: {park:?}");
     assert_eq!(
-        double.double.server().resume(&parked.id),
-        Some(true),
-        "the parked work resumes"
+        park.reason.code(),
+        lash::persistence::ParkReasonCode::EngineRetryExhausted,
+        "the root parked on its child's exhausted retries: {park:?}"
     );
     assert_eq!(
-        answer_of(session.attach_id("keys-direct-bind-fault-root")).await,
+        park.reason.model_key(),
+        Some(&ModelKey::new(KIMI)),
+        "the root's park carries the unbindable key typed: {park:?}"
+    );
+    let listed = listed_parks(&core).await;
+    let again = reconcile_pass(&double).await;
+    assert!(
+        again.parked.is_empty() && again.attached == 1,
+        "a later pass finds the child's root already parked: {again:?}"
+    );
+    assert_eq!(
+        listed_parks(&core).await,
+        listed,
+        "a later pass over the same paused child writes nothing"
+    );
+
+    catalog.serve(registry_of(KIMI, "kimi-k3", provider()));
+    core.parked_work()
+        .redrive(&work, park.park_id)
+        .await
+        .expect("the operator redrives the parked root");
+    assert_eq!(
+        answer_after_redrive(&session, "keys-direct-bind-fault-root").await,
         "kimi answers",
-        "the resumed root completes once the key is served"
+        "the redriven root completes once the key is served"
+    );
+    assert_eq!(
+        double
+            .double
+            .server()
+            .invocations()
+            .iter()
+            .find(|view| view.id == parked.id)
+            .map(|view| view.status),
+        Some("completed"),
+        "the redrive resumed the paused child, which ran to its end"
+    );
+    assert_eq!(
+        listed_parks(&core).await,
+        Vec::new(),
+        "the root's commit ends its park"
     );
     assert_eq!(
         settled.lock().expect("settled attempts").last(),

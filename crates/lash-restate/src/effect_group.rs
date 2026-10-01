@@ -83,6 +83,7 @@ pub use protocol::{EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FOR
 use protocol::{load_committed_final, load_index, load_index_shared, load_membership};
 use rank_run::served_run;
 pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
+pub(crate) use wire::EffectGroupOpenerResponse;
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,
@@ -182,6 +183,8 @@ pub(crate) trait EffectGroupState {
     async fn probe(call: Call<()>) -> HandlerResult<Reply<EffectGroupProbeResponse>>;
     #[shared]
     async fn unsettled_children(call: Call<()>) -> HandlerResult<Reply<usize>>;
+    #[shared]
+    async fn opener(call: Call<()>) -> HandlerResult<Reply<EffectGroupOpenerResponse>>;
     async fn open(
         call: Call<EffectGroupOpenRequest>,
     ) -> HandlerResult<Reply<EffectGroupOpenResponse>>;
@@ -321,6 +324,37 @@ impl EffectGroupState for EffectGroupStateImpl {
             None => 0,
         };
         Ok(Reply::at(wire, unsettled))
+    }
+
+    /// The admitted scope this group's children run for, while its opener
+    /// still waits on them: what parks a child the engine stopped retrying
+    /// on the work that waits for it (FIG-4607). A closed or retired group's
+    /// opener no longer needs its children (FIG-3725), unless it reopened
+    /// the group (FIG-3481).
+    async fn opener(
+        &self,
+        ctx: SharedObjectContext<'_>,
+        call: Call<()>,
+    ) -> HandlerResult<Reply<EffectGroupOpenerResponse>> {
+        let (wire, ()) = call.open()?;
+        object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
+        let response = match load_index_shared(&ctx).await? {
+            Some(EffectGroupStateRecord {
+                lifecycle:
+                    EffectGroupLifecycle::Preparing { live, .. }
+                    | EffectGroupLifecycle::Ready { live, .. }
+                    | EffectGroupLifecycle::Closed {
+                        reopened: true,
+                        live,
+                        ..
+                    },
+                ..
+            }) => EffectGroupOpenerResponse::Waiting {
+                opener: live.shape.opener,
+            },
+            _ => EffectGroupOpenerResponse::Released,
+        };
+        Ok(Reply::at(wire, response))
     }
 
     async fn open(

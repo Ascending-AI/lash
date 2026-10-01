@@ -48,6 +48,21 @@ pub enum EffectGroupProbeResponse {
     },
 }
 
+/// Who a group's children run for, as the park reconcile asks of a paused
+/// child (FIG-4607).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum EffectGroupOpenerResponse {
+    /// The group's opener still waits on its children.
+    Waiting {
+        #[serde(with = "lash_core::admitted_scope_wire")]
+        opener: lash_core::AdmittedScope,
+    },
+    /// No opener waits on the group's children: the group is absent, closed
+    /// or retired.
+    Released,
+}
+
 /// A semantic admission under one recorded group child (ADR 0099 §4,
 /// FIG-3470): the index-side answer the SQL claim's minting-row fence and
 /// the native group mutex give on their tiers. A child-bound controller asks

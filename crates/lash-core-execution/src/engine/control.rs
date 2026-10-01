@@ -165,7 +165,8 @@ pub trait SessionControlEngine: Send + Sync {
     /// whose target already ended is released instead. A stalled session
     /// drive is parked on its session's next root; one that stopped only
     /// behind a redrive that has since settled is resumed, and one whose
-    /// session's next work names no root is released (ADR 0109 §3).
+    /// session's next work names no root is released (ADR 0109 §3). Stalled
+    /// work a root waits on is parked on that root.
     ///
     /// Each recovery catalog inspects at most `page.limit` records under
     /// `page.budget`. The stalled-work listing resumes after `page.after`
@@ -180,9 +181,9 @@ pub trait SessionControlEngine: Send + Sync {
         page: EnginePage,
     ) -> Result<ParkReconcileReport, EngineRefusal>;
 
-    /// O4 redrive: resume the execution holding the root's park. An engine
-    /// holding none answers [`EngineAck::NothingHeld`], and the caller
-    /// schedules a drive instead.
+    /// O4 redrive: resume the execution holding the root's park, and every
+    /// stopped execution the root waits on. An engine holding none answers
+    /// [`EngineAck::NothingHeld`], and the caller schedules a drive instead.
     async fn resume_root(
         &self,
         target: &RootRef,
@@ -289,6 +290,13 @@ pub enum ParkTarget {
     /// is parked on the root the session's next admission names (ADR 0109
     /// §3), and only that park's operator verb resumes it.
     Drive { session: SessionId },
+    /// Work a session's logical root waits on, stopped in an execution of
+    /// its own (a tool attempt's child, FIG-4607). The root's own execution
+    /// is not stopped: it waits for the child. The child is parked on the
+    /// root with no engine handle, as a stopped drive is: several children
+    /// of one root may stop, the engine finds them by their root, and the
+    /// park's redrive resumes them all.
+    RootChild { session: SessionId, root: TurnId },
 }
 
 /// What [`ParkRecoveryWriter::record_engine_park`] did.
@@ -348,7 +356,9 @@ pub trait StalledExecution: Send + Sync {
 /// keeps its reason and gains the engine's handle.
 #[async_trait::async_trait]
 pub trait ParkRecoveryWriter: Send + Sync {
-    /// Park `target` for `reason`, carrying the engine's `engine` handle.
+    /// Park `target` for `reason`, carrying the engine's `engine` handle. A
+    /// [`ParkTarget::Drive`] or [`ParkTarget::RootChild`] park stores no
+    /// handle: the engine finds that stopped work by its session.
     /// `execution` re-reads the stalled execution when a redrive may have
     /// resumed it since the engine listed it.
     async fn record_engine_park(
