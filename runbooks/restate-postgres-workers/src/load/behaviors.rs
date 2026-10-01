@@ -2,7 +2,7 @@ use super::*;
 use crate::load::ReportedStatus;
 use crate::load::behavior::{
     self, AuxiliaryEvidence, BehaviorReport, EditEvidence, FrameEvidence, HistoryEvidence,
-    OccurrenceEvidence,
+    OccurrenceEvidence, PromotionEvidence,
 };
 use lash_restate::RestateControllerContext as _;
 
@@ -48,6 +48,133 @@ where
     result.map_err(terminal)
 }
 
+/// The external occurrence `{run}/behaviors/{suffix}`: its recorded emission,
+/// then the terminal output of each process it started, awaited inside one
+/// recorded step. A replay after a started process is pruned returns the
+/// outputs the first attempt awaited instead of asking the registry again.
+pub(super) async fn external_event(
+    controller: &Controller<'_>,
+    core: &lash::LashCore,
+    run: &str,
+    suffix: &str,
+) -> HandlerResult<OccurrenceEvidence> {
+    let key = format!("{run}/behaviors/{suffix}");
+    let source = json!({"schedule":format!("{run}/behaviors")});
+    let receipt = core
+        .triggers()
+        .emit(
+            lash::triggers::TriggerOccurrenceRequest::new(
+                behavior::EXTERNAL_SOURCE,
+                lash_core::facade_support::default_trigger_source_key(
+                    behavior::EXTERNAL_SOURCE,
+                    &source,
+                ),
+                json!({"schedule":format!("{run}/behaviors"),"tick":key}),
+                key.clone(),
+            )
+            .with_source(source),
+            scoped(controller, &key, "emit")?,
+        )
+        .await
+        .map_err(turn_handler_error)?;
+    let ids = receipt.started_process_ids();
+    let outputs = journal_read(controller, "load.external-outputs", async {
+        let mut outputs = Vec::new();
+        for id in &ids {
+            let output = core.processes().await_output(id).await?.into_tool_output();
+            if !output.is_success() {
+                return Ok(Err(format!("external target {id} failed: {output:?}")));
+            }
+            outputs.push(output.into_value_for_projection());
+        }
+        Ok(Ok(outputs))
+    })
+    .await?
+    .map_err(terminal)?;
+    Ok(OccurrenceEvidence {
+        key,
+        started: ids.iter().map(ToString::to_string).collect(),
+        outputs,
+    })
+}
+
+/// The promotion readback of the process the external occurrence started:
+/// its registry record and the module artifact its engine input names, read
+/// with every refusal inside one recorded step. A replay after the process
+/// is pruned, or its module released, returns the original evidence.
+pub(super) async fn promotion_evidence(
+    controller: &Controller<'_>,
+    core: &lash::LashCore,
+    session_id: &str,
+    external: &OccurrenceEvidence,
+) -> HandlerResult<PromotionEvidence> {
+    let process_id = external
+        .started
+        .first()
+        .ok_or_else(|| terminal("external occurrence started no process"))?
+        .clone();
+    journal_read(controller, "load.promotion", async move {
+        let id = match process_id.parse::<lash_core::ProcessId>() {
+            Ok(id) => id,
+            Err(error) => return Ok(Err(error.to_string())),
+        };
+        let Some(record) = core.process_registry().get_process(&id).await? else {
+            return Ok(Err("promotion process record missing".into()));
+        };
+        let lash_core::ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
+            return Ok(Err("promotion input is not Engine".into()));
+        };
+        let input: lash::process::LashlangProcessInput =
+            match serde_json::from_value(payload.clone()) {
+                Ok(input) => input,
+                Err(error) => return Ok(Err(error.to_string())),
+            };
+        let Some(artifact) = lashlang::LashlangArtifacts::of_backend(core.backend())
+            .get_module_artifact(&input.module_ref)
+            .await
+            .map_err(lash_core::PluginError::from)?
+        else {
+            return Ok(Err("promotion module missing".into()));
+        };
+        Ok(Ok(behavior::promotion(
+            process_id,
+            matches!(&record.provenance.originator,lash_core::ProcessOriginator::Session {session_id:origin,..} if origin.as_str()==session_id),
+            kind.clone(),
+            &record.identity,
+            &input,
+            &artifact,
+        )))
+    })
+    .await?
+    .map_err(terminal)
+}
+
+/// The revision the session's `load-external` subscription lists, read with
+/// the session's acquisition inside one recorded step. A replay after the
+/// session is deleted or the subscription advances returns the original
+/// revision.
+pub(super) async fn listed_trigger_revision(
+    controller: &Controller<'_>,
+    core: &lash::LashCore,
+    session_id: &str,
+) -> HandlerResult<u64> {
+    journal_read(controller, "load.trigger-revision", async {
+        let listed = core
+            .session(session_id.to_string())
+            .open()
+            .await?
+            .admin()
+            .triggers()
+            .by_source_type(behavior::EXTERNAL_SOURCE)
+            .await?;
+        Ok(listed
+            .iter()
+            .find(|entry| entry.subscription_key == "load-external")
+            .map_or(0, |entry| entry.revision))
+    })
+    .await
+}
+
 impl LoadWorker {
     async fn behavior_turn(
         &self,
@@ -74,54 +201,6 @@ impl LoadWorker {
             )));
         }
         Ok(outcome)
-    }
-
-    async fn external_event(
-        &self,
-        controller: &Controller<'_>,
-        run: &str,
-        suffix: &str,
-    ) -> HandlerResult<OccurrenceEvidence> {
-        let key = format!("{run}/behaviors/{suffix}");
-        let source = json!({"schedule":format!("{run}/behaviors")});
-        let receipt = self
-            .core
-            .triggers()
-            .emit(
-                lash::triggers::TriggerOccurrenceRequest::new(
-                    behavior::EXTERNAL_SOURCE,
-                    lash_core::facade_support::default_trigger_source_key(
-                        behavior::EXTERNAL_SOURCE,
-                        &source,
-                    ),
-                    json!({"schedule":format!("{run}/behaviors"),"tick":key}),
-                    key.clone(),
-                )
-                .with_source(source),
-                scoped(controller, &key, "emit")?,
-            )
-            .await
-            .map_err(turn_handler_error)?;
-        let ids = receipt.started_process_ids();
-        let mut outputs = Vec::new();
-        for id in &ids {
-            let output = self
-                .core
-                .processes()
-                .await_output(id)
-                .await
-                .map_err(turn_handler_error)?;
-            let output = output.into_tool_output();
-            if !output.is_success() {
-                return Err(terminal(format!("external target {id} failed: {output:?}")));
-            }
-            outputs.push(output.into_value_for_projection());
-        }
-        Ok(OccurrenceEvidence {
-            key,
-            started: ids.iter().map(ToString::to_string).collect(),
-            outputs,
-        })
     }
 
     pub(super) async fn behaviors(
@@ -213,63 +292,17 @@ impl LoadWorker {
         };
         self.behavior_turn(controller, &session, run, "register")
             .await?;
-        let external = self.external_event(controller, run, "event").await?;
-        let process_id = external
-            .started
-            .first()
-            .ok_or_else(|| terminal("external occurrence started no process"))?;
-        let record = self
-            .core
-            .process_registry()
-            .get_process(
-                &process_id
-                    .parse::<lash_core::ProcessId>()
-                    .map_err(terminal)?,
-            )
-            .await
-            .map_err(terminal)?
-            .ok_or_else(|| terminal("promotion process record missing"))?;
-        let lash_core::ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
-            return Err(terminal("promotion input is not Engine"));
-        };
-        let input: lash::process::LashlangProcessInput =
-            serde_json::from_value(payload.clone()).map_err(terminal)?;
-        let artifact = lashlang::LashlangArtifacts::of_backend(self.core.backend())
-            .get_module_artifact(&input.module_ref)
-            .await
-            .map_err(terminal)?
-            .ok_or_else(|| terminal("promotion module missing"))?;
-        let promotion = behavior::promotion(
-            process_id.clone(),
-            matches!(&record.provenance.originator,lash_core::ProcessOriginator::Session {session_id:origin,..} if origin.as_str()==session_id),
-            kind.clone(),
-            &record.identity,
-            &input,
-            &artifact,
-        );
+        let external = external_event(controller, &self.core, run, "event").await?;
+        let promotion = promotion_evidence(controller, &self.core, &session_id, &external).await?;
         let edited = self
             .behavior_turn(controller, &session, run, "edit")
             .await?;
         let revision = edited.final_value["revision"].as_u64().unwrap_or_default();
-        let listed = self
-            .core
-            .session(session_id.clone())
-            .open()
-            .await
-            .map_err(turn_handler_error)?
-            .admin()
-            .triggers()
-            .by_source_type(behavior::EXTERNAL_SOURCE)
-            .await
-            .map_err(turn_handler_error)?;
-        let listed_revision = listed
-            .iter()
-            .find(|entry| entry.subscription_key == "load-external")
-            .map_or(0, |entry| entry.revision);
-        let after_edit = self.external_event(controller, run, "edit").await?;
+        let listed_revision = listed_trigger_revision(controller, &self.core, &session_id).await?;
+        let after_edit = external_event(controller, &self.core, run, "edit").await?;
         self.behavior_turn(controller, &session, run, "delete")
             .await?;
-        let after_delete = self.external_event(controller, run, "after-delete").await?;
+        let after_delete = external_event(controller, &self.core, run, "after-delete").await?;
         let edit = EditEvidence {
             revision,
             listed_revision,
@@ -288,3 +321,7 @@ impl LoadWorker {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "behaviors_replay_tests.rs"]
+mod replay_tests;

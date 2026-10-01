@@ -327,6 +327,17 @@ struct FnDef {
     reads: Vec<ReadSite>,
     /// Names called outside every recorded step.
     unrecorded_calls: BTreeSet<String>,
+    /// Every call this body makes, by any receiver, outside the steps it
+    /// opens itself.
+    calls: Vec<CallSite>,
+    body: Vec<Token>,
+}
+
+#[derive(Debug)]
+struct CallSite {
+    name: String,
+    line: usize,
+    recorded: bool,
 }
 
 #[derive(Debug)]
@@ -350,12 +361,43 @@ pub(super) struct Hit {
     pub(super) path: String,
 }
 
+/// One call in a scanned function, by any receiver.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct Call {
+    pub(super) file: String,
+    pub(super) line: usize,
+    pub(super) name: String,
+    /// The function the call is made from.
+    pub(super) function: String,
+    /// Whether a recorded step's span contains the call.
+    pub(super) recorded: bool,
+}
+
+/// One `fn` with a body, outside test code.
+pub(super) struct Definition {
+    pub(super) file: String,
+    pub(super) name: String,
+    pub(super) body: Vec<Token>,
+}
+
+/// What [`survey`] finds: the hits, every call and every definition.
+pub(super) struct Survey {
+    pub(super) hits: Vec<Hit>,
+    pub(super) calls: Vec<Call>,
+    pub(super) definitions: Vec<Definition>,
+}
+
 /// Analyze `files` (`(path, source)`): every surface read inside a
 /// replay-path function and outside every recorded-step span.
 pub(super) fn analyze(
     files: &[(String, String)],
     surface: &Surface<'_>,
 ) -> Result<Vec<Hit>, String> {
+    survey(files, surface).map(|survey| survey.hits)
+}
+
+/// [`analyze`], with every call and definition the walk saw.
+pub(super) fn survey(files: &[(String, String)], surface: &Surface<'_>) -> Result<Survey, String> {
     let mut trees = Vec::new();
     for (path, source) in files {
         trees.push(tokenize(source).map_err(|error| format!("{path}: {error}"))?);
@@ -420,7 +462,92 @@ pub(super) fn analyze(
         }
     }
     hits.sort();
-    Ok(hits)
+    let mut calls = Vec::new();
+    let mut definitions = Vec::new();
+    for def in fns {
+        let file = &files[def.file].0;
+        for call in &def.calls {
+            calls.push(Call {
+                file: file.clone(),
+                line: call.line,
+                name: call.name.clone(),
+                function: def.name.clone(),
+                recorded: call.recorded,
+            });
+        }
+        definitions.push(Definition {
+            file: file.clone(),
+            name: def.name,
+            body: def.body,
+        });
+    }
+    calls.sort();
+    Ok(Survey {
+        hits,
+        calls,
+        definitions,
+    })
+}
+
+/// How often `ident` occurs in `tokens` inside and outside the spans of the
+/// recorded steps `steps` (and Restate `ctx.run`) the tokens open.
+pub(super) fn ident_uses(tokens: &[Token], ident: &str, steps: &[&str]) -> (usize, usize) {
+    let mut uses = (0, 0);
+    count_uses(tokens, ident, steps, false, &mut uses);
+    uses
+}
+
+fn count_uses(
+    tokens: &[Token],
+    ident: &str,
+    steps: &[&str],
+    in_step: bool,
+    uses: &mut (usize, usize),
+) {
+    let mut i = 0;
+    while i < tokens.len() {
+        let token = &tokens[i];
+        if let Some(name) = token.ident() {
+            if name == ident {
+                if in_step {
+                    uses.0 += 1;
+                } else {
+                    uses.1 += 1;
+                }
+            }
+            let method = i > 0 && tokens[i - 1].is_punct('.');
+            let receiver = if method && i > 1 {
+                tokens[i - 2].ident()
+            } else {
+                None
+            };
+            let (arguments, next) = call_arguments(tokens, i + 1);
+            if let Some(arguments) = arguments
+                && (steps.contains(&name)
+                    || (method && name == "run" && matches!(receiver, Some("ctx"))))
+            {
+                count_uses(arguments, ident, steps, true, uses);
+                i = next;
+                continue;
+            }
+        }
+        if let Kind::Group(_, inner) = &token.kind {
+            count_uses(inner, ident, steps, in_step, uses);
+        }
+        i += 1;
+    }
+}
+
+/// Whether `source` declares `trait <name>` without a visibility: a trait
+/// only its own module and that module's children can name.
+pub(super) fn declares_private_trait(source: &str, name: &str) -> Result<bool, String> {
+    let tokens = tokenize(source)?;
+    Ok(tokens.iter().enumerate().any(|(i, token)| {
+        token.ident() == Some("trait")
+            && tokens.get(i + 1).and_then(Token::ident) == Some(name)
+            && !(i > 0 && tokens[i - 1].ident() == Some("pub"))
+            && !(i > 0 && tokens[i - 1].group(Delimiter::Paren).is_some())
+    }))
 }
 
 /// A line trimmed, with every whitespace run collapsed to one space.
@@ -674,6 +801,8 @@ fn collect_items(
                             seed,
                             reads: Vec::new(),
                             unrecorded_calls: BTreeSet::new(),
+                            calls: Vec::new(),
+                            body: body.to_vec(),
                         };
                         walk_body(body, false, context.surface, &mut def);
                         out.push(def);
@@ -747,6 +876,11 @@ fn walk_body(tokens: &[Token], in_step: bool, surface: &Surface<'_>, def: &mut F
                 if step {
                     walk_body(arguments, true, surface, def);
                 } else {
+                    def.calls.push(CallSite {
+                        name: name.to_string(),
+                        line: token.line,
+                        recorded: in_step,
+                    });
                     if surface.reads.contains(&name) {
                         def.reads.push(ReadSite {
                             method: name.to_string(),

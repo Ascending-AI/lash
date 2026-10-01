@@ -22,7 +22,10 @@
 //!   ([`REPLAY_IMPL_TYPES`]), or a uniquely named `fn` a replay path calls
 //!   outside its recorded steps;
 //! - **a recorded span** is the argument list of a recorded-step call
-//!   ([`RECORDED_STEPS`]): what a replay reads back is that step's output.
+//!   ([`RECORDED_STEPS`], or a [`STEP_WRAPPERS`] function proven to hand its
+//!   future to one): what a replay reads back is that step's output. A
+//!   [`STEP_BODIES`] method proven to be called only inside recorded spans
+//!   is part of the step whose span calls it.
 //!
 //! The other half of the rule — a duplicate delivery re-deciding inside a
 //! fresh step what its coalesced admission already decided — happens inside a
@@ -327,19 +330,148 @@ const PINS: &[Pin] = &[
              segment's journal, fenced by the recorded execution authority",
         ),
     },
-    Pin {
-        file: "runbooks/restate-postgres-workers/src/load/behaviors.rs",
-        text: ".get_process(",
-        count: 1,
-        class: PinClass::Ticket("FIG-4277"),
-    },
-    Pin {
-        file: "runbooks/restate-postgres-workers/src/load/worker.rs",
-        text: ".list_originated_by(",
-        count: 1,
-        class: PinClass::Ticket("FIG-4277"),
+];
+
+/// A function that hands one parameter, a future, to a recorded step and
+/// touches it nowhere else: a call to it is a recorded step whose argument
+/// list is that step's body. The gate proves the shape before it trusts the
+/// name: the function is the only one of its name in the scanned tree, it is
+/// defined in `file`, and `parameter` occurs only inside the spans of
+/// [`RECORDED_STEPS`].
+struct StepWrapper {
+    file: &'static str,
+    function: &'static str,
+    parameter: &'static str,
+}
+
+const STEP_WRAPPERS: &[StepWrapper] = &[
+    // The load behavior workload journals each readback, with its errors,
+    // through one `run_json_or_retry_send` (FIG-4484).
+    StepWrapper {
+        file: LOAD_BEHAVIORS,
+        function: "journal_read",
+        parameter: "future",
     },
 ];
+
+/// A method of a module-private trait whose every call sits inside a recorded
+/// step's span: its body runs inside that step, so its reads are recorded.
+/// The gate proves the trait is declared without a visibility in `files[0]`
+/// (only that module and its children can call the method), that it declares
+/// `method`, and that every call named `method` in `files` (the module's
+/// production sources) lies inside a recorded span. A call moved outside its
+/// step fails the gate.
+struct StepBody {
+    files: &'static [&'static str],
+    trait_name: &'static str,
+    method: &'static str,
+}
+
+const STEP_BODIES: &[StepBody] = &[
+    // The workload delete's owned-process listing runs inside its recorded
+    // `load.model-children.list` step, whose stored IDs drive cancellation
+    // (FIG-4348).
+    StepBody {
+        files: &[LOAD_WORKER, LOAD_BEHAVIORS],
+        trait_name: "WorkloadProcessCleanup",
+        method: "owned",
+    },
+];
+
+const LOAD_WORKER: &str = "runbooks/restate-postgres-workers/src/load/worker.rs";
+const LOAD_BEHAVIORS: &str = "runbooks/restate-postgres-workers/src/load/behaviors.rs";
+
+/// Every failure of the gate over `files`: the step wrappers' and step
+/// bodies' proofs, then [`check`] over the hits no proven step body owns.
+fn check_tree(
+    files: &[(String, String)],
+    pins: &[Pin],
+    wrappers: &[StepWrapper],
+    bodies: &[StepBody],
+) -> Vec<String> {
+    let survey = scan::survey(files, &surface(wrappers)).expect("the scanned sources tokenize");
+    let mut failures = Vec::new();
+    for wrapper in wrappers {
+        let definitions: Vec<_> = survey
+            .definitions
+            .iter()
+            .filter(|definition| definition.name == wrapper.function)
+            .collect();
+        let [definition] = definitions.as_slice() else {
+            failures.push(format!(
+                "step wrapper `{}` must be the only function of its name; found {} definition(s)",
+                wrapper.function,
+                definitions.len()
+            ));
+            continue;
+        };
+        if definition.file != wrapper.file {
+            failures.push(format!(
+                "step wrapper `{}` is defined in {}, not {}",
+                wrapper.function, definition.file, wrapper.file
+            ));
+        }
+        let (inside, outside) =
+            scan::ident_uses(&definition.body, wrapper.parameter, RECORDED_STEPS);
+        if inside == 0 || outside > 0 {
+            failures.push(format!(
+                "step wrapper `{}` must hand `{}` to a recorded step and use it nowhere else \
+                 ({inside} use(s) inside a recorded step, {outside} outside)",
+                wrapper.function, wrapper.parameter
+            ));
+        }
+    }
+    for body in bodies {
+        let declaring = files
+            .iter()
+            .find(|(path, _)| path == body.files[0])
+            .map(|(_, source)| source.as_str())
+            .unwrap_or_default();
+        if !scan::declares_private_trait(declaring, body.trait_name).unwrap_or(false) {
+            failures.push(format!(
+                "step body `{}`: {} declares no private trait `{}`",
+                body.method, body.files[0], body.trait_name
+            ));
+        }
+        if !scan::trait_methods(declaring, body.trait_name)
+            .is_ok_and(|methods| methods.iter().any(|method| method == body.method))
+        {
+            failures.push(format!(
+                "step body `{}`: trait `{}` declares no such method",
+                body.method, body.trait_name
+            ));
+        }
+        let calls: Vec<_> = survey
+            .calls
+            .iter()
+            .filter(|call| call.name == body.method && body.files.contains(&call.file.as_str()))
+            .collect();
+        if calls.is_empty() {
+            failures.push(format!(
+                "stale step body `{}`: nothing in {:?} calls it",
+                body.method, body.files
+            ));
+        }
+        for call in calls.iter().filter(|call| !call.recorded) {
+            failures.push(format!(
+                "{}:{}: step body `{}` is called outside every recorded step (in `{}`), so its \
+                 reads run before the record",
+                call.file, call.line, body.method, call.function
+            ));
+        }
+    }
+    let unowned: Vec<_> = survey
+        .hits
+        .into_iter()
+        .filter(|hit| {
+            !bodies
+                .iter()
+                .any(|body| hit.function == body.method && body.files.contains(&hit.file.as_str()))
+        })
+        .collect();
+    failures.extend(check(&unowned, pins));
+    failures
+}
 
 /// Every pin failure and every unpinned hit.
 fn check(hits: &[scan::Hit], pins: &[Pin]) -> Vec<String> {
@@ -388,10 +520,17 @@ fn check(hits: &[scan::Hit], pins: &[Pin]) -> Vec<String> {
     failures
 }
 
-fn surface() -> scan::Surface<'static> {
+/// The surface, with each of `wrappers` a recorded step beside
+/// [`RECORDED_STEPS`].
+fn surface(wrappers: &[StepWrapper]) -> scan::Surface<'static> {
+    let steps: Vec<&'static str> = RECORDED_STEPS
+        .iter()
+        .copied()
+        .chain(wrappers.iter().map(|wrapper| wrapper.function))
+        .collect();
     scan::Surface {
         reads: READS.get_or_init(|| STORE_READS.iter().chain(HOST_READS).copied().collect()),
-        steps: RECORDED_STEPS,
+        steps: Box::leak(steps.into_boxed_slice()),
         replay_signature_types: REPLAY_SIGNATURE_TYPES,
         replay_impl_types: REPLAY_IMPL_TYPES,
     }
@@ -476,8 +615,7 @@ fn read_workspace_file(relative: &str) -> String {
 
 #[test]
 fn replay_paths_read_store_state_only_inside_recorded_steps() {
-    let hits = scan::analyze(&read_sources(), &surface()).expect("the scanned sources tokenize");
-    let failures = check(&hits, PINS);
+    let failures = check_tree(&read_sources(), PINS, STEP_WRAPPERS, STEP_BODIES);
     assert!(
         failures.is_empty(),
         "replay-read gate (ADR 0105 §1): a decision on a replay path must come from a \
@@ -517,7 +655,7 @@ mod self_test {
     fn hits(source: &str) -> Vec<scan::Hit> {
         scan::analyze(
             &[("crates/lash/src/planted.rs".to_string(), source.to_string())],
-            &surface(),
+            &surface(&[]),
         )
         .expect("the planted source tokenizes")
     }
@@ -764,11 +902,98 @@ mod self_test {
             ),
             1,
         );
-        let hits = scan::analyze(&files, &surface()).expect("the planted tree tokenizes");
-        let failures = check(&hits, PINS);
+        let failures = check_tree(&files, PINS, STEP_WRAPPERS, STEP_BODIES);
         assert!(
             failures.iter().any(|failure| failure.contains("_planted")),
             "the planted read fails the gate: {failures:?}"
+        );
+    }
+
+    /// The real tree, with `anchor` in `path` preceded by `planted`.
+    fn planted_tree(path: &str, anchor: &str, planted: &str) -> Vec<String> {
+        let mut files = read_sources();
+        let (_, source) = files
+            .iter_mut()
+            .find(|(file, _)| file == path)
+            .unwrap_or_else(|| panic!("{path} is scanned"));
+        assert!(source.contains(anchor), "{path} holds `{anchor}`");
+        *source = source.replacen(anchor, &format!("{planted}\n{anchor}"), 1);
+        check_tree(&files, PINS, STEP_WRAPPERS, STEP_BODIES)
+    }
+
+    #[test]
+    fn the_real_tree_passes_with_no_ticket_pins() {
+        assert!(
+            PINS.iter()
+                .all(|pin| !matches!(pin.class, PinClass::Ticket(_))),
+            "every known violation is fixed"
+        );
+        assert!(check_tree(&read_sources(), PINS, STEP_WRAPPERS, STEP_BODIES).is_empty());
+    }
+
+    /// A promotion lookup moved ahead of its recorded step fails the gate.
+    #[test]
+    fn the_real_tree_fails_with_an_unrecorded_promotion_lookup() {
+        let failures = planted_tree(
+            LOAD_BEHAVIORS,
+            r#"journal_read(controller, "load.promotion""#,
+            "let _planted = core.process_registry().get_process(&lash_core::ProcessId::new()).await;",
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("_planted") && failure.contains("get_process")),
+            "{failures:?}"
+        );
+    }
+
+    /// An owned-process listing moved outside its recorded step fails the
+    /// gate, though the listing's body is unchanged.
+    #[test]
+    fn the_real_tree_fails_with_an_owned_listing_outside_its_step() {
+        let failures = planted_tree(
+            LOAD_WORKER,
+            "let mut cleaned = std::collections::BTreeSet::new();",
+            "let _planted = admin.owned(session).await;",
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("step body `owned` is called outside")),
+            "{failures:?}"
+        );
+    }
+
+    /// A wrapper that awaits its future before the step it names records
+    /// nothing, and fails the gate.
+    #[test]
+    fn a_wrapper_that_runs_its_future_outside_the_step_fails() {
+        let planted = r#"
+            type Controller<'ctx> = RestateRuntimeEffectController<'ctx, WorkflowContext<'ctx>>;
+            async fn journal_read<T, F>(controller: &Controller<'_>, name: &str, future: F) -> T {
+                let answer = future.await;
+                controller.context().run_json_or_retry_send(name.into(), async move { Ok(answer) }).await
+            }
+            async fn read(controller: &Controller<'_>) {
+                journal_read(controller, "x", async { registry.get_process(&id).await }).await;
+            }
+        "#;
+        let files = [(LOAD_BEHAVIORS.to_string(), planted.to_string())];
+        let failures = check_tree(&files, &[], STEP_WRAPPERS, &[]);
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("must hand `future` to a recorded step")),
+            "{failures:?}"
+        );
+        let honest = planted.replace("let answer = future.await;\n", "").replace(
+            "async move { Ok(answer) }",
+            "async move { Ok(future.await) }",
+        );
+        let files = [(LOAD_BEHAVIORS.to_string(), honest)];
+        assert!(
+            check_tree(&files, &[], STEP_WRAPPERS, &[]).is_empty(),
+            "a read inside a proven wrapper's span passes"
         );
     }
 }

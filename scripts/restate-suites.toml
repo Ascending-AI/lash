@@ -163,6 +163,17 @@ endpoints = ["WDP"]
 shards = 1
 timeout_seconds = 180
 
+# The load behavior evidence replays its recorded readbacks after the
+# promotion process is pruned, the session is deleted, or the subscription
+# advances (FIG-4484).
+[suites.load-behavior-replay]
+label = "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test"
+cwd = "runbooks/restate-postgres-workers"
+filters = ["load::worker::behaviors::replay_tests::live_restate::"]
+endpoints = ["LBR"]
+shards = 1
+timeout_seconds = 240
+
 [suites.public-process-command]
 label = "//crates/lash:integration__test"
 cwd = "crates/lash"
