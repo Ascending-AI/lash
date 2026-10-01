@@ -21,9 +21,9 @@
 //! with defaults: the host's open and the engine's drive are both refused
 //! with the typed creation-unrecorded refusal, and nothing is committed.
 //!
-//! Over SQLite memory, SQLite file and PostgreSQL. The PostgreSQL legs skip
-//! unless `LASH_POSTGRES_DATABASE_URL` is set (and fail without it under
-//! `LASH_REQUIRE_POSTGRES=1`).
+//! Over SQLite memory, SQLite file and PostgreSQL. The PostgreSQL legs are
+//! ignored outside a PostgreSQL gate, which selects them with
+//! `--include-ignored`.
 
 use super::*;
 
@@ -49,8 +49,7 @@ enum Storage {
     Postgres,
 }
 
-/// The double over `storage`, with what its stores need to outlive it, or
-/// `None` for a PostgreSQL leg without a database.
+/// The double over `storage`, with what its stores need to outlive it.
 async fn double_over(
     storage: Storage,
 ) -> Option<(
@@ -530,13 +529,70 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     Ok(())
 }
 
+/// A send to a catalog row with no head ends: the sender's output answers
+/// the typed creation-unrecorded refusal of the drive that could not open
+/// the session, and never waits on a turn that cannot run.
+async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
+    storage: Storage,
+) -> Result<()> {
+    const ID: &str = "send-to-a-catalog-row-with-no-head";
+    let Some((double, _held)) = double_over(storage).await else {
+        return Ok(());
+    };
+    let core = core_over(&double, NODE_BUDGET)?;
+    let store = lash_core::runtime::admit_session_view(
+        &core.store_factory,
+        &lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from(ID),
+            relation: lash_core::SessionRelation::Root,
+            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            head: lash_core::SessionCreationHead::CommittedByCreator,
+        },
+    )
+    .await
+    .map_err(EmbedError::Store)?;
+
+    let sent = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        core.session(ID)
+            .durable()
+            .await?
+            .send(TurnInput::text("a turn the row can never run"))
+            .output()
+            .await
+    })
+    .await;
+    let Ok(output) = sent else {
+        panic!(
+            "the sender's output answers the refusal: none in 60 s, invocations {:?}",
+            invocations(&double)
+        );
+    };
+    let refusal = match output {
+        Ok(output) => panic!("the row runs no turn: {:?}", output.result.outcome),
+        Err(refusal) => refusal,
+    };
+    let code = lash_core::RuntimeErrorCode::SessionCreationUnrecorded;
+    assert!(
+        format!("{refusal:?}").contains(&format!("{code:?}")),
+        "the sender's output answers the typed creation-unrecorded refusal: {refusal:?}"
+    );
+    assert!(
+        head_of(&store).await?.is_none(),
+        "the refused send committed no head"
+    );
+    Ok(())
+}
+
 macro_rules! crashed_create_drain_laws {
-    ($($storage:ident: $kind:expr;)*) => {
+    ($($(#[$service:meta])* $storage:ident: $kind:expr;)*) => {
         $(
             mod $storage {
                 use super::*;
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$service])*
                 async fn a_refused_append_drained_after_a_crashed_create_leaves_nothing_of_it()
                 -> Result<()> {
                     super::a_refused_append_drained_after_a_crashed_create_leaves_nothing_of_it(
@@ -546,12 +602,14 @@ macro_rules! crashed_create_drain_laws {
                 }
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$service])*
                 async fn an_append_drained_after_a_crashed_create_is_committed_once() -> Result<()>
                 {
                     super::an_append_drained_after_a_crashed_create_is_committed_once($kind).await
                 }
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$service])*
                 async fn a_refused_append_drain_after_a_crashed_create_reopens_on_a_new_deployment()
                 -> Result<()> {
                     super::a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
@@ -562,6 +620,7 @@ macro_rules! crashed_create_drain_laws {
                 }
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$service])*
                 async fn an_accepted_append_drain_after_a_crashed_create_reopens_on_a_new_deployment()
                 -> Result<()> {
                     super::a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
@@ -572,6 +631,15 @@ macro_rules! crashed_create_drain_laws {
                 }
 
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$service])*
+                async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal()
+                -> Result<()> {
+                    super::a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal($kind)
+                        .await
+                }
+
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$service])*
                 async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults()
                 -> Result<()> {
                     super::a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
@@ -587,5 +655,6 @@ macro_rules! crashed_create_drain_laws {
 crashed_create_drain_laws! {
     sqlite_memory: Storage::SqliteMemory;
     sqlite_file: Storage::SqliteFile;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     postgres: Storage::Postgres;
 }
