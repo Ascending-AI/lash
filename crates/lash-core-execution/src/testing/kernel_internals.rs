@@ -286,3 +286,39 @@ pub async fn bind_retained_tool_requests(
     let requests = requests.iter().copied().map(Some).collect::<Vec<_>>();
     context.bind_retained_requests(group_key, &requests).await
 }
+
+/// Complete a settled output through the journaled presentation boundary.
+pub async fn complete_tool_output(
+    context: &crate::RuntimeExecutionContext<'_>,
+    call_id: crate::ToolCallId,
+    tool: &str,
+    output: crate::ToolCallOutput,
+) -> Result<crate::ModelToolReturn, crate::RuntimeEffectControllerError> {
+    context
+        .complete_tool_call(
+            crate::tool_dispatch::ToolCallIds {
+                call_id: call_id.clone(),
+                provider_call_id: None,
+            },
+            crate::ToolId::new(tool),
+            None,
+            crate::tool_dispatch::ToolDispatchOutcome {
+                record: crate::ToolCallRecord {
+                    call_id,
+                    provider_call_id: None,
+                    tool: tool.to_string(),
+                    args: serde_json::json!({}),
+                    output,
+                },
+                attempts: Vec::new(),
+                intents: crate::ToolIntents::default(),
+                intent_outcomes: Vec::new(),
+                captures: Vec::new(),
+                triggers: Vec::new(),
+            },
+            "test:call",
+            1,
+        )
+        .await
+        .map(|result| result.completed.model_return)
+}

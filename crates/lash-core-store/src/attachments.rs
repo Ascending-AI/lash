@@ -59,7 +59,10 @@ impl AttachmentSourcePolicy for OpenAttachmentSourcePolicy {
 ///
 /// The retry and operator verdicts are derived from the class, never stored
 /// separately, so a class and its verdicts cannot contradict each other.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AttachmentStoreFailureClass {
     /// The operation may succeed if retried: a transport fault, timeout,
@@ -181,18 +184,7 @@ impl AttachmentStoreError {
     /// refusal. A failed rollback is retryable only if both causes are
     /// retryable. This verdict does not authorize replaying an executed tool.
     pub fn is_retryable(&self) -> bool {
-        match self {
-            Self::Backend { class, .. } => class.is_retryable(),
-            Self::RootSetOperationFailed { source, .. }
-            | Self::ReferrersOperationFailed { source, .. } => source.is_transient(),
-            Self::WriteRollbackFailed {
-                write_error,
-                abort_error,
-                ..
-            } => write_error.is_retryable() && abort_error.is_transient(),
-            Self::ReclamationInFlight { .. } => true,
-            _ => false,
-        }
+        self.retention_failure().is_retryable()
     }
 
     /// Whether an operator must correct credentials or authorization before the

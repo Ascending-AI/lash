@@ -364,6 +364,12 @@ impl<R> From<crate::MaintenanceFailure<R>> for PluginError {
     }
 }
 
+impl From<crate::AttachmentStoreError> for PluginError {
+    fn from(error: crate::AttachmentStoreError) -> Self {
+        crate::RuntimeEffectControllerError::output_retention_failed(&error).into()
+    }
+}
+
 impl From<crate::StoreError> for PluginError {
     fn from(error: crate::StoreError) -> Self {
         match error {

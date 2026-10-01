@@ -6,13 +6,16 @@ use crate::SessionId;
 /// Typed cause retained when a controller-owned runtime effect must abort
 /// through the generic runtime error boundary.
 ///
-/// Every cause but [`Self::ModelUnavailable`] is terminal by construction
-/// ([`Self::is_terminal`]), whatever the code's ordinary classification. An
-/// unbound model's cause only names the key: its error stays retryable.
+/// An attachment retention cause keeps the attachment store's retry class.
+/// Other causes are terminal except for an unavailable recorded model.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    /// The attachment-store family and structured source of a required retention failure.
+    AttachmentRetention {
+        failure: Box<super::AttachmentRetentionFailure>,
+    },
     IngressReservedSourceKey {
         #[serde(flatten)]
         refusal: Box<IngressReservedSourceKeyRefusal>,
@@ -38,8 +41,8 @@ pub enum RuntimeErrorCause {
     EffectGroupChildUnroutable {
         missing: GroupChildCapability,
     },
-    /// The recorded model key this worker could not bind (FIG-4404). The one
-    /// cause that is not terminal: a deployment serving the key repairs it.
+    /// The recorded model key this worker could not bind (FIG-4404).
+    /// A deployment serving the key repairs this retryable cause.
     ModelUnavailable {
         model_key: Box<crate::ModelKey>,
     },

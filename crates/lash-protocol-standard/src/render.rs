@@ -463,11 +463,7 @@ async fn render_present(
         )
         .await
         .map_err(|error| {
-            lash_core::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::OutputRetentionFailed,
-                format!("the cut tool output could not be retained: {error}"),
-            )
-            .retryable_uncommitted_derivation()
+            lash_core::RuntimeEffectControllerError::output_retention_failed(&error)
         })?;
     let retention = format!("attachment {}", reference.id);
     let mut notice = format!(
@@ -562,7 +558,8 @@ mod tests {
     use super::*;
     use lash_core::facade_support::{ToolPresentationArtifacts, ToolResultProjectionContext};
     use lash_core::{
-        AttachmentId, AttachmentRef, MediaType, PluginError, SessionId, ToolView, ToolViewMeta,
+        AttachmentId, AttachmentRef, AttachmentStoreError, MediaType, SessionId, ToolView,
+        ToolViewMeta,
     };
     use std::future::Future;
     use std::pin::Pin;
@@ -573,6 +570,7 @@ mod tests {
         writes: AtomicUsize,
         text: std::sync::Mutex<Vec<String>>,
         fail: bool,
+        terminal: bool,
     }
 
     impl ToolPresentationArtifacts for Artifacts {
@@ -580,12 +578,24 @@ mod tests {
             &'a self,
             _label: &'a str,
             text: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<AttachmentRef, PluginError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<AttachmentRef, AttachmentStoreError>> + Send + 'a>>
+        {
             Box::pin(async move {
                 self.writes.fetch_add(1, Ordering::SeqCst);
                 self.text.lock().expect("test mutex").push(text.to_string());
                 if self.fail {
-                    return Err(PluginError::Session("store unavailable".into()));
+                    return Err(if self.terminal {
+                        AttachmentStoreError::SizeLimitExceeded {
+                            byte_len: text.len() as u64,
+                            max_bytes: 64,
+                        }
+                    } else {
+                        AttachmentStoreError::Backend {
+                            operation: "put",
+                            class: lash_core::AttachmentStoreFailureClass::Transient,
+                            source: Box::new(std::io::Error::other("store unavailable")),
+                        }
+                    });
                 }
                 Ok(AttachmentRef::new(
                     AttachmentId::parse("full-output").expect("valid id"),
@@ -868,6 +878,33 @@ mod tests {
             "a store fault is the attempt's: the presentation retries"
         );
         assert_eq!(failed.writes.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_renderer_retention_is_typed_and_terminal() {
+        let output =
+            ToolCallOutput::success_tool_value(lash_core::ToolValue::String("x".repeat(900)));
+        let params = ToolRenderParams {
+            value: RenderParams {
+                max_chars: 180,
+                ..RenderParams::default()
+            },
+            ..ToolRenderParams::default()
+        };
+        let failed = Arc::new(Artifacts {
+            fail: true,
+            terminal: true,
+            ..Artifacts::default()
+        });
+        let ctx = context(output, params, failed);
+        let error = render_present(baseline(&ctx), &ctx, &ToolOutputRendererSlot::default())
+            .await
+            .expect_err("required retention refused");
+        assert!(
+            error.is_terminal(),
+            "renderer refusal is terminal: {error:?}"
+        );
+        assert!(error.cause.is_some());
     }
 
     #[tokio::test]

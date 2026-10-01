@@ -153,7 +153,7 @@ struct RecordedCellOutputs {
 /// something is oversized — so a replay under a changed policy issues the
 /// same step and is served the recorded observations, witnesses and
 /// references verbatim. A retention that fails is the step's typed
-/// `OutputRetentionFailed` error: the cell stops, and the outputs never
+/// typed attachment-store error: the cell stops, and the outputs never
 /// enter history in its place.
 async fn record_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
@@ -288,9 +288,10 @@ async fn retain_oversized_value(
     }
     let meta = lash_core::AttachmentCreateMeta::new(
         lash_core::MediaType::parse("application/json").map_err(|error| {
-            lash_core::RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::OutputRetentionFailed,
-                format!("the retained-output media type is fixed and cannot parse: {error}"),
+            lash_core::RuntimeEffectControllerError::output_retention_failed(
+                &lash_core::AttachmentStoreError::Contract(format!(
+                    "the retained-output media type is fixed and cannot parse: {error}"
+                )),
             )
         })?,
         None,
@@ -301,11 +302,7 @@ async fn retain_oversized_value(
         .put(encoded.clone().into_bytes(), meta)
         .await
         .map_err(|error| {
-            lash_core::RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::OutputRetentionFailed,
-                format!("retaining an RLM output of {byte_len} bytes failed: {error}"),
-            )
-            .retryable_uncommitted_derivation()
+            lash_core::RuntimeEffectControllerError::output_retention_failed(&error)
         })?;
     let notice = format!(
         "…[value retained: {byte_len} bytes exceed the {}-byte history limit; full value: attachment {}]",

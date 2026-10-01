@@ -76,10 +76,10 @@ pub type ToolPresentationPresenter = Arc<
 /// The standard renderer retains a cut output through it, a step may retain
 /// what it presents, and the boundary itself retains whatever the folded
 /// return still carries past [`Self::retention_policy`]. A retention that
-/// fails fails the presentation with a typed
-/// [`OutputRetentionFailed`](crate::RuntimeErrorCode::OutputRetentionFailed)
-/// error, whatever a step made of the refusal: a presentation never records
-/// a retention failure as text.
+/// fails ends the presentation with its typed attachment-store cause, even
+/// when a step catches it. Transient faults retry the uncommitted derivation;
+/// permanent refusals record [`OutputRetentionRefused`](crate::RuntimeErrorCode::OutputRetentionRefused).
+/// A presentation never records a retention failure as text.
 pub trait ToolPresentationArtifacts: Send + Sync {
     /// Retain `text` under `label`, returning the content-addressed reference
     /// the session now references.
@@ -87,7 +87,13 @@ pub trait ToolPresentationArtifacts: Send + Sync {
         &'a self,
         label: &'a str,
         text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::AttachmentRef, PluginError>> + Send + 'a>>;
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::AttachmentRef, crate::AttachmentStoreError>>
+                + Send
+                + 'a,
+        >,
+    >;
 
     /// The byte policy the boundary measures the folded return against. The
     /// recorded presentation journals it, so a replay under another policy
@@ -105,7 +111,7 @@ pub trait ToolPresentationArtifacts: Send + Sync {
 
     /// Why the first retention that failed while the chain ran failed, if
     /// one did.
-    fn retention_failure(&self) -> Option<String> {
+    fn retention_failure(&self) -> Option<crate::RuntimeEffectControllerError> {
         None
     }
 }
@@ -123,8 +129,18 @@ impl ToolPresentationArtifacts for NoPresentationArtifacts {
         &'a self,
         _label: &'a str,
         _text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::AttachmentRef, PluginError>> + Send + 'a>> {
-        Box::pin(async move { Err(PluginError::Session(NO_PRESENTATION_ARTIFACTS.to_string())) })
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::AttachmentRef, crate::AttachmentStoreError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Err(crate::AttachmentStoreError::Contract(
+                NO_PRESENTATION_ARTIFACTS.to_string(),
+            ))
+        })
     }
 }
 pub type AfterTurnHook =

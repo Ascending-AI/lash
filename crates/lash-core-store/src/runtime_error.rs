@@ -9,6 +9,8 @@ pub use crate::executable_generation::{ExecutableGeneration, ExecutableGeneratio
 use crate::{RuntimeEffectKind, SessionId};
 use serde::{Deserialize, Serialize};
 
+mod attachment_retention;
+pub use attachment_retention::{AttachmentRetentionFailure, AttachmentRetentionStoreFailure};
 mod cause;
 mod classification;
 pub use cause::{GroupChildCapability, RuntimeErrorCause, StoredDataCorruption};
@@ -255,6 +257,8 @@ pub enum RuntimeErrorCode {
     /// enters history in its place: the step retries, and its retry budget
     /// parks the root.
     OutputRetentionFailed,
+    /// A required output retention was permanently refused by its attachment store.
+    OutputRetentionRefused,
     /// A registered run definition refused the spec's context (FIG-3838):
     /// deterministic, so it is recorded as the root's failure.
     RunShapeRefused,
@@ -757,6 +761,7 @@ impl RuntimeErrorCode {
             Self::RunDefinitionUnavailable => "run_definition_unavailable",
             Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
             Self::OutputRetentionFailed => "output_retention_failed",
+            Self::OutputRetentionRefused => "output_retention_refused",
             Self::RunShapeRefused => "run_shape_refused",
             Self::RunSpecMismatch => "run_spec_mismatch",
             Self::TurnAddressUnknown => "turn_address_unknown",
@@ -1037,6 +1042,7 @@ impl RuntimeErrorCode {
             "run_definition_unavailable" => Self::RunDefinitionUnavailable,
             "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,
             "output_retention_failed" => Self::OutputRetentionFailed,
+            "output_retention_refused" => Self::OutputRetentionRefused,
             "run_shape_refused" => Self::RunShapeRefused,
             "run_spec_mismatch" => Self::RunSpecMismatch,
             "turn_address_unknown" => Self::TurnAddressUnknown,
@@ -1489,6 +1495,7 @@ impl RuntimeError {
             | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::ModelUnavailable { .. }
+            | RuntimeErrorCause::AttachmentRetention { .. }
             | RuntimeErrorCause::MaxToolCallsExceeded { .. }
             | RuntimeErrorCause::StoredDataCorrupt { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
@@ -1926,15 +1933,21 @@ impl RuntimeErrorCode {
 
 impl From<crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: crate::StoreError) -> Self {
+        Self::from(&err)
+    }
+}
+
+impl From<&crate::StoreError> for RuntimeEffectControllerError {
+    fn from(err: &crate::StoreError) -> Self {
         if let crate::StoreError::StoredDataCorrupt {
             record_kind,
             message,
-        } = &err
+        } = err
         {
             return Self::stored_data_corrupt(*record_kind, message.clone());
         }
-        let refusal = crate::store::StoreRefusal::of_store_error(&err);
-        let cause = match &err {
+        let refusal = crate::store::StoreRefusal::of_store_error(err);
+        let cause = match err {
             crate::StoreError::SessionDeleted { session_id } => {
                 Some(crate::RuntimeErrorCause::SessionDeleted {
                     session_id: session_id.clone(),
@@ -1953,7 +1966,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
                 refusal: Box::new(refusal.clone()),
             })
             .or(cause);
-        let code = RuntimeErrorCode::of_store_error(&err);
+        let code = RuntimeErrorCode::of_store_error(err);
         Self {
             journal_disposition: EffectErrorJournalPolicy::Terminal,
             code,

@@ -11,7 +11,17 @@ impl RuntimeErrorCause {
     /// Whether an error carrying this cause is settled, whatever its code.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
-        !matches!(self, Self::ModelUnavailable { .. })
+        match self {
+            Self::ModelUnavailable { .. } => false,
+            Self::AttachmentRetention { failure } => !failure.is_retryable(),
+            Self::IngressReservedSourceKey { .. }
+            | Self::StoreRefusal { .. }
+            | Self::StoredDataCorrupt { .. }
+            | Self::SessionDeleted { .. }
+            | Self::ArtifactReferrerEnded { .. }
+            | Self::EffectGroupChildUnroutable { .. }
+            | Self::MaxToolCallsExceeded { .. } => true,
+        }
     }
 
     /// The recorded model key `cause` names, if it is an unbound model.

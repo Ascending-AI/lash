@@ -87,3 +87,5 @@ pub mod causal {
         crate::runtime::causal::direct_request_discriminator(explicit_replay, caused_by, ordinal)
     }
 }
+
+pub use lash_core_execution::testing::kernel_internals::complete_tool_output;

@@ -100,7 +100,7 @@ impl ToolPresentation {
 pub struct SessionPresentationArtifacts {
     store: Arc<crate::RuntimeAttachmentStore>,
     retained: std::sync::Mutex<Vec<crate::AttachmentRef>>,
-    failure: std::sync::Mutex<Option<String>>,
+    failure: std::sync::Mutex<Option<RuntimeEffectControllerError>>,
 }
 
 impl SessionPresentationArtifacts {
@@ -118,12 +118,17 @@ impl crate::plugin::ToolPresentationArtifacts for SessionPresentationArtifacts {
         &'a self,
         label: &'a str,
         text: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::AttachmentRef, crate::PluginError>> + Send + 'a>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::AttachmentRef, crate::AttachmentStoreError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
             let meta = crate::AttachmentCreateMeta::new(
                 crate::MediaType::parse("text/plain").map_err(|error| {
-                    crate::PluginError::Session(format!(
+                    crate::AttachmentStoreError::Contract(format!(
                         "the retained-output media type is fixed and cannot parse: {error}"
                     ))
                 })?,
@@ -133,13 +138,10 @@ impl crate::plugin::ToolPresentationArtifacts for SessionPresentationArtifacts {
             let reference = match self.store.put(text.as_bytes().to_vec(), meta).await {
                 Ok(reference) => reference,
                 Err(error) => {
-                    let message = format!(
-                        "retaining the full tool output as a session artifact failed: {error}"
-                    );
-                    self.failure
-                        .lock_recover()
-                        .get_or_insert_with(|| message.clone());
-                    return Err(crate::PluginError::Session(message));
+                    self.failure.lock_recover().get_or_insert_with(|| {
+                        RuntimeEffectControllerError::output_retention_failed(&error)
+                    });
+                    return Err(error);
                 }
             };
             self.retained.lock_recover().push(reference.clone());
@@ -155,16 +157,9 @@ impl crate::plugin::ToolPresentationArtifacts for SessionPresentationArtifacts {
         self.retained.lock_recover().clone()
     }
 
-    fn retention_failure(&self) -> Option<String> {
+    fn retention_failure(&self) -> Option<RuntimeEffectControllerError> {
         self.failure.lock_recover().clone()
     }
-}
-
-/// The typed failure of a retention a presentation needed (FIG-1643): the
-/// output is never recorded in its place, and the step retries.
-pub fn output_retention_failed(message: impl Into<String>) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(crate::RuntimeErrorCode::OutputRetentionFailed, message)
-        .retryable_uncommitted_derivation()
 }
 
 /// Retains the folded return's text when it is longer than `policy` allows
@@ -196,7 +191,7 @@ pub async fn retain_oversized_return(
     let reference = artifacts
         .retain_text(&format!("tool-output:{call_id}"), &text)
         .await
-        .map_err(|error| output_retention_failed(error.to_string()))?;
+        .map_err(|error| RuntimeEffectControllerError::output_retention_failed(&error))?;
     let notice = format!(
         "\n[output retained: {} bytes exceed the {}-byte history limit; showing the first bytes; full output: attachment {}]",
         text.len(),

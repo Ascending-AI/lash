@@ -888,3 +888,5 @@ pub mod usage_accounting {
 }
 pub use lash_core_execution::UsageAccountingStore;
 pub use usage_accounting::*;
+
+pub use lash_core_execution::{AttachmentRetentionFailure, AttachmentRetentionStoreFailure};

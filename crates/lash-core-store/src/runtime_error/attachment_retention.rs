@@ -1,0 +1,217 @@
+//! The attachment-store cause that survives a journal or plugin boundary.
+
+use crate::attachments::{AttachmentStoreError, AttachmentStoreFailureClass};
+use crate::runtime_error::{RuntimeEffectControllerError, RuntimeErrorCause, RuntimeErrorCode};
+use crate::{AttachmentId, StoreError};
+
+/// Structured attachment failure evidence. Backend diagnostics remain on the
+/// runtime error's message; classification and refusal data remain typed.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum AttachmentRetentionFailure {
+    NotFound {
+        attachment_id: AttachmentId,
+    },
+    SizeLimitExceeded {
+        byte_len: u64,
+        max_bytes: u64,
+    },
+    ReadLimitExceeded {
+        byte_len: u64,
+        max_bytes: u64,
+    },
+    RequestBudgetExceeded {
+        max_bytes: u64,
+    },
+    Io {
+        path: std::path::PathBuf,
+        raw_os_error: Option<i32>,
+    },
+    ReferrersOperationFailed {
+        operation: String,
+        attachment_id: AttachmentId,
+        source: Box<AttachmentRetentionStoreFailure>,
+    },
+    WriteRollbackFailed {
+        attachment_id: AttachmentId,
+        write_error: Box<Self>,
+        abort_error: Box<AttachmentRetentionStoreFailure>,
+    },
+    Backend {
+        operation: String,
+        class: AttachmentStoreFailureClass,
+    },
+    Contract,
+    RootSetEnumerationFailed {
+        source: Box<AttachmentRetentionStoreFailure>,
+    },
+    RootSetOperationFailed {
+        operation: String,
+        source: Box<AttachmentRetentionStoreFailure>,
+    },
+    ReclamationInFlight {
+        attachment_id: AttachmentId,
+        attempts: u32,
+    },
+}
+
+/// A nested store cause with the store's authoritative retry class and its
+/// runtime code and structured refusal. The diagnostic is carried separately.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum AttachmentRetentionStoreFailure {
+    Transient {
+        code: RuntimeErrorCode,
+        cause: Option<Box<RuntimeErrorCause>>,
+    },
+    Refused {
+        code: RuntimeErrorCode,
+        cause: Option<Box<RuntimeErrorCause>>,
+    },
+}
+
+impl AttachmentRetentionStoreFailure {
+    fn of(error: &StoreError) -> Box<Self> {
+        let mapped = RuntimeEffectControllerError::from(error);
+        let cause = mapped.cause.map(Box::new);
+        Box::new(if error.is_transient() {
+            Self::Transient {
+                code: mapped.code,
+                cause,
+            }
+        } else {
+            Self::Refused {
+                code: mapped.code,
+                cause,
+            }
+        })
+    }
+
+    pub const fn is_retryable(&self) -> bool {
+        match self {
+            Self::Transient { .. } => true,
+            Self::Refused { .. } => false,
+        }
+    }
+}
+
+impl AttachmentRetentionFailure {
+    /// Whether retrying the identical retention can succeed.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Backend { class, .. } => class.is_retryable(),
+            Self::RootSetOperationFailed { source, .. }
+            | Self::ReferrersOperationFailed { source, .. } => source.is_retryable(),
+            Self::WriteRollbackFailed {
+                write_error,
+                abort_error,
+                ..
+            } => write_error.is_retryable() && abort_error.is_retryable(),
+            Self::ReclamationInFlight { .. } => true,
+            Self::NotFound { .. }
+            | Self::SizeLimitExceeded { .. }
+            | Self::ReadLimitExceeded { .. }
+            | Self::RequestBudgetExceeded { .. }
+            | Self::Io { .. }
+            | Self::Contract
+            | Self::RootSetEnumerationFailed { .. } => false,
+        }
+    }
+}
+
+impl AttachmentStoreError {
+    /// Capture the typed failure while retaining backend diagnostics on the live source.
+    pub fn retention_failure(&self) -> AttachmentRetentionFailure {
+        use AttachmentRetentionFailure as F;
+        match self {
+            Self::NotFound(id) => F::NotFound {
+                attachment_id: id.clone(),
+            },
+            Self::SizeLimitExceeded {
+                byte_len,
+                max_bytes,
+            } => F::SizeLimitExceeded {
+                byte_len: *byte_len,
+                max_bytes: *max_bytes,
+            },
+            Self::ReadLimitExceeded {
+                byte_len,
+                max_bytes,
+            } => F::ReadLimitExceeded {
+                byte_len: *byte_len,
+                max_bytes: *max_bytes,
+            },
+            Self::RequestBudgetExceeded { max_bytes } => F::RequestBudgetExceeded {
+                max_bytes: *max_bytes,
+            },
+            Self::Io { path, source } => F::Io {
+                path: path.clone(),
+                raw_os_error: source.raw_os_error(),
+            },
+            Self::ReferrersOperationFailed {
+                operation,
+                attachment_id,
+                source,
+            } => F::ReferrersOperationFailed {
+                operation: (*operation).to_string(),
+                attachment_id: attachment_id.clone(),
+                source: AttachmentRetentionStoreFailure::of(source),
+            },
+            Self::WriteRollbackFailed {
+                attachment_id,
+                write_error,
+                abort_error,
+            } => F::WriteRollbackFailed {
+                attachment_id: attachment_id.clone(),
+                write_error: Box::new(write_error.retention_failure()),
+                abort_error: AttachmentRetentionStoreFailure::of(abort_error),
+            },
+            Self::Backend {
+                operation, class, ..
+            } => F::Backend {
+                operation: (*operation).to_string(),
+                class: *class,
+            },
+            Self::Contract(_) => F::Contract,
+            Self::RootSetEnumerationFailed { source } => F::RootSetEnumerationFailed {
+                source: AttachmentRetentionStoreFailure::of(source),
+            },
+            Self::RootSetOperationFailed { operation, source } => F::RootSetOperationFailed {
+                operation: (*operation).to_string(),
+                source: AttachmentRetentionStoreFailure::of(source),
+            },
+            Self::ReclamationInFlight {
+                attachment_id,
+                attempts,
+            } => F::ReclamationInFlight {
+                attachment_id: attachment_id.clone(),
+                attempts: *attempts,
+            },
+        }
+    }
+}
+
+impl RuntimeEffectControllerError {
+    /// Refuse a required retention without granting retry authority to permanent causes.
+    pub fn output_retention_failed(source: &AttachmentStoreError) -> Self {
+        let retryable = source.is_retryable();
+        let mut error = Self::new(
+            if retryable {
+                RuntimeErrorCode::OutputRetentionFailed
+            } else {
+                RuntimeErrorCode::OutputRetentionRefused
+            },
+            format!("retaining the full output as an attachment failed: {source}"),
+        );
+        error.cause = Some(RuntimeErrorCause::AttachmentRetention {
+            failure: Box::new(source.retention_failure()),
+        });
+        if retryable {
+            error.retryable_uncommitted_derivation()
+        } else {
+            error
+        }
+    }
+}

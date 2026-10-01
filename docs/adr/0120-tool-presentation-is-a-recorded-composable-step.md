@@ -20,7 +20,9 @@ A plugin registers a `ToolPresentationPresenter` through
 required renderer. Optional `ToolPresentationStep`s register through
 `presentation_step(..)` and fold in registration order. Every step receives
 the prior `ModelToolReturn`, the settlement and its projection context.
-An optional-step error becomes fallback text, and the chain continues.
+A retryable optional-step error aborts the uncommitted presentation derivation
+and is never model-visible text. Other optional-step errors become fallback
+text, and the chain continues.
 A required-presenter error fails presentation.
 
 The standard `ToolOutputRenderer` uses the renderer id and resolved per-tool
@@ -69,10 +71,12 @@ one `ModelToolReturnPart::Retained` block containing a bounded witness and the
 exact text's attachment reference. The outcome records the policy, so replay
 serves the same retention decision after a threshold change.
 
-A required retention failure anywhere in the chain is
-`RuntimeErrorCode::OutputRetentionFailed`, even when a step catches the put
-error and returns text. This failure refuses presentation and is retryable
-while nothing downstream derives from it.
+A required retention failure anywhere in the chain carries its typed
+attachment-store cause, even when a step catches the put error and returns
+text. `AttachmentStoreError::is_retryable()` is the retry authority:
+`OutputRetentionFailed` retries the uncommitted derivation only for a
+transient cause. A permanent refusal records `OutputRetentionRefused` and
+ends presentation. Byte limits and ended referrers never retry.
 
 RLM cell prints and final values follow the same policy in the journaled
 `{cell}:outputs` value: history carries `OutputValue::Retained` for oversized

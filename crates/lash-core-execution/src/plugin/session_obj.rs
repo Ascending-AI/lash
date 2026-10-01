@@ -702,7 +702,8 @@ impl PluginSession {
     /// registered [`ToolPresentationStep`] in registration order, starting
     /// from `ModelToolReturn::from_output`.
     ///
-    /// A step error does not abort the chain: the fold continues from the
+    /// A retryable step error aborts the uncommitted derivation. Other optional
+    /// step errors continue the fold from the
     /// recorded fallback text return (`ModelToolReturn::text(call_id, tool,
     /// err)`), so one broken step settles a refusal the model can read instead
     /// of losing the whole presentation. Attachment-materialization notices
@@ -715,7 +716,7 @@ impl PluginSession {
     ///
     /// A retention that failed anywhere in the chain — the presenter's, a
     /// step's, or the boundary's own — fails the presentation with a typed
-    /// `OutputRetentionFailed` error: a step that turned the refusal into
+    /// attachment-store cause: a step that turned the refusal into
     /// text does not make it the call's return.
     pub(crate) async fn present_tool_result(
         &self,
@@ -746,6 +747,12 @@ impl PluginSession {
             };
             model_return = match (registered.hook)(input).await {
                 Ok(next) => next,
+                Err(err) if err.is_retryable() => {
+                    return Err(crate::RuntimeEffectControllerError::from(
+                        err.into_turn_failure(crate::RuntimeErrorCode::Plugin),
+                    )
+                    .retryable_uncommitted_derivation());
+                }
                 Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
             };
         }
@@ -763,7 +770,7 @@ impl PluginSession {
         )
         .await?;
         if let Some(failure) = ctx.artifacts.retention_failure() {
-            return Err(crate::runtime::effect::output_retention_failed(failure));
+            return Err(failure);
         }
         Ok(crate::runtime::effect::ToolPresentation {
             version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
