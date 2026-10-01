@@ -514,6 +514,10 @@ impl PendingTurnInputBatch {
 /// hashes must bump this version together with both SQL store schema versions:
 /// a row admitted under the old grammar would otherwise refuse its own
 /// identical retry as a conflict.
+///
+/// version_guard(
+///     items(turn_input_submission_preimage, TurnInput, InputItem),
+/// )
 pub const TURN_INPUT_SUBMISSION_FAMILY_VERSION: u8 = 1;
 
 /// Permanent tag registry for the turn-input submission preimage.

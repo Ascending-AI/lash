@@ -1467,7 +1467,21 @@ pub fn evaluate_trigger_prune(
 const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 6;
 // Was 5 (FIG-2886): list filters carry the canonical owner scope and retain an
 // absent slot for the retired raw session-id spelling.
+/// version_guard(
+///     items(trigger_command_preimage),
+///     items(
+///         path = "crates/lash-core-execution/src/triggers/router.rs",
+///         path = "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
+///         project_trigger_owner, project_trigger_actor, project_trigger_draft,
+///         project_process_event_type, project_process_value_selector,
+///         project_trigger_process_input, project_process_payload_leaf, project_process_schema_leaf,
+///     ),
+/// )
 const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 8;
+/// version_guard(
+///     items(trigger_operation_receipt_preimage),
+///     items(path = "crates/lash-core-execution/src/triggers/router.rs", project_trigger_owner),
+/// )
 const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 
 /// Fingerprint one trigger command independently of its caller-supplied

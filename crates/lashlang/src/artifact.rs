@@ -39,6 +39,13 @@ use crate::linker::{
 pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The JSON module envelope written by the 1.0 binary.
+///
+/// version_guard(
+///     items(
+///         StoredModuleArtifact, ModuleArtifactEnvelope, StoredModuleArtifactEnvelope,
+///         to_store_bytes, from_store_bytes, reject_future_shape,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 1;
 
@@ -77,6 +84,14 @@ const fn envelope_encoding_admitted(encoding: u64) -> bool {
 /// v14 (FIG-3707): a compiled program shares an assigned captured binding
 /// through a binding cell rather than copying it, so a host bridge built for
 /// v13 would run a program this VM compiled under the old capture meaning.
+///
+/// version_guard(
+///     items(
+///         path = "crates/lashlang/src/runtime/host.rs", AbilityOp, AggregateConsumer,
+///         ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf, ProcessEvent,
+///         ProcessEventKind, Sleep, SleepKind,
+///     ),
+/// )
 pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v14";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

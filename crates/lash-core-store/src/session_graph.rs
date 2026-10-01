@@ -306,6 +306,55 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
+///
+/// version_guard(
+///     shapes(cover(StoredSessionNodeBody, SessionNodePayload, SessionNodeRecord)),
+///     items(
+///         path = "crates/lash-sansio/src/session_model/mod.rs", SessionHistoryRecord,
+///         ConversationRecord, ProtocolEvent, TurnBudget, NoProgressBudget,
+///     ),
+///     items(
+///         path = "crates/lash-sansio/src/session_model/message.rs", Message, MessageRole,
+///         MessageOrigin, Part, FlatPart, FlatPartRef, PartKind, PartAttachment,
+///     ),
+///     items(path = "crates/lash-sansio/src/tool_output.rs", ModelToolReturnPart),
+///     items(
+///         path = "crates/lash-core-store/src/session_identity.rs", AgentFrameReason,
+///         AgentFrameAssignment,
+///     ),
+///     file(
+///         path = "crates/lash-core-store/src/session_policy_serde.rs",
+///         cover(
+///             "impl serde::Serialize for SessionPolicy",
+///             "impl<'de> serde::Deserialize<'de> for SessionPolicy",
+///         ),
+///     ),
+///     items(path = "crates/lash-core-store/src/execution_state.rs", PluginOptions),
+///     items(path = "crates/lash-core-llm/src/model.rs", ModelLimits),
+///     shapes(
+///         path = "crates/lash-sansio/src/llm/capability.rs",
+///         cover(
+///             ModelCapability, ReasoningCapability, ReasoningSelection, ReasoningEncoding,
+///             SamplingCapability, StreamTermination, CacheControlDialect,
+///         ),
+///     ),
+///     shapes(
+///         path = "crates/lash-sansio/src/session_model/prompt.rs",
+///         cover(
+///             PromptLayer, PromptTemplate, PromptTemplateSection, PromptTemplateEntry, PromptSlot,
+///             PromptSlotLayer, PromptBuiltin,
+///         ),
+///     ),
+///     shapes(
+///         path = "crates/lash-sansio/src/llm/types.rs",
+///         path = "crates/lash-sansio/src/llm/types/non_negative_finite_f64.rs",
+///         cover(
+///             AttachmentSource, ProviderReplayMeta, ProviderReasoningReplay, ResponseTextMeta,
+///             ProviderRouteIdentity, ProviderFileScope, GenerationOptions, NonNegativeFiniteF64,
+///         ),
+///     ),
+///     items(path = "crates/lash-sansio/src/attachment.rs", MediaType, AttachmentRef),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 22;
 

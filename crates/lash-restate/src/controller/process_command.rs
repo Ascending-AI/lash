@@ -4,6 +4,14 @@ use restate_sdk::serde::Json;
 
 /// Version stamped on the Restate-journaled process-command admission payload;
 /// a replay refuses any other version.
+///
+/// version_guard(
+///     items(JournaledCancelCommandIdentity, JournaledCancelAdmission),
+///     items(
+///         path = "crates/lash-core-execution/src/runtime/process/start_staging.rs",
+///         RegisteredProcessStart,
+///     ),
+/// )
 pub const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

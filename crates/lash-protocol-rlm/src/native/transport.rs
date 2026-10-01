@@ -8,6 +8,10 @@ use std::collections::HashMap;
 
 /// Schema version of the native RLM provider-call and repair envelopes
 /// recorded in session history.
+///
+/// version_guard(
+///     shapes(cover(Envelope, Transport)),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const NATIVE_TRANSPORT_VERSION: u32 = 1;
 

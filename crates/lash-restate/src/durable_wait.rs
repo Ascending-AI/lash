@@ -137,6 +137,13 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// absolute deadline first journaled by the invoking handler. The request
 /// decoder rejects the version-1 field instead of silently granting a fresh
 /// relative timeout after a worker replacement.
+///
+/// version_guard(
+///     items(
+///         path = "crates/lash-restate/src/durable_wait/messages.rs",
+///         RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline,
+///     ),
+/// )
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
@@ -145,6 +152,21 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// record (ADR 0115 §3.2). Bump it when a stored shape under those keys
 /// changes, and register the previous format's lift in
 /// `lash_core::store::RECORD_UPCASTERS`.
+///
+/// version_guard(
+///     items(
+///         RestateDurableWaitIndexMetadata, DURABLE_WAIT_REGISTRY_FORMATS,
+///         DURABLE_WAIT_INDEX_METADATA_KEY, DURABLE_WAIT_INDEX_WAIT_PREFIX,
+///         DURABLE_WAIT_INDEX_RESOLUTION_PREFIX, DURABLE_WAIT_INDEX_EFFECT_PREFIX,
+///         DURABLE_WAIT_INDEX_GROUP_PREFIX, DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX,
+///         DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
+///     ),
+///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
+///     items(
+///         path = "crates/lash-restate/src/durable_wait/messages.rs",
+///         RestateDurableWaitAwakeableRequest, RestateDurableWaitClassification,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 1;
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2 with

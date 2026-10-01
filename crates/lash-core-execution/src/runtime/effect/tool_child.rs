@@ -158,6 +158,39 @@ use super::executor::RuntimeEffectControllerError;
 /// id alone: the incarnation-qualified process reference is retired, so a v9
 /// request is refused, typed and before any effect, at
 /// [`ToolChildRequest::validate`].
+///
+/// version_guard(
+///     items(
+///         path = "crates/lash-core-execution/src/runtime/effect/tool_child.rs",
+///         path = "crates/lash-core-execution/src/runtime/effect/tool_child/session_facts.rs",
+///         path = "crates/lash-core-execution/src/tool_provider.rs",
+///         path = "crates/lash-core-store/src/effect_opener.rs",
+///         path = "crates/lash-core-store/src/turn_control_binding.rs",
+///         path = "crates/lash-core-store/src/effect_identity.rs",
+///         path = "crates/lash-core-store/src/process_identity.rs",
+///         path = "crates/lash-core-store/src/session_identity.rs",
+///         path = "crates/lash-core-store/src/admitted_scope.rs",
+///         path = "crates/lash-sansio/src/tool_output.rs",
+///         path = "crates/lash-sansio/src/tool_contract.rs",
+///         path = "crates/lash-sansio/src/schema_contract.rs",
+///         path = "crates/lash-sansio/src/llm/types.rs",
+///         path = "crates/lash-sansio/src/effect_identity.rs",
+///         path = "crates/lash-sansio/src/causal.rs", ToolChildRequest, ToolChildScope,
+///         ToolChildAdmission, ToolChildCompletionRouting, ToolChildSessionFacts,
+///         UnrecordedSessionSources, ToolDefinition, SessionToolAccessWire, SubagentSessionContext,
+///         EffectOpener, AdmittedScope, AdmittedScopeWire, TurnControlBindingId, PreparedToolCall,
+///         ToolExecutionGrant, RuntimeInvocation, RuntimeAttribution, RuntimeSubject, RuntimeReplay,
+///         RuntimeReplayAttribution, ToolIntentIdentity, ProcessExecutionEnvRef, FrameNodeId,
+///         ToolId, ToolManifest, ToolContract, ToolRetryPolicy, ToolArgumentProjectionPolicy,
+///         ToolOutputContract, CompactToolContract, SchemaContract, SchemaProjectionPolicy,
+///         SchemaProjectionOverride, ProjectionMode, ProviderReplayMeta, ProviderRouteIdentity,
+///         ExecutionScope, EffectAddress, CausalRef,
+///     ),
+///     file(
+///         path = "crates/lash-sansio/src/identity.rs",
+///         cover("string_identity!", SessionId, ProcessId, TurnId),
+///     ),
+/// )
 pub const TOOL_CHILD_REQUEST_VERSION: u16 = 10;
 
 mod session_facts;

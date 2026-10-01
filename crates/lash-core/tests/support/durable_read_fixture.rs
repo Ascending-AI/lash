@@ -99,6 +99,10 @@ pub const SESSION_ID: &str = "durable-read-fixture";
 /// The fixture format's declaration, carried in every [`ExpectedFixture`] and
 /// checked by [`assert_semantics`], so a captured release fixture names the
 /// format it was written in. Move it when [`ExpectedFixture`]'s shape changes.
+///
+/// version_guard(
+///     items(ExpectedFixture),
+/// )
 pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;

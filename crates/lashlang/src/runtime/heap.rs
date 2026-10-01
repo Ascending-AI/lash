@@ -57,6 +57,13 @@ use super::{
 /// The stamp is chosen where a heap is encoded, never carried by the heap:
 /// a durable writer stamps the version its store's `F` assigns the surface,
 /// and a reader admits the surface's read window (FIG-4262).
+///
+/// version_guard(
+///     items(
+///         path = "crates/lashlang/src/runtime/heap/object.rs", OBJECT_HEADER_BYTES,
+///         VALUE_SLOT_BYTES, value_logical_bytes,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 3;
 

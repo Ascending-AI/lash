@@ -454,6 +454,11 @@ pub fn direct_effect_invocation(
 
 // Version 3 includes the admitted execution scope in the direct effect's
 // address. Version 2 identified the replay only by descriptive session fields.
+/// version_guard(
+///     items(
+///         direct_effect_replay_preimage, direct_request_discriminator, project_direct_causal_ref,
+///     ),
+/// )
 const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
 
 fn direct_effect_replay_preimage(

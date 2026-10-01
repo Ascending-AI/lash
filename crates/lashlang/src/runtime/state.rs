@@ -48,6 +48,24 @@ pub use canonical_messagepack::{
 /// absent and an explicitly empty message stays empty, where v9 encoded both
 /// as `""`. A v9 wire would decode but resurrect `new Error('')` with no own
 /// `message`; the bump refuses it instead (FIG-3657).
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lashlang/src/runtime/state.rs",
+///         path = "crates/lashlang/src/runtime/state/*.rs",
+///         cover(CanonicalSnapshot, CanonicalHeap, CanonicalHeapObject, CanonicalValue),
+///     ),
+///     shapes(
+///         path = "crates/lashlang/src/runtime/projected_wire.rs",
+///         cover(CanonicalProjectedValue, CanonicalJsonValue, CanonicalJsonField),
+///     ),
+///     shapes(
+///         path = "crates/lashlang/src/runtime/heap.rs",
+///         path = "crates/lashlang/src/runtime/heap/*.rs",
+///         cover(ErrorKind, HeapId),
+///     ),
+///     items(path = "crates/lashlang/src/runtime/value.rs", ImageValue, ResourceHandle),
+/// )
 // v11 writes a closure's ECMA `name`/`length` own-property slots. A v10 wire's
 // closures would decode under the old shape, but restoring them would silently
 // drop the properties — an empty answer where the live run reported one — so

@@ -443,6 +443,11 @@ pub mod lifetime {
 /// ADR 0094's parent scope until FIG-3607 changed it in place under the
 /// pre-1.0 version freeze (FIG-3846); such a payload's scope is not a
 /// [`ScopeId`], so it is refused as malformed.
+///
+/// version_guard(
+///     items(ScopeId, ScopeStoragePayload),
+///     items(path = "crates/lash-core-store/src/effect_opener.rs", EffectOpener),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;
 

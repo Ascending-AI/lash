@@ -304,6 +304,9 @@ pub enum RuntimeSubject {
     },
 }
 
+/// version_guard(
+///     items(process_transfer_set_preimage),
+/// )
 pub(crate) const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 /// Canonical lineage for a runtime-side invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

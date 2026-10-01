@@ -401,6 +401,13 @@ pub struct UsageRunPage {
 
 /// Payload identity (moved here from `store/runtime_commit.rs`; same constant,
 /// same value under the version freeze, new projection in place).
+///
+/// version_guard(
+///     items(
+///         usage_fact_payload_hash, usage_correction_payload_hash, attempt_payload_bytes,
+///         correction_payload_bytes, payload_bytes,
+///     ),
+/// )
 pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
 /// BLAKE3 hex under domain `lash-usage-fact-payload/v4` of the framed
 /// projection: kind, disposition tag, source, model key, requested model,

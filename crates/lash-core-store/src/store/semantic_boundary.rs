@@ -14,10 +14,24 @@ use crate::SessionId;
 /// Version 2 (FIG-2880) carries explicit ambient/restricted resident-tool
 /// authority in the shared persisted-config projection. Version 3 accounts for
 /// the cancellation-dependent commit fields admitted after that cutover.
+///
+/// version_guard(
+///     items(
+///         SemanticBoundaryRequestIntent, semantic_boundary_request_intent_encoding,
+///         semantic_boundary_request_identity,
+///     ),
+/// )
 pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// Encoding version of the create-session semantic-boundary request identity;
 /// moves with [`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION`] for the same
 /// reasons.
+///
+/// version_guard(
+///     items(
+///         SemanticBoundaryRequestIntent, semantic_boundary_request_intent_encoding,
+///         semantic_boundary_request_identity,
+///     ),
+/// )
 pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///

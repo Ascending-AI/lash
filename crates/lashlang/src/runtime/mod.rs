@@ -180,6 +180,21 @@ pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 /// string, collection, URL, codec, date, equality and callback-driven scans —
 /// where v2 charged only JSON text, collection sorts, regexp fuel and callback
 /// counts (FIG-3672 P2b).
+///
+/// version_guard(
+///     items(
+///         CANCEL_CHECKPOINT_INSTRUCTIONS, CANCEL_CHECKPOINT_INTERVAL_CAP,
+///         cancel_checkpoint_reached, COOPERATIVE_YIELD_INSTRUCTION_BUDGET,
+///     ),
+///     items(path = "crates/lashlang/src/runtime/ops.rs", charge_collection_work),
+///     items(path = "crates/lashlang/src/runtime/vm/control.rs", charge_intrinsic_work),
+///     items(
+///         path = "crates/lashlang/src/runtime/vm/javascript_regexp.rs",
+///         TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
+///         grant_regexp_fuel,
+///     ),
+///     file(path = "crates/lashlang/src/runtime/compiler/*.rs"),
+/// )
 pub const INSTRUCTION_ACCOUNTING_VERSION: u32 = 3;
 
 /// Instructions before a run's first cancel checkpoint (FIG-3672 P9). The VM

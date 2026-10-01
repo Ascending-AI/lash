@@ -15,6 +15,11 @@ pub use lash_sansio::VersionRange;
 
 /// The one wire version of every Lash handler a build other than the
 /// caller's can serve.
+///
+/// version_guard(
+///     shapes(cover(Call, Reply, ObjectCompat)),
+///     items(COMPAT_KEY),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const RESTATE_WIRE_VERSION: u32 = 1;
 

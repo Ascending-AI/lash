@@ -24,6 +24,10 @@ mod arc_serde_bytes {
 /// Version 4 (FIG-1961) retypes `PersistedTurnState.last_prompt_usage` to the
 /// checked `TokenUsage` shape; v3 roots carrying the retired `PromptUsage`
 /// snapshot fields are refused rather than remapped.
+///
+/// version_guard(
+///     items(SessionCheckpoint),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
 
@@ -33,6 +37,10 @@ pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
 
 /// Encoding implemented for checkpoint-component logical bytes in this build.
+///
+/// version_guard(
+///     items(CheckpointComponentDescriptor, HydratedCheckpointComponent),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 2;
 

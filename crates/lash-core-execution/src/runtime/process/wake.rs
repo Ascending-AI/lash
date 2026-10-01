@@ -4,6 +4,9 @@ pub use lash_core_store::process_identity::{process_wake_turn_cause, process_wak
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWake, ProcessWakeDelivery};
 use super::model::{ProcessId, SessionId};
 
+/// version_guard(
+///     items(process_wake_identity_preimage),
+/// )
 const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
 
 /// Permanent tag registry for process-wake identities.

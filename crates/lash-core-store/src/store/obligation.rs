@@ -16,6 +16,13 @@ use super::StoreError;
 use super::control_intent::ControlIntentId;
 
 /// The obligation state, kind, key, and stall labels written at the 1.0 cut.
+///
+/// version_guard(
+///     items(
+///         ObligationKind, ALL, from_label, label, key_column_types, KeyColumnType, ObligationKey,
+///         decode_label, columns, decode, ObligationState, as_str, StallReason,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 1;
 

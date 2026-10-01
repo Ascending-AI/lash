@@ -3,9 +3,31 @@ use crate::runtime::process::identity_projection::{
     project_process_event_type, project_process_payload_leaf, project_process_schema_leaf,
 };
 
+/// version_guard(
+///     items(
+///         path = "crates/lash-core-execution/src/triggers/router.rs",
+///         path = "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
+///         trigger_subscription_definition_preimage, project_trigger_owner, project_trigger_draft,
+///         project_process_event_type, project_process_value_selector,
+///         project_trigger_process_input, project_process_payload_leaf, project_process_schema_leaf,
+///     ),
+/// )
 pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
+/// version_guard(
+///     items(trigger_subscription_address_preimage, project_trigger_owner),
+/// )
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
+/// version_guard(
+///     items(
+///         path = "crates/lash-core-execution/src/triggers/router.rs",
+///         path = "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
+///         trigger_source_preimage, project_process_payload_leaf,
+///     ),
+/// )
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
+/// version_guard(
+///     items(derived_trigger_subscription_key),
+/// )
 const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 3;
 
 pub fn deterministic_subscription_id(

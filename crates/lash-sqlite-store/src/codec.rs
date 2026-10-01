@@ -4,6 +4,13 @@ use super::*;
 use lash_sansio::SessionId;
 
 /// The stored SQLite blob envelope's format under the 1.0 freeze.
+///
+/// version_guard(
+///     items(
+///         should_compress_blob, compress_blob, decompress_blob, encode_artifact_blob,
+///         decode_artifact_blob,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 1;
 

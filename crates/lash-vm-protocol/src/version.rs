@@ -3,6 +3,16 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Wire shapes change in place at version 1 until the 1.0 freeze ends.
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-vm-protocol/src/*.rs",
+///         cover(
+///             MessageHeader, Start, EffectRequest, EffectResponse, ParentMessage, WorkerMessage,
+///             ParentFrame, WorkerFrame, VmContract,
+///         ),
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const WORKER_PROTOCOL_VERSION: u32 = 1;
 /// Acceptance builds advertise N+1 before admitting any guest work.

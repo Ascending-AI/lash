@@ -13,6 +13,14 @@
 # The manifest re-exports the constants rather than copying them, so this file
 # never repeats a version number; it only says which constants exist and what
 # they version.
+#
+# What each constant guards is not listed here either. The constant declares
+# it in code, with a `/// version_guard(..)` marker in its doc comment, and scripts/check_version_bumps.py reads the markers from the
+# tree: given `--base <sha> --head <sha>` it fails when a guarded shape changed
+# without its constant bumping, when a decoder-law surface bumped without its
+# RECORD_UPCASTERS lift, and when a guard cannot be evaluated. A surface whose
+# constant carries no marker, and no `version_guard(unshaped = "<reason>")`,
+# fails check_format_registry.py.
 
 [[surface]]
 constant = "REMOTE_PROTOCOL_VERSION"

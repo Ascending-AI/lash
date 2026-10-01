@@ -27,6 +27,10 @@ use std::sync::Arc;
 /// keeps content identity. Two structurally identical batches raised from one
 /// such caller still share an identity; that caller is ordinary host code with
 /// no deterministic count of its own.
+///
+/// version_guard(
+///     items(tool_invocation_batch_preimage),
+/// )
 const TOOL_BATCH_FAMILY_VERSION: u8 = 3;
 
 enum ToolCallAuthorization {

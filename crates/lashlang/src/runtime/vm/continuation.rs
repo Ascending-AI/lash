@@ -128,6 +128,31 @@ use super::exceptions::PendingErrorOrigin;
 ///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lashlang/src/runtime/vm/continuation.rs",
+///         path = "crates/lashlang/src/runtime/vm/continuation/types.rs",
+///         cover(VmContinuation, HeapWire, HeapObjectWire, ValueWire, VmHandlerContinuation),
+///     ),
+///     shapes(
+///         path = "crates/lashlang/src/runtime/projected_wire.rs",
+///         cover(CanonicalProjectedValue, CanonicalJsonValue, CanonicalJsonField),
+///     ),
+///     shapes(path = "crates/lashlang/src/runtime/error.rs", cover(RuntimeError)),
+///     items(path = "crates/lashlang/src/runtime/host.rs", ExecutionMode, ExecutionHostError),
+///     items(
+///         path = "crates/lash-sansio/src/tool_output.rs", ToolFailureClass, ToolFailureSource,
+///         ToolRetryStatus,
+///     ),
+///     items(path = "crates/lashlang/src/span.rs", Span),
+///     shapes(
+///         path = "crates/lashlang/src/runtime/heap.rs",
+///         path = "crates/lashlang/src/runtime/heap/*.rs",
+///         cover(ErrorKind, HeapId),
+///     ),
+///     items(path = "crates/lashlang/src/runtime/value.rs", ImageValue, ResourceHandle),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 29;
 

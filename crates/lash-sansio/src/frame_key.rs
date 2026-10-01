@@ -4,6 +4,9 @@ use crate::SessionId;
 use crate::core_support::Blake3DomainHasher;
 
 const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
+/// version_guard(
+///     items(derive),
+/// )
 const FRAME_KEY_VERSION: u8 = 2;
 
 /// A non-empty, deterministically derived key that Lash turns into a durable

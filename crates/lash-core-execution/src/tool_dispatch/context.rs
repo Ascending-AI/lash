@@ -211,6 +211,10 @@ impl ToolDispatchContext<'_> {
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
+///
+/// version_guard(
+///     items(ToolDispatchContext, RebindField, REBIND_FIELDS),
+/// )
 pub const TOOL_CHILD_REBIND_VERSION: u16 = 7;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from

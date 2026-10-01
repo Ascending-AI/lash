@@ -7,6 +7,27 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-protocol-rlm/src/executor/state.rs",
+///         path = "crates/lash-lashlang-runtime/src/deferred.rs",
+///         path = "crates/lash-lashlang-runtime/src/deferred_triggers.rs",
+///         path = "crates/lash-protocol-rlm/src/protocol/state.rs",
+///         path = "crates/lash-protocol-rlm/src/projection/bindings.rs",
+///         cover(RlmSnapshotRoot, RlmDriverState, DeferredTriggerResolutionRecord),
+///     ),
+///     items(path = "crates/lash-rlm-types/src/lib.rs", RlmProjectedSeedEntry),
+///     items(
+///         path = "crates/lash-sansio/src/tool_contract.rs",
+///         path = "crates/lash-sansio/src/schema_contract.rs",
+///         path = "crates/lash-sansio/src/effect_identity.rs",
+///         path = "crates/lash-sansio/src/causal.rs", ToolDefinition, ToolManifest, ToolContract,
+///         ToolId, CompactToolContract, ToolRetryPolicy, ToolOutputContract,
+///         ToolArgumentProjectionPolicy, SchemaContract, SchemaProjectionPolicy,
+///         SchemaProjectionOverride, ProjectionMode, EffectAddress, ExecutionScope, CausalRef,
+///     ),
+/// )
 // v26 carries Lashlang snapshot v13 and VM continuation v25, whose heaps may
 // hold a binding cell (FIG-3707). A v25 body embeds the v12/v24 substrate
 // shapes this reader does not decode, so the boundary is a version.

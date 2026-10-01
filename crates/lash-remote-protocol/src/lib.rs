@@ -315,6 +315,12 @@ pub use usage_activity::*;
 // instead of `policy`; and a list filter selects `until` a scope instead of a
 // `parent_scope`. A peer built before the change sends a `lifecycle` policy
 // this decoder refuses.
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-remote-protocol/src/*.rs",
+///         cover(RemoteLlmRequest, RemoteProcessInput, RemoteTurnEvent, RemoteTurnReport),
+///     ),
+/// )
 pub const REMOTE_PROTOCOL_VERSION: u32 = 100;
 
 /// One versioned remote-protocol message.

@@ -36,6 +36,15 @@ use crate::compat::{Call, Reply};
 /// The version of the continuation's request bodies. A settle is retained in
 /// Restate until a handler reads it, so a body version this build does not
 /// read is a terminal refusal (upgrade by drain).
+///
+/// version_guard(
+///     shapes(
+///         cover(
+///             UsageAccountingSettle, UsageExecutionRetirement, UsageOwnerDrain,
+///             UsageOwnerRetiredWire,
+///         ),
+///     ),
+/// )
 pub const USAGE_ACCOUNTING_WIRE_VERSION: u32 = 1;
 
 /// One spending effect's settlement, sent by the execution that journaled it.

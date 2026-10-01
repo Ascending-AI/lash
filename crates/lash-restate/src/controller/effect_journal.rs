@@ -93,6 +93,27 @@ use serde::{Deserialize, Serialize};
 /// carries its usage run's owner, identity and facts beside its outcome
 /// (`usage`, absent for an effect that dispatched nothing), and the entry is
 /// followed by the run's one-way settle send (ADR 0125).
+///
+/// version_guard(
+///     shapes(cover(RecordedRuntimeEffect, GaveUpEntry, Stamped, FrontierMark)),
+///     items(JournaledEffectRecord, EFFECT_JOURNAL_VERSION_FIELD, stamped),
+///     impls("Serialize for JournaledEffectRecord", "Deserialize for JournaledEffectRecord"),
+///     shapes(
+///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
+///         cover(
+///             RuntimeEffectInvocation, RuntimeEffectEnvelope, RuntimeEffectCommand,
+///             RuntimeEffectOutcome,
+///         ),
+///     ),
+///     items(
+///         path = "crates/lash-core-execution/src/runtime/effect/validation.rs",
+///         CanonicalRuntimeEffectEnvelope,
+///     ),
+///     items(
+///         path = "crates/lash-core-store/src/runtime_error.rs", RuntimeEffectControllerError,
+///         RuntimeEffectReplayMismatchReport,
+///     ),
+/// )
 pub const EFFECT_JOURNAL_VERSION: u32 = 15;
 
 /// The entry field the generation is stamped under.

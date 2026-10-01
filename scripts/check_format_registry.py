@@ -32,6 +32,13 @@ surface, and the crate it names as owner runs the three guarded-surface laws
 under ``const OWNER`` set to its own name, so a row cannot be added without
 its decoders being driven through its supported range.
 
+Every surface's constant declares the shapes it guards with a
+``/// version_guard(..)`` marker in its doc comment, or states why it has
+none
+(``scripts/check_version_bumps.py`` describes the marker). A surface without
+one, or with a guard the tree cannot evaluate, fails here, so the strict bump
+gate's inventory cannot go incomplete silently.
+
 Only the Python standard library is used.
 """
 
@@ -43,6 +50,9 @@ from pathlib import Path
 import re
 import sys
 import tomllib
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import check_version_bumps  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -398,6 +408,18 @@ def guarded_problems(repo: Path, registry: Registry) -> list[str]:
     return problems
 
 
+def guard_marker_problems(repo: Path, registry: Registry) -> list[str]:
+    """Surfaces whose constant declares no guard, or one that cannot be read."""
+    try:
+        surfaces = [
+            check_version_bumps.surface_of(raw, key)
+            for key, raw in sorted(registry.surfaces.items())
+        ]
+    except check_version_bumps.CheckError as error:
+        raise RegistryError(str(error)) from error
+    return check_version_bumps.worktree_problems(repo, surfaces)
+
+
 def row_label(row: str) -> str:
     """How a table row prints in a finding: a facade variant or an engine id."""
     if row.startswith("engine:"):
@@ -532,6 +554,7 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
                 f"manifest row; every durable format must be in {MANIFEST}"
             )
     problems.extend(guarded_problems(repo, registry))
+    problems.extend(guard_marker_problems(repo, registry))
     return problems
 
 

@@ -1115,6 +1115,10 @@ impl ProcessEventAppendRequest {
 
 /// Version 3 drops the process incarnation: a minted process id names one
 /// process (ADR 0107).
+///
+/// version_guard(
+///     items(cancellation_replay_preimage),
+/// )
 const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 3;
 
 /// Permanent cancellation origin tags: TurnStopped=0, ParentEnded=1,

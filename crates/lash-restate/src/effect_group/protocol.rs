@@ -18,6 +18,13 @@ use super::*;
 ///
 /// 5: the journaled child request's shape carries the opener's admitted
 /// scope (FIG-3780).
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-restate/src/effect_group/dispatch.rs",
+///         cover(EffectGroupDispatchRequest),
+///     ),
+/// )
 pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 
 /// The stored format the group index's retained record stamps into its
@@ -30,6 +37,18 @@ pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 /// name the group's dispatch was sent under (FIG-3795 S10). It was reset in
 /// place under the pre-1.0 version freeze (FIG-4048), so no upcaster is
 /// registered.
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-restate/src/effect_group.rs",
+///         path = "crates/lash-restate/src/effect_group/state_record.rs",
+///         path = "crates/lash-restate/src/effect_group/shape.rs",
+///         cover(EffectGroupStateRecord, EffectGroupStateLiveRecord, EffectGroupShape),
+///     ),
+///     items(path = "crates/lash-restate/src/effect_group.rs", INDEX_STATE_KEY),
+///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
+///     items(EFFECT_GROUP_STATE_FORMATS),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 1;
 

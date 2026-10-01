@@ -114,6 +114,13 @@ const START_KEY_PREFIX: &str = "process-start-key";
 /// is `process-start-key:v1:<namespace>:blake3:<64 hex>`; the namespace is
 /// also the first tagged field of the preimage. Retired namespaces stay
 /// burned.
+///
+/// version_guard(
+///     items(
+///         START_KEY_DOMAIN, START_KEY_PREFIX, StartKeyNamespace, derive, for_tool_intent,
+///         for_trigger_delivery, for_host, for_keyless_host, write_scope,
+///     ),
+/// )
 pub const START_KEY_FAMILY_VERSION: u8 = 1;
 
 /// The start path a key was derived for. Each has its own tag in the preimage
@@ -557,6 +564,10 @@ impl WakeDeliveryState {
 /// Version 3 carries full admitted effect addresses and complete trigger causes
 /// in the invocation delivered with a process wake. Version 4 drops the
 /// process incarnation: a minted process id names one process (ADR 0107).
+///
+/// version_guard(
+///     items(ProcessWakeDelivery),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;
 

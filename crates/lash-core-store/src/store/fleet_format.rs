@@ -27,6 +27,10 @@ use crate::compat::{CompatRefusal, VersionRange};
 /// the range is one version wide and this constant is it. The first format
 /// upgrade introduces `min_F`/`max_F` and widens the range; until then a store
 /// recording any other value is refused at open.
+///
+/// version_guard(
+///     items(FleetFormat, FleetFormatState),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const FLEET_FORMAT_VERSION: u32 = 1;
 

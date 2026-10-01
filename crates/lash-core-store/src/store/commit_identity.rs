@@ -25,6 +25,17 @@ pub struct OperationId {
 
 /// Encoding version of the append-request identity bytes a retried commit must
 /// reproduce exactly.
+///
+/// version_guard(
+///     items(
+///         path = "crates/lash-core-store/src/store/commit_identity.rs",
+///         path = "crates/lash-core-ids/src/stable_identity.rs", push_json_value, push_message_role,
+///         push_causal_ref, push_message_origin, push_attachment_type_metadata, push_attachment_ref,
+///         push_attachment_source, push_part_kind, push_part, append_node_identity_bytes,
+///         append_request_identity_bytes, new_unframed, tag, u8, u32, u64, i64, string, bytes,
+///         optional, sequence, finish, provider_route,
+///     ),
+/// )
 pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 7;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).

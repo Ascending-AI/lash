@@ -12,6 +12,11 @@ const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 /// (ADR 0115 §3.2). Bump it when a stored shape under those keys changes,
 /// and register the previous format's lift in
 /// `lash_core::store::RECORD_UPCASTERS`.
+///
+/// version_guard(
+///     items(PAYLOAD_STATE_KEY, PAYLOAD_RETIRED_KEY, EFFECT_GROUP_PAYLOAD_FORMATS),
+///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const EFFECT_GROUP_PAYLOAD_FORMAT_VERSION: u16 = 1;
 

@@ -73,6 +73,20 @@ use std::sync::Arc;
 /// ancestry and session capability where it carried a parent policy
 /// (FIG-3607), and the input carries its sender's drain generation in place
 /// of this version, behind the generation sentinel (FIG-3795).
+///
+/// version_guard(
+///     items(
+///         ADMIT_STEP, START_STEP, AdmissionVerdict, StartOutcome, stamped_journal_version,
+///         decode_stamped_request,
+///     ),
+///     items(
+///         path = "crates/lash-restate/src/process/mod.rs",
+///         path = "crates/lash-restate/src/process_attach.rs", RestateProcessWorkflowInput,
+///         RestateProcessWorkflowPayload, RestateProcessCancelRequest,
+///         RestateProcessCompleteRequest, RestateProcessAwaitRequest, RestateProcessAttachRequest,
+///     ),
+///     file(path = "crates/lash-restate/src/process/stamped_requests.rs"),
+/// )
 pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the
@@ -84,6 +98,15 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 /// change, so one lands by bumping this epoch, which changes the build's
 /// generation and keeps the old journal replaying only under its own build.
 /// The bump guard pins the handler prefix steps below.
+///
+/// version_guard(
+///     items(ADMIT_STEP, START_STEP, AdmissionVerdict, StartOutcome),
+///     items(
+///         path = "crates/lash-restate/src/process/workflow.rs", COMPLETE_STEP, BOUNDARY_STEP,
+///         HANDOVER_STEP, CANCEL_FORWARD_STEP, CANCEL_RECORD_STEP, CANCEL_ROUTE_STEP,
+///         CANCEL_CHILD_TURN_STEP, RETIRE_STEP,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const JOURNAL_LOGIC_EPOCH: u32 = 1;
 

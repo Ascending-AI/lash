@@ -77,6 +77,24 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// deleting the output index where the source element is absent — so
 /// unchanged source lowers to a program an artifact minted under v23 does
 /// not carry.
+///
+/// version_guard(
+///     items(path = "crates/lashlang/src/ast_number.rs", canonical_bits),
+///     items(
+///         path = "crates/lashlang/src/artifact.rs", hash_host_requirements, process_component_hash,
+///         write_exports, write_host_requirements, write_program, write_declaration, write_function,
+///         write_process, write_type, write_expr,
+///     ),
+///     items(
+///         path = "crates/lashlang/src/builtins.rs", SOURCE_BUILTINS, TYPESCRIPT_BUILTINS, Builtin,
+///         Arity,
+///     ),
+///     file(
+///         path = "crates/lash-typescript/src/lower/**", path = "crates/lashlang/src/ast_roles.rs",
+///         cover("impl Lowerer", CollectionTransformParts),
+///     ),
+///     items(path = "crates/lashlang/src/artifact_identity.rs", module_ref),
+/// )
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v24";
 
 pub use append_vec::AppendVec;

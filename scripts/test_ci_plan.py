@@ -6,6 +6,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -1614,6 +1615,56 @@ class ReleaseJournalReplaySelectionTests(unittest.TestCase):
     def test_unrelated_pull_requests_skip_release_journal_replay(self):
         plan = ci_plan.classify([("M", "crates/lash-core/src/runtime/assembly.rs")], event_name="pull_request")
         self.assertEqual("false", plan.get("release_journal_replay"))
+
+
+class VersionedSurfaceSelectionTests(unittest.TestCase):
+    """The strict bump gate's selector reads the surfaces' own markers.
+
+    A guarded shape often lives outside the file that defines its constant,
+    so the rule is the markers' paths, not the registry's constant files.
+    """
+
+    def test_a_constant_file_a_guarded_file_and_the_gate_select_it(self) -> None:
+        for path in (
+            "crates/lash-restate/src/process/admission.rs",
+            "crates/lash-restate/src/durable_wait/messages.rs",
+            "crates/lash-postgres-store/schema.sql",
+            "crates/lash-remote-protocol/src/lib.rs",
+            "scripts/versioned-surfaces.toml",
+            "scripts/check_version_bumps.py",
+            ".github/workflows/version-bumps.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(ci_plan.touches_versioned_surface([path]))
+
+    def test_docs_and_unguarded_paths_do_not_select_it(self) -> None:
+        self.assertFalse(
+            ci_plan.touches_versioned_surface(
+                ["docs/guide.md", "crates/lash-core/src/runtime/assembly.rs", "justfile"]
+            )
+        )
+
+    def test_the_command_fails_open_on_an_unreadable_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = Path(directory) / "changed"
+            paths.write_bytes(b"M\0docs/guide.md")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/ci_plan.py"), "versioned-surface",
+                 "--paths-file", str(paths)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual("versioned_surface=true\n", result.stdout)
+            paths.write_bytes(b"M\0docs/guide.md\0")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/ci_plan.py"), "versioned-surface",
+                 "--paths-file", str(paths)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual("versioned_surface=false\n", result.stdout)
 
 
 class ConclusionTests(unittest.TestCase):

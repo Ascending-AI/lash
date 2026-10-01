@@ -33,6 +33,10 @@ pub(crate) struct RlmDriverState {
 
 /// Schema version of the native RLM driver state parked in the protocol
 /// driver-state slot; a decode refuses any other version.
+///
+/// version_guard(
+///     shapes(cover(RlmDriverState, Envelope)),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
 

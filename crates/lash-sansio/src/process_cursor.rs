@@ -21,6 +21,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::{ProcessId, VersionRange};
 
 /// The newest process cursor format this build reads and writes.
+///
+/// version_guard(
+///     items(
+///         ProcessCursor, ProcessCursorReference, parse, fmt, PROCESS_CURSOR_UNROUTED_EPOCH,
+///         RETIRED_PROCESS_CURSOR_VERSIONS,
+///     ),
+///     impls("Serialize for ProcessCursor", "Deserialize for ProcessCursor"),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_CURSOR_VERSION: u32 = 3;
 

@@ -114,6 +114,26 @@ pub(crate) fn record_segment_boundary_decline(
 /// than decoded.
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
+///
+/// version_guard(
+///     items(LashlangSegmentState),
+///     items(path = "crates/lashlang/src/workflow_graph.rs", workflow_node_id),
+///     items(
+///         path = "crates/lashlang/src/workflow_graph/execution_sites.rs",
+///         path = "crates/lashlang/src/workflow_graph/ownership.rs",
+///         path = "crates/lashlang/src/ast_roles.rs", path = "crates/lashlang/src/tracking.rs",
+///         from_indices, indices, path_for_ast, for_main, for_process, ownership_map,
+///         into_ownership_map, workflow_projection, statement_list, push_statement_list,
+///         is_statement_list, collect_body, collect_statement, statement_value, map_node_subtree,
+///         check_shape, process_wrapper_run_path, execution_sites, collect_execution_sites,
+///         push_execution_site_descriptor, collect_child_execution_sites, workflow_owner, node_site,
+///         branch_site, branch_edge_id,
+///     ),
+///     shapes(
+///         path = "crates/lash-core-execution/src/runtime/process/engine.rs",
+///         cover(SegmentHandover, PersistedSegmentHandover),
+///     ),
+/// )
 pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 23;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";

@@ -43,6 +43,12 @@ use lash_sansio::sync::MutexExt;
 /// iteration's execution-environment sync, a process body through its start
 /// record's stamp. Changing any spelling in this module — the namespace
 /// marker, the ordinal width, a sub-key, the seal — is a grammar change.
+///
+/// version_guard(
+///     items(LashlangReplayNamespace, CommandShape, DispatchedOrdinalsDigest),
+///     items(path = "crates/lash-lashlang-runtime/src/host_identity.rs", LashlangHostIdentities),
+///     items(path = "crates/lash-core-execution/src/runtime/causal.rs", CommandReplayKey),
+/// )
 pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 
 /// The journal grammar a code cell writes (FIG-3587): the replay-key grammar
@@ -63,6 +69,17 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 /// its peeks at other positions. A cell's iteration sync
 /// stamps this version, and a cell whose sync names another is refused before
 /// it runs. Process bodies journal no binding set and stay on the key grammar.
+///
+/// version_guard(
+///     items(
+///         path = "crates/lash-lashlang-runtime/src/cell_bindings.rs", CELL_TOOL_BINDINGS_SUFFIX,
+///         CELL_TOOL_BINDINGS_OPERATION, resolve_ambient_bindings, compare,
+///     ),
+///     items(
+///         path = "crates/lash-core-execution/src/session.rs", ToolDispatchSurface,
+///         tool_dispatch_surface,
+///     ),
+/// )
 pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 6;
 
 /// The executable generation code cells run under (FIG-3571): what a turn's

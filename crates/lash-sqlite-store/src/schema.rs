@@ -1137,6 +1137,21 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
 /// recreate it.
 const BASE_SCHEMA_VERSION: i32 = 99;
+/// version_guard(
+///     items(SCHEMA, elide = "sql_idempotent_index"),
+///     items(
+///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope, BlobArtifactDescriptor,
+///         BlobStorageHint, BlobCompression,
+///     ),
+///     items(path = "crates/lash-core-store/src/store/root.rs", RootAdmission, AdmittedHead),
+///     items(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
+///     items(path = "crates/lash-sansio/src/effect_identity.rs", ExecutionScope),
+///     items(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
+///     items(
+///         path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, TurnFinish, TurnStop,
+///         TurnCancellationEvidence, TurnCancelMode, SessionAppendNode, ErrorEnvelope,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub(crate) const SCHEMA_VERSION: i32 = BASE_SCHEMA_VERSION;
 #[cfg(feature = "synthetic-next")]
@@ -1644,6 +1659,9 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// pruned. A registry written before the change lacks the columns; recreate
 /// it.
 const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;
+/// version_guard(
+///     items(PROCESS_SCHEMA, elide = "sql_idempotent_index"),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION;
 #[cfg(feature = "synthetic-next")]
@@ -1680,6 +1698,19 @@ pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION + 1;
 // is started by the relay rather than by a re-emit. A trigger store written
 // before the change lacks the columns; recreate it.
 const BASE_TRIGGER_SCHEMA_VERSION: i32 = 12;
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
+///         cover(
+///             RuntimeEffectInvocation, RuntimeEffectEnvelope, RuntimeEffectCommand,
+///             RuntimeEffectOutcome,
+///         ),
+///     ),
+///     items(
+///         path = "crates/lash-sqlite-store/src/trigger_schema.rs", TRIGGER_SCHEMA,
+///         elide = "sql_idempotent_index",
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = BASE_TRIGGER_SCHEMA_VERSION;
 #[cfg(feature = "synthetic-next")]

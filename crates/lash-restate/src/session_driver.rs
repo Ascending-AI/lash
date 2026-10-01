@@ -150,6 +150,24 @@ mod asks;
 /// FIG-4523: `drive` records a `lash.drive.leg` step after admission 0, before
 /// it calls the leg's first root, and the continuation it sends carries the
 /// stop rules' memory of the leg.
+///
+/// version_guard(
+///     shapes(cover(RestateSessionDriveRequest, RestateTurnDriveRequest)),
+///     shapes(
+///         path = "crates/lash-core-execution/src/engine/admission.rs",
+///         path = "crates/lash-core-execution/src/engine/drive.rs",
+///         path = "crates/lash-core-execution/src/engine/contracts.rs",
+///         cover(
+///             Admitted, AdmittedWork, AdmitRequest, AdmitVerdict, SealVerdict, RootOutcome,
+///             DriveOutcome, DriveStop, DriveRequest,
+///         ),
+///     ),
+///     items(
+///         DRIVE_HANDLER, TURN_OUTCOME_STATE, turn_workflow_key, drive_session_journal,
+///         run_root_journal,
+///     ),
+///     items(path = "crates/lash-restate/src/sentinel.rs", GENERATION_SENTINEL),
+/// )
 pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
@@ -178,6 +196,12 @@ const TURN_OUTCOME_STATE: &str = "outcome";
 /// the previous format's lift in `lash_core::store::RECORD_UPCASTERS`. The
 /// outcome is history: a finished workflow's state is never rewritten, so
 /// every lift from its floor is permanent (FIG-3802).
+///
+/// version_guard(
+///     items(TURN_OUTCOME_STATE, TURN_OUTCOME_FORMATS),
+///     items(path = "crates/lash-core-execution/src/engine/drive.rs", RootOutcome),
+///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const LASH_TURN_OUTCOME_FORMAT_VERSION: u32 = 1;
 

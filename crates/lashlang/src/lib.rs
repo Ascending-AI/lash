@@ -195,6 +195,16 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// entry it was compiled as, and the continuation it parks names that
 /// identity; resume refuses any other program. A v29 continuation names no
 /// executable and is refused.
+///
+/// version_guard(
+///     items(
+///         path = "crates/lashlang/src/runtime/instruction.rs", Instruction, IntrinsicOp,
+///         JavaScriptUriCodec,
+///     ),
+///     items(path = "crates/lashlang/src/ast.rs", JavaScriptBinaryOp, JavaScriptUnaryOp),
+///     shapes(path = "crates/lashlang/src/runtime/vm/continuation.rs", cover(VmContinuation)),
+///     items(path = "crates/lashlang/src/runtime/entry_points.rs", compile, compile_main),
+/// )
 pub const BYTECODE_FORMAT_VERSION: u32 = 30;
 
 pub use lash_sansio::WorkflowExecutionSite;

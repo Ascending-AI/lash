@@ -1130,6 +1130,32 @@ def _is_rolling_upgrade_path(path: str, surface_paths: frozenset[str]) -> bool:
     )
 
 
+# The strict version-bump gate (FIG-4494) runs on a change to a registered
+# versioned surface, and the release-journal replay (FIG-4097) keys on the
+# same rule. A surface is more than the file that defines its constant: the
+# constant's `version_guard` marker names the shapes it guards, wherever they
+# live, so the rule is read from the markers rather than kept as a path list.
+VERSION_BUMP_GATE_PATHS = frozenset(
+    {"scripts/check_version_bumps.py", ".github/workflows/version-bumps.yml"}
+)
+
+
+def touches_versioned_surface(paths: list[str], root: Path | None = None) -> bool:
+    """Whether any of `paths` is a registered surface's constant file, a file
+    one of its guards reads, the registry, or the gate itself."""
+
+    import fnmatch
+
+    import check_version_bumps
+
+    patterns = VERSION_BUMP_GATE_PATHS | check_version_bumps.guarded_path_patterns(
+        root if root is not None else REPO_ROOT
+    )
+    return any(
+        fnmatch.fnmatchcase(path, pattern) for path in paths for pattern in patterns
+    )
+
+
 # `facade` gates the untrusted Cargo seal lane: only the facade crate's public
 # API or the root manifests can break the API surface it seals. Trusted events
 # seal on every run inside `buck2-tests`, where an unchanged seal is a cache
@@ -2164,8 +2190,26 @@ def main() -> int:
     )
     scope_parser.add_argument("--repo", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
 
+    surface_parser = subparsers.add_parser(
+        "versioned-surface",
+        help="say whether a diff touches a registered versioned surface",
+    )
+    surface_parser.add_argument("--paths-file", type=Path, required=True)
+
     subparsers.add_parser("conclusion")
     args = parser.parse_args()
+
+    if args.command == "versioned-surface":
+        # Fail open: a diff or a marker that cannot be read runs the gate,
+        # which then reports what is wrong with it.
+        try:
+            paths = [path for _, path in _read_nul_changes(args.paths_file)]
+            selected = touches_versioned_surface(paths)
+        except Exception as error:  # noqa: BLE001
+            print(f"versioned-surface selection failed open: {error}", file=sys.stderr)
+            selected = True
+        _write_outputs({"versioned_surface": str(selected).lower()})
+        return 0
 
     if args.command == "gate-scope":
         try:

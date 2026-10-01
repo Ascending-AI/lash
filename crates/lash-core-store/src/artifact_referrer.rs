@@ -25,6 +25,13 @@ use crate::process_identity::StartKey;
 use crate::{ProcessId, SessionId};
 
 /// The referrer labels and their canonical id encodings at the 1.0 cut.
+///
+/// version_guard(
+///     items(
+///         ArtifactReferrerKind, ALL, as_str, parse, ArtifactReferrer, canonical_id, decode,
+///         StoredReferrer, HOST_PIN_PREFIX, UPLOAD_PREFIX,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 1;
 

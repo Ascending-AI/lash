@@ -1,0 +1,112 @@
+name: Version bumps
+
+# The strict version-bump gate (FIG-4494): a guarded shape that changes
+# without its version constant bumping, a bump without its upgrade evidence,
+# and a guard that cannot be evaluated all fail it. It has no report-only
+# mode.
+#
+# Until the lash 1.0 cut ends the version freeze (FIG-3846), shapes change in
+# place and this job reports those changes as failures; that is expected, and
+# is why the workflow is not a required check yet. The cut makes it required
+# and adds it to `publish-crates`' `needs` in release.yml.
+#
+# It runs on every push to main, and on a pull request or merge group whose
+# diff touches a registered versioned surface (`scripts/ci_plan.py
+# versioned-surface`, which reads the surfaces' own `version_guard` markers).
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  version-bumps:
+    name: Strict version-bump gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      # The baseline is the commit the change lands on: the pull request's
+      # base, the merge group's base, or main's previous tip. A baseline that
+      # cannot be named or fetched fails the job; the gate never guesses one.
+      - name: Fetch the baseline
+        id: baseline
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request) base_sha="${PR_BASE_SHA}" ;;
+            merge_group) base_sha="${MERGE_GROUP_BASE_SHA}" ;;
+            push) base_sha="${PUSH_BEFORE_SHA}" ;;
+            *) echo "::error::unsupported event ${GITHUB_EVENT_NAME}"; exit 1 ;;
+          esac
+          if [[ -z "${base_sha}" || "${base_sha}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "::error::the event names no baseline commit"
+            exit 1
+          fi
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" \
+            fetch --no-tags --prune --depth=1 origin "${base_sha}"
+          git rev-parse --verify "${base_sha}^{commit}" >/dev/null
+          echo "sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Select the gate
+        id: select
+        env:
+          BASE_SHA: ${{ steps.baseline.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            echo "versioned_surface=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git diff --name-status --no-renames -z "${BASE_SHA}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-paths"
+          python3 scripts/ci_plan.py versioned-surface \
+            --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
+
+      - name: Check version bumps
+        if: steps.select.outputs.versioned_surface == 'true'
+        env:
+          BASE_SHA: ${{ steps.baseline.outputs.sha }}
+        run: python3 scripts/check_version_bumps.py --base "${BASE_SHA}" --head "${GITHUB_SHA}"
+
+      - name: Report an untouched diff
+        if: steps.select.outputs.versioned_surface != 'true'
+        run: echo "The diff touches no registered versioned surface; the gate did not run." >> "${GITHUB_STEP_SUMMARY}"

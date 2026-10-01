@@ -514,6 +514,7 @@ jobs:
           python3 scripts/test_identity_adr_claims.py
           python3 scripts/test_check_test262_ratchet.py
           python3 scripts/test_check_format_registry.py
+          python3 scripts/test_check_version_bumps.py
           python3 scripts/test_generate_workflow_schemas.py
           python3 scripts/test_schema_validation.py
           python3 scripts/test_dev_test.py

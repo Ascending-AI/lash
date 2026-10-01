@@ -9,6 +9,20 @@ use crate::linker::{LinkError, WorkflowLinkAnalysis};
 /// (FIG-4038) drops `incompatible_binary_operands`: the retired surface
 /// dialect's operand check has no JavaScript equivalent; v3 facet documents
 /// are refused. The pre-1.0 freeze changes this shape in place.
+///
+/// version_guard(
+///     shapes(cover(WorkflowNodeTypeFacets)),
+///     items(
+///         path = "crates/lashlang/src/ast.rs", TypeExpr, UnionMembers, ProcessSignature,
+///         ProcessType, ProcessTypeKind, ProcessTypeWire, ProcessParamWire, ProcessParam, TypeField,
+///     ),
+///     impls(
+///         path = "crates/lashlang/src/ast.rs", "Serialize for UnionMembers",
+///         "Deserialize for UnionMembers", "Serialize for ProcessType",
+///         "Deserialize for ProcessType",
+///     ),
+///     items(path = "crates/lashlang/src/ast_string.rs", AstString),
+/// )
 pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

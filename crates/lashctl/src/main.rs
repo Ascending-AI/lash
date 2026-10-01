@@ -23,6 +23,13 @@ use lash_postgres_store::{
 use serde::Serialize;
 use serde_json::{Value, json};
 
+/// version_guard(
+///     shapes(cover(StepDto)),
+///     items(
+///         Exit, objects_preflight_result, objects_sweep_result, finalize_result, hold_result,
+///         migration_result, stalled_row, stalled_result, drain_status_result, version_result,
+///     ),
+/// )
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
 const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;

@@ -35,6 +35,28 @@ use super::executor::RuntimeEffectControllerError;
 /// journals the output-retention policy the boundary applied, and a result
 /// block may be a retained output — a bounded witness and the attachment
 /// holding the complete text.
+///
+/// version_guard(
+///     items(
+///         path = "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs",
+///         path = "crates/lash-sansio/src/plugin.rs",
+///         path = "crates/lash-sansio/src/session_model/message.rs",
+///         path = "crates/lash-sansio/src/llm/types.rs",
+///         path = "crates/lash-sansio/src/attachment.rs",
+///         path = "crates/lash-sansio/src/tool_output.rs",
+///         path = "crates/lash-sansio/src/causal.rs", ToolPresentation, PluginMessage, MessageRole,
+///         MessageOrigin, TurnOutputSource, Part, FlatPart, FlatPartRef, PartAttachment, PartKind,
+///         AttachmentSource, ProviderFileScope, ProviderReplayMeta, ProviderReasoningReplay,
+///         ProviderRouteIdentity, ResponsePhase, ResponseTextMeta, AttachmentRef, AttachmentId,
+///         AttachmentTypeMetadata, MediaType, ModelToolReturn, ModelToolReturnPart,
+///         AttachmentMaterializationNotice, AttachmentMaterializationSource,
+///         AttachmentMaterializationReason, CausalRef,
+///     ),
+///     file(
+///         path = "crates/lash-sansio/src/identity.rs",
+///         cover("string_identity!", SessionId, ProcessId),
+///     ),
+/// )
 pub const TOOL_PRESENTATION_VERSION: u16 = 3;
 
 /// The journaled product of one tool result's presentation chain.

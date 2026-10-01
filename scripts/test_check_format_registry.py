@@ -52,11 +52,23 @@ reason = "mirrors the package version"
 """
 
 SOURCE = """
+/// version_guard(items(WireRecord))
 pub const WIRE_VERSION: u16 = 3;
+/// version_guard(shapes(cover(Hello)))
 pub const PEER_PROTOCOL_VERSION: u32 = 1;
+/// version_guard(unshaped = "a hash-domain tag with no projected shape")
 const KEY_FAMILY_VERSION: u8 = 2;
 const OTHER_FAMILY_VERSION: u8 = 1;
 pub(crate) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub struct WireRecord {
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Hello {
+    pub name: String,
+}
 
 #[cfg(test)]
 mod tests {
@@ -282,7 +294,9 @@ class FormatRegistryTests(unittest.TestCase):
     def test_an_engine_registered_row_satisfies_a_manifest_claim(self) -> None:
         self.write("crates/lash-restate/src/formats.rs", ENGINE_REGISTRY)
         self.write(
-            "crates/demo/src/engine.rs", "pub const ENGINE_WIRE_VERSION: u8 = 1;\n"
+            "crates/demo/src/engine.rs",
+            '/// version_guard(unshaped = "fixture engine wire")\n'
+            "pub const ENGINE_WIRE_VERSION: u8 = 1;\n",
         )
         self.registry_text = REGISTRY + textwrap.dedent(
             """
@@ -346,6 +360,50 @@ class FormatRegistryTests(unittest.TestCase):
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("owned by other", problems[0])
+
+
+    def test_a_surface_whose_constant_declares_no_guard_fails(self) -> None:
+        self.write(
+            "crates/demo/src/lib.rs",
+            SOURCE.replace("/// version_guard(items(WireRecord))\n", ""),
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("WIRE_VERSION declares no version_guard marker", problems[0])
+
+    def test_a_stated_reason_admits_a_surface_without_a_guard(self) -> None:
+        self.write(
+            "crates/demo/src/lib.rs",
+            SOURCE.replace("items(WireRecord)", 'unshaped = "a manual epoch"'),
+        )
+        self.assertEqual(self.problems(), [])
+
+    def test_an_empty_reason_is_not_a_reason(self) -> None:
+        self.write(
+            "crates/demo/src/lib.rs",
+            SOURCE.replace("items(WireRecord)", 'unshaped = " "'),
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("unshaped must state a reason", problems[0])
+
+    def test_a_guard_naming_what_the_tree_lacks_fails(self) -> None:
+        self.write(
+            "crates/demo/src/lib.rs", SOURCE.replace("items(WireRecord)", "items(Gone)")
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("has a guard that cannot be evaluated", problems[0])
+        self.assertIn("does not find Gone", problems[0])
+
+    def test_a_malformed_marker_fails(self) -> None:
+        self.write(
+            "crates/demo/src/lib.rs",
+            SOURCE.replace("shapes(cover(Hello))", "shapes(cover(Hello)"),
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("PEER_PROTOCOL_VERSION has a guard that cannot be evaluated", problems[0])
 
 
 class RealRepositoryTests(unittest.TestCase):

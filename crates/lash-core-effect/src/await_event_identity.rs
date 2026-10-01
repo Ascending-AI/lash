@@ -6,6 +6,9 @@
 use super::{AwaitEventWaitIdentity, ExecutionScope};
 use crate::{RuntimeError, RuntimeErrorCode};
 
+/// version_guard(
+///     items(promise_key_preimage),
+/// )
 const AWAIT_EVENT_FAMILY_VERSION: u8 = 3;
 
 /// Permanent tag registry for await-event promise identities.

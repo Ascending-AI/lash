@@ -636,6 +636,42 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // definitions are immutable and content-addressed, retained by their
 // referrers rather than by a catalog name. A catalog provisioned before the
 // change fails the open-time shape check and is recreated.
+/// version_guard(
+///     file(
+///         path = "crates/lash-postgres-store/schema.sql",
+///         cover(
+///             "CREATE TABLE IF NOT EXISTS lash_schema_versions",
+///             "CREATE TABLE IF NOT EXISTS lash_blobs", "CREATE TABLE IF NOT EXISTS lash_sessions",
+///             "CREATE TABLE IF NOT EXISTS lash_graph_nodes",
+///             "CREATE TABLE IF NOT EXISTS lash_session_meta",
+///             "CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits",
+///             "CREATE TABLE IF NOT EXISTS lash_queued_work_batches",
+///             "CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs",
+///             "CREATE TABLE IF NOT EXISTS lash_processes",
+///             "CREATE TABLE IF NOT EXISTS lash_process_events",
+///             "CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries",
+///             "CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions",
+///             "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
+///             "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",
+///             "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
+///         ),
+///     ),
+///     shapes(
+///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
+///         cover(
+///             RuntimeEffectInvocation, RuntimeEffectEnvelope, RuntimeEffectCommand,
+///             RuntimeEffectOutcome,
+///         ),
+///     ),
+///     items(path = "crates/lash-core-store/src/store/root.rs", RootAdmission, AdmittedHead),
+///     items(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
+///     items(path = "crates/lash-sansio/src/effect_identity.rs", ExecutionScope),
+///     items(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
+///     items(
+///         path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, TurnFinish, TurnStop,
+///         TurnCancellationEvidence, TurnCancelMode, SessionAppendNode, ErrorEnvelope,
+///     ),
+/// )
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).

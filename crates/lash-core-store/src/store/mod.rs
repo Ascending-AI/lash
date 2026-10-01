@@ -220,6 +220,23 @@ fn default_root_session_id() -> SessionId {
 /// Version 11 nests restricted resident-tool definitions under `manifest` and
 /// `contract` fields (FIG-1210); a version 10 head carrying the flattened
 /// encoding is refused rather than reinterpreted field-by-field.
+///
+/// version_guard(
+///     items(SessionHeadPayload),
+///     items(path = "crates/lash-core-store/src/session_graph.rs", PersistedSessionConfig),
+///     items(path = "crates/lash-sansio/src/llm/capability.rs", ModelCapability, InstructionRole),
+///     items(
+///         path = "crates/lash-core-store/src/session_identity.rs", SessionToolAccess,
+///         SessionResidentToolAccess, SessionToolAccessWire,
+///     ),
+///     items(
+///         path = "crates/lash-sansio/src/tool_contract.rs",
+///         path = "crates/lash-sansio/src/schema_contract.rs", ToolDefinition, ToolManifest,
+///         ToolContract, ToolId, CompactToolContract, ToolRetryPolicy, ToolOutputContract,
+///         ToolArgumentProjectionPolicy, SchemaContract, SchemaProjectionPolicy,
+///         SchemaProjectionOverride, ProjectionMode,
+///     ),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 11;
 

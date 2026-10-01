@@ -161,6 +161,36 @@ pub use lashlang_graph::{
 /// `child_incarnation`. It changes in place under the pre-1.0 version freeze
 /// (FIG-3846): FIG-4029 drops `prompt_view_pruned`, because context-pressure
 /// compaction starts a frame instead of pruning the prompt view.
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-trace/src/*.rs",
+///         cover(
+///             TraceRecord, TraceEvent, TraceTurnOutcome, TraceTurnCancellationEvidence,
+///             TraceTurnCompletionReason, TraceTurnFailureReason, TraceJournaledEffectStatus,
+///             TraceDurableWaitResolution, TraceDurableTimerStatus, TraceLanguageExecutionPayload,
+///             TraceLashlangGraph, TraceNodeWaitKind, TraceNodeAwaited, TraceNodeWaitResolution,
+///             TraceLashlangNodeObservation, TraceLashlangGraphNode,
+///             TraceLashlangNodeTerminalStatus, TraceLanguageExecutionMapNode,
+///             TraceLashlangEventIdentity, TraceBranchMembership,
+///         ),
+///     ),
+///     items(
+///         path = "crates/lash-sansio/src/tool_output.rs", ToolFailureClass, ToolFailureSource,
+///         ToolRetryStatus,
+///     ),
+///     items(path = "crates/lash-sansio/src/workflow.rs", WorkflowExecutionSite),
+///     items(path = "crates/lash-sansio/src/execution_node_kind.rs", ExecutionNodeKind),
+///     items(path = "crates/lash-trace/src/lashlang_graph.rs", fold_lashlang_graph),
+///     shapes(
+///         path = "crates/lash-trace/src/lashlang_graph/model.rs",
+///         cover(TraceLashlangNodeObservation),
+///     ),
+///     shapes(
+///         path = "crates/lash-trace/src/language_execution_failure.rs",
+///         cover(TraceLanguageExecutionFailure),
+///     ),
+/// )
 pub const TRACE_SCHEMA_VERSION: u32 = 36;
 
 /// A durable trace record was written under a schema this reader does not support.

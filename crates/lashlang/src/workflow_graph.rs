@@ -57,6 +57,45 @@ pub use projection::{
 /// refused. Version 21 (FIG-4038) retires the surface dialect's IR: the
 /// comprehension container kind and the declaration and expression spellings
 /// TypeScript never produces are gone; v20 graph documents are refused.
+///
+/// version_guard(
+///     shapes(cover(WorkflowGraph)),
+///     items(
+///         path = "crates/lashlang/src/ast.rs", Declaration, ProcessDecl, ProcessParam,
+///         ProcessSignalDecl, FunctionDecl, FunctionParam, LabelMetadata, AssignTarget,
+///         AssignPathStep, Expr, FunctionExpr, MethodKey, ProcessLiteralExpr, TryExpr, CatchClause,
+///         TypeExpr, UnionMembers, ProcessSignature, ProcessType, ProcessTypeKind, ProcessTypeWire,
+///         ProcessParamWire, TypeField, ResourceRefExpr, JavaScriptUnaryOp, JavaScriptBinaryOp,
+///         JavaScriptLogicalOp,
+///     ),
+///     impls(
+///         path = "crates/lashlang/src/ast.rs", "Serialize for UnionMembers",
+///         "Deserialize for UnionMembers", "Serialize for ProcessType",
+///         "Deserialize for ProcessType",
+///     ),
+///     items(path = "crates/lashlang/src/ast_string.rs", AstString),
+///     items(
+///         path = "crates/lashlang/src/workflow_graph/projection.rs",
+///         path = "crates/lashlang/src/artifact.rs",
+///         path = "crates/lash-typescript/src/workflow_graph/mod.rs",
+///         workflow_graph_from_source_with_facets, workflow_graph_from_program,
+///         workflow_graph_from_artifact, project_process, project_literal_process, project_node,
+///         source_identity, edge,
+///     ),
+///     items(workflow_node_id),
+///     items(
+///         path = "crates/lashlang/src/workflow_graph/execution_sites.rs",
+///         path = "crates/lashlang/src/workflow_graph/ownership.rs",
+///         path = "crates/lashlang/src/ast_roles.rs", path = "crates/lashlang/src/tracking.rs",
+///         from_indices, indices, path_for_ast, for_main, for_process, ownership_map,
+///         into_ownership_map, workflow_projection, statement_list, push_statement_list,
+///         is_statement_list, collect_body, collect_statement, statement_value, map_node_subtree,
+///         check_shape, process_wrapper_run_path, execution_sites, collect_execution_sites,
+///         push_execution_site_descriptor, collect_child_execution_sites, workflow_owner, node_site,
+///         branch_site, branch_edge_id,
+///     ),
+///     items(path = "crates/lash-sansio/src/workflow.rs", WorkflowExecutionSite),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
 
