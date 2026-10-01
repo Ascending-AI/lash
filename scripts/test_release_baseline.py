@@ -63,6 +63,22 @@ class ReleaseBaselineTests(unittest.TestCase):
     def test_sqlite_stamps_equal_their_catalog_numbers(self):
         self.assertEqual(baseline.sqlite_stamp_mismatches(ROOT), [])
 
+    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
+    def test_postgres_stamp_equals_its_catalog_number(self):
+        self.assertEqual(baseline.postgres_stamp_mismatches(ROOT), [])
+
+    def test_pre_cut_postgres_stamp_is_named_against_its_descriptor(self):
+        errors = baseline.postgres_stamp_mismatches(ROOT)
+        if not baseline.mismatches(baseline.inventory(ROOT), baseline.load_baseline(ROOT / baseline.BASELINE)):
+            self.assertEqual(errors, [])
+            return
+        self.assertTrue(
+            any(":SCHEMA_VERSION: default stamp" in error and "POSTGRES" in error
+                for error in errors), errors)
+        self.assertTrue(
+            any(":SCHEMA_VERSION: synthetic-next stamp" in error and "POSTGRES" in error
+                for error in errors), errors)
+
     def test_pre_cut_sqlite_stamps_are_named_against_their_catalog_numbers(self):
         errors = baseline.sqlite_stamp_mismatches(ROOT)
         if not baseline.mismatches(baseline.inventory(ROOT), baseline.load_baseline(ROOT / baseline.BASELINE)):
@@ -142,14 +158,45 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
 
             # After the reset every SQLite stamp is its catalog's number, in
             # both tiers; a stamp that keeps an old value, and a catalog step
-            # numbered past its stamp, are red.
+            # numbered past its stamp, are red. The PostgreSQL stamp's law is
+            # the same.
             self.assertEqual(baseline.sqlite_stamp_mismatches(repo), [])
+            self.assertEqual(baseline.postgres_stamp_mismatches(repo), [])
             check = subprocess.run(
                 [sys.executable, str(ROOT / "scripts/release_baseline.py"), "--repo", str(repo), "check"],
                 capture_output=True, text=True, cwd=ROOT,
             )
             self.assertIn("REMOTE_PROTOCOL_VERSION", check.stderr)
             self.assertNotIn("stamp", check.stderr)
+            lib = repo / "crates/lash-postgres-store/src/lib.rs"
+            reset_lib = lib.read_text()
+            self.assertIn("const SCHEMA_VERSION: i32 = 1;", reset_lib)
+            lib.write_text(reset_lib.replace("const SCHEMA_VERSION: i32 = 1;",
+                                             "const SCHEMA_VERSION: i32 = 2;"))
+            errors = baseline.postgres_stamp_mismatches(repo)
+            self.assertTrue(errors and all("SCHEMA_VERSION" in error for error in errors), errors)
+            self.assertTrue(any("stamp 2" in error and "POSTGRES" in error for error in errors))
+            check = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/release_baseline.py"), "--repo", str(repo), "check"],
+                capture_output=True, text=True, cwd=ROOT,
+            )
+            self.assertIn("POSTGRES", check.stderr)
+            lib.write_text(reset_lib)
+            expand = repo / "crates/lash-postgres-store/src/postgres/migrate.rs"
+            reset_expand = expand.read_text()
+            self.assertIn("static EXPAND_MIGRATIONS: &[ExpandMigration] = &[", reset_expand)
+            expand.write_text(reset_expand.replace(
+                "static EXPAND_MIGRATIONS: &[ExpandMigration] = &[",
+                "static EXPAND_MIGRATIONS: &[ExpandMigration] = &[\n"
+                "    ExpandMigration {\n"
+                "        id: \"0002-past-the-stamp\",\n"
+                "        from_version: 1,\n"
+                "        to_version: 9,\n"
+                "        statements: \"-- past the stamp\",\n"
+                "    },", 1))
+            errors = baseline.postgres_stamp_mismatches(repo)
+            self.assertTrue(any("expand step 1 to 9 is outside" in error for error in errors), errors)
+            expand.write_text(reset_expand)
             schema = repo / "crates/lash-sqlite-store/src/schema.rs"
             reset_schema = schema.read_text()
             self.assertIn("const BASE_PROCESS_SCHEMA_VERSION: i32 = 1;", reset_schema)
