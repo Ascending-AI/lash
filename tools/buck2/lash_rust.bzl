@@ -4,7 +4,7 @@ load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load(":buildscript_manifest.bzl", "buildscript_manifest", "buildscript_sources")
 load(":clippy_policy.bzl", "FIRST_PARTY_CLIPPY_LINT_FLAGS", "FIRST_PARTY_RUST_LINT_FLAGS", "first_party_clippy_configuration")
 load(":deps.bzl", "PACKAGE_DEPS")
-load(":platforms.bzl", "pool_constraint")
+load(":platforms.bzl", "MEMORY_SCALE", "pool_constraint")
 load(":profile.bzl", "FIRST_PARTY_OPT_LEVELS")
 load(":source_tree.bzl", "lash_rust_source_tree")
 load(":test_rules.bzl", "lash_test_wrapper")
@@ -68,12 +68,38 @@ def _run_request(exec_properties):
         int(exec_properties["test.memory_kb"]),
     )
 
-def _resource_attrs(exec_properties):
-    cpu, memory = _request(exec_properties)
+def _pool(cpu, memory):
     return {
         "exec_compatible_with": [pool_constraint(cpu, memory)],
         "kiln_action_cpu_count": str(cpu),
         "kiln_action_memory_kb": str(memory),
+    }
+
+def _resource_attrs(exec_properties):
+    """A target's compile request: its platform and the supervisor's limits.
+
+    An `optimized.` request applies in the configurations that compile with
+    the optimized flags, where LLVM holds more than a dev compile does. A
+    target without one keeps plain attributes, and a dev configuration takes
+    the default branch, so neither's action keys depend on the select.
+    `-c kiln.memory_scale=N` multiplies the memory of every request made here
+    for one invocation.
+    """
+    cpu, memory = _request(exec_properties)
+    dev = _pool(cpu, memory * MEMORY_SCALE)
+    optimized = _pool(
+        int(exec_properties.get("optimized.cpu_count", str(cpu))),
+        int(exec_properties.get("optimized.memory_kb", str(memory))) * MEMORY_SCALE,
+    )
+    if optimized == dev:
+        return dev
+    return {
+        key: select({
+            "//tools/buck2:profile_host": optimized[key],
+            "//tools/buck2:profile_optimized": optimized[key],
+            "DEFAULT": value,
+        })
+        for key, value in dev.items()
     }
 
 def _named_deps(package_name, include_dev = False, build = False):

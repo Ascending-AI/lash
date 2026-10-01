@@ -84,10 +84,18 @@ def event(
     wall: float = 10.0,
     memory_kb: int = 4194304,
     cache_hit: bool = False,
+    configuration: str = "prelude//platforms:default#a8ac7ec86a6bee54",
 ) -> str:
     start = end - wall
     action = {
-        "key": {"owner": {"TargetLabel": {"label": {"package": "root//crates/lash-core", "name": name}}}},
+        "key": {
+            "owner": {
+                "TargetLabel": {
+                    "label": {"package": "root//crates/lash-core", "name": name},
+                    "configuration": {"full_name": configuration},
+                }
+            }
+        },
         "name": {"category": category, "identifier": identifier},
         "commands": [
             {
@@ -209,6 +217,57 @@ class KindTableTest(unittest.TestCase):
         # A peak above the row in force moves it whatever the distance.
         measured = {(KEY, "target"): samples(int(2.1 * GIB), 20, requested_kb=1048576)}
         self.assertEqual(sizes.kind_table(measured, {}, current)[KEY]["target"]["memory_kb"], 2883584)
+
+
+class OptimizedTableTest(unittest.TestCase):
+    def measured(self, peak_bytes: int, count: int) -> dict:
+        return {(KEY, "target"): samples(peak_bytes, count, requested_kb=1048576)}
+
+    def table(self, measured, dev=(1, 1572864), previous=None, current=None) -> dict:
+        return sizes.optimized_table(
+            measured, lambda key, kind: dev, lambda key, kind: previous or dev, current
+        )
+
+    def test_optimized_and_host_compiles_are_kept_apart_from_dev(self) -> None:
+        events = [
+            event(),
+            event(end=2000.0, configuration="root//tools/buck2:optimized#0123456789abcdef"),
+            event(end=3000.0, configuration="lash-rust-host#0123456789abcdef"),
+        ]
+        lines = [usage(), usage(stamp=2000, peak_bytes=2 * GIB), usage(stamp=3000, peak_bytes=3 * GIB)]
+        records = list(
+            joined.labelled_records(list(joined.executed_actions(events)), lines, INVENTORY)
+        )
+        self.assertEqual(sizes.collect_kinds(records, {KEY})[(KEY, "target")].peaks(), [GIB])
+        self.assertEqual(
+            sizes.collect_optimized(records)[(KEY, "target")].peaks(), [2 * GIB, 3 * GIB]
+        )
+
+    def test_one_optimized_sample_raises_the_request(self) -> None:
+        # 2 GiB x 1.25 in 256 MiB steps, over a 1.5 GiB dev request.
+        rows = self.table(self.measured(2 * GIB, 1))
+        self.assertEqual(rows[KEY]["target"]["memory_kb"], 2621440)
+        self.assertEqual(rows[KEY]["target"]["samples"], 1)
+
+    def test_a_row_that_raises_nothing_is_dropped(self) -> None:
+        self.assertEqual(self.table(self.measured(GIB // 2, 30)), {})
+        current = {KEY: {"target": {"cpu_count": 1, "memory_kb": 2097152}}}
+        self.assertEqual(self.table({}, dev=(1, 2097152), current=current), {})
+
+    def test_a_lowered_dev_request_leaves_the_optimized_one_in_place(self) -> None:
+        # The refresh seeds the row with the request in force before it; a few
+        # small samples cannot lower it, twenty can.
+        current = {KEY: {"target": {"cpu_count": 1, "memory_kb": 4194304}}}
+        self.assertEqual(self.table({}, current=current)[KEY]["target"]["memory_kb"], 4194304)
+        few = self.table(self.measured(GIB, 3), current=current)
+        self.assertEqual(few[KEY]["target"]["memory_kb"], 4194304)
+        many = self.table(self.measured(2 * GIB, 20), current=current)
+        self.assertEqual(many[KEY]["target"]["memory_kb"], 2621440)
+
+    def test_few_samples_can_still_raise_the_row_in_force(self) -> None:
+        current = {KEY: {"target": {"cpu_count": 1, "memory_kb": 2097152}}}
+        rows = self.table(self.measured(3 * GIB, 2), current=current)
+        self.assertEqual(rows[KEY]["target"]["memory_kb"], 3932160)
 
 
 class InForceTest(unittest.TestCase):

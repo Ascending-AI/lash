@@ -111,9 +111,9 @@ Optimized compiles
 dependencies) compile with `-Copt-level=3`, and LLVM then holds more than a
 dev compile of the same crate. The event logs name each action's
 configuration, so `tools/buck2/optimized-sizes.json` carries, keyed like the
-kind table, what an optimized compile needs where that is more than the
-dev request. The
-rule is `optimized_table`'s: a row only raises, one optimized sample is
+kind table, what an optimized compile asks for where that is more than the
+dev request; the generated rules select it on the profile constraint, so a
+dev build's requests do not depend on it. The rule is `optimized_table`'s: a row only raises, one optimized sample is
 evidence, and a dev request that a refresh lowers leaves the optimized
 request where it was until 20 optimized samples say otherwise.
 
@@ -364,8 +364,14 @@ def parse_record(line: str) -> dict[str, str] | None:
 
 
 
-def collect(lines, crates: set[tuple[str, str]]) -> dict[str, Samples]:
+def collect(
+    lines, crates: set[tuple[str, str]], optimized_ops: frozenset[str] = frozenset()
+) -> dict[str, Samples]:
     """Keeps the Lash compile samples; every other record is skipped.
+
+    `optimized_ops` names the operations the event logs showed to be
+    optimized-configuration compiles. They are sized by their own table and
+    would otherwise price the dev row at an optimized peak.
 
     The log is append-only from many actions at once, so a torn or unknown line
     is skipped rather than fatal: the table is a measurement, not a ledger.
@@ -376,7 +382,7 @@ def collect(lines, crates: set[tuple[str, str]]) -> dict[str, Samples]:
         if record is None or record.get("tool") not in COMPILE_TOOLS:
             continue
         pair = (record.get("pkg", ""), record.get("crate", ""))
-        if pair not in crates:
+        if pair not in crates or record.get("op", "-") in optimized_ops:
             continue
         observe_compile(measured[f"{pair[0]}/{pair[1]}"], record)
     return {key: samples for key, samples in measured.items() if samples.records}
@@ -886,8 +892,19 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
 
     keys = {f"{package}/{crate}" for package, crate in crates}
     labels = test_labels(inventory)
+    labelled = []
+    if events:
+        actions = [
+            action for path in events for action in joined.executed_actions(joined.event_lines(path))
+        ]
+        labelled = list(joined.labelled_records(actions, lines, inventory))
+    optimized_ops = frozenset(
+        record["op"]
+        for _key, _kind, _category, _emit, optimized, record in labelled
+        if optimized and record.get("op", "-") != "-"
+    )
     crate_rows = table(
-        collect(lines, crates),
+        collect(lines, crates, optimized_ops),
         {key: row for key, row in stored("action-sizes.json").items() if key in keys},
     )
     shared = joined.shared_identities(inventory)
@@ -895,12 +912,7 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         key: rows for key, rows in stored("target-kind-sizes.json").items() if key in shared
     }
     previous = (stored("action-sizes.json"), stored("target-kind-sizes.json"))
-    labelled = []
     if events:
-        actions = [
-            action for path in events for action in joined.executed_actions(joined.event_lines(path))
-        ]
-        labelled = list(joined.labelled_records(actions, lines, inventory))
         kind_rows = kind_table(collect_kinds(labelled, shared), crate_rows, kind_rows)
     # Every dev request this refresh lowers keeps its optimized compile where
     # it was; see `optimized_table`.

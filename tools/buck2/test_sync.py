@@ -211,6 +211,30 @@ def check_sizing() -> None:
         if key in measured_compile:
             largest = max(target["memory_kb"], test["memory_kb"])
             assert measured_compile[key]["peak_bytes"] <= largest * 1024, key
+
+    # An optimized configuration's request is its row where that is more than
+    # the dev request, and never less than the dev request: the select can
+    # only raise. A row that raises nothing is not rendered.
+    optimized_requests = bzl_value(text, "OPTIMIZED_COMPILE_REQUESTS")
+    measured_optimized = load_json("optimized-sizes.json")
+    assert set(optimized_requests) <= set(measured_optimized)
+    for key, kinds in measured_optimized.items():
+        assert kinds and set(kinds) <= {"target", "test"}, key
+        for kind, row in kinds.items():
+            dev = compile_requests.get(key, default)
+            if kind == "test":
+                dev = test_compile_requests.get(key, dev)
+            expected = {field: max(dev[field], row[field]) for field in dev}
+            rendered = optimized_requests.get(key, {}).get(kind, dev)
+            assert rendered == expected, (key, kind)
+            assert (kind in optimized_requests.get(key, {})) == (expected != dev), (key, kind)
+            assert row["peak_bytes"] <= rendered["memory_kb"] * 1024, (key, kind)
+    for key, kinds in optimized_requests.items():
+        for kind, rendered in kinds.items():
+            dev = compile_requests.get(key, default)
+            if kind == "test":
+                dev = test_compile_requests.get(key, dev)
+            assert all(rendered[field] >= dev[field] for field in dev), (key, kind)
     for label, measured in measured_tests.items():
         assert label in test_requests or label in batches
         actual = test_requests.get(label, batches.get(label))
@@ -223,7 +247,9 @@ def check_sizing() -> None:
     assert len(budgets) == len(set(budgets))
     requested = {
         (value["cpu_count"], value["memory_kb"])
-        for value in list(compile_requests.values()) + list(test_compile_requests.values())
+        for value in list(compile_requests.values())
+        + list(test_compile_requests.values())
+        + [request for kinds in optimized_requests.values() for request in kinds.values()]
     } | {(1, 1572864), (2, 3145728)}
     assert requested <= set(budgets), f"unregistered pool budgets: {sorted(requested - set(budgets))}"
     # A target that names no budget takes the first platform: it must stay the
@@ -309,6 +335,21 @@ def check_action_categories() -> None:
     assert '_DEFAULT_CONSTRAINT = "//tools/buck2:pool_1_1572864"' in third_party
     rust = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
     assert '"exec_compatible_with": [pool_constraint(cpu, memory)]' in rust
+    # The optimized request is selected on the profile constraints alone, with
+    # the dev request as the default branch, and only for a target that has
+    # one: a dev configuration's action keys never depend on the select.
+    assert '"//tools/buck2:profile_host": optimized[key],' in rust
+    assert '"//tools/buck2:profile_optimized": optimized[key],' in rust
+    assert '"DEFAULT": value,' in rust
+    assert "if optimized == dev:\n        return dev\n" in rust
+    # `-c kiln.memory_scale=N` scales those requests for one invocation. It is
+    # 1 unless the command line says otherwise, and its platforms exist only
+    # when it is set.
+    platforms = (HERE / "platforms.bzl").read_text(encoding="utf-8")
+    assert 'MEMORY_SCALE = int(read_root_config("kiln", "memory_scale", "1"))' in platforms
+    assert "if MEMORY_SCALE > 1 and (cpu, memory_kb * MEMORY_SCALE) not in POOL_BUDGETS" in platforms
+    assert rust.count("* MEMORY_SCALE") == 2
+    assert "memory_scale" not in (ROOT / ".buckconfig").read_text(encoding="utf-8")
     assert "exec_compatible_with = [pool_constraint(cpu, memory)]" in rust
 
 

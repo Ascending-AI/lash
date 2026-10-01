@@ -151,6 +151,7 @@ def is_content_input(relative: str) -> bool:
             "tools/buck2/clippy_policy.py",
             "tools/buck2/feature_variants.py",
             "tools/buck2/generate_model.py",
+            "tools/buck2/optimized-sizes.json",
             "tools/buck2/package-policy.toml",
             "tools/buck2/reindeer-lock.json",
             "tools/buck2/reindeer.toml",

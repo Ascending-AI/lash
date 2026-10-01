@@ -1,5 +1,11 @@
 load(":exec_sizes.bzl", "POOL_BUDGETS")
 
+# `-c kiln.memory_scale=N` multiplies the memory of every sized first-party
+# compile request for one invocation: the way to get a build past an
+# OOM-killed compile before its row is re-measured. Unset, it is 1 and every
+# request is exactly its table's.
+MEMORY_SCALE = int(read_root_config("kiln", "memory_scale", "1"))
+
 def pool_budget_name(cpu, memory_kb):
     return "pool_{}_{}".format(cpu, memory_kb)
 
@@ -72,7 +78,14 @@ platforms = rule(
 def declare_pool_platforms(name, constraints):
     native.constraint_setting(name = "budget")
     budgets = {}
-    for cpu, memory_kb in POOL_BUDGETS:
+    if MEMORY_SCALE < 1:
+        fail("kiln.memory_scale must be a positive integer")
+    scaled = [
+        (cpu, memory_kb * MEMORY_SCALE)
+        for cpu, memory_kb in POOL_BUDGETS
+        if MEMORY_SCALE > 1 and (cpu, memory_kb * MEMORY_SCALE) not in POOL_BUDGETS
+    ]
+    for cpu, memory_kb in POOL_BUDGETS + scaled:
         budget_name = pool_budget_name(cpu, memory_kb)
         native.constraint_value(name = budget_name, constraint_setting = ":budget")
         budgets["{}|{}|{}".format(budget_name, cpu, memory_kb)] = ":" + budget_name

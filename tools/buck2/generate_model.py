@@ -46,6 +46,13 @@ ACTION_SIZES_PATH = ROOT / "tools/buck2/action-sizes.json"
 # kind without a row takes the crate row.
 TARGET_KIND_SIZES_PATH = ROOT / "tools/buck2/target-kind-sizes.json"
 TARGET_KINDS = ("target", "test")
+# `--config=optimized` and the host configuration compile with
+# `-Copt-level=3`, and LLVM then holds more than a dev compile of the same
+# crate does. This table carries, keyed like the kind table, what an optimized
+# compile asks for where that is more than the dev request; the Rust macros
+# select it on the profile constraint, so a dev build's requests -- and action
+# keys -- do not depend on it.
+OPTIMIZED_SIZES_PATH = ROOT / "tools/buck2/optimized-sizes.json"
 # Must match the default execution platform in `tools/buck2/platforms.bzl` and
 # `DEFAULT_MEMORY_KB` in `tools/buck2/action_sizes_from_log.py`.
 DEFAULT_MEMORY_KB = 1572864
@@ -159,7 +166,16 @@ def action_sizes() -> dict[str, dict[str, int]]:
 
 ACTION_SIZES = action_sizes()
 TARGET_KIND_SIZES = json.loads(TARGET_KIND_SIZES_PATH.read_text(encoding="utf-8"))
+OPTIMIZED_SIZES = json.loads(OPTIMIZED_SIZES_PATH.read_text(encoding="utf-8"))
 TEST_RUN_SIZES = json.loads(TEST_RUN_SIZES_PATH.read_text(encoding="utf-8"))
+
+
+def optimized_request(package_name: str, crate_name: str, kind: str) -> dict[str, int]:
+    """What an optimized compile of one kind of target asks for: never less
+    than its dev request."""
+    dev = compile_request(package_name, crate_name, kind)
+    row = OPTIMIZED_SIZES.get(f"{package_name}/{crate_name}", {}).get(kind) or {}
+    return {field: max(dev[field], row.get(field, 0)) for field in ("cpu_count", "memory_kb")}
 
 
 def compile_request(
@@ -306,12 +322,22 @@ def exec_sizes_bzl() -> str:
         kind: {key: compile_request(*key.rsplit("/", 1), kind) for key in sized}
         for kind in TARGET_KINDS
     }
+    optimized_requests = {
+        key: {
+            kind: optimized_request(*key.rsplit("/", 1), kind)
+            for kind in TARGET_KINDS
+            if optimized_request(*key.rsplit("/", 1), kind)
+            != compile_request(*key.rsplit("/", 1), kind)
+        }
+        for key in sorted(OPTIMIZED_SIZES)
+    }
+    optimized_requests = {key: kinds for key, kinds in optimized_requests.items() if kinds}
     pool_budgets = [UNSIZED_ACTION_BUDGET] + sorted(
         (
             set(FIXED_POOL_BUDGETS)
             | {
                 (request["cpu_count"], request["memory_kb"])
-                for requests in compile_requests.values()
+                for requests in list(compile_requests.values()) + list(optimized_requests.values())
                 for request in requests.values()
             }
         )
@@ -370,6 +396,21 @@ def exec_sizes_bzl() -> str:
             if request != compile_requests["target"][key]
         ),
         "}\n\n",
+        "# What an optimized compile (`--config=optimized`, or the host\n",
+        "# configuration) of a crate asks for, per kind of target, where that\n",
+        "# is more than its dev request.\n",
+        "OPTIMIZED_COMPILE_REQUESTS = {\n",
+        "".join(
+            f"    {quote(key)}: {{"
+            + ", ".join(
+                f'{quote(kind)}: {{"cpu_count": {request["cpu_count"]}, '
+                f'"memory_kb": {request["memory_kb"]}}}'
+                for kind, request in kinds.items()
+            )
+            + "},\n"
+            for key, kinds in optimized_requests.items()
+        ),
+        "}\n\n",
         "TEST_RUN_REQUESTS = {\n",
         "".join(
             f"    {quote(label)}: {{"
@@ -390,12 +431,17 @@ def exec_sizes_bzl() -> str:
         "}\n\n",
         "def sized_exec_properties(package_name, crate_name, test_label = None):\n",
         '    """The target\'s remote requests: its crate\'s compile row, plus'
-        ' the run\'s, scoped to the `test` exec group, for a test."""\n',
+        ' the run\'s, scoped to the `test` exec group, for a test; `optimized.`'
+        ' keys carry the compile request of an optimized configuration."""\n',
         '    crate = package_name + "/" + crate_name\n',
         "    request = COMPILE_REQUESTS.get(crate, {})\n",
         "    if test_label != None:\n",
         "        request = TEST_COMPILE_REQUESTS.get(crate, request)\n",
         "    properties = {key: str(value) for key, value in request.items()}\n",
+        '    kind = "target" if test_label == None else "test"\n',
+        "    optimized = OPTIMIZED_COMPILE_REQUESTS.get(crate, {}).get(kind, {})\n",
+        "    for key, value in optimized.items():\n",
+        '        properties["optimized." + key] = str(value)\n',
         "    if test_label != None:\n",
         "        run = TEST_RUN_REQUESTS.get(\n",
         "            test_label,\n",
@@ -443,7 +489,8 @@ def validate_action_sizes(metadata: dict) -> None:
         if "custom-build" not in target["kind"]
     }
     stale = sorted(
-        (set(ACTION_SIZES) | set(TARGET_KIND_SIZES) | set(LARGE_TEST_RUNS)) - crates
+        (set(ACTION_SIZES) | set(TARGET_KIND_SIZES) | set(OPTIMIZED_SIZES) | set(LARGE_TEST_RUNS))
+        - crates
     )
     if stale:
         raise SystemExit(
@@ -452,14 +499,21 @@ def validate_action_sizes(metadata: dict) -> None:
         )
     unknown = sorted(
         f"{key}: {kind}"
-        for key, rows in TARGET_KIND_SIZES.items()
+        for table in (TARGET_KIND_SIZES, OPTIMIZED_SIZES)
+        for key, rows in table.items()
         for kind in rows
         if kind not in TARGET_KINDS
     )
-    if unknown or not all(TARGET_KIND_SIZES.values()):
+    empty = sorted(
+        key
+        for table in (TARGET_KIND_SIZES, OPTIMIZED_SIZES)
+        for key, rows in table.items()
+        if not rows
+    )
+    if unknown or empty:
         raise SystemExit(
-            "buck2 sync: target-kind sizes need `target` or `test` rows: "
-            + ", ".join(unknown or sorted(key for key, rows in TARGET_KIND_SIZES.items() if not rows))
+            "buck2 sync: target-kind and optimized sizes need `target` or `test` rows: "
+            + ", ".join(unknown or empty)
         )
 
 

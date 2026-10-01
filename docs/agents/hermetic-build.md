@@ -287,6 +287,14 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   several times higher than anything the library runs; where Buck2's event
   logs told the two apart at least 20 times, each has its own row in
   `target-kind-sizes.json`, and a kind without one keeps the crate row.
+- `--config=optimized` and the host configuration compile with
+  `-Copt-level=3`, where LLVM holds more than a dev compile does.
+  `tools/buck2/optimized-sizes.json` carries what such a compile asks for
+  where that is more than the dev request, and the Rust macros select it on
+  the profile constraint. A row only raises; one optimized sample is evidence;
+  and a dev request that a refresh lowers leaves the optimized request where
+  it was until 20 optimized samples say otherwise. A dev build takes the
+  select's default branch, so its action keys do not depend on this table.
 - A request is a platform property and so part of the action key. A refresh
   keeps the row in force unless the request moves by a whole CPU or at least
   512 MiB, or a recorded peak exceeds it: a smaller correction is not worth
@@ -307,7 +315,7 @@ python3 tools/buck2/action_sizes_from_log.py --report --since <unix seconds> usa
 ```
 
 `--refresh` rewrites `action-sizes.json`, `target-kind-sizes.json`,
-`category-sizes.json` and `test-run-sizes.json` and runs `sync.py`, which
+`optimized-sizes.json`, `category-sizes.json` and `test-run-sizes.json` and runs `sync.py`, which
 regenerates `exec_sizes.bzl`, including the execution platforms. `--report`
 prints reserved against used CPU and memory per Buck2 category. The usage log
 names an action's category and crate but not its target or what it emitted,
@@ -321,6 +329,25 @@ refresh re-executes the resized targets. The graph contracts fail when a
 category in the rules or in `category-sizes.json` has no entry, when an action
 no row sizes peaked above its category's smallest request, when a compile row
 is below its recorded peak, and when a test row is below its p99 peak.
+
+When a compile is OOM-killed at its request (`rustc` exits on signal 9 with
+no output) and the build cannot wait for a refresh, raise every sized
+first-party compile request for that one invocation:
+
+```sh
+kiln build -c kiln.memory_scale=2 //crates/lash-core:lash-core
+```
+
+The value is a positive integer multiplier on `memory_kb`; `kiln check`,
+`kiln test` and `kiln clippy` take it the same way, alone or with
+`--config=optimized`. Unset, it is 1 and every request is exactly its table's.
+Scaled requests are different action keys, so the resized compiles re-execute
+and nothing they produce is shared with an unscaled build's cache entries;
+third-party compiles and test runs are not scaled and stay cached. Then
+refresh the tables so the next build does not need the flag. A Buck2
+configuration modifier (`-m`) is not the mechanism: this repository registers
+no modifier constructor, and a modifier would reconfigure the whole dependency
+closure, third-party crates included, into a cold cache.
 
 These are scheduler reservations, not compiler-thread counts. The worker
 supervisor uses the requests to size cgroups within unchanged floors and
