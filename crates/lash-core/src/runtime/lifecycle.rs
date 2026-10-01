@@ -294,6 +294,16 @@ impl LashRuntime {
             ))
             .await
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        // A head no commit has written is its creator's, which commits it
+        // (`SessionCreationHead::CommittedByCreator`): until then it is the
+        // head a reload gives way to, with the plugin state it opened with
+        // (FIG-4492).
+        let mut resident_session = ResidentSessionContinuity::fresh();
+        if state.head_revision == 0 && session.history_store().is_some() {
+            let mut head = state.clone();
+            head.capture_plugin_states(session.plugins());
+            resident_session = resident_session.with_uncommitted_head(head);
+        }
         Ok(Self {
             session: Some(session),
             host,
@@ -306,7 +316,7 @@ impl LashRuntime {
             drive_root: None,
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
-            resident_session: ResidentSessionContinuity::fresh(),
+            resident_session,
             tool_restore_report,
         })
     }

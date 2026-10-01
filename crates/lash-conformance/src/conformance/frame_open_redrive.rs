@@ -77,6 +77,8 @@ mod host_commands;
 pub use host_commands::*;
 mod command_budget;
 pub use command_budget::*;
+mod uncommitted_head;
+pub use uncommitted_head::*;
 
 /// The prompt usage at which the laws' pressure hook compacts.
 const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
@@ -1764,6 +1766,9 @@ macro_rules! frame_open_redrive_tests {
             a_lowered_budget_refuses_a_stranded_command_once_per_drive,
             raising_the_budget_settles_a_stranded_command,
             an_over_budget_command_settles_failed_at_its_bare_commits_size,
+            an_over_budget_append_on_an_uncommitted_head_leaves_nothing_of_it,
+            a_protocol_refused_append_on_an_uncommitted_head_leaves_nothing_of_it,
+            an_ancestor_refused_append_on_an_uncommitted_head_leaves_nothing_of_it,
             host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_settlement);
         $crate::frame_open_redrive_tests!(@commanded [$(#[$attr])*] $fixture;
             (host_append_waits_for_the_bound_turn,

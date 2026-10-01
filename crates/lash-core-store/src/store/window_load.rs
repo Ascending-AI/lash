@@ -67,14 +67,15 @@ pub async fn load_session_read_view(
 
 /// Re-adopt the session's current frame into `state`, keeping the session
 /// binding and the resident open's tool-state claim. Everything else,
-/// the execution controls included (FIG-4376), is the head's. A session with
-/// no head leaves `state` unchanged.
+/// the execution controls included (FIG-4376), is the head's. Answers whether
+/// the session has a head: one with none leaves `state` unchanged, and the
+/// caller decides which head stands in for it (FIG-4492).
 pub async fn refresh_session_window(
     store: &SessionStore,
     state: &mut crate::RuntimeSessionState,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
     let Some(read) = store.load_session_window(WindowSelector::Current).await? else {
-        return Ok(());
+        return Ok(false);
     };
     validate_window_session(store.session_id(), &read)?;
     let mut fresh = window_state(read, store.fleet_format())?.state;
@@ -84,5 +85,5 @@ pub async fn refresh_session_window(
     // decision or a later stamp would export the unreconciled registry.
     fresh.preserve_tool_state_snapshot = state.preserve_tool_state_snapshot;
     *state = fresh;
-    Ok(())
+    Ok(true)
 }

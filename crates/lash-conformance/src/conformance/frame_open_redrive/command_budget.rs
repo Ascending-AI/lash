@@ -40,7 +40,7 @@ const STRANDED_NOTE: &str = "a note the host appended before the budget was lowe
 type DriveRecord = Result<(Vec<(TurnId, crate::RuntimeError)>, DriveStop), String>;
 
 /// Each refused root with its refusal's code.
-fn refused_codes(
+pub(super) fn refused_codes(
     refusals: &[(TurnId, crate::RuntimeError)],
 ) -> Vec<(String, crate::RuntimeErrorCode)> {
     refusals
@@ -50,7 +50,7 @@ fn refused_codes(
 }
 
 /// `parts` with the host's commit budget set to `budget`.
-fn under_budget(parts: &DriveParts, budget: crate::CommitBudget) -> DriveParts {
+pub(super) fn under_budget(parts: &DriveParts, budget: crate::CommitBudget) -> DriveParts {
     let mut parts = parts.clone();
     parts.host.durability.commit_budget = budget;
     parts
@@ -102,7 +102,7 @@ async fn queue_append(parts: &DriveParts, key: &str, text: &str) -> crate::Batch
 /// Drive the session on the tier as an engine's drive does: admission after
 /// admission under the drive loop's rules, where a root refused terminally
 /// is released, as the engine records it.
-async fn engine_drive(
+pub(super) async fn engine_drive(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     parts: &DriveParts,
     drive: &str,
@@ -151,7 +151,7 @@ async fn engine_drive(
 }
 
 /// The budgeted bytes a byte-budget refusal names its commit carrying.
-fn refused_commit_bytes(message: &str) -> usize {
+pub(super) fn refused_commit_bytes(message: &str) -> usize {
     message
         .strip_prefix("runtime commit carries ")
         .and_then(|rest| rest.split_once(' '))

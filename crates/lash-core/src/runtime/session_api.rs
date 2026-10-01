@@ -82,8 +82,13 @@ impl LashRuntime {
     ///   two inputs of the plugin catalog projection), is published to the
     ///   live plugin session, invalidating discovery caches only when it
     ///   changed, so live discovery always reflects the settled authority
-    ///   (FIG-2415, FIG-2987).
+    ///   (FIG-2415, FIG-2987);
+    /// - a committed head retires the creator's uncommitted one, which a
+    ///   reload gives way to only while the store has no head (FIG-4492).
     pub(in crate::runtime) fn install_resident_state(&mut self, state: crate::RuntimeSessionState) {
+        if state.head_revision > 0 {
+            self.resident_session.forget_uncommitted_head();
+        }
         self.state = state;
         self.reapply_tool_state_preservation_marker();
         self.publish_resident_authority();

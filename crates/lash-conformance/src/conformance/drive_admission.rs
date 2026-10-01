@@ -33,6 +33,9 @@ pub(super) struct DriveParts {
     pub(super) session_id: SessionId,
     pub(super) host: crate::RuntimeHostConfig,
     pub(super) store: Arc<dyn crate::RuntimeStore>,
+    /// The protocol session the law's runtime runs, in place of the
+    /// standard test protocol's.
+    pub(super) protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
     calls: Arc<AtomicUsize>,
 }
 
@@ -77,6 +80,7 @@ impl DriveParts {
             session_id,
             host,
             store,
+            protocol: None,
             calls,
         }
     }
@@ -114,7 +118,17 @@ impl DriveParts {
                 .with_session_id(&self.session_id)
                 .with_policy(policy)
                 .with_initial_state(state)
-                .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+                .with_plugin_factories(match &self.protocol {
+                    Some(protocol) => {
+                        vec![
+                            crate::testing::test_standard_protocol_factory_with_runtime_state(
+                                Arc::clone(protocol),
+                                None,
+                            ),
+                        ]
+                    }
+                    None => crate::testing::test_standard_protocol_factories(),
+                })
                 .with_store(crate::conformance::helpers::session_view(
                     &store,
                     self.session_id.clone(),
