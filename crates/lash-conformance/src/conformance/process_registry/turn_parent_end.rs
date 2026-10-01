@@ -319,7 +319,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
     let session_scope = lash_core::ScopeId::session(session.clone());
     let root = turn_scope(&session, "never-root-admitted");
     let joined = turn_scope(&session, "never-root-joined");
-    let drain = lash_core::ScopeId::queue_drain(session.clone(), "never-root-drain");
+    let drain = lash_core::ScopeId::session_operation(session.clone(), "never-root-drain");
     let other_session = SessionId::from("never-root-session-other");
     let foreign = turn_scope(&other_session, "never-root-joined");
 

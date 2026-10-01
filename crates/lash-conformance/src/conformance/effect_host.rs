@@ -1097,10 +1097,10 @@ where
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
-    let scope = ExecutionScope::queue_drain("session-1", "drain-1");
+    let scope = ExecutionScope::session_operation("session-1", "drain-1");
     let scoped = host
         .scoped(admit(scope.clone()))
-        .expect("queue drain scope");
+        .expect("session operation scope");
     assert_eq!(
         scoped.execution_scope(),
         &scope,
@@ -1122,7 +1122,7 @@ async fn effect_host_rejects_missing_scope_ids(host: Arc<dyn EffectHost>) {
     let invalid_scopes = [
         ExecutionScope::turn("", "turn"),
         ExecutionScope::turn("session", ""),
-        ExecutionScope::queue_drain("session", ""),
+        ExecutionScope::session_operation("session", ""),
         ExecutionScope::session_delete(""),
         ExecutionScope::runtime_operation(""),
     ];

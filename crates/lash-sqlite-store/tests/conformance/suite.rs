@@ -76,6 +76,46 @@ impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
             });
     }
 
+    async fn run_turn_until_crash(
+        &self,
+        admitted: lash_core_execution::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+        crash: lash_conformance::ConformanceCrash,
+    ) {
+        // Inside the handler the crash kills the attempt where it stands —
+        // the double's redelivery would re-run the crashed job, so a retried
+        // attempt parks forever instead: the law's next `run_turn` is the
+        // recovery the tier promises, not Restate's retry.
+        let crashing: lash_restate_test::HandlerAttempt = {
+            let crash = crash.clone();
+            Arc::new(move |scoped| {
+                let attempt = Arc::clone(&attempt);
+                let crash = crash.clone();
+                Box::pin(async move {
+                    if crash.has_fired() {
+                        std::future::pending::<()>().await;
+                    }
+                    tokio::select! {
+                        biased;
+                        () = crash.fired() => {
+                            panic!("the conformance crash killed the attempt")
+                        }
+                        end = attempt(scoped) => {
+                            panic!("the crashing attempt ended ({end:?}) before its crash fired")
+                        }
+                    }
+                })
+            })
+        };
+        tokio::select! {
+            biased;
+            () = crash.fired() => {}
+            result = self.0.run_in_handler(admitted, crashing) => {
+                panic!("the crashing turn's handler ended ({result:?}) before its crash fired")
+            }
+        }
+    }
+
     /// Process segments run in the double's process workflow: the worker is
     /// installed there, and the runtime's own port only observes the
     /// registry that workflow writes terminals into.
@@ -113,6 +153,34 @@ lash_conformance::frame_open_redrive_tests!({
     (
         (backend, double),
         "sqlite-frame-open",
+        effect_host,
+        stores,
+        runner,
+    )
+});
+
+// FIG-3607 contract 4 (FIG-4489): every logical turn a drive runs, a
+// recovered follow-on's included, is owned by `Turn(logical root)`. Each
+// drive runs inside a handler of the Restate double over this substrate's
+// stores.
+lash_conformance::driver_turn_ownership_tests!({
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4489 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the ownership law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+        as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    (
+        (backend, double),
+        "sqlite-driver-ownership",
         effect_host,
         stores,
         runner,

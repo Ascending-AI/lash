@@ -1042,13 +1042,13 @@ async fn session_store_factory_round_trips_every_relation_shape(
             })),
         ),
         (
-            "child-effect-queue-drain",
+            "child-effect-session-operation",
             child(Some(crate::CausalRef::Effect {
                 address: EffectAddress::new(
-                    ExecutionScope::queue_drain("cause-session", "cause-drain"),
+                    ExecutionScope::session_operation("cause-session", "cause-drain"),
                     "cause-effect",
                 )
-                .expect("valid queue-drain effect cause"),
+                .expect("valid session-operation effect cause"),
             })),
         ),
         (

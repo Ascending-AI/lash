@@ -3,7 +3,7 @@
 //!
 //! Withdrawal reaches only a command no drive has read (FIG-4202). Once a
 //! drive admitted a plugin task, a host's cancel resolves the task's cancel
-//! signal: a keyed promise under the command's own queue-drain scope, which
+//! signal: a keyed promise under the command's own session-operation scope, which
 //! only a host's cancel ever resolves. The signal is a durable request, not a
 //! decision. The one record of how the command ended is its settlement,
 //! written by the commit that settles it, which every replay and every
@@ -87,7 +87,7 @@ impl PluginTaskCancelSignal {
         session_id: &crate::SessionId,
         batch_id: &str,
     ) -> Result<Option<Self>, RuntimeError> {
-        let scope = crate::ExecutionScope::queue_drain(session_id.clone(), batch_id);
+        let scope = crate::ExecutionScope::session_operation(session_id.clone(), batch_id);
         let minted = host
             .await_event_resolver()
             .await_event_key(

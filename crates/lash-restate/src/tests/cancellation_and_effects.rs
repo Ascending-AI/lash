@@ -637,7 +637,7 @@ pub(super) async fn restate_routes_every_execution_scope_to_an_exact_durable_wai
     let scopes = [
         durable_turn_scope("session", "turn"),
         ExecutionScope::process(lash_core::ProcessId::fixture("process")),
-        ExecutionScope::queue_drain("session", "drain"),
+        ExecutionScope::session_operation("session", "operation"),
         ExecutionScope::session_delete("session"),
         ExecutionScope::runtime_operation("operation"),
     ];
@@ -781,7 +781,7 @@ pub(super) async fn restate_deadline_durably_terminalizes_timeout() {
 pub(super) async fn restate_session_cancel_cancels_current_waits_but_allows_new_waits() {
     let context = Arc::new(RecordingContext::default());
     let first_key = test_restate_await_event_key(
-        &ExecutionScope::queue_drain("cancel-session", "drain-one"),
+        &ExecutionScope::turn("cancel-session", "drain-one"),
         AwaitEventWaitIdentity::Custom {
             key: "first".to_string(),
         },

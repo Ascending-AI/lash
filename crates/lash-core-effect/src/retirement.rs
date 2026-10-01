@@ -145,7 +145,7 @@ impl EffectJournalRetirement {
                 Some(Self::runtime_operation(operation_id.clone()))
             }
             ExecutionScope::Turn { .. }
-            | ExecutionScope::QueueDrain { .. }
+            | ExecutionScope::SessionOperation { .. }
             | ExecutionScope::SessionDelete { .. } => None,
         }
     }

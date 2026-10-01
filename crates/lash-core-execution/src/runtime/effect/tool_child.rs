@@ -108,7 +108,7 @@ use super::executor::RuntimeEffectControllerError;
 /// rather than defaulting: a request it cannot fully reconstruct is a child it
 /// would run under partial authority, which is worse than refusing to run it.
 ///
-/// Version 2 adds the queue-drain arm to [`EffectOpener`] (FIG-3394, ADR 0099
+/// Version 2 adds the session-operation arm to [`EffectOpener`] (FIG-3394, ADR 0099
 /// §1), which widens `scope.opener`. Nothing persists this shape in production
 /// yet, so the move costs nothing at run time — but the constant moves anyway,
 /// because a version that did not would let a v1 reader decode a v2 request,
@@ -322,7 +322,7 @@ impl ToolChildScope {
                 crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
                 format!(
                     "retained tool-child request binds opener {:?} but attributes its work to \
-                     `{}`; a turn opener and a queue-drain opener each name their own session, \
+                     `{}`; a turn opener and a session-operation opener each name their own session, \
                      and a process opener its own process, so the two are one fact",
                     self.opener,
                     self.owner.runtime_owner()

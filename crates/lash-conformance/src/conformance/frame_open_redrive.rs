@@ -1189,7 +1189,7 @@ impl LawSession {
         tokio::time::timeout(
             std::time::Duration::from_secs(90),
             self.runner.run_turn(
-                admit(crate::ExecutionScope::queue_drain(
+                admit(crate::ExecutionScope::turn(
                     &self.session_id,
                     format!("{}-{drive}", self.prefix),
                 )),
@@ -1235,7 +1235,7 @@ impl LawSession {
         tokio::time::timeout(
             std::time::Duration::from_secs(90),
             self.runner.run_crashed_then_redriven_turn(
-                admit(crate::ExecutionScope::queue_drain(
+                admit(crate::ExecutionScope::turn(
                     &self.session_id,
                     format!("{}-{drive}", self.prefix),
                 )),

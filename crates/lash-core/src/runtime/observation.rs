@@ -175,8 +175,11 @@ impl RuntimeObservation {
         crate::ExecutionScope::turn(self.session_id.as_ref(), turn_id)
     }
 
-    pub fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
-        crate::ExecutionScope::queue_drain(self.session_id.as_ref(), drain_id)
+    pub fn session_operation_scope(
+        &self,
+        operation_id: impl Into<String>,
+    ) -> crate::ExecutionScope {
+        crate::ExecutionScope::session_operation(self.session_id.as_ref(), operation_id)
     }
 
     pub async fn query_plugin(

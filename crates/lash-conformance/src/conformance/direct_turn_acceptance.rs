@@ -793,9 +793,7 @@ async fn assert_nothing_left_to_answer(
     let drain_id = format!("{prefix}-after-redrive-drain");
     let scope = journal
         .effect_host
-        .scoped(admit(crate::ExecutionScope::queue_drain(
-            SESSION_ID, &drain_id,
-        )))
+        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
         .expect("scope the post-redrive drain");
     let drain = drainer
         .drive_one_admitted_queued_root(crate::TurnOptions::new(

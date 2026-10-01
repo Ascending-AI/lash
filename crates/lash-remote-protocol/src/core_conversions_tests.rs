@@ -666,7 +666,7 @@ fn process_start_requests_round_trip_core_values() {
             SessionId::from("session-a"),
             lash_core::TurnId::from("turn-a"),
         ),
-        lash_core::ScopeId::queue_drain(SessionId::from("session-a"), "drain-a".to_string()),
+        lash_core::ScopeId::session_operation(SessionId::from("session-a"), "drain-a".to_string()),
         lash_core::ScopeId::process(lash_sansio::ProcessId::fixture("parent")),
         lash_core::ScopeId::Session(SessionId::from("session-a")),
     ] {

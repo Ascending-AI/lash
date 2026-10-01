@@ -848,7 +848,7 @@ async fn append_in_a_handler(
     )
     .await?;
     let drained = Arc::new(std::sync::Mutex::new(Ok(Vec::new())));
-    let scope = crate::AdmittedScope::queue_drain(
+    let scope = crate::AdmittedScope::turn(
         world.session_id.clone(),
         format!("host-append:{}", receipt.batch_id),
     );

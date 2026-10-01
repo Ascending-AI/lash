@@ -220,7 +220,7 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
     let window_loads_before = store.load_session_count();
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from(SESSION),
             "frame-residency-compaction",
         ))

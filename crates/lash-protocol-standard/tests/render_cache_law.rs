@@ -359,7 +359,7 @@ async fn drive_with_run_spec(
         .await
         .expect("enqueue run spec");
     let handler = double
-        .open_handler(lash_core::AdmittedScope::queue_drain(
+        .open_handler(lash_core::AdmittedScope::turn(
             session_id.clone(),
             TurnId::from("run-spec"),
         ))
@@ -691,7 +691,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                 .await
                 .expect("options command");
             let handler = double
-                .open_handler(lash_core::AdmittedScope::queue_drain(
+                .open_handler(lash_core::AdmittedScope::turn(
                     &session_id,
                     "render-options-command",
                 ))

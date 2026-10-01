@@ -107,18 +107,6 @@ pub fn backend_turn_scope(
     backend_admitted_scope(backend, crate::AdmittedScope::turn(session_id, turn_id))
 }
 
-/// `backend_admitted_scope` for a queued-work drain scope.
-pub fn backend_queued_scope(
-    backend: &crate::Backend,
-    session_id: &SessionId,
-    drain_id: &TurnId,
-) -> crate::ScopedEffectController<'static> {
-    backend_admitted_scope(
-        backend,
-        crate::AdmittedScope::queue_drain(session_id, drain_id.as_str()),
-    )
-}
-
 /// `backend_admitted_scope` for a process scope, standing in for the
 /// worker's admission step.
 pub fn backend_process_scope(
@@ -135,18 +123,6 @@ pub fn host_turn_scope(
     turn_id: &TurnId,
 ) -> crate::ScopedEffectController<'static> {
     host_admitted_scope(config, crate::AdmittedScope::turn(session_id, turn_id))
-}
-
-/// `host_admitted_scope` for a queued-work drain scope.
-pub fn host_queued_scope(
-    config: &crate::RuntimeHostConfig,
-    session_id: &SessionId,
-    drain_id: &TurnId,
-) -> crate::ScopedEffectController<'static> {
-    host_admitted_scope(
-        config,
-        crate::AdmittedScope::queue_drain(session_id, drain_id.as_str()),
-    )
 }
 
 /// `host_admitted_scope` for a process scope, standing in for the worker's

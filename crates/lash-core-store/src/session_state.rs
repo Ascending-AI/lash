@@ -1281,7 +1281,8 @@ pub mod facade_ops {
         // Both scope methods take APIT, intentionally non-dyn-compatible: one static impl.
         fn turn_scope(&self, turn_id: impl Into<TurnId>) -> crate::ExecutionScope;
 
-        fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope;
+        fn session_operation_scope(&self, operation_id: impl Into<String>)
+        -> crate::ExecutionScope;
 
         fn process_execution_env_spec(
             &self,
@@ -1303,8 +1304,11 @@ pub mod facade_ops {
             crate::ExecutionScope::turn(&self.session_id, turn_id)
         }
 
-        fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
-            crate::ExecutionScope::queue_drain(&self.session_id, drain_id)
+        fn session_operation_scope(
+            &self,
+            operation_id: impl Into<String>,
+        ) -> crate::ExecutionScope {
+            crate::ExecutionScope::session_operation(&self.session_id, operation_id)
         }
 
         fn process_execution_env_spec(

@@ -1,4 +1,4 @@
-//! The logical opener of durable work: a turn, a queued-work drain, or one
+//! The logical opener of durable work: a turn, a session operation, or one
 //! process (ADR 0099 §1).
 //!
 //! # A process opener is its minted process id
@@ -33,6 +33,11 @@ use serde::{Deserialize, Serialize};
 use crate::admitted_scope::AdmittedScope;
 use crate::{SessionId, TurnId};
 
+/// The tag of a session operation's rendering and canonical encoding. The
+/// encoding is a stable-identity preimage (tool-call admissions and stored
+/// scope ids derive from it), so its bytes are kept as first written.
+const SESSION_OPERATION_TAG: &str = "drain:";
+
 /// The exact logical opener that durable work binds (ADR 0099 §1).
 ///
 /// Shared vocabulary rather than a per-lane spelling: the retained tool-child
@@ -49,24 +54,22 @@ pub enum EffectOpener {
         /// The turn's durable identity.
         turn_id: TurnId,
     },
-    /// One drain of a session's queued work.
+    /// One operation on a session that runs no turn: a host command, named
+    /// by its batch, or the admissions of one drive request.
     ///
-    /// A drain is a lifecycle owner in exactly the sense §1 means: it is
-    /// durable and retry-stable. `drain_id` is the host's idempotency key for
-    /// a retried drain, and `crates/lash/src/turn.rs` makes it the *alternative*
-    /// to a turn id for identifying one physical unit — "keep `drain_id(...)`
-    /// as the durable idempotency key for retried drains, or keep
-    /// `turn_id(...)` as the host-minted physical turn identity" — resolving
-    /// the execution scope to `queue_drain_scope(session, drain_id)` when no
-    /// turn id exists. One drain may run several queued turns, and the opener
-    /// lives until the drain ends, not until the first turn does.
-    QueueDrain {
-        /// The session whose queue is being drained.
+    /// An operation is a lifecycle owner in the sense §1 means: its id is
+    /// durable and retry-stable, so a redrive of the operation binds the
+    /// same opener. No logical turn runs under it: every turn a drive runs
+    /// is opened by its logical root's [`Turn`](Self::Turn) (FIG-3607
+    /// contract 4). No root's end closes an operation's scope; its session's
+    /// close does.
+    SessionOperation {
+        /// The session the operation is on.
         session_id: SessionId,
-        /// The drain's durable identity. A plain string because no typed id
-        /// exists for it; empty is refused, as `ExecutionScope::validate`
-        /// refuses an empty scope id.
-        drain_id: String,
+        /// The operation's durable identity. A plain string because no one
+        /// typed id names every operation; empty is refused, as
+        /// `ExecutionScope::validate` refuses an empty scope id.
+        operation_id: String,
     },
     /// One process.
     Process {
@@ -85,12 +88,15 @@ impl EffectOpener {
         }
     }
 
-    /// The opener of one queued-work drain.
+    /// The opener of one session operation.
     #[must_use]
-    pub fn queue_drain(session_id: impl Into<SessionId>, drain_id: impl Into<String>) -> Self {
-        Self::QueueDrain {
+    pub fn session_operation(
+        session_id: impl Into<SessionId>,
+        operation_id: impl Into<String>,
+    ) -> Self {
+        Self::SessionOperation {
             session_id: session_id.into(),
-            drain_id: drain_id.into(),
+            operation_id: operation_id.into(),
         }
     }
 
@@ -109,7 +115,9 @@ impl EffectOpener {
     #[must_use]
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
-            Self::Turn { session_id, .. } | Self::QueueDrain { session_id, .. } => Some(session_id),
+            Self::Turn { session_id, .. } | Self::SessionOperation { session_id, .. } => {
+                Some(session_id)
+            }
             Self::Process { .. } => None,
         }
     }
@@ -118,7 +126,7 @@ impl EffectOpener {
     #[must_use]
     pub fn process_id(&self) -> Option<&crate::ProcessId> {
         match self {
-            Self::Turn { .. } | Self::QueueDrain { .. } => None,
+            Self::Turn { .. } | Self::SessionOperation { .. } => None,
             Self::Process { process_id } => Some(process_id),
         }
     }
@@ -141,10 +149,10 @@ impl EffectOpener {
                 session_id,
                 turn_id,
             } => format!("turn:{session_id}:{turn_id}"),
-            Self::QueueDrain {
+            Self::SessionOperation {
                 session_id,
-                drain_id,
-            } => format!("drain:{session_id}:{drain_id}"),
+                operation_id,
+            } => format!("{SESSION_OPERATION_TAG}{session_id}:{operation_id}"),
             Self::Process { process_id } => format!("process:{process_id}"),
         }
     }
@@ -182,14 +190,14 @@ impl EffectOpener {
                 push_component(&mut encoding, turn_id.as_str());
                 encoding
             }
-            Self::QueueDrain {
+            Self::SessionOperation {
                 session_id,
-                drain_id,
+                operation_id,
             } => {
-                let mut encoding = String::from("drain:");
+                let mut encoding = String::from(SESSION_OPERATION_TAG);
                 push_component(&mut encoding, session_id.as_str());
                 encoding.push(':');
-                push_component(&mut encoding, drain_id);
+                push_component(&mut encoding, operation_id);
                 encoding
             }
             Self::Process { process_id } => {
@@ -201,7 +209,7 @@ impl EffectOpener {
     }
 
     /// The admission every tool call this opener issues is named under (ADR
-    /// 0117 §2): a turn or a queued drain roots its calls in its
+    /// 0117 §2): a turn or a session operation roots its calls in its
     /// [`identity_encoding`](Self::identity_encoding), a process in its
     /// minted id. Calls are admitted in the default deployment namespace.
     #[must_use]
@@ -211,7 +219,7 @@ impl EffectOpener {
     )]
     pub fn tool_call_admission(&self) -> lash_sansio::ToolCallAdmission {
         match self {
-            Self::Turn { .. } | Self::QueueDrain { .. } => {
+            Self::Turn { .. } | Self::SessionOperation { .. } => {
                 lash_sansio::ToolCallAdmission::turn("", self.identity_encoding())
                     .expect("an identity encoding is never blank")
             }
@@ -231,10 +239,10 @@ impl EffectOpener {
     }
 
     /// [`session_turn_encoding_range`](Self::session_turn_encoding_range) for
-    /// the queue-drain openers of `session_id`.
+    /// the session-operation openers of `session_id`.
     #[must_use]
-    pub fn session_queue_drain_encoding_range(session_id: &SessionId) -> (String, String) {
-        session_encoding_range("drain:", session_id)
+    pub fn session_operation_encoding_range(session_id: &SessionId) -> (String, String) {
+        session_encoding_range(SESSION_OPERATION_TAG, session_id)
     }
 
     /// The one owner derivation: the admitted execution scope, and nothing
@@ -247,12 +255,10 @@ impl EffectOpener {
     /// already names its owner, and a process scope names the minted id of
     /// its process.
     ///
-    /// A queued turn is a real production shape, not an edge one: a turn
-    /// started with `drain_id` and no turn id runs its whole effect tree under
-    /// `ExecutionScope::QueueDrain`, so a drain is an opener in its own right.
-    /// And a cell under `ExecutionScope::Process` — the shape every
-    /// `agents.spawn` child takes — is opened by the process, not by any turn
-    /// inside it.
+    /// A session operation is an opener in its own right: a host command's
+    /// plugin task runs its effect tree under the command's scope. And a
+    /// cell under `ExecutionScope::Process` — the shape every `agents.spawn`
+    /// child takes — is opened by the process, not by any turn inside it.
     ///
     /// # Errors
     ///
@@ -265,10 +271,13 @@ impl EffectOpener {
                 session_id,
                 turn_id,
             } => Ok(Self::turn(session_id.clone(), turn_id.clone())),
-            crate::ExecutionScope::QueueDrain {
+            crate::ExecutionScope::SessionOperation {
                 session_id,
-                drain_id,
-            } => Ok(Self::queue_drain(session_id.clone(), drain_id.clone())),
+                operation_id,
+            } => Ok(Self::session_operation(
+                session_id.clone(),
+                operation_id.clone(),
+            )),
             crate::ExecutionScope::Process { process_id } => Ok(Self::process(process_id.clone())),
             crate::ExecutionScope::SessionDelete { .. } => Err(EffectOpenerError::NotAnOpener {
                 scope_kind: "session-delete",
@@ -298,7 +307,7 @@ pub enum EffectOpenerError {
     /// A scope kind that is not an opener at all. `SessionDelete` and
     /// `RuntimeOperation` run administrative work and own no durable effects.
     #[error(
-        "{scope_kind} scope names no opener: neither a turn, a queued-work drain nor a process"
+        "{scope_kind} scope names no opener: neither a turn, a session operation nor a process"
     )]
     NotAnOpener {
         /// The scope kind, for the diagnostic.
@@ -317,7 +326,7 @@ mod tests {
         EffectOpener::process(process(n))
     }
 
-    /// A session's turn and drain openers, and only its own, fall in its
+    /// A session's turn and operation openers, and only its own, fall in its
     /// encoding ranges: a session id that extends another's, or holds a `:`,
     /// never lands in the other's range.
     #[test]
@@ -327,16 +336,16 @@ mod tests {
         };
         let session = SessionId::from("s:1");
         let turns = EffectOpener::session_turn_encoding_range(&session);
-        let drains = EffectOpener::session_queue_drain_encoding_range(&session);
+        let operations = EffectOpener::session_operation_encoding_range(&session);
         for turn in ["t", "", "t:9", "~"] {
             let encoding =
                 EffectOpener::turn(session.clone(), TurnId::from(turn)).identity_encoding();
             assert!(inside(&turns, &encoding), "{encoding} outside {turns:?}");
-            assert!(!inside(&drains, &encoding));
+            assert!(!inside(&operations, &encoding));
         }
-        let drain = EffectOpener::queue_drain(session.clone(), "d").identity_encoding();
-        assert!(inside(&drains, &drain));
-        assert!(!inside(&turns, &drain));
+        let operation = EffectOpener::session_operation(session.clone(), "d").identity_encoding();
+        assert!(inside(&operations, &operation));
+        assert!(!inside(&turns, &operation));
         for other in ["s:10", "s:", "s", "s:1:", "s;1"] {
             let encoding =
                 EffectOpener::turn(SessionId::from(other), TurnId::from("t")).identity_encoding();
@@ -376,7 +385,7 @@ mod tests {
     fn a_rendered_opener_introduces_no_reserved_separator() {
         for opener in [
             EffectOpener::turn("session-1", "turn-7"),
-            EffectOpener::queue_drain("session-1", "drain-3"),
+            EffectOpener::session_operation("session-1", "operation-3"),
             process_opener(3),
         ] {
             for projection in [opener.render(), opener.identity_encoding()] {
@@ -394,7 +403,7 @@ mod tests {
 
     /// The collision the canonical encoding exists to close.
     ///
-    /// `SessionId`, `TurnId` and drain ids accept arbitrary strings, so the
+    /// `SessionId`, `TurnId` and operation ids accept arbitrary strings, so the
     /// `:`-joined rendering of `Turn("a:b", "c")` and `Turn("a", "b:c")` is
     /// the same text — `turn:a:b:c`. That is acceptable for the diagnostic
     /// projection; the canonical encoding length-prefixes every component, so
@@ -408,8 +417,8 @@ mod tests {
                 EffectOpener::turn("a", "b:c"),
             ),
             (
-                EffectOpener::queue_drain("a:b", "c"),
-                EffectOpener::queue_drain("a", "b:c"),
+                EffectOpener::session_operation("a:b", "c"),
+                EffectOpener::session_operation("a", "b:c"),
             ),
         ] {
             assert_eq!(
@@ -450,21 +459,25 @@ mod tests {
         );
     }
 
-    /// A drain is its own opener, distinct from any turn it runs.
-    ///
-    /// One drain may run several queued turns, so the drain's opener is not
-    /// the opener of any one of them, and a turn whose ids spell a drain must
-    /// not reach it either.
+    /// A session operation is its own opener, distinct from any turn: a
+    /// turn whose ids spell an operation must not reach it.
     #[test]
-    fn a_drain_is_not_the_turns_it_runs() {
-        let drain = EffectOpener::queue_drain("session-1", "drain-3");
-        assert_ne!(drain, EffectOpener::turn("session-1", "drain-3"));
+    fn a_session_operation_is_not_a_turn() {
+        let operation = EffectOpener::session_operation("session-1", "operation-3");
+        assert_ne!(operation, EffectOpener::turn("session-1", "operation-3"));
         assert_ne!(
-            drain.render(),
-            EffectOpener::turn("session-1", "drain-3").render()
+            operation.render(),
+            EffectOpener::turn("session-1", "operation-3").render()
         );
-        assert_eq!(drain.session_id().map(SessionId::as_str), Some("session-1"));
-        assert!(drain.process_id().is_none());
+        assert_ne!(
+            operation.identity_encoding(),
+            EffectOpener::turn("session-1", "operation-3").identity_encoding()
+        );
+        assert_eq!(
+            operation.session_id().map(SessionId::as_str),
+            Some("session-1")
+        );
+        assert!(operation.process_id().is_none());
     }
 
     /// Kind-tagged on the wire, so a decoded opener cannot change arm.
@@ -502,17 +515,18 @@ mod tests {
     // resolution.
     // -----------------------------------------------------------------------
 
-    /// Turn and drain scopes carry their whole owner in the scope itself.
+    /// Turn and session-operation scopes carry their whole owner in the scope
+    /// itself.
     #[test]
-    fn a_turn_and_a_drain_scope_derive_their_openers() {
+    fn a_turn_and_a_session_operation_scope_derive_their_openers() {
         assert_eq!(
             EffectOpener::for_scope(&AdmittedScope::turn("s", "t")).expect("a turn is an opener"),
             EffectOpener::turn("s", "t")
         );
         assert_eq!(
-            EffectOpener::for_scope(&AdmittedScope::queue_drain("s", "d"))
-                .expect("a drain is an opener"),
-            EffectOpener::queue_drain("s", "d")
+            EffectOpener::for_scope(&AdmittedScope::session_operation("s", "d"))
+                .expect("a session operation is an opener"),
+            EffectOpener::session_operation("s", "d")
         );
     }
 

@@ -105,7 +105,7 @@ impl LashRuntime {
     /// when the command was withdrawn since the lane was read: nothing was
     /// applied.
     ///
-    /// The compaction runs under the command's own scope, the queue drain its
+    /// The compaction runs under the command's own scope, the session operation its
     /// batch names, rescoped from the command root's controller: a redrive of
     /// the unsettled command replays the base it recorded and the summary it
     /// journaled, and the frame key it derives from that scope names the
@@ -132,7 +132,10 @@ impl LashRuntime {
         let controller = super::drive::step_controller(
             root_controller,
             host.as_ref(),
-            crate::AdmittedScope::queue_drain(self.state.session_id.clone(), batch_id.as_str()),
+            crate::AdmittedScope::session_operation(
+                self.state.session_id.clone(),
+                batch_id.as_str(),
+            ),
         )?;
         let run = Box::pin(self.run_compaction(instructions, &controller)).await?;
         Box::pin(self.commit_compact_context_command(run, completion, drive_fence)).await
@@ -290,8 +293,10 @@ impl LashRuntime {
             self.invalidate_resident_session_state();
             self.reload_invalidated_resident_session_state().await?;
         }
-        let operation =
-            crate::OperationId::new(self.state.queue_drain_scope(&batch_id), "session-command");
+        let operation = crate::OperationId::new(
+            self.state.session_operation_scope(&batch_id),
+            "session-command",
+        );
         if self
             .session_command_run_settled(&store, &completion)
             .await?

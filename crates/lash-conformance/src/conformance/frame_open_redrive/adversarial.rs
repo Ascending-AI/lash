@@ -102,7 +102,7 @@ impl LawSession {
         tokio::time::timeout(
             std::time::Duration::from_secs(90),
             self.runner.run_turn(
-                admit(crate::ExecutionScope::queue_drain(
+                admit(crate::ExecutionScope::turn(
                     &self.session_id,
                     format!("{}-{drive}", self.prefix),
                 )),
@@ -832,7 +832,7 @@ pub async fn every_open_restarts_the_live_execution_state(
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
         law.runner.run_turn(
-            admit(crate::ExecutionScope::queue_drain(
+            admit(crate::ExecutionScope::turn(
                 &law.session_id,
                 format!("{}-open", law.prefix),
             )),

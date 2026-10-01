@@ -174,7 +174,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
         runner.run_crashed_then_redriven_turn(
-            admit(crate::ExecutionScope::queue_drain(
+            admit(crate::ExecutionScope::turn(
                 &session_id,
                 format!("{prefix}-queued-redrive-1"),
             )),
@@ -212,7 +212,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
         runner.run_turn(
-            admit(crate::ExecutionScope::queue_drain(
+            admit(crate::ExecutionScope::turn(
                 &session_id,
                 format!("{prefix}-queued-redrive-2"),
             )),

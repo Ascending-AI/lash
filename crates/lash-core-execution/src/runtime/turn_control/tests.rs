@@ -104,7 +104,7 @@ fn every_shared_scope_cancel_peek_key_covers_physical_turn_and_gate() {
             TurnAddress::new("turn-session", "turn-root:agent-frame:1"),
         ),
         (
-            ExecutionScope::queue_drain("queue-session", "queue-drain"),
+            ExecutionScope::session_operation("queue-session", "queue-operation"),
             TurnAddress::new("queue-session", "queue-root"),
             TurnAddress::new("queue-session", "queue-follow-on"),
         ),

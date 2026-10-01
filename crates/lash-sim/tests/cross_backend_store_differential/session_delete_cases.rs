@@ -175,7 +175,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     let plans = [
         ScopeId::session(own.clone()),
         ScopeId::turn(own.clone(), root.clone()),
-        ScopeId::queue_drain(own.clone(), "delete-drain"),
+        ScopeId::session_operation(own.clone(), "delete-drain"),
         ScopeId::session(other.clone()),
         ScopeId::turn(other.clone(), root.clone()),
     ];

@@ -138,7 +138,7 @@ pub async fn a_close_acknowledgement_arms_the_session_delete_obligation(
 
 /// L-D8: a session's delete waits on exactly its own undelivered cleanup —
 /// scope-close obligations on its roots, parent-end obligations on the plans
-/// of its own scope, its turns' and its queue drains' — whether due, claimed
+/// of its own scope, its turns' and its session operations' — whether due, claimed
 /// or stalled, and on nothing another session owes, even one whose id
 /// extends its own.
 #[expect(
@@ -195,12 +195,12 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
     let own = [
         ScopeId::session(id.clone()),
         ScopeId::turn(id.clone(), root.clone()),
-        ScopeId::queue_drain(id.clone(), "cleanup-drain"),
+        ScopeId::session_operation(id.clone(), "cleanup-drain"),
     ];
     let foreign = [
         ScopeId::session(other.clone()),
         ScopeId::turn(other.clone(), root.clone()),
-        ScopeId::queue_drain(other.clone(), "cleanup-drain"),
+        ScopeId::session_operation(other.clone(), "cleanup-drain"),
     ];
     // Recording a plan arms its `ParentEnd` obligation in the same
     // transaction (ADR 0109 §3).

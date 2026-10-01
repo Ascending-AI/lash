@@ -454,11 +454,27 @@ impl LashRuntime {
         // declared it would not run one is refused before any effect.
         self.refuse_turn_execution_on_preserved_tool_surface()?;
         let (follow_turn_context, supplied_trace_turn_id) = start.continuation_state();
+        // A session operation owns no turn (FIG-3607 contract 4): a logical
+        // turn is opened by its root's turn scope, or runs inside a process
+        // or a runtime operation.
+        if let crate::ExecutionScope::SessionOperation { operation_id, .. } =
+            scoped_effect_controller.execution_scope()
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                format!(
+                    "session operation `{operation_id}` owns no turn: a logical turn runs under \
+                     its root's turn scope"
+                ),
+            ));
+        }
+        // A turn scope is its logical root's: the turn that starts under it
+        // is the root's first physical turn, or, for a recovered follow-on,
+        // a later physical turn of that root.
         if !supplied_trace_turn_id.is_empty()
-            && scoped_effect_controller
-                .execution_scope()
-                .validates_turn_trace_id()
-            && supplied_trace_turn_id.as_str() != scoped_effect_controller.scope_id()
+            && let Some(scope_root) = scoped_effect_controller.execution_scope().turn_id()
+            && crate::store::PhysicalTurn::physical_ordinal_of(scope_root, &supplied_trace_turn_id)
+                .is_none()
         {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::ExecutionScopeTurnIdMismatch,

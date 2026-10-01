@@ -19,9 +19,12 @@ pub enum ExecutionScope {
     Process {
         process_id: ProcessId,
     },
-    QueueDrain {
+    /// One operation on a session that runs no turn: a host command, named
+    /// by its batch, or the admissions of one drive request. It has no
+    /// logical root, and no logical turn runs under it.
+    SessionOperation {
         session_id: SessionId,
-        drain_id: String,
+        operation_id: String,
     },
     SessionDelete {
         session_id: SessionId,
@@ -45,10 +48,13 @@ impl ExecutionScope {
         }
     }
 
-    pub fn queue_drain(session_id: impl Into<SessionId>, drain_id: impl Into<String>) -> Self {
-        Self::QueueDrain {
+    pub fn session_operation(
+        session_id: impl Into<SessionId>,
+        operation_id: impl Into<String>,
+    ) -> Self {
+        Self::SessionOperation {
             session_id: session_id.into(),
-            drain_id: drain_id.into(),
+            operation_id: operation_id.into(),
         }
     }
 
@@ -68,24 +74,23 @@ impl ExecutionScope {
         match self {
             Self::Turn { turn_id, .. } => turn_id,
             Self::Process { process_id } => process_id,
-            Self::QueueDrain { drain_id, .. } => drain_id,
+            Self::SessionOperation { operation_id, .. } => operation_id,
             Self::SessionDelete { session_id, .. } => session_id,
             Self::RuntimeOperation { operation_id } => operation_id,
         }
     }
 
     /// The logical root this scope runs under: a turn scope is its root's
-    /// own; a queue drain names its queued root by its drain id until queued
-    /// roots run under turn scopes (FIG-3600 S8). `None` outside a session
-    /// turn (a process body, a session delete, a runtime operation).
+    /// own. `None` outside a session turn (a process body, a session
+    /// operation, a session delete, a runtime operation).
     #[must_use]
     pub fn logical_root(&self) -> Option<TurnId> {
         match self {
             Self::Turn { turn_id, .. } => Some(turn_id.clone()),
-            Self::QueueDrain { drain_id, .. } => Some(TurnId::from(drain_id.as_str())),
-            Self::Process { .. } | Self::SessionDelete { .. } | Self::RuntimeOperation { .. } => {
-                None
-            }
+            Self::Process { .. }
+            | Self::SessionOperation { .. }
+            | Self::SessionDelete { .. }
+            | Self::RuntimeOperation { .. } => None,
         }
     }
 
@@ -118,9 +123,9 @@ impl ExecutionScope {
                 session_id: wire.session_id?,
                 turn_id: TurnId::from(wire.execution_id?),
             },
-            "drain" => Self::QueueDrain {
+            SESSION_OPERATION_JOURNAL_KIND => Self::SessionOperation {
                 session_id: wire.session_id?,
-                drain_id: wire.execution_id?,
+                operation_id: wire.execution_id?,
             },
             "delete" => Self::SessionDelete {
                 session_id: wire.session_id?,
@@ -140,7 +145,7 @@ impl ExecutionScope {
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
             Self::Turn { session_id, .. }
-            | Self::QueueDrain { session_id, .. }
+            | Self::SessionOperation { session_id, .. }
             | Self::SessionDelete { session_id, .. } => Some(session_id),
             Self::Process { .. } | Self::RuntimeOperation { .. } => None,
         }
@@ -164,10 +169,10 @@ impl ExecutionScope {
                 turn_id,
             } => session_id.trim().is_empty() || turn_id.trim().is_empty(),
             Self::Process { process_id } => process_id.trim().is_empty(),
-            Self::QueueDrain {
+            Self::SessionOperation {
                 session_id,
-                drain_id,
-            } => session_id.trim().is_empty() || drain_id.trim().is_empty(),
+                operation_id,
+            } => session_id.trim().is_empty() || operation_id.trim().is_empty(),
             Self::SessionDelete { session_id } => session_id.trim().is_empty(),
             Self::RuntimeOperation { operation_id } => operation_id.trim().is_empty(),
         };
@@ -227,6 +232,11 @@ pub struct EffectJournalIdentity {
     session_id: Option<SessionId>,
 }
 
+/// The journal-key kind of a session operation. The key is a stable-identity
+/// preimage (operation storage keys derive from it), so its bytes are kept
+/// as first written.
+const SESSION_OPERATION_JOURNAL_KIND: &str = "drain";
+
 /// The exact existing generation of `ExecutionScope` journal keys.
 const JOURNAL_IDENTITY_VERSION: u8 = 2;
 
@@ -247,10 +257,14 @@ impl EffectJournalIdentity {
                 session_id,
                 turn_id,
             } => ("turn", Some(session_id), Some(turn_id.as_str())),
-            ExecutionScope::QueueDrain {
+            ExecutionScope::SessionOperation {
                 session_id,
-                drain_id,
-            } => ("drain", Some(session_id), Some(drain_id.as_str())),
+                operation_id,
+            } => (
+                SESSION_OPERATION_JOURNAL_KIND,
+                Some(session_id),
+                Some(operation_id.as_str()),
+            ),
             ExecutionScope::SessionDelete { session_id } => ("delete", Some(session_id), None),
             ExecutionScope::Process { process_id } => ("process", None, Some(process_id.as_str())),
             ExecutionScope::RuntimeOperation { operation_id } => {
@@ -312,8 +326,8 @@ mod tests {
                 r#"{"version":2,"kind":"turn","session_id":"session","execution_id":"turn"}"#,
             ),
             (
-                ExecutionScope::queue_drain("session", "drain"),
-                r#"{"version":2,"kind":"drain","session_id":"session","execution_id":"drain"}"#,
+                ExecutionScope::session_operation("session", "operation"),
+                r#"{"version":2,"kind":"drain","session_id":"session","execution_id":"operation"}"#,
             ),
             (
                 ExecutionScope::session_delete("session"),

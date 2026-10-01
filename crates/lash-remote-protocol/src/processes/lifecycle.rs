@@ -3,7 +3,7 @@ use super::*;
 /// The wire form of the shared opener vocabulary inside an owned parent.
 ///
 /// Mirrors `lash_core::EffectOpener` arm for arm so a remote peer names the
-/// exact durable owner — a turn, a queued-work drain, or one process — and
+/// exact durable owner — a turn, a session operation, or one process — and
 /// never a rendered id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -12,9 +12,9 @@ pub enum RemoteEffectOpener {
         session_id: SessionId,
         turn_id: String,
     },
-    QueueDrain {
+    SessionOperation {
         session_id: SessionId,
-        drain_id: String,
+        operation_id: String,
     },
     Process {
         process_id: ProcessId,
@@ -72,12 +72,12 @@ impl RemoteScopeId {
                 require_non_empty(type_name, field, session_id)?;
                 require_non_empty(type_name, field, turn_id)
             }
-            Self::Opener(RemoteEffectOpener::QueueDrain {
+            Self::Opener(RemoteEffectOpener::SessionOperation {
                 session_id,
-                drain_id,
+                operation_id,
             }) => {
                 require_non_empty(type_name, field, session_id)?;
-                require_non_empty(type_name, field, drain_id)
+                require_non_empty(type_name, field, operation_id)
             }
             Self::Opener(RemoteEffectOpener::Process { process_id }) => {
                 require_non_empty(type_name, field, process_id)

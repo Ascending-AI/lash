@@ -114,7 +114,7 @@ enum JournalKind {
     AwaitedRoot,
     DrivelessRoot,
     Process,
-    QueueDrain,
+    SessionOperation,
 }
 
 fn ingress(harness: &Harness) -> lash_restate::RestateIngressClient {
@@ -161,7 +161,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
             process = Some((core, hold));
             ExecutionScope::process(id)
         }
-        JournalKind::AwaitedRoot | JournalKind::DrivelessRoot | JournalKind::QueueDrain => {
+        JournalKind::AwaitedRoot | JournalKind::DrivelessRoot | JournalKind::SessionOperation => {
             let store = lash_core::runtime::admit_session_view(
                 &backend.session_store_factory(),
                 &lash_core::SessionStoreCreateRequest {
@@ -214,7 +214,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                         .unwrap();
                     ExecutionScope::turn(session.clone(), root)
                 }
-                JournalKind::QueueDrain | JournalKind::AwaitedRoot => {
+                JournalKind::SessionOperation | JournalKind::AwaitedRoot => {
                     ingress(&harness)
                         .send_object_json(
                             "LashSession",
@@ -233,7 +233,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                     if matches!(kind, JournalKind::AwaitedRoot) {
                         ExecutionScope::turn(session.clone(), root)
                     } else {
-                        ExecutionScope::queue_drain(session.clone(), "drain")
+                        ExecutionScope::session_operation(session.clone(), "drain")
                     }
                 }
                 JournalKind::Process => unreachable!(),
@@ -339,10 +339,12 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
     .await
     .expect("the engine observes settlement after the handler ends");
     if matches!(kind, JournalKind::AwaitedRoot) {
-        let drive =
-            ExecutionScope::queue_drain(held_driver.as_ref().unwrap().session.clone(), "drain")
-                .journal_identity()
-                .unwrap();
+        let drive = ExecutionScope::session_operation(
+            held_driver.as_ref().unwrap().session.clone(),
+            "drain",
+        )
+        .journal_identity()
+        .unwrap();
         tokio::time::timeout(BOUND, async {
             while host.journal_replay(&drive).await.unwrap() != JournalReplay::Settled {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -421,8 +423,8 @@ macro_rules! laws {
             }
             $(#[ignore = $service])?
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn queue_drain_deferral_retains_then_releases_awaiting_cleanups() {
-                law($storage, false, JournalKind::QueueDrain).await;
+            async fn session_operation_deferral_retains_then_releases_awaiting_cleanups() {
+                law($storage, false, JournalKind::SessionOperation).await;
             }
             #[ignore = "live Restate; crash-windows suite"]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -436,8 +438,8 @@ macro_rules! laws {
             }
             #[ignore = "live Restate; crash-windows suite"]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn live_restate_queue_drain_deferral_retains_then_releases_awaiting_cleanups() {
-                law($storage, true, JournalKind::QueueDrain).await;
+            async fn live_restate_session_operation_deferral_retains_then_releases_awaiting_cleanups() {
+                law($storage, true, JournalKind::SessionOperation).await;
             }
         }
     };

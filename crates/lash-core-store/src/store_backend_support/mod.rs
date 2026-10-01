@@ -76,7 +76,7 @@ pub fn drain_end_receipt_storage_key(
     drain_id: &str,
 ) -> Result<String, crate::StoreError> {
     crate::OperationId::new(
-        crate::ExecutionScope::queue_drain(session_id.clone(), drain_id),
+        crate::ExecutionScope::session_operation(session_id.clone(), drain_id),
         "final",
     )
     .storage_key()

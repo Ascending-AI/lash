@@ -20,7 +20,7 @@
 //!   turn: its graph appends ride the command's commit, with its runtime
 //!   events and plugin state, and its model usage is delivered by the engine
 //!   per call (ADR 0125). A task's effects are journaled under
-//!   the command's own queue-drain scope, so a redrive of the unsettled
+//!   the command's own session-operation scope, so a redrive of the unsettled
 //!   command replays them. A host's cancel reaches an admitted task through
 //!   its cancel signal ([`task_cancel`]), and a cancel the drive finds
 //!   requested once the task's code returned settles the command
@@ -110,7 +110,7 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state().await?;
         // An append's receipt identity is owned by the append operation key.
         let operation = crate::OperationId::new(
-            self.state.queue_drain_scope(&batch_id),
+            self.state.session_operation_scope(&batch_id),
             "append-session-nodes",
         );
         let append_stamp = crate::RuntimeTurnCommitStamp::append_session_nodes(
@@ -340,7 +340,7 @@ impl LashRuntime {
                 let controller =
                     match self
                         .effect_host()
-                        .scoped_static(crate::AdmittedScope::queue_drain(
+                        .scoped_static(crate::AdmittedScope::session_operation(
                             session_id.clone(),
                             batch_id.as_str(),
                         )) {
@@ -432,7 +432,7 @@ impl LashRuntime {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let events_operation = crate::OperationId::new(
-                self.state.queue_drain_scope(batch_id),
+                self.state.session_operation_scope(batch_id),
                 "append-plugin-runtime-events",
             );
             let draft_namespace = events_operation.storage_key().map_err(|err| {
@@ -505,7 +505,7 @@ impl LashRuntime {
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
-        let committing = self.state.queue_drain_scope(&batch_id);
+        let committing = self.state.session_operation_scope(&batch_id);
         let staged = self
             .stage_agent_frame(request, super::frame_open::StagedOpen::Caller)
             .await;
@@ -570,9 +570,12 @@ impl LashRuntime {
     }
 
     /// The operation a host command's commit is identified by: the command's
-    /// own queue drain, named by its batch.
+    /// own session operation, named by its batch.
     fn command_operation(&self, batch_id: &crate::BatchId) -> crate::OperationId {
-        crate::OperationId::new(self.state.queue_drain_scope(batch_id), "session-command")
+        crate::OperationId::new(
+            self.state.session_operation_scope(batch_id),
+            "session-command",
+        )
     }
 
     /// Commit the resident state as the command's one commit (F2): whatever

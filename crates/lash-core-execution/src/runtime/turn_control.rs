@@ -1412,7 +1412,7 @@ impl ActiveTurnControl {
         // TurnAddress continues to route the cancellation promise in `key`;
         // the journaled observation belongs to the controller's admitted scope.
         // Keep the shipped foreground key only when the admitted Turn exactly
-        // names this physical turn. Process, queue-drain, runtime-operation,
+        // names this physical turn. Process, session-operation, runtime-operation,
         // and follow-on Turn scopes can span physical turns, so their keys
         // fold in the captured address as well as the gate identity.
         let replay_key = turn_cancel_peek_replay_key(

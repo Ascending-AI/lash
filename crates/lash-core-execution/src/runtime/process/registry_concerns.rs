@@ -546,7 +546,7 @@ pub trait ProcessLifecycle: Send + Sync {
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
     /// This is the single durable scope-close fact, written for a turn root,
-    /// a queued drain, a process or a session. The row carries no action list. On the SQL tiers the write
+    /// a session operation, a process or a session. The row carries no action list. On the SQL tiers the write
     /// must ride the same transaction as the fact that ended the scope, so a
     /// child either commits before the row and is swept, or after it and is
     /// refused at registration. Repetition on an existing row is an idempotent
@@ -601,7 +601,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// child and a child already carrying a request are settled by definition,
     /// so two concurrent passes converge instead of conflicting.
     ///
-    /// A session's plan also owes every such child of a turn or queue-drain
+    /// A session's plan also owes every such child of a turn or session-operation
     /// scope inside the session that has no ledger row of its own (FIG-3948).
     /// Such a scope is a turn the session never admitted as a root: no root
     /// close records its row, and the session's close is the proof that it
@@ -617,7 +617,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// Mark one ledger row settled. Repetition is idempotent.
     async fn settle_parent_end_plan(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
 
-    /// Page turn and queue-drain parent scopes that still owe a ledger row.
+    /// Page turn and session-operation parent scopes that still owe a ledger row.
     ///
     /// A turn's ledger row is written immediately after the turn commit rather
     /// than inside it, and a drain's row after its end receipt, because a
@@ -627,7 +627,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// candidates, and the caller decides which of them actually ended before
     /// writing anything.
     ///
-    /// Returns distinct turn and drain scopes named by at least one
+    /// Returns distinct turn and session-operation scopes named by at least one
     /// nonterminal child row and carrying no ledger row, ordered by scope id,
     /// resumed strictly after `after` and bounded by `limit`.
     ///

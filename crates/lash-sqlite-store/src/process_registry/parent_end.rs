@@ -243,7 +243,7 @@ pub(super) async fn get_by_key(
     get_by_columns(registry, parent_kind.to_string(), parent_id.to_string()).await
 }
 
-/// Turn and queue-drain scopes with live `Until` children and no ledger row
+/// Turn and session-operation scopes with live `Until` children and no ledger row
 /// yet.
 ///
 /// An opener's ledger row is written right after its end evidence rather than
@@ -289,7 +289,7 @@ pub(super) async fn list_unrecorded_opener_parents(
             let parent = record.lifetime.scope().cloned();
             parent
                 .filter(|parent| {
-                    matches!(parent.storage_kind(), "turn" | "queue_drain")
+                    matches!(parent.storage_kind(), "turn" | "session_operation")
                         && parent.storage_kind() == kind
                         && parent.storage_id() == id
                 })
@@ -325,7 +325,7 @@ pub(super) fn children_conn(
         ScopeId::Session(session_id) => {
             let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
             let (drains_from, drains_to) =
-                EffectOpener::session_queue_drain_encoding_range(session_id);
+                EffectOpener::session_operation_encoding_range(session_id);
             record_json_rows(
                 conn,
                 process_sql().process_sqlite.list_session_end_children.sql(),

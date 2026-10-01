@@ -30,7 +30,7 @@ impl RestateJournalAuthority {
 /// settled once its durable waits are retired under `WhenQuiescent`,
 /// which the facade does only after the operation's commit. A turn is
 /// settled once its root has terminal evidence and Restate holds no open
-/// run of that root; a queue drain once Restate holds no open drive of
+/// run of that root; a session operation once Restate holds no open drive of
 /// its session and no open run of any of its roots; a process once it is
 /// terminal, or pruned, and Restate holds no open run of any of its
 /// segments. A wait retirement alone settles nothing else.
@@ -57,7 +57,7 @@ pub(super) async fn journal_replay(
             );
         }
         ExecutionScope::Turn { .. }
-        | ExecutionScope::QueueDrain { .. }
+        | ExecutionScope::SessionOperation { .. }
         | ExecutionScope::Process { .. } => {}
     }
     let Some(authority) = host.journal_authority.get() else {
@@ -68,8 +68,8 @@ pub(super) async fn journal_replay(
             session_id,
             turn_id,
         } => turn_journal_settled(authority, host.namespace(), session_id, turn_id).await?,
-        ExecutionScope::QueueDrain { session_id, .. } => {
-            drain_journal_settled(authority, host.namespace(), session_id).await?
+        ExecutionScope::SessionOperation { session_id, .. } => {
+            session_operation_journal_settled(authority, host.namespace(), session_id).await?
         }
         ExecutionScope::Process { process_id } => {
             process_journal_settled(authority, host.namespace(), process_id).await?
@@ -115,10 +115,10 @@ async fn turn_journal_settled(
     Ok(!runs.iter().any(|run| run.status.is_open()))
 }
 
-/// A queue drain names no root, so its journal is settled only once Restate
+/// A session operation names no root, so its journal is settled only once Restate
 /// holds no open drive of its session and no open run of any of the
 /// session's roots: nothing of the session can replay it.
-async fn drain_journal_settled(
+async fn session_operation_journal_settled(
     authority: &RestateJournalAuthority,
     namespace: &crate::RestateNamespace,
     session_id: &SessionId,

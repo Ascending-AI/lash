@@ -1580,7 +1580,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     assert!(pending[0].input.state.is_next_turn_input(None));
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
             "late-active-next-turn",
         ))
@@ -1618,7 +1618,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
         enqueue_session_command(store.as_ref(), &SessionId::from("root"), "test refresh").await;
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
             "command-only-queue-drain",
         ))
@@ -1728,7 +1728,7 @@ pub(super) async fn next_turn_input_turn_admits_process_wake_at_active_checkpoin
     .await;
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
             "next-input-before-wake-drain",
         ))
@@ -2219,7 +2219,7 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     );
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             session.clone(),
             format!("{session_id}-redrive"),
         ))
@@ -2360,7 +2360,7 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
     });
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from(SESSION_ID),
             "cancel-admitted-wake-drain",
         ))
@@ -2405,7 +2405,7 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
         wake.wake_id
     );
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from(SESSION_ID),
             "after-cancel-admitted-wake-drain",
         ))

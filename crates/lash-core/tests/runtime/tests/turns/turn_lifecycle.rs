@@ -358,7 +358,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
     // failed, so the session's next drive reloads and then recovers the
     // owed follow-on in its frame before anything else (ADR 0101 §3).
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
             "after-post-commit-restore-failure-drain",
         ))
@@ -1125,7 +1125,7 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     .await;
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain("root", "capture-abort-owner"))
+        .open_handler(AdmittedScope::turn("root", "capture-abort-owner"))
         .await
         .expect("open the owner's handler");
     let error = first
@@ -1162,7 +1162,7 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     .await;
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain("root", "capture-abort-peer"))
+        .open_handler(AdmittedScope::turn("root", "capture-abort-peer"))
         .await
         .expect("open the peer's handler");
     let reclaimed = peer
@@ -1261,7 +1261,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     .await;
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
             "follow-on-capture-failure",
         ))
@@ -1298,7 +1298,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     executor.fail_capture.store(false, Ordering::SeqCst);
     executor.dirty.store(false, Ordering::SeqCst);
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
             "follow-on-capture-retry",
         ))

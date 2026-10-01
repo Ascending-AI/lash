@@ -344,7 +344,7 @@ mod tests {
     }
 
     /// Symmetrically: a non-process opener encloses no process, so a retained
-    /// `enclosing_process` on a turn or drain opener is a refused
+    /// `enclosing_process` on a turn or session-operation opener is a refused
     /// inconsistency rather than a stray field.
     #[test]
     fn a_non_process_opener_records_no_enclosing_process() {

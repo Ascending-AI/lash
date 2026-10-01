@@ -33,6 +33,46 @@ lash_conformance::drive_admission_tests!({
     (harness, prefix, effect_host, stores, turn_runner)
 });
 
+// FIG-3607 contract 4 (FIG-4489): every logical turn a drive runs, a
+// recovered follow-on's included, is owned by `Turn(logical root)`.
+lash_conformance::driver_turn_ownership_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let effect_host = harness.endpoint_host();
+    let turn_runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-driver-ownership-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, effect_host, stores, turn_runner)
+});
+
+// The ownership law where every await suspends and every resumption replays
+// the handler's journal from its start. Its terminal-checkpoint follow-on
+// case is not registered here: in this mode that drive never ends, after both
+// of its turns ran owned by the root.
+mod driver_turn_ownership_under_replay {
+    use super::{HarnessServer, LiveConformanceHarness};
+
+    lash_conformance::driver_turn_ownership_tests!(@without_checkpoint_follow_on {
+        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+            unreachable!("in_process names the server double");
+        };
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+                seed,
+                always_replay: true,
+            })
+            .await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str = Box::leak(
+            format!("restate-driver-ownership-replay-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        (harness, prefix, effect_host, stores, turn_runner)
+    });
+}
+
 // The session config a root runs under is a recorded step (FIG-3600 S6):
 // a redelivered handler replays the root under the config it recorded.
 lash_conformance::turn_config_tests!({

@@ -1858,6 +1858,27 @@ lash_conformance::retention_tests!({
     (database_fixture, Arc::new(storage.session_store_factory()))
 });
 
+// FIG-3607 contract 4 (FIG-4489): every logical turn a drive runs, a
+// recovered follow-on's included, is owned by `Turn(logical root)`, on the
+// Restate double over PostgreSQL stores.
+mod driver_turn_ownership {
+    use super::*;
+    lash_conformance::driver_turn_ownership_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
+        (
+            (lock, storage, attachments, double),
+            "pg-driver-ownership",
+            host,
+            stores,
+            runner,
+        )
+    });
+}
+
 mod root_control {
     use super::*;
     lash_conformance::drive_admission_tests!(@laws [] {

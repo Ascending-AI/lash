@@ -26,7 +26,7 @@ pub struct SessionCleanup {
     /// Scope-close obligations on the session's roots.
     pub scope_close: u64,
     /// Parent-end obligations on the plans of scopes the session owns: the
-    /// session's own scope, its turns' and its queue drains'.
+    /// session's own scope, its turns' and its session operations'.
     pub parent_end: u64,
 }
 

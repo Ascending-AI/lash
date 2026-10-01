@@ -122,7 +122,7 @@ async fn drive_config_command(
 ) -> crate::ConfigTransactionOutcome {
     let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
     let attempt_parts = parts.clone();
-    let scope = crate::ExecutionScope::queue_drain(&parts.session_id, request);
+    let scope = crate::ExecutionScope::session_operation(&parts.session_id, request);
     runner
         .run_turn(
             admit(scope),
@@ -969,7 +969,10 @@ pub async fn a_bad_route_is_refused_typed_and_publishes_nothing(
     let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(
-            admit(crate::ExecutionScope::queue_drain(&session_id, &scope)),
+            admit(crate::ExecutionScope::session_operation(
+                &session_id,
+                &scope,
+            )),
             Arc::new(move |controller| {
                 let parts = parts.clone();
                 let settled_tx = settled_tx.clone();
@@ -1084,7 +1087,10 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
     let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(
-            admit(crate::ExecutionScope::queue_drain(&session_id, &scope)),
+            admit(crate::ExecutionScope::session_operation(
+                &session_id,
+                &scope,
+            )),
             Arc::new(move |controller| {
                 let sender = sender.clone();
                 let applier = applier.clone();

@@ -13,7 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod lost_root;
+mod ownership;
 pub use lost_root::*;
+pub use ownership::*;
 
 struct Control {
     fail: AtomicBool,

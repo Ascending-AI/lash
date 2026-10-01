@@ -450,7 +450,7 @@ async fn task_proxy_group_open_reports_a_dropped_response() {
 fn journal_identity_is_typed_and_session_qualified() {
     let scopes = [
         ExecutionScope::turn("session", "shared"),
-        ExecutionScope::queue_drain("session", "shared"),
+        ExecutionScope::session_operation("session", "shared"),
         ExecutionScope::session_delete("session"),
         ExecutionScope::process(crate::process_id_for_test("shared")),
         ExecutionScope::runtime_operation("shared"),
@@ -486,7 +486,7 @@ fn journal_identity_is_typed_and_session_qualified() {
 fn every_scope_variant_round_trips_through_its_journal_key() {
     for scope in [
         ExecutionScope::turn("session", "shared"),
-        ExecutionScope::queue_drain("session", "shared"),
+        ExecutionScope::session_operation("session", "shared"),
         ExecutionScope::session_delete("session"),
         ExecutionScope::process(crate::process_id_for_test("shared")),
         ExecutionScope::runtime_operation("shared"),

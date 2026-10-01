@@ -192,7 +192,7 @@ settlement is in
 `crates/lash-store-sql/src/artifact/cleanup_obligations.rs:125-149`.
 `NotYet` defers at the relay's maximum backoff with attempts reset.
 Every journal kind uses this deferral: awaited and driveless roots,
-processes, and queue drains. Settlement permits cleanup when the next due
+processes, and session operations. Settlement permits cleanup when the next due
 pass reaches the row; it does not shorten the recorded delay. Retaining
 artifacts for the full deferral avoids a separate settlement fast path.
 `NotBefore` defers at the earlier of its known due instant and that backoff.
@@ -207,7 +207,7 @@ promises that the journal cannot replay or append. Restate uses durable
 facts and its invocation status:
 
 - A turn needs a root terminal and no open run of that root.
-- A queue drain needs no open session drive or root run.
+- A session operation needs no open session drive or root run.
 - A process needs terminal evidence and no open segment run; a pruned
   process is settled.
 - A runtime operation needs its durable waits retired after its commit.
@@ -615,7 +615,7 @@ Prune and a late start rescue respect fences
 
 A replaying journal keeps its gate's artifacts
 (`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:618`). For awaited
-and driveless roots, processes, and queue drains, a deferred
+and driveless roots, processes, and session operations, a deferred
 cleanup retains its artifacts while the journal can replay and releases
 after settlement once the deferral expires, on SQLite memory/file and
 PostgreSQL over both the double and live Restate

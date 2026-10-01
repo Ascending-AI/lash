@@ -475,10 +475,7 @@ async fn host_append(
         .cloned()
         .expect("session engine registered");
     let handler = double
-        .open_handler(lash_core::AdmittedScope::queue_drain(
-            &session_id,
-            key.as_str(),
-        ))
+        .open_handler(lash_core::AdmittedScope::turn(&session_id, key.as_str()))
         .await
         .expect("open the append's drive handler");
     let drained = runtime

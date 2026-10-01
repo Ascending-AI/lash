@@ -591,13 +591,13 @@ pub(crate) fn project_effect_address(
             identity.tag(2);
             identity.string(process_id);
         }
-        ExecutionScope::QueueDrain {
+        ExecutionScope::SessionOperation {
             session_id,
-            drain_id,
+            operation_id,
         } => {
             identity.tag(3);
             identity.string(session_id);
-            identity.string(drain_id);
+            identity.string(operation_id);
         }
         ExecutionScope::SessionDelete { session_id } => {
             identity.tag(4);

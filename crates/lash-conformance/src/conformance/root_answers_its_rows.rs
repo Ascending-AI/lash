@@ -497,7 +497,7 @@ impl LawParts {
     }
 
     fn scope(&self, name: &str) -> crate::AdmittedScope {
-        admit(crate::ExecutionScope::queue_drain(&self.session_id, name))
+        admit(crate::ExecutionScope::turn(&self.session_id, name))
     }
 }
 

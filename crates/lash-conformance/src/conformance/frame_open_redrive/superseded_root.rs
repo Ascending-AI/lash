@@ -153,7 +153,7 @@ impl LawSession {
 
     /// The scope a drive named `drive` runs under.
     fn drive_scope(&self, drive: &str) -> crate::AdmittedScope {
-        admit(crate::ExecutionScope::queue_drain(
+        admit(crate::ExecutionScope::turn(
             &self.session_id,
             format!("{}-{drive}", self.prefix),
         ))

@@ -10,12 +10,12 @@ impl From<lash_core::EffectOpener> for RemoteEffectOpener {
                 session_id,
                 turn_id: turn_id.to_string(),
             },
-            lash_core::EffectOpener::QueueDrain {
+            lash_core::EffectOpener::SessionOperation {
                 session_id,
-                drain_id,
-            } => Self::QueueDrain {
+                operation_id,
+            } => Self::SessionOperation {
                 session_id,
-                drain_id,
+                operation_id,
             },
             lash_core::EffectOpener::Process { process_id } => Self::Process { process_id },
         }
@@ -29,10 +29,10 @@ impl From<RemoteEffectOpener> for lash_core::EffectOpener {
                 session_id,
                 turn_id,
             } => Self::turn(session_id, turn_id),
-            RemoteEffectOpener::QueueDrain {
+            RemoteEffectOpener::SessionOperation {
                 session_id,
-                drain_id,
-            } => Self::queue_drain(session_id, drain_id),
+                operation_id,
+            } => Self::session_operation(session_id, operation_id),
             RemoteEffectOpener::Process { process_id } => Self::process(process_id),
         }
     }

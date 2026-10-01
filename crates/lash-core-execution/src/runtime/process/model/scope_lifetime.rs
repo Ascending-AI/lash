@@ -26,8 +26,8 @@ use crate::EffectOpener;
 
 /// A scope a process may live until.
 ///
-/// An effect opener (a logical turn root, a queued-work drain until FIG-3600
-/// S8, one process) or a session. A session is never an effect-group opener:
+/// An effect opener (a logical turn root, a session operation, one process)
+/// or a session. A session is never an effect-group opener:
 /// it owns lifetimes, not effects.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "scope", rename_all = "snake_case")]
@@ -295,7 +295,7 @@ pub enum StartCxError {
 impl StartCx {
     /// The context of a start admitted under `scope`.
     ///
-    /// - A turn or queued drain of session `s` starts with the opener, then
+    /// - A turn or session operation of session `s` starts with the opener, then
     ///   `Session(s)`, then, when `s` is owned by a process, that process's
     ///   lineage; the session capability is `s`.
     /// - A process opener's context is the lineage the process runs under,
@@ -326,7 +326,8 @@ impl StartCx {
                     lineage.session.clone(),
                 ))
             }
-            EffectOpener::Turn { session_id, .. } | EffectOpener::QueueDrain { session_id, .. } => {
+            EffectOpener::Turn { session_id, .. }
+            | EffectOpener::SessionOperation { session_id, .. } => {
                 let session_id = session_id.clone();
                 let starter = ScopeId::Opener(opener.clone());
                 let mut above = vec![ScopeId::Session(session_id.clone())];
@@ -487,10 +488,13 @@ impl ScopeId {
         Self::Opener(EffectOpener::turn(session_id, turn_id))
     }
 
-    /// The scope of one queued-work drain.
+    /// The scope of one session operation.
     #[must_use]
-    pub fn queue_drain(session_id: impl Into<SessionId>, drain_id: impl Into<String>) -> Self {
-        Self::Opener(EffectOpener::queue_drain(session_id, drain_id))
+    pub fn session_operation(
+        session_id: impl Into<SessionId>,
+        operation_id: impl Into<String>,
+    ) -> Self {
+        Self::Opener(EffectOpener::session_operation(session_id, operation_id))
     }
 
     /// The scope of one process.
@@ -520,8 +524,8 @@ impl ScopeId {
         }
     }
 
-    /// The session scope this scope lies inside: a turn's or a queue drain's
-    /// session. A session lies inside no other scope, and a process scope
+    /// The session scope this scope lies inside: a turn's or a session
+    /// operation's session. A session lies inside no other scope, and a process scope
     /// inside no session (ADR 0094 ends it through its own parent).
     ///
     /// A session's close closes every scope inside it (FIG-3948): once a
@@ -540,7 +544,7 @@ impl ScopeId {
     pub fn storage_kind(&self) -> &'static str {
         match self {
             Self::Opener(EffectOpener::Turn { .. }) => "turn",
-            Self::Opener(EffectOpener::QueueDrain { .. }) => "queue_drain",
+            Self::Opener(EffectOpener::SessionOperation { .. }) => "session_operation",
             Self::Opener(EffectOpener::Process { .. }) => "process",
             Self::Session(_) => "session",
         }
@@ -663,7 +667,7 @@ mod tests {
         for scope in [
             turn_scope(),
             process_scope(),
-            ScopeId::queue_drain(SessionId::from("s"), "d"),
+            ScopeId::session_operation(SessionId::from("s"), "d"),
             ScopeId::session("s"),
         ] {
             let payload = scope

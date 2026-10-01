@@ -42,7 +42,7 @@ pub struct ParentEndApplication {
     /// Children this application delivered `ParentEnded` to.
     pub delivered: u32,
     /// Whether the scope had a ledger row to settle. `false` for a scope
-    /// that has not ended yet: a queue drain whose receipt is still owed.
+    /// that has not ended yet: a session operation whose receipt is still owed.
     pub planned: bool,
 }
 

@@ -98,7 +98,7 @@ impl std::error::Error for ParkedTurn {}
 ///
 /// A turn handler calls it when its turn fails with a generation refusal
 /// (the facade's `EmbedError::session_state_version_refusal`). A
-/// scope with a turn in flight — a queue drain's unsettled run, a direct
+/// scope with a turn in flight — a driver-run root's unsettled run, a direct
 /// turn's journaled acceptance — ran under an earlier execution whose journal
 /// already holds commands: the handler ends the attempt with
 /// [`parked_turn_failure`], so the invocation keeps its journal and pauses
@@ -112,10 +112,8 @@ pub async fn park_generation_refused_turn(
     refusal: lash_core::SessionStateVersionRefusal,
     at_ms: u64,
 ) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
-    let session_id = match scope {
-        lash_core::ExecutionScope::QueueDrain { session_id, .. }
-        | lash_core::ExecutionScope::Turn { session_id, .. } => session_id,
-        _ => return Ok(None),
+    let lash_core::ExecutionScope::Turn { session_id, .. } = scope else {
+        return Ok(None);
     };
     if !matches!(
         sessions.lookup_session(session_id).await?,

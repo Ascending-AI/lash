@@ -17,7 +17,7 @@ session's children.
 ### 1. Lifetime is `Until(scope)` or `Detached`
 
 A start chooses `Lifetime::Until(ScopeRef)` or `Lifetime::Detached`. A
-`ScopeId` names either an effect opener (a turn root, queued drain or
+`ScopeId` names either an effect opener (a turn root, session operation or
 process) or a session. A `ScopeRef` pairs it with one grant:
 
 - `Ancestor` names a scope in the start's recorded ancestry.

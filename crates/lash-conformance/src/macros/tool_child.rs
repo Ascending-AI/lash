@@ -193,7 +193,6 @@ macro_rules! drive_admission_tests {
             (reset_before_admission_admits_fresh, "drive-reset-admission"),
             (parked_root_blocks_admission, "drive-parked-root"),
             (fence_is_not_in_the_envelope_hash, "drive-fence-envelope"),
-            (every_driver_turn_is_owned_by_its_root, "drive-owned-root"),
             (a_store_fault_at_the_root_admission_is_retried_not_recorded, "drive-admission-fault-retried"),
             (a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary, "drive-command-after-admission"),
             (a_root_admission_survives_a_worker_crash_without_widening, "drive-admission-commit-crash"),
@@ -220,6 +219,43 @@ macro_rules! drive_admission_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+        }
+    };
+}
+
+/// Register the driver-turn ownership law (FIG-3607 contract 4, FIG-4489):
+/// every logical turn a drive runs — a host-input root's, a wake root's, a
+/// frame or terminal-checkpoint follow-on's, and a follow-on a later drive
+/// recovered — is owned by `Turn(logical root)`, writes positive terminal
+/// evidence, and closes that root's scope exactly once; a parked root keeps
+/// its scope open until a cancel ends it. The fixture is the admitted-head
+/// one: a guard, a prefix, the tier's effect host, the store set under test
+/// and its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner), which
+/// must crash a turn from outside its attempt.
+#[macro_export]
+macro_rules! driver_turn_ownership_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $(#[$attr])*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn every_driver_turn_is_owned_by_its_root() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::every_driver_turn_is_owned_by_its_root(
+                prefix, host, stores, runner,
+            )
+            .await;
+        }
+    };
+    // A tier that replays its handler's journal at every await registers the
+    // law without its terminal-checkpoint follow-on case, whose drive never
+    // ends there.
+    (@without_checkpoint_follow_on $fixture:block) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn every_driver_turn_but_a_checkpoint_follow_on_is_owned_by_its_root() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::every_driver_turn_but_a_checkpoint_follow_on_is_owned_by_its_root(
+                prefix, host, stores, runner,
+            )
+            .await;
         }
     };
 }

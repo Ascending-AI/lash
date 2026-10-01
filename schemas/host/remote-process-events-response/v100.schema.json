@@ -233,22 +233,23 @@
           "type": "object"
         },
         {
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one drive request. It has no\nlogical root, and no logical turn runs under it.",
           "properties": {
-            "drain_id": {
+            "operation_id": {
               "type": "string"
             },
             "session_id": {
               "type": "string"
             },
             "type": {
-              "const": "queue_drain",
+              "const": "session_operation",
               "type": "string"
             }
           },
           "required": [
             "type",
             "session_id",
-            "drain_id"
+            "operation_id"
           ],
           "type": "object"
         },

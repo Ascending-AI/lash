@@ -596,8 +596,8 @@ pub async fn admit_session_state_generation(
 /// tool drifted and it would run live, or its replay diverged — and returns
 /// it. The child runs in its own invocation on an engine whose opener cannot
 /// learn of a refusal that settles nothing, so the child writes the park its
-/// opener would have: keyed by the opener's logical root (D2 §1.3) — a turn
-/// scope's root, a queue drain's queued root — in the root's own session. A
+/// opener would have: keyed by the opener's logical root (D2 §1.3), a turn
+/// scope's root, in the root's own session. A
 /// refusal that parks nothing, a scope with no root, and a session the
 /// catalog does not hold live answer `None`.
 pub async fn park_turn_of_refused_group_child(
@@ -610,11 +610,7 @@ pub async fn park_turn_of_refused_group_child(
         return Ok(None);
     };
     let (session_id, root) = match (scope, scope.logical_root()) {
-        (
-            crate::ExecutionScope::Turn { session_id, .. }
-            | crate::ExecutionScope::QueueDrain { session_id, .. },
-            Some(root),
-        ) => (session_id, root),
+        (crate::ExecutionScope::Turn { session_id, .. }, Some(root)) => (session_id, root),
         _ => return Ok(None),
     };
     if !session_is_live(store, session_id).await? {
@@ -635,8 +631,8 @@ pub async fn park_turn_of_refused_group_child(
 ///
 /// The gate refuses before any effect, so a redrive meets `refusal` before it
 /// issues its first command. A turn the refused session holds in flight for
-/// `scope` — an admitted, unfinished root for a queue-drain scope; for a
-/// direct turn scope, the open input row the turn's journaled acceptance
+/// `scope` — the admitted, unfinished root a driver-run turn scope names; for
+/// a direct turn scope, the open input row the turn's journaled acceptance
 /// wrote (its id is provisioned from the acceptance address) — was driven by
 /// an earlier execution, whose journal already holds commands the refused
 /// redrive cannot replay. Its handler must not return, or fail terminally,
@@ -652,28 +648,28 @@ pub async fn park_turn_refused_by_generation(
     refusal: crate::SessionStateVersionRefusal,
     at_ms: u64,
 ) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
-    let session_id = match scope {
-        crate::ExecutionScope::QueueDrain { session_id, .. }
-        | crate::ExecutionScope::Turn { session_id, .. } => session_id,
-        _ => return Ok(None),
+    let crate::ExecutionScope::Turn {
+        session_id,
+        turn_id,
+    } = scope
+    else {
+        return Ok(None);
     };
-    let in_flight = match scope {
-        crate::ExecutionScope::QueueDrain { .. } => store
-            .unfinished_root(session_id)
+    let in_flight = if store
+        .unfinished_root(session_id)
+        .await?
+        .is_some_and(|unfinished| unfinished.root == *turn_id)
+    {
+        true
+    } else {
+        let accepted = super::provisioned_turn_input_id(
+            super::causal::turn_acceptance_effect_invocation(scope, session_id, turn_id).address(),
+        );
+        store
+            .list_pending_turn_inputs(session_id)
             .await?
-            .is_some_and(|unfinished| unfinished.root.as_str() == scope.id()),
-        crate::ExecutionScope::Turn { turn_id, .. } => {
-            let accepted = super::provisioned_turn_input_id(
-                super::causal::turn_acceptance_effect_invocation(scope, session_id, turn_id)
-                    .address(),
-            );
-            store
-                .list_pending_turn_inputs(session_id)
-                .await?
-                .iter()
-                .any(|read| read.input.input_id.as_str() == accepted)
-        }
-        _ => false,
+            .iter()
+            .any(|read| read.input.input_id.as_str() == accepted)
     };
     if !in_flight {
         return Ok(None);

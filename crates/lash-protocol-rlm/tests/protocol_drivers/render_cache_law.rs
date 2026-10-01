@@ -241,7 +241,7 @@ async fn drive_with_run_spec(
         .await
         .expect("enqueue run spec");
     let handler = double
-        .open_handler(lash_core::AdmittedScope::queue_drain(
+        .open_handler(lash_core::AdmittedScope::turn(
             session_id.clone(),
             TurnId::from("run-spec"),
         ))
@@ -429,7 +429,7 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                 .await
                 .expect("replace protocol options command");
             let handler = double
-                .open_handler(lash_core::AdmittedScope::queue_drain(
+                .open_handler(lash_core::AdmittedScope::turn(
                     &session_id,
                     "render-options-command",
                 ))

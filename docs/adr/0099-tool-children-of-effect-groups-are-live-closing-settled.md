@@ -83,19 +83,25 @@ turn latency bound exists: every protected committed obligation must finish.
 
 ### 1. Logical opener identity
 
-**An opener is `Turn { session_id, turn_id }`, `QueueDrain { session_id,
-drain_id }` or `Process { process_id }`.** `EffectOpener`
+**An opener is `Turn { session_id, turn_id }`, `SessionOperation {
+session_id, operation_id }` or `Process { process_id }`.** `EffectOpener`
 (`crates/lash-core-store/src/effect_opener.rs`) is that identity. It is stable
 across worker attempts and segments. A process opener is the process's minted
 id, which is never reused (ADR 0107), so a process registered later can never
 share it and alias another process's groups, closes or cancellation fences.
 
-**A queued-work drain is a durable logical opener.** A turn started with a
-`drain_id` and no turn id runs its whole effect tree under
-`ExecutionScope::QueueDrain`, and the opener lives until the drain ends, not
-until its first physical turn does. Group identity, retained authority,
-cancellation and retirement bind that exact opener throughout the drain.
-Admission, selection, retry and abandonment of queued work are ADR 0101's.
+**Every logical turn a drive runs is opened by `Turn(logical root)`.** Its
+later physical turns share the opener: a frame or terminal-checkpoint
+follow-on, and a follow-on that a later drive recovers under a recovery root
+of its own. The root's terminal evidence closes that scope once. Admission,
+selection, retry and abandonment of queued work are ADR 0101's.
+
+**A session operation is a durable opener that runs no turn.** A host command
+runs under `SessionOperation(session, batch)`, so a redrive of the unsettled
+command under another root replays its effects, and a drive request's
+admissions are recorded under an operation named by the request. An operation
+has no logical root, and a logical turn started under one is refused. Its
+session's close ends its scope.
 
 **`SessionDelete` and `RuntimeOperation` scopes are not openers and run no
 cells.** A scope that is none of the three is refused with a typed

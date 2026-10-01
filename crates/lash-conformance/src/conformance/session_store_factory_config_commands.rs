@@ -485,7 +485,7 @@ async fn commit_session_command_run_with(
     let mut commit = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
         crate::OperationId::new(
-            crate::ExecutionScope::queue_drain(&request.session_id, first_batch_id),
+            crate::ExecutionScope::session_operation(&request.session_id, first_batch_id),
             "session-command",
         ),
     );

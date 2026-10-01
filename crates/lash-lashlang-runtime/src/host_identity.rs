@@ -223,50 +223,44 @@ mod tests {
         );
     }
 
-    /// A queued turn's cell opens on its drain, and two cells of one drain stay
-    /// apart.
-    ///
-    /// A turn started with `drain_id(...)` and no `turn_id(...)` runs its whole
-    /// effect tree — cells included — under `ExecutionScope::QueueDrain`:
-    /// `crates/lash/src/turn.rs`'s `execution_scope` resolves to
-    /// `queue_drain_scope(session, drain_id)` when no turn id exists, and that
-    /// is `ExecutionScope::queue_drain` verbatim
-    /// (`crates/lash-core-store/src/session_state.rs`). The drain is the
-    /// opener, not a container for the turn's; one drain may run several queued
-    /// turns and many cells, so the cell's own replay key is what keeps two of
-    /// them apart (ADR 0099 §1).
+    /// A cell under a session operation opens on that operation, and two
+    /// cells of one operation stay apart: the cell's own replay key is what
+    /// keeps them apart (ADR 0099 §1).
     #[test]
-    fn two_cells_of_one_queued_drain_mint_distinct_identities() {
-        let scope = ExecutionScope::queue_drain("session-1", "drain-3");
+    fn two_cells_of_one_session_operation_mint_distinct_identities() {
+        let scope = ExecutionScope::session_operation("session-1", "operation-3");
         let opener = EffectOpener::for_scope(&AdmittedScope::new(scope))
-            .expect("a queued-work drain is an opener");
-        assert_eq!(opener, EffectOpener::queue_drain("session-1", "drain-3"));
+            .expect("a session operation is an opener");
+        assert_eq!(
+            opener,
+            EffectOpener::session_operation("session-1", "operation-3")
+        );
         let first = LashlangHostIdentities::cell(opener.clone(), "exec-code:1");
         let second = LashlangHostIdentities::cell(opener.clone(), "exec-code:2");
 
         assert_eq!(
             first.opener(),
             second.opener(),
-            "both cells belong to one drain; that is the point"
+            "both cells belong to one operation; that is the point"
         );
         assert_ne!(
             first.call_id(0),
             second.call_id(0),
-            "two cells of one drain must not mint one leaf identity"
+            "two cells of one operation must not mint one leaf identity"
         );
         assert_ne!(
             first.child_call_id(0, 0),
             second.child_call_id(0, 0),
-            "two cells of one drain must not mint one child identity"
+            "two cells of one operation must not mint one child identity"
         );
         assert_ne!(
             opener,
             EffectOpener::for_scope(&AdmittedScope::new(ExecutionScope::turn(
                 "session-1",
-                "drain-3"
+                "operation-3"
             )),)
             .expect("a turn is an opener"),
-            "a drain is not a turn that happens to spell its id"
+            "a session operation is not a turn that happens to spell its id"
         );
     }
 
@@ -304,24 +298,29 @@ mod tests {
         );
     }
 
-    /// The drain arm had the same collision: `QueueDrain("a:b", "c")` and
-    /// `QueueDrain("a", "b:c")` both rendered `drain:a:b:c`.
+    /// The session-operation arm has the same collision in its rendering:
+    /// `SessionOperation("a:b", "c")` and `SessionOperation("a", "b:c")` both
+    /// render the same text.
     #[test]
-    fn delimiter_bearing_drain_components_mint_distinct_identities() {
-        let split_early =
-            LashlangHostIdentities::cell(EffectOpener::queue_drain("a:b", "c"), "exec-code:1");
-        let split_late =
-            LashlangHostIdentities::cell(EffectOpener::queue_drain("a", "b:c"), "exec-code:1");
+    fn delimiter_bearing_session_operation_components_mint_distinct_identities() {
+        let split_early = LashlangHostIdentities::cell(
+            EffectOpener::session_operation("a:b", "c"),
+            "exec-code:1",
+        );
+        let split_late = LashlangHostIdentities::cell(
+            EffectOpener::session_operation("a", "b:c"),
+            "exec-code:1",
+        );
 
         assert_ne!(
             split_early.call_id(0),
             split_late.call_id(0),
-            "two splits of `a:b:c` are different drains and must mint different leaves"
+            "two splits of `a:b:c` are different operations and must mint different leaves"
         );
         assert_ne!(
             split_early.child_call_id(0, 0),
             split_late.child_call_id(0, 0),
-            "two splits of `a:b:c` are different drains and must mint different children"
+            "two splits of `a:b:c` are different operations and must mint different children"
         );
     }
 

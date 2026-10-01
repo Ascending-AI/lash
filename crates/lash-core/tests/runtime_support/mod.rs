@@ -170,7 +170,7 @@ async fn drive_submitted_command(
     use lash_core::testing::TestTurnDrive as _;
 
     let handler = double
-        .open_handler(lash_core::AdmittedScope::queue_drain(
+        .open_handler(lash_core::AdmittedScope::turn(
             lash_core::SessionId::from(runtime.session_id()),
             request,
         ))

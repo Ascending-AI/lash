@@ -109,7 +109,7 @@ pub async fn frames_keep_identity_and_distinguish_fresh_calls(tier: ToolCallIden
     world
         .runner()
         .run_crashed_then_redriven_turn(
-            crate::admit(crate::ExecutionScope::queue_drain(
+            crate::admit(crate::ExecutionScope::turn(
                 &world.session_id,
                 format!("{}-drive", world.session_id),
             )),
@@ -191,7 +191,7 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
     world
         .runner()
         .run_turn(
-            crate::admit(crate::ExecutionScope::queue_drain(
+            crate::admit(crate::ExecutionScope::turn(
                 &world.session_id,
                 format!("{}-compaction", world.session_id),
             )),

@@ -152,7 +152,8 @@ mod tests {
     #[test]
     fn orphan_recovery_uses_persisted_turn_address_for_session_scopes() {
         let address = crate::TurnAddress::new("session", "original-turn");
-        let successor_drain = crate::ExecutionScope::queue_drain("session", "successor-drain");
+        let successor_drain =
+            crate::ExecutionScope::session_operation("session", "successor-drain");
 
         assert_eq!(
             admitted_turn_cancel_scope(&address, &successor_drain, "test-authority"),

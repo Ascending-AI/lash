@@ -139,7 +139,7 @@ append lands its nodes, or settles `StaleBranch` when its required ancestor
 left the active path. A plugin's code runs only after admission; its services
 join the command as in-turn services join a turn, so its graph appends, usage,
 runtime events, plugin state, and queued turns ride the command's commit, and a
-task journals its effects under the command's own queue-drain scope. A frame
+task journals its effects under the command's own session-operation scope. A frame
 open opens its frame and restarts the live interpreter from the seed. A command
 that cannot apply, including one whose commit exceeds the commit budget,
 settles with its typed refusal, so the lane never waits on it. The one command
@@ -161,7 +161,7 @@ operations, `compact_context`) submit and await. Dropping an await does not
 withdraw the command; `withdraw` does, transactionally, and answers
 `AlreadyAdmitted` once a drive read it. A host's cancel of a plugin task a
 drive admitted resolves the task's cancel signal, a keyed promise
-(`SessionCommandCancelSignal`) under the command's queue-drain scope that
+(`SessionCommandCancelSignal`) under the command's session-operation scope that
 only a host's cancel writes; a cancel of a command that already settled
 finds its settlement and writes nothing. The signal is a durable request,
 never a decision: the drive peeks it before the task runs, fires the task's

@@ -1047,7 +1047,7 @@ impl LashRuntime {
         }
         let host = self.effect_host();
         // The command commit keeps its batch's existing operation identity.
-        let controller = host.scoped(crate::AdmittedScope::queue_drain(
+        let controller = host.scoped(crate::AdmittedScope::session_operation(
             &self.state.session_id,
             "session-command",
         ))?;
@@ -1411,7 +1411,10 @@ impl LashRuntime {
             .batch_ids
             .first()
             .map(|batch_id| {
-                crate::OperationId::new(self.state.queue_drain_scope(batch_id), "session-command")
+                crate::OperationId::new(
+                    self.state.session_operation_scope(batch_id),
+                    "session-command",
+                )
             })
             .ok_or_else(|| {
                 RuntimeError::new(

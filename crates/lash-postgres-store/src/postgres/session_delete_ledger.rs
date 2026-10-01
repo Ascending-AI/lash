@@ -107,7 +107,7 @@ impl SessionDeleteLedger for PostgresSessionDeleteLedger {
             .await
             .map_err(store_sqlx_error)?;
         let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
-        let (drains_from, drains_to) = EffectOpener::session_queue_drain_encoding_range(session_id);
+        let (drains_from, drains_to) = EffectOpener::session_operation_encoding_range(session_id);
         let parent_end: i64 = sqlx::query_scalar(PLANS.count_undelivered_for_session.sql())
             .bind(ScopeId::session(session_id.clone()).storage_id())
             .bind(turns_from)

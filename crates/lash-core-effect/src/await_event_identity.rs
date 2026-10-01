@@ -10,7 +10,8 @@ const AWAIT_EVENT_FAMILY_VERSION: u8 = 3;
 
 /// Permanent tag registry for await-event promise identities.
 ///
-/// Execution scopes: 1 turn, 2 process, 3 queue drain, 4 session delete, 5 runtime operation.
+/// Execution scopes: 1 turn, 2 process, 3 session operation, 4 session delete,
+/// 5 runtime operation.
 /// Retired tags remain burned.
 fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
@@ -30,13 +31,13 @@ fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -
             identity.tag(2);
             identity.string(process_id);
         }
-        ExecutionScope::QueueDrain {
+        ExecutionScope::SessionOperation {
             session_id,
-            drain_id,
+            operation_id,
         } => {
             identity.tag(3);
             identity.string(session_id);
-            identity.string(drain_id);
+            identity.string(operation_id);
         }
         ExecutionScope::SessionDelete { session_id } => {
             identity.tag(4);
@@ -143,7 +144,7 @@ mod tests {
                 ),
             ),
             (
-                ExecutionScope::queue_drain("same", "same"),
+                ExecutionScope::session_operation("same", "same"),
                 AwaitEventWaitIdentity::TurnCancelGate,
             ),
             (

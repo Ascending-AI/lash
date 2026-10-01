@@ -242,7 +242,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
         tool,
     };
     let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
-    let scope = admit(crate::ExecutionScope::queue_drain(
+    let scope = admit(crate::ExecutionScope::turn(
         &session_id,
         format!("{prefix}-frame-switch-drive"),
     ));

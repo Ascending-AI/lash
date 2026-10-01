@@ -399,7 +399,7 @@ const SURFACE_FOLLOW_ON_TURN_ID: &str = "fig-2841-surface-follow-on";
 const SURFACE_UNOWED_FOLLOW_ON_TURN_ID: &str = "fig-2841-unowed-follow-on";
 
 fn surface_drain_scope(session_id: &SessionId) -> lash_core::ExecutionScope {
-    lash_core::ExecutionScope::queue_drain(session_id.clone(), SURFACE_DRAIN_ID)
+    lash_core::ExecutionScope::turn(session_id.clone(), SURFACE_DRAIN_ID)
 }
 
 /// The drain root the sweep admits on a queued-work head.

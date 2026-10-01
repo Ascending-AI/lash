@@ -1685,7 +1685,7 @@ async fn resolve_model_return(
 ///
 /// The derivation is the one owner derivation every durable-work surface uses
 /// ([`EffectOpener::for_scope`], FIG-3417): the scope supplies the identity
-/// for a turn and for a queued drain, while a process scope's opener is the
+/// for a turn and for a session operation, while a process scope's opener is the
 /// **pinned** incarnation inside the [`AdmittedScope`] — never a name
 /// resolved afresh, because a same-name successor must not rebind work its
 /// predecessor still owns. `for_scope`'s refusals — an administrative scope

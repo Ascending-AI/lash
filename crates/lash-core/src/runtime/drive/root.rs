@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use super::{DriveSinks, RootRun, drive_abort};
-use crate::engine::{Admitted, DriveAbort, RootOutcome};
+use crate::engine::{Admitted, DriveAbort, RootOutcome, drive_root_scope};
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::runtime::logical_turn::{LogicalTurnAdmissions, LogicalTurnStart};
@@ -422,10 +422,26 @@ impl LashRuntime {
         let (crate::store::FollowOnRecovery::Run(owed)
         | crate::store::FollowOnRecovery::Exhausted(owed)) = &recovery;
         self.state.pending_follow_on = Some(Box::new(owed.clone()));
+        // The follow-on's turn is a physical turn of the logical root that
+        // owed it, so it runs under that root's turn scope (FIG-3607
+        // contract 4): its effects and process starts are owned by the root
+        // whose evidence its final commit writes and whose scope that
+        // evidence closes. The recovery root owns only its own steps.
         let host = Arc::clone(&self.host.core.control.effect_host);
-        let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
-        let drain =
-            Box::pin(self.drive_recovered_follow_on(recovery, &options, fence.clone())).await;
+        let logical_root = crate::store::PhysicalTurn::split_turn_id(follow_on.turn).0;
+        let turn_controller = super::step_controller(
+            root_controller,
+            host.as_ref(),
+            drive_root_scope(admitted.session(), &logical_root),
+        )
+        .map_err(DriveAbort::Refused)?;
+        let drain = Box::pin(self.drive_recovered_follow_on(
+            recovery,
+            turn_controller,
+            sinks,
+            fence.clone(),
+        ))
+        .await;
         self.admitted_turn_index = None;
         let drain = drain.map_err(|error| drive_abort(Some(&root), error))?;
         Ok(match drain {
@@ -1181,29 +1197,6 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
         };
         Ok(crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict })
     }
-}
-
-/// The drain options a follow-on recovery root runs under: its own drain
-/// scope, named by the root.
-fn root_drain_options<'a>(
-    root_controller: &ScopedEffectController<'a>,
-    host: &'a dyn crate::EffectHost,
-    admitted: &Admitted,
-    sinks: &DriveSinks<'a>,
-) -> Result<crate::runtime::QueuedTurnOptions<'a>, DriveAbort> {
-    let drain_controller = super::step_controller(
-        root_controller,
-        host,
-        crate::AdmittedScope::queue_drain(admitted.session().clone(), admitted.root().as_str()),
-    )
-    .map_err(DriveAbort::Refused)?;
-    Ok(crate::runtime::QueuedTurnOptions::new(
-        sinks.local_stop.immediate_token(),
-        crate::runtime::QueuedEffectSource::Scoped(drain_controller),
-    )
-    .with_local_stop(sinks.local_stop.clone())
-    .with_events(sinks.events)
-    .with_turn_events(sinks.turn_events))
 }
 
 /// Trace attribution for the admission decisions the runner makes.

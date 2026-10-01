@@ -973,7 +973,7 @@ fn scoped_controller(
 ) -> crate::ScopedEffectController<'static> {
     crate::ScopedEffectController::shared(
         controller,
-        crate::AdmittedScope::queue_drain(&identity.session_id, identity.turn_id.as_str()),
+        crate::AdmittedScope::turn(&identity.session_id, identity.turn_id.as_str()),
     )
     .expect("valid reference turn scope")
 }
@@ -981,7 +981,7 @@ fn scoped_controller(
 /// The execution scope the reference turn runs under: the scope a
 /// journaled invocation for that turn must be opened on.
 fn reference_turn_scope(identity: &ReferenceIdentity) -> crate::ExecutionScope {
-    crate::ExecutionScope::queue_drain(&identity.session_id, identity.turn_id.as_str())
+    crate::ExecutionScope::turn(&identity.session_id, identity.turn_id.as_str())
 }
 
 async fn build_runtime(
@@ -1306,7 +1306,7 @@ fn crash_at_armed_point(control: &SeamControl) -> crate::ConformanceCrash {
 
 /// The admitted scope a runner runs the reference turn under.
 fn reference_admitted_scope(identity: &ReferenceIdentity) -> crate::AdmittedScope {
-    crate::AdmittedScope::queue_drain(&identity.session_id, identity.turn_id.as_str())
+    crate::AdmittedScope::turn(&identity.session_id, identity.turn_id.as_str())
 }
 
 /// The level-one crash points of `trace`, in trace order.

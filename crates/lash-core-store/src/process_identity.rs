@@ -334,7 +334,7 @@ fn write_scope(
     let (kind, session_id): (u8, Option<&crate::SessionId>) = match scope {
         crate::ExecutionScope::Turn { session_id, .. } => (1, Some(session_id)),
         crate::ExecutionScope::Process { .. } => (2, None),
-        crate::ExecutionScope::QueueDrain { session_id, .. } => (3, Some(session_id)),
+        crate::ExecutionScope::SessionOperation { session_id, .. } => (3, Some(session_id)),
         crate::ExecutionScope::SessionDelete { session_id } => (4, Some(session_id)),
         crate::ExecutionScope::RuntimeOperation { .. } => (5, None),
     };

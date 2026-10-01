@@ -88,7 +88,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
     )
     .await;
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("queued-frame-chain").clone(),
         ))
@@ -145,7 +145,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         .expect("follow-on frame is active");
     assert_eq!(requests_after_follow[1].scope.agent_frame_id, follow_frame);
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("second-queued-after-frame-chain").clone(),
         ))
@@ -238,7 +238,7 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
     )
     .await;
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from(SESSION_ID).clone(),
             TurnId::from("mid-chain-cancel").clone(),
         ))
@@ -317,7 +317,7 @@ pub(super) async fn admitted_normalization_failure_commits_and_settles_input() {
     .await
     .expect("enqueue invalid input");
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("invalid-admitted-input").clone(),
         ))
@@ -389,7 +389,7 @@ pub(super) async fn admitted_plugin_abort_commits_and_settles_input() {
     let inbound =
         enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "abort this input").await;
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("admitted-plugin-abort").clone(),
         ))
@@ -648,7 +648,7 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_admiss
     )
     .await;
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("bounded-frame-chain").clone(),
         ))
@@ -771,7 +771,7 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_admission_b
     )
     .await;
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("bounded-frame-capture-abort").clone(),
         ))
@@ -849,7 +849,7 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
     let turn = enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "user turn").await;
     let turn_events = RecordingTurnEvents::default();
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("command-before-turn-drain").clone(),
         ))
@@ -919,7 +919,7 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
         )
         .await;
         let handler = double
-            .open_handler(AdmittedScope::queue_drain(
+            .open_handler(AdmittedScope::turn(
                 SessionId::from("root").clone(),
                 TurnId::from(format!("depth-invariance-{backlog_depth}")).clone(),
             ))
@@ -979,7 +979,7 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
     )
     .await;
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("later-command-before-turn-drain").clone(),
         ))
@@ -1010,7 +1010,7 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
         turn.input_id
     );
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("later-command-drain").clone(),
         ))
@@ -1109,7 +1109,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
 
     let turn_events = RecordingTurnEvents::default();
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root").clone(),
             TurnId::from("queued-work-started-turn").clone(),
         ))

@@ -1750,7 +1750,7 @@ pub(super) fn durable_wait_register_and_sweep_derive_the_same_address_for_every_
     let scopes = [
         durable_turn_scope("fig2005-session", "fig2005-turn"),
         ExecutionScope::process(ProcessId::fixture("fig2005-process")),
-        ExecutionScope::queue_drain("fig2005-session", "fig2005-drain"),
+        ExecutionScope::session_operation("fig2005-session", "fig2005-operation"),
         ExecutionScope::session_delete("fig2005-session"),
         ExecutionScope::runtime_operation("fig2005-operation"),
     ];

@@ -33,10 +33,13 @@ impl AdmittedScope {
         Self::new(ExecutionScope::turn(session_id, turn_id))
     }
 
-    /// One admitted queued-work drain.
+    /// One admitted session operation.
     #[must_use]
-    pub fn queue_drain(session_id: impl Into<SessionId>, drain_id: impl Into<String>) -> Self {
-        Self::new(ExecutionScope::queue_drain(session_id, drain_id))
+    pub fn session_operation(
+        session_id: impl Into<SessionId>,
+        operation_id: impl Into<String>,
+    ) -> Self {
+        Self::new(ExecutionScope::session_operation(session_id, operation_id))
     }
 
     /// One admitted session-delete scope.
@@ -136,7 +139,7 @@ mod tests {
     fn non_process_scopes_name_no_process() {
         for admitted in [
             AdmittedScope::turn("s", "t"),
-            AdmittedScope::queue_drain("s", "d"),
+            AdmittedScope::session_operation("s", "d"),
             AdmittedScope::session_delete("s"),
             AdmittedScope::runtime_operation("op"),
         ] {

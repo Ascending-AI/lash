@@ -439,7 +439,7 @@ fn a_childs_tool_context_holds_no_runtime_execution_context() {
 /// Live-opener registration derives through the one owner derivation
 /// (`EffectOpener::for_scope`, FIG-3417), exhaustively, so a scope arm added
 /// later is a compile error rather than a silently unregistered opener: a
-/// turn and a queued drain name their opener from the scope alone; a process
+/// turn and a session operation name their opener from the scope alone; a process
 /// scope names it only through the pinned incarnation the runner bound,
 /// never from the reusable name.
 #[test]
@@ -449,10 +449,10 @@ fn opener_derivation_names_every_admitted_opener_scope() {
         opener_for_execution_scope(&turn),
         Some(crate::EffectOpener::turn("session", "turn"))
     );
-    let drain = crate::AdmittedScope::queue_drain("session", "drain-1");
+    let drain = crate::AdmittedScope::session_operation("session", "drain-1");
     assert_eq!(
         opener_for_execution_scope(&drain),
-        Some(crate::EffectOpener::queue_drain("session", "drain-1"))
+        Some(crate::EffectOpener::session_operation("session", "drain-1"))
     );
     let process_id = crate::ProcessId::fixture("process-1");
     let process = crate::AdmittedScope::process(process_id.clone());

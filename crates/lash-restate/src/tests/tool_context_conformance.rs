@@ -684,8 +684,7 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
 
     let (control, control_host) = ProductionToolCell::durable("llm_query").await;
     seed_drain_input(&control).await;
-    let control_scope =
-        lash_core::ExecutionScope::queue_drain(control.session_id.clone(), drain_id);
+    let control_scope = lash_core::ExecutionScope::turn(control.session_id.clone(), drain_id);
     let mut control_runtime = control.runtime_on(control.runtime_store.clone()).await;
     drive_drain(
         &mut control_runtime,
@@ -701,7 +700,7 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
     let (cell, host) = ProductionToolCell::durable("llm_query").await;
     let host = Arc::new(host);
     seed_drain_input(&cell).await;
-    let drain_scope = lash_core::ExecutionScope::queue_drain(cell.session_id.clone(), drain_id);
+    let drain_scope = lash_core::ExecutionScope::turn(cell.session_id.clone(), drain_id);
     let committed = Arc::new(tokio::sync::Notify::new());
     let dying = decorated_view(&cell.runtime_store, |inner| DiesAfterFinalCommit {
         inner,

@@ -18,9 +18,9 @@ use super::contracts::DriveRequest;
 use crate::store::TurnCommitId;
 use crate::{AdmittedScope, RuntimeError, SessionId, TurnId, TurnOutcome};
 
-/// The prefix of the queue-drain id a drive's admission steps are recorded
-/// under. A drive is never a queue drain; the scope only gives its admission
-/// journal a session-bearing address.
+/// The prefix of the session-operation id a drive's admission steps are
+/// recorded under: the scope gives the admission journal a session-bearing
+/// address.
 const DRIVE_ADMISSION_SCOPE_PREFIX: &str = "drive:";
 
 /// Maximum roots admitted by one engine drive invocation before it hands
@@ -77,14 +77,14 @@ pub fn drive_continuation_request(request: &DriveRequest) -> DriveRequestId {
 /// request admits afresh.
 #[must_use]
 pub fn drive_admission_scope(session: &SessionId, request: &DriveRequestId) -> AdmittedScope {
-    AdmittedScope::queue_drain(
+    AdmittedScope::session_operation(
         session.clone(),
         format!("{DRIVE_ADMISSION_SCOPE_PREFIX}{}", request.as_str()),
     )
 }
 
 /// The scope an admitted root runs under: the root's own turn. Every turn a
-/// drive runs is opened by its root, never by a queue drain (FIG-3607
+/// drive runs is opened by its root, never by a session operation (FIG-3607
 /// contract 4).
 #[must_use]
 pub fn drive_root_scope(session: &SessionId, root: &TurnId) -> AdmittedScope {

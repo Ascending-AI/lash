@@ -772,7 +772,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
     ))
     .await;
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             "root",
             "admission-window-late-input-drain",
         ))

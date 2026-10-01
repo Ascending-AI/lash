@@ -372,22 +372,22 @@ fn invocation_authority_retains_attempt_correlation() {
     assert_eq!(context.admitted_process_attempt(), Some(1));
 }
 
-/// A queued-work drain is a durable owner with an end protocol (FIG-3419), so
+/// A session operation is a durable owner with an end protocol (FIG-3419), so
 /// a child it starts is started by the drain itself — the derivation must not
 /// silently borrow the session's current turn.
 #[tokio::test]
 async fn a_child_started_from_a_queued_drain_is_started_by_the_drain() {
     let context = scoped_context(
         "session-1",
-        crate::AdmittedScope::queue_drain("session-1", "drain-3"),
+        crate::AdmittedScope::session_operation("session-1", "drain-3"),
     );
     assert_eq!(
         context
             .start_cx()
-            .expect("a queued drain materializes a start context")
+            .expect("a session operation materializes a start context")
             .starter()
             .id(),
-        &crate::ScopeId::queue_drain("session-1", "drain-3"),
+        &crate::ScopeId::session_operation("session-1", "drain-3"),
     );
 }
 

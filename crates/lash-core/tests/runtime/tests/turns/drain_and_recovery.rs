@@ -27,14 +27,6 @@ async fn open_turn(
     open_admitted(double, AdmittedScope::turn(session, turn)).await
 }
 
-async fn open_drain(
-    double: &lash_restate_test::RestateTestBackend,
-    session: impl Into<SessionId>,
-    drain: impl Into<String>,
-) -> lash_restate_test::OpenHandler {
-    open_admitted(double, AdmittedScope::queue_drain(session, drain)).await
-}
-
 struct OneHeldAdmissionStore {
     inner: Arc<RecordingStore>,
     held_once: AtomicBool,
@@ -117,7 +109,7 @@ pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_admissio
     };
     double
         .run_in_handler(
-            AdmittedScope::queue_drain(session.clone(), tid("held-root")),
+            AdmittedScope::turn(session.clone(), tid("held-root")),
             attempt,
         )
         .await
@@ -183,7 +175,7 @@ pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_root
         request: lash_core::engine::DriveRequestId::new("bounded-first"),
         build_generation: runtime.host.core.backend().build_generation().clone(),
     };
-    let handler = open_drain(&double, session.clone(), tid("bounded-first")).await;
+    let handler = open_turn(&double, session.clone(), tid("bounded-first")).await;
     let first = Box::pin(lash_core::drive::drive_session(
         &mut runtime,
         &handler.scoped(),
@@ -201,7 +193,7 @@ pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_root
         request: lash_core::engine::drive_continuation_request(&request),
         ..request
     };
-    let handler = open_drain(&double, session.clone(), tid("bounded-next")).await;
+    let handler = open_turn(&double, session.clone(), tid("bounded-next")).await;
     let last = Box::pin(lash_core::drive::drive_session(
         &mut runtime,
         &handler.scoped(),
@@ -1345,7 +1337,7 @@ pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
     let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let mut runtime = standard_runtime_with_transport(&backend, mock_provider(Vec::new())).await;
-    let handler = open_drain(&double, sid("root"), "storeless-drain").await;
+    let handler = open_turn(&double, sid("root"), "storeless-drain").await;
     let drain = runtime
         .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
@@ -1416,7 +1408,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
     let session = sid("root");
 
-    let idle_handler = open_drain(&double, session.clone(), tid("drive-entry-idle")).await;
+    let idle_handler = open_turn(&double, session.clone(), tid("drive-entry-idle")).await;
     let idle = runtime
         .lock()
         .await
@@ -1473,7 +1465,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     };
     double
         .run_crashed_then_redriven(
-            AdmittedScope::queue_drain(session.clone(), tid("drive-entry-first")),
+            AdmittedScope::turn(session.clone(), tid("drive-entry-first")),
             Arc::clone(&attempt),
             attempt,
         )
@@ -1499,7 +1491,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
         "a repeated drain replays its recorded root, never the next input"
     );
 
-    let handler = open_drain(&double, session.clone(), tid("drive-entry-second")).await;
+    let handler = open_turn(&double, session.clone(), tid("drive-entry-second")).await;
     let after = runtime
         .lock()
         .await

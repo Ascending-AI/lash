@@ -1001,7 +1001,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
             })
         })
     };
-    let scope = admit(crate::ExecutionScope::queue_drain(
+    let scope = admit(crate::ExecutionScope::turn(
         &parts.session_id,
         format!("{prefix}-run-spec-follow-on-drive"),
     ));

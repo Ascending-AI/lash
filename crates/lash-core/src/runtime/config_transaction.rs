@@ -212,7 +212,7 @@ impl LashRuntime {
     /// command was withdrawn since the lane was read: nothing was applied.
     ///
     /// The resolution is one recorded step on the command's own scope, the
-    /// queue drain its batch names, rescoped from the root's controller: a
+    /// session operation its batch names, rescoped from the root's controller: a
     /// redrive of the unsettled command publishes the resolution its first
     /// execution recorded, and a replay of a settled one adopts the head its
     /// commit published without committing again.
@@ -254,7 +254,10 @@ impl LashRuntime {
         let controller = super::drive::step_controller(
             root_controller,
             host.as_ref(),
-            crate::AdmittedScope::queue_drain(self.state.session_id.clone(), batch_id.as_str()),
+            crate::AdmittedScope::session_operation(
+                self.state.session_id.clone(),
+                batch_id.as_str(),
+            ),
         )?;
         let resolution =
             Box::pin(self.resolve_config_transaction(&controller, &transaction)).await?;

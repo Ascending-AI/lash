@@ -132,7 +132,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         effect::layered_operation_controller(&backend, Arc::new(EngineOwnedCommitLayer));
     let controller = lash_core::ScopedEffectController::borrowed(
         controller.as_ref(),
-        lash_core::AdmittedScope::queue_drain(SessionId::from(session_id), "session-command"),
+        lash_core::AdmittedScope::session_operation(SessionId::from(session_id), "session-command"),
     )
     .unwrap();
     runtime

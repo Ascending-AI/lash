@@ -104,7 +104,7 @@ async fn a_queued_input_drains_in_an_open_handler_on_the_double() {
     .expect("enqueue an idle turn input");
 
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             &session_id,
             "queued-drain-on-the-double",
         ))

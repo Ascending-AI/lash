@@ -510,7 +510,7 @@ impl SessionAdmin {
                 }
                 let host = runtime.effect_host();
                 let controller = host
-                    .scoped(lash_core::AdmittedScope::queue_drain(
+                    .scoped(lash_core::AdmittedScope::session_operation(
                         SessionId::from(runtime.session_id()),
                         format!("compact-context:{}", uuid::Uuid::new_v4()),
                     ))

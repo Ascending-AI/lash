@@ -308,7 +308,7 @@ impl RuntimeCommit {
         // A session command's settlement commits under its batch's queue
         // drain; every batch id has the derived id's length.
         let operation = super::OperationId::new(
-            crate::ExecutionScope::queue_drain(
+            crate::ExecutionScope::session_operation(
                 session_id.clone(),
                 super::queued_work::derive_batch_id(session_id, None, 0, None),
             ),

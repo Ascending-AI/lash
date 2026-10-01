@@ -44,7 +44,7 @@ async fn drive_and_settle(
     let attempt_parts = parts.clone();
     runner
         .run_turn(
-            admit(crate::ExecutionScope::queue_drain(
+            admit(crate::ExecutionScope::session_operation(
                 &parts.session_id,
                 request,
             )),

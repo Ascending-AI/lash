@@ -501,7 +501,7 @@ async fn drive_crashed_at(
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
         law.runner.run_crashed_then_redriven_turn(
-            admit(crate::ExecutionScope::queue_drain(
+            admit(crate::ExecutionScope::turn(
                 &law.session_id,
                 format!("{}-{drive}", law.prefix),
             )),

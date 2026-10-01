@@ -118,7 +118,7 @@ impl LashCore {
         };
         let own = ScopeId::session(session_id.clone()).storage_id();
         let turns = EffectOpener::session_turn_encoding_range(session_id);
-        let drains = EffectOpener::session_queue_drain_encoding_range(session_id);
+        let drains = EffectOpener::session_operation_encoding_range(session_id);
         for kind in [
             ObligationKind::ControlIntent,
             ObligationKind::ScopeClose,
@@ -146,7 +146,7 @@ impl LashCore {
                         }) => match parent_kind.as_str() {
                             "session" => *parent_id == own,
                             "turn" => turns.0 <= *parent_id && *parent_id < turns.1,
-                            "queue_drain" => drains.0 <= *parent_id && *parent_id < drains.1,
+                            "session_operation" => drains.0 <= *parent_id && *parent_id < drains.1,
                             _ => false,
                         },
                         _ => false,

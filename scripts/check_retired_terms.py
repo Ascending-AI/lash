@@ -62,6 +62,35 @@ IDENTIFIER_RULES = (
 )
 
 
+# Queue-drain ownership is deleted (FIG-4489): every driver-run logical turn
+# is owned by Turn(logical root), and a host command or a drive admission by a
+# session operation. The names are refused wherever they are declared,
+# constructed, matched, stored or documented: source, SQL, schemas and docs,
+# comments and tests included. Nothing is exempt, and no marker excuses one.
+QUEUE_DRAIN = re.compile(
+    r"QueueDrain"
+    r"|(?<![A-Za-z0-9_])(?:session_)?queue_drain(?:_scope|_encoding_range)?(?![A-Za-z0-9_])"
+)
+QUEUE_DRAIN_ROOTS = frozenset({"crates", "schemas", "docs", "examples", "runbooks", "scripts"})
+QUEUE_DRAIN_SUFFIXES = frozenset({".rs", ".sql", ".json", ".md", ".py", ".sh", ".toml", ".ts"})
+GATE_FILES = frozenset({
+    Path("scripts/check_retired_terms.py"), Path("scripts/test_check_retired_terms.py"),
+})
+
+
+def check_queue_drain(path: Path, body: str) -> list[str]:
+    if not path.parts or path.parts[0] not in QUEUE_DRAIN_ROOTS:
+        return []
+    if path.suffix not in QUEUE_DRAIN_SUFFIXES or path in GATE_FILES:
+        return []
+    return [
+        f"{path}:{number}: retired queue-drain ownership: '{match[0]}' is deleted; "
+        "a driver-run turn is owned by Turn(logical root), a host command by a session operation"
+        for number, line in enumerate(body.splitlines(), 1)
+        for match in QUEUE_DRAIN.finditer(line)
+    ]
+
+
 def check_identifiers(path: Path, body: str) -> list[str]:
     if not path.parts or path.parts[0] not in {"crates", "scripts", "runbooks", "examples"}:
         return []
@@ -107,7 +136,7 @@ def check_text(path: Path, body: str) -> list[str]:
     markdown = path.suffix == ".md"
     adr = path.parts[:2] == ("docs", "adr")
     lines = body.splitlines()
-    violations = check_identifiers(path, body)
+    violations = check_identifiers(path, body) + check_queue_drain(path, body)
     sections: list[tuple[int, str]] = []
     paragraph: list[tuple[int, str]] = []
 
@@ -167,9 +196,15 @@ def check_repository(root: Path) -> list[str]:
     violations: list[str] = []
     for name in sorted(set(tracked)):
         path = Path(name)
-        if path.suffix not in {".md", ".rs", ".py", ".sh", ".toml", ".yml", ".yaml"}:
-            continue
         if not (root / path).is_file():
+            continue
+        if path.suffix not in {".md", ".rs", ".py", ".sh", ".toml", ".yml", ".yaml"}:
+            # Schemas, SQL and generated bindings carry no prose rules, only
+            # the queue-drain denial.
+            if path.suffix in QUEUE_DRAIN_SUFFIXES:
+                violations.extend(
+                    check_queue_drain(path, (root / path).read_text(encoding="utf-8"))
+                )
             continue
         violations.extend(check_text(path, (root / path).read_text(encoding="utf-8")))
     return violations
@@ -184,7 +219,10 @@ def main() -> int:
         print("\n".join(violations))
         print(f"retired terms: {len(violations)} unmarked uses")
         return 1
-    print(f"retired terms: {len(TERMS)} prose and {len(IDENTIFIER_RULES)} identifier rules passed")
+    print(
+        f"retired terms: {len(TERMS)} prose and {len(IDENTIFIER_RULES)} identifier rules "
+        "and the queue-drain denial passed"
+    )
     return 0
 
 

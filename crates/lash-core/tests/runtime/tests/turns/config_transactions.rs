@@ -106,7 +106,7 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
         build_generation: runtime.host.core.backend().build_generation().clone(),
     };
     let handler = double
-        .open_handler(AdmittedScope::queue_drain(
+        .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
             "session-command",
         ))

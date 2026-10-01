@@ -114,6 +114,32 @@ class RetiredTermsTests(unittest.TestCase):
         self.assertFalse(checker.check_text(Path("scripts/check-substrate-boundary.sh"), 'retired="InMemorySessionStore"'))
         self.assertTrue(checker.check_text(Path("crates/example/src/lib.rs"), "struct InMemorySessionStore;"))
 
+    def test_queue_drain_ownership_is_refused_everywhere(self) -> None:
+        planted = (
+            ("crates/example/src/lib.rs", "enum Scope { QueueDrain { drain_id: String } }"),
+            ("crates/example/src/lib.rs", "let scope = AdmittedScope::queue_drain(session, id);"),
+            ("crates/example/src/lib.rs", "let scope = state.queue_drain_scope(batch);"),
+            ("crates/example/src/lib.rs", "EffectOpener::session_queue_drain_encoding_range(id)"),
+            ("crates/example/src/lib.rs", "// A queued root runs under its QueueDrain scope."),
+            ("crates/example/tests/law.rs", "let scope = ExecutionScope::queue_drain(s, d);"),
+            ("crates/example/schema.sql", "CHECK (parent_kind IN ('turn', 'queue_drain'))"),
+            ("schemas/host/planted/v1.schema.json", '"const": "queue_drain",'),
+            ("docs/adr/planted.md", "An opener is `Turn`, `QueueDrain` or `Process`."),
+            ("docs/adr/planted.md", "Retired in 60e0e86b2a: the QueueDrain opener."),
+        )
+        for path, body in planted:
+            with self.subTest(path=path, body=body):
+                self.assertTrue(checker.check_queue_drain(Path(path), body))
+        self.assertTrue(checker.check_text(Path("crates/example/src/lib.rs"), planted[0][1]))
+        self.assertTrue(checker.check_text(Path("docs/adr/planted.md"), planted[-1][1]))
+        for body in (
+            "let scope = ExecutionScope::session_operation(session, batch);",
+            '"runtime.command_only_queue_drain" => facts.push(command_queue_drain_fact()),',
+            "const COMMAND_ONLY_QUEUE_DRAIN: Coverage = coverage();",
+        ):
+            with self.subTest(body=body):
+                self.assertFalse(checker.check_queue_drain(Path("crates/example/src/lib.rs"), body))
+
     def test_repository_cli_rejects_planted_identifiers(self) -> None:
         temporary_root = Path(__file__).resolve().parents[1] / "target"
         temporary_root.mkdir(exist_ok=True)

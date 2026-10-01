@@ -261,7 +261,7 @@ pub(super) async fn get_by_key(
     get_by_columns(pool, parent_kind, parent_id, fleet_format).await
 }
 
-/// Turn and queue-drain scopes with live `Cancel` children and no ledger row
+/// Turn and session-operation scopes with live `Cancel` children and no ledger row
 /// yet.
 ///
 /// An opener's ledger row is written right after its end evidence rather than
@@ -302,7 +302,7 @@ pub(super) async fn list_unrecorded_opener_parents(
                 .scope()
                 .cloned()
                 .filter(|parent| {
-                    matches!(parent.storage_kind(), "turn" | "queue_drain")
+                    matches!(parent.storage_kind(), "turn" | "session_operation")
                         && parent.storage_kind() == kind
                         && parent.storage_id() == id
                 })
@@ -336,7 +336,7 @@ pub(super) async fn children(
         ScopeId::Session(session_id) => {
             let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
             let (drains_from, drains_to) =
-                EffectOpener::session_queue_drain_encoding_range(session_id);
+                EffectOpener::session_operation_encoding_range(session_id);
             sqlx::query(
                 process_sql()
                     .process_postgres
