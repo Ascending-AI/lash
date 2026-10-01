@@ -12,8 +12,10 @@
 //! - a catalog row with no head: `SessionCreationUnrecorded` (FIG-4553);
 //! - a catalog read the store refuses with a typed refusal: that refusal's
 //!   own code and cause;
-//! - a catalog read the store refuses otherwise, and a plugin that refuses
-//!   to build: `PluginSessionManager`, naming the refusal.
+//! - a permanent catalog refusal without a typed carrier, or a plugin that
+//!   refuses to build: `PluginSessionManager`, naming the refusal;
+//! - a transient store fault at the catalog or state read: the engine
+//!   retries the open and delivers the input once the store recovers.
 //!
 //! A tool source lost under `ToolSourcePolicy::Require` is the runtime
 //! build's own refusal; `tool_restore_report.rs` holds its law. A deployment
@@ -348,4 +350,352 @@ async fn a_send_whose_open_meets_an_untyped_store_refusal_is_answered_naming_it(
         "the refusal names the store's own: {error:?}"
     );
     Ok(())
+}
+
+mod typed_open {
+    use super::*;
+    use lash_core::store::{SessionWindowRead, WindowSelector};
+    use std::sync::atomic::AtomicUsize;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Read {
+        Catalog,
+        Version,
+        Window,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Fault {
+        WrongSession,
+        UnsupportedGeneration,
+        NewerGeneration,
+        StorageFailure,
+        Backend,
+    }
+
+    struct OpenStore {
+        inner: Arc<dyn DeploymentStore>,
+        fault: Fault,
+        read: Read,
+        armed: AtomicBool,
+        remaining: AtomicUsize,
+        attempts: AtomicUsize,
+        faults: AtomicUsize,
+    }
+
+    impl OpenStore {
+        fn fails(&self, read: Read) -> bool {
+            if !self.armed.load(Ordering::SeqCst) || self.read != read {
+                return false;
+            }
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            let fails = match self.fault {
+                Fault::StorageFailure | Fault::Backend => self
+                    .remaining
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                        left.checked_sub(1)
+                    })
+                    .is_ok(),
+                _ => true,
+            };
+            if fails {
+                self.faults.fetch_add(1, Ordering::SeqCst);
+            }
+            fails
+        }
+
+        fn error(&self) -> StoreError {
+            let current = lash_core::store::CURRENT_SESSION_STATE_VERSION;
+            match self.fault {
+                Fault::UnsupportedGeneration => lash_core::store::resolve_session_state_version(
+                    Some(0),
+                    self.inner.fleet_format(),
+                )
+                .expect_err("an unsupported session generation"),
+                Fault::NewerGeneration => lash_core::store::resolve_session_state_version(
+                    Some(current + 1),
+                    self.inner.fleet_format(),
+                )
+                .expect_err("a session generation newer than this build"),
+                Fault::StorageFailure => StoreError::StorageFailure {
+                    backend: "open-law",
+                    message: "the store is temporarily unavailable".into(),
+                },
+                Fault::Backend => {
+                    StoreError::Backend("the store is temporarily unavailable".into())
+                }
+                Fault::WrongSession => unreachable!("the wrong session is a returned window"),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl lash_core::store::RuntimeStoreDecorator for OpenStore {
+        type Inner = dyn DeploymentStore;
+
+        fn inner(&self) -> &Self::Inner {
+            self.inner.as_ref()
+        }
+
+        async fn lookup_session(
+            &self,
+            id: &SessionId,
+        ) -> std::result::Result<lash_core::store::SessionLookup, StoreError> {
+            if self.fails(Read::Catalog) {
+                return Err(self.error());
+            }
+            self.inner.lookup_session(id).await
+        }
+
+        async fn read_session_state_version(
+            &self,
+            id: &SessionId,
+        ) -> std::result::Result<u32, StoreError> {
+            if self.fails(Read::Version) {
+                return Err(self.error());
+            }
+            self.inner.read_session_state_version(id).await
+        }
+
+        async fn load_session_window(
+            &self,
+            id: &SessionId,
+            selector: WindowSelector,
+        ) -> std::result::Result<Option<SessionWindowRead>, StoreError> {
+            let wrong_session = self.fails(Read::Window);
+            let mut read = self.inner.load_session_window(id, selector).await?;
+            if wrong_session {
+                read.as_mut().expect("the session has a head").session_id =
+                    SessionId::from("another-session");
+            }
+            Ok(read)
+        }
+    }
+
+    impl lash_core::DeploymentStoreDecorator for OpenStore {}
+
+    #[derive(Clone, Copy)]
+    enum Storage {
+        Memory,
+        File,
+        Postgres,
+    }
+
+    async fn double_over(
+        storage: Storage,
+    ) -> (
+        lash_restate_test::RestateTestBackend,
+        Box<dyn std::any::Any>,
+    ) {
+        let config = lash_restate_test::ServerConfig::default();
+        match storage {
+            Storage::Memory => (restate_double(SEED).await, Box::new(())),
+            Storage::File => {
+                let files = tempfile::tempdir().expect("SQLite store directory");
+                let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+                    lash_sqlite_store::SqliteStoreSet::open(files.path())
+                        .await
+                        .expect("SQLite file stores"),
+                );
+                (
+                    lash_restate_test::backend_with(SEED, config, move |_| stores)
+                        .await
+                        .expect("the double over SQLite files"),
+                    Box::new(files),
+                )
+            }
+            Storage::Postgres => {
+                let (stores, held) = postgres_store_set().await.expect("PostgreSQL gate");
+                (
+                    lash_restate_test::backend_with(SEED, config, move |_| stores)
+                        .await
+                        .expect("the double over PostgreSQL"),
+                    held,
+                )
+            }
+        }
+    }
+
+    async fn send_with_fault(
+        storage: Storage,
+        fault: Fault,
+        read: Read,
+    ) -> (Result<crate::TurnOutput>, Arc<OpenStore>) {
+        let (double, _held) = double_over(storage).await;
+        let store = Arc::new(OpenStore {
+            inner: double.lash_backend().session_store_factory(),
+            fault,
+            read,
+            armed: AtomicBool::new(false),
+            remaining: AtomicUsize::new(2),
+            attempts: AtomicUsize::new(0),
+            faults: AtomicUsize::new(0),
+        });
+        let backend = DecoratedBackend::over(double.lash_backend()).session_store_factory({
+            let store = Arc::clone(&store);
+            move |_| store
+        });
+        let core = builder(backend.into())
+            .build(crate::testing::runtime_lease_owner())
+            .expect("the core over the decorated store");
+        const ID: &str = "typed-open-fault";
+        crate::tests::create_catalog_session(&core, ID)
+            .await
+            .expect("create the session");
+        let durable = core
+            .session(ID)
+            .durable()
+            .await
+            .expect("acquire before the fault");
+        durable
+            .pending_turn_inputs()
+            .await
+            .expect("resolve before the fault");
+        store.armed.store(true, Ordering::SeqCst);
+        let answer = tokio::time::timeout(
+            ANSWERS_WITHIN,
+            durable
+                .send(TurnInput::text("accepted before the open fault"))
+                .output(),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "{fault:?} at {read:?}: no answer, {:?}",
+                invocations(&double)
+            )
+        });
+        tokio::time::timeout(
+            ANSWERS_WITHIN,
+            double.settle_session_drive(&SessionId::from(ID)),
+        )
+        .await
+        .expect("the drive ends without a paused invocation");
+        assert_nothing_paused(&double);
+        (answer, store)
+    }
+
+    async fn permanent_refusal(storage: Storage, fault: Fault) {
+        let (read, expected) = match fault {
+            Fault::WrongSession => (
+                Read::Window,
+                serde_json::json!({
+                    "type": "store_session_mismatch",
+                    "loaded": "another-session",
+                    "requested": "typed-open-fault",
+                }),
+            ),
+            Fault::UnsupportedGeneration => (
+                Read::Version,
+                serde_json::json!({
+                    "type": "session_state_version_unsupported",
+                    "found": 0,
+                    "current": lash_core::store::CURRENT_SESSION_STATE_VERSION,
+                }),
+            ),
+            Fault::NewerGeneration => (
+                Read::Version,
+                serde_json::json!({
+                    "type": "session_state_version_newer_than_runtime",
+                    "found": lash_core::store::CURRENT_SESSION_STATE_VERSION + 1,
+                    "current": lash_core::store::CURRENT_SESSION_STATE_VERSION,
+                }),
+            ),
+            _ => unreachable!("a permanent refusal"),
+        };
+        let (answer, store) = send_with_fault(storage, fault, read).await;
+        let error = drive_refusal("typed-open-fault", answer.expect_err("the open is refused"));
+        assert_eq!(
+            error.code.as_str(),
+            expected["type"].as_str().unwrap(),
+            "{error:?}"
+        );
+        let Some(lash_core::RuntimeErrorCause::StoreRefusal { refusal }) = &error.cause else {
+            panic!("the sender receives a typed store refusal: {error:?}");
+        };
+        assert_eq!(error.code, refusal.code());
+        assert_eq!(serde_json::to_value(refusal).unwrap(), expected);
+        assert!(error.is_terminal() && !error.is_retryable(), "{error:?}");
+        assert_eq!(
+            store.attempts.load(Ordering::SeqCst),
+            1,
+            "a permanent refusal is not retried"
+        );
+
+        let plugin = lash_core::PluginError::from(refusal.clone().into_store_error());
+        let plugin: lash_core::PluginError = serde_json::from_value(
+            serde_json::to_value(plugin).expect("journal the plugin refusal"),
+        )
+        .expect("replay the plugin refusal");
+        let controller = lash_core::RuntimeEffectControllerError::from(plugin.clone());
+        for plugin in [
+            plugin,
+            lash_core::PluginError::RuntimeEffectController(controller.clone()),
+            lash_core::PluginError::Runtime(controller.into_runtime_error()),
+        ] {
+            let runtime = plugin.into_turn_failure(lash_core::RuntimeErrorCode::Plugin);
+            assert_eq!(runtime.code, error.code);
+            assert_eq!(runtime.cause, error.cause);
+        }
+    }
+
+    async fn transient_fault_recovers(storage: Storage) {
+        for fault in [Fault::StorageFailure, Fault::Backend] {
+            for read in [Read::Catalog, Read::Version] {
+                let (answer, store) = send_with_fault(storage, fault, read).await;
+                let output =
+                    answer.unwrap_or_else(|error| panic!("{fault:?} at {read:?}: {error:?}"));
+                assert!(
+                    output.is_success(),
+                    "{fault:?} at {read:?}: {:?}",
+                    output.result
+                );
+                assert_eq!(
+                    store.faults.load(Ordering::SeqCst),
+                    2,
+                    "both faults were exercised"
+                );
+                assert!(
+                    store.attempts.load(Ordering::SeqCst) >= 3,
+                    "the store recovered on a retry"
+                );
+            }
+        }
+    }
+
+    macro_rules! laws {
+        ($module:ident, $storage:expr $(, $ignore:meta)?) => {
+            mod $module {
+                use super::*;
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn wrong_session_refusal_reaches_the_sender() {
+                    permanent_refusal($storage, Fault::WrongSession).await;
+                }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn unsupported_generation_refusal_reaches_the_sender() {
+                    permanent_refusal($storage, Fault::UnsupportedGeneration).await;
+                }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn newer_generation_refusal_reaches_the_sender() {
+                    permanent_refusal($storage, Fault::NewerGeneration).await;
+                }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn transient_open_faults_retry_until_the_store_recovers() {
+                    transient_fault_recovers($storage).await;
+                }
+            }
+        };
+    }
+
+    laws!(sqlite_memory, Storage::Memory);
+    laws!(sqlite_file, Storage::File);
+    laws!(
+        postgres,
+        Storage::Postgres,
+        ignore = "requires the PostgreSQL gate"
+    );
 }

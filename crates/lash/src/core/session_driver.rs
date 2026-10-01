@@ -137,9 +137,6 @@ impl CoreSessionDriver {
                 .await
             {
                 Ok(store) => store,
-                Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
-                    return Err(OpenFailure::Contended);
-                }
                 Err(crate::EmbedError::Store(
                     error @ (lash_core::StoreError::SessionDeleted { .. }
                     | lash_core::StoreError::SessionClosing { .. }),
@@ -152,9 +149,6 @@ impl CoreSessionDriver {
             };
         let state = match crate::session::load_state_from_store(session_id, &policy, &store).await {
             Ok(state) => state,
-            Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
-                return Err(OpenFailure::Contended);
-            }
             Err(crate::EmbedError::Store(
                 error @ (lash_core::StoreError::SessionDeleted { .. }
                 | lash_core::StoreError::SessionClosing { .. }),
@@ -264,8 +258,8 @@ fn session_retired_error(
 
 /// Why a session's runtime did not open for a drive.
 enum OpenFailure {
-    /// Another writer holds the session; the drive is retried.
-    Contended,
+    /// A transient store fault aborted the open; the engine retries it.
+    Retry(lash_core::RuntimeError),
     /// The session was deleted or is closing past admission: a journaled
     /// step still has to be emitted for it so the invocation does not
     /// diverge from a `run` command an earlier attempt journaled, and that
@@ -283,9 +277,17 @@ enum OpenFailure {
 
 impl OpenFailure {
     /// Why a read of the session's catalog row or recorded state failed the
-    /// open, once contention and retirement are answered.
+    /// open, once retirement is answered. Storage faults use the same
+    /// classifier as attachment delivery; permanent refusals stay typed.
     fn of_store_read(error: crate::EmbedError) -> Self {
         match error {
+            crate::EmbedError::Store(error) if error.is_transient() => Self::Retry(match error {
+                lash_core::StoreError::Contended => lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::StoreCommitContended,
+                    "the session's runtime is contended; the drive is retried",
+                ),
+                error => lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
+            }),
             crate::EmbedError::Store(error)
                 if lash_core::store::StoreRefusal::of_store_error(&error).is_some() =>
             {
@@ -293,16 +295,19 @@ impl OpenFailure {
                     lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
                 )
             }
+            crate::EmbedError::StoreSessionMismatch { loaded, requested } => Self::StoreRefused(
+                lash_core::RuntimeEffectControllerError::from(
+                    lash_core::StoreError::StoreSessionMismatch { loaded, requested },
+                )
+                .into_runtime_error(),
+            ),
             error => Self::Terminal(lash_core::PluginError::Session(error.to_string())),
         }
     }
 
     fn into_abort(self) -> lash_core::engine::DriveAbort {
         match self {
-            Self::Contended => lash_core::engine::DriveAbort::Retry(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::StoreCommitContended,
-                "the session's runtime is contended; the drive is retried",
-            )),
+            Self::Retry(error) => lash_core::engine::DriveAbort::Retry(error),
             Self::SessionRetired(error)
             | Self::CreationUnrecorded(error)
             | Self::StoreRefused(error) => lash_core::engine::DriveAbort::Refused(error),

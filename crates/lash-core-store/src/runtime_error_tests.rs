@@ -175,6 +175,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectControllerTaskClosed,
         Self::WriterFenced,
         Self::StoreIncompatible,
+        Self::StoreSessionMismatch,
         Self::TurnCancelBindingMismatch,
         Self::RuntimeStore,
         Self::RuntimeStoreCorrupt,
@@ -297,7 +298,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        196,
+        198,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -675,11 +676,8 @@ fn replay_refusals_park_the_turn() {
     }
 }
 
-/// FIG-3619 (lead ruling): the two session-state codes are additive. A stored
-/// refusal carries only its code and message — the typed generations travel
-/// in-process on the returned error and are never serialized — so a build
-/// from before these codes decodes the stored error without failing, reading
-/// the code as a foreign recorded outcome and re-encoding the same bytes.
+/// Generation refusals keep their fields across journaling (FIG-4605).
+/// Their code spellings still round-trip as foreign codes on older decoders.
 #[test]
 fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_existed() {
     let added = [
@@ -730,8 +728,15 @@ fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_exist
         let stored = serde_json::to_value(&refused).expect("serialize the refusal");
         assert_eq!(
             stored,
-            serde_json::json!({ "code": code.as_str(), "message": refused.message }),
-            "a stored refusal is its code and message; the generations are not persisted"
+            serde_json::json!({
+                "code": code.as_str(),
+                "message": refused.message,
+                "cause": {
+                    "kind": "store_refusal",
+                    "refusal": { "type": code.as_str(), "found": found, "current": current },
+                },
+            }),
+            "a stored refusal keeps both generations typed"
         );
         assert!(
             refused.message.contains(&found.to_string())
@@ -760,7 +765,10 @@ fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_exist
         let decoded: RuntimeError =
             serde_json::from_value(stored).expect("this build decodes the stored refusal");
         assert_eq!(decoded.code, code);
-        assert_eq!(decoded.session_state_version_refusal(), None);
+        assert_eq!(
+            decoded.session_state_version_refusal(),
+            Some(crate::runtime_error::SessionStateVersionRefusal { found, current })
+        );
     }
 }
 

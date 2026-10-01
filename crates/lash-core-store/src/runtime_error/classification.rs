@@ -406,7 +406,7 @@ impl RuntimeErrorCode {
             // the process-local controller task closed; a restart repairs it.
             Self::RuntimeEffectControllerTaskClosed => Redrivable,
             // store I/O failed.
-            Self::WriterFenced | Self::StoreIncompatible => Terminal,
+            Self::WriterFenced | Self::StoreIncompatible | Self::StoreSessionMismatch => Terminal,
             // the session admitted another cancellation authority.
             Self::TurnCancelBindingMismatch => Terminal,
             Self::RuntimeStore => Retryable,

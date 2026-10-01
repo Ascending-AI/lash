@@ -403,6 +403,9 @@ impl PluginError {
                         error.code,
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
+                            | crate::RuntimeErrorCode::StoreSessionMismatch
+                            | crate::RuntimeErrorCode::SessionStateVersionUnsupported
+                            | crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
                             | crate::RuntimeErrorCode::TurnCancelBindingMismatch
                             | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
@@ -418,6 +421,9 @@ impl PluginError {
                         error.code,
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
+                            | crate::RuntimeErrorCode::StoreSessionMismatch
+                            | crate::RuntimeErrorCode::SessionStateVersionUnsupported
+                            | crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
                             | crate::RuntimeErrorCode::TurnCancelBindingMismatch
                             | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable

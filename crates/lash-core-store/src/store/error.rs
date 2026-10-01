@@ -28,8 +28,8 @@ pub enum AnchorUnavailable {
 }
 
 /// A store refusal that stays typed past the store, with the same fields as
-/// its store error: a compatibility refusal, or a cancellation authority the
-/// session was not admitted under. Plugin errors are cloned and journaled, so
+/// its store error: a compatibility, session identity or cancellation
+/// authority refusal. Plugin errors are cloned and journaled, so
 /// this representation carries only the terminal refusals rather than backend
 /// failures and sources.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -42,6 +42,18 @@ pub enum StoreRefusal {
     WriterFenced {
         recorded: u32,
         writable: crate::compat::VersionRange,
+    },
+    StoreSessionMismatch {
+        loaded: SessionId,
+        requested: SessionId,
+    },
+    SessionStateVersionUnsupported {
+        found: u32,
+        current: u32,
+    },
+    SessionStateVersionNewerThanRuntime {
+        found: u32,
+        current: u32,
     },
     /// The deployment presented another cancellation authority than the one
     /// the session durably admitted: it runs over these stores under an
@@ -64,6 +76,24 @@ impl StoreRefusal {
                 recorded: *recorded,
                 writable: *writable,
             }),
+            StoreError::StoreSessionMismatch { loaded, requested } => {
+                Some(Self::StoreSessionMismatch {
+                    loaded: loaded.clone(),
+                    requested: requested.clone(),
+                })
+            }
+            StoreError::SessionStateVersionUnsupported { found, current } => {
+                Some(Self::SessionStateVersionUnsupported {
+                    found: *found,
+                    current: *current,
+                })
+            }
+            StoreError::SessionStateVersionNewerThanRuntime { found, current } => {
+                Some(Self::SessionStateVersionNewerThanRuntime {
+                    found: *found,
+                    current: *current,
+                })
+            }
             StoreError::TurnCancelBindingMismatch {
                 session_id,
                 expected,
@@ -82,6 +112,13 @@ impl StoreRefusal {
         match self {
             Self::Incompatible { .. } => crate::RuntimeErrorCode::StoreIncompatible,
             Self::WriterFenced { .. } => crate::RuntimeErrorCode::WriterFenced,
+            Self::StoreSessionMismatch { .. } => crate::RuntimeErrorCode::StoreSessionMismatch,
+            Self::SessionStateVersionUnsupported { .. } => {
+                crate::RuntimeErrorCode::SessionStateVersionUnsupported
+            }
+            Self::SessionStateVersionNewerThanRuntime { .. } => {
+                crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
+            }
             Self::TurnCancelBindingMismatch { .. } => {
                 crate::RuntimeErrorCode::TurnCancelBindingMismatch
             }
@@ -94,6 +131,15 @@ impl StoreRefusal {
             Self::Incompatible { refusal } => StoreError::Incompatible { refusal },
             Self::WriterFenced { recorded, writable } => {
                 StoreError::WriterFenced { recorded, writable }
+            }
+            Self::StoreSessionMismatch { loaded, requested } => {
+                StoreError::StoreSessionMismatch { loaded, requested }
+            }
+            Self::SessionStateVersionUnsupported { found, current } => {
+                StoreError::SessionStateVersionUnsupported { found, current }
+            }
+            Self::SessionStateVersionNewerThanRuntime { found, current } => {
+                StoreError::SessionStateVersionNewerThanRuntime { found, current }
             }
             Self::TurnCancelBindingMismatch {
                 session_id,
@@ -281,6 +327,13 @@ pub enum StoreError {
     HistoryCursorLineageChanged { session_id: SessionId },
     #[error("session `{session_id}` was admitted without durable session metadata")]
     SessionBindingNotMaterialized { session_id: SessionId },
+    /// The store returned another session's state. No retry can adopt it
+    /// as the session the caller requested.
+    #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
+    StoreSessionMismatch {
+        loaded: SessionId,
+        requested: SessionId,
+    },
     #[error(
         "session state version {found} is newer than this runtime's version {current}; upgrade the runtime before opening this session"
     )]
@@ -941,6 +994,7 @@ impl StoreError {
             | Self::CursorForeignSession { .. }
             | Self::HistoryCursorLineageChanged { .. }
             | Self::SessionBindingNotMaterialized { .. }
+            | Self::StoreSessionMismatch { .. }
             | Self::SessionStateVersionUnsupported { .. }
             | Self::Incompatible { .. }
             | Self::WriterFenced { .. }
@@ -1044,6 +1098,7 @@ impl StoreError {
             Self::QueuedWorkRowExceedsContextWindow { .. } => "QueuedWorkRowExceedsContextWindow",
             Self::SessionRelationMismatch { .. } => "SessionRelationMismatch",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
+            Self::StoreSessionMismatch { .. } => "StoreSessionMismatch",
             Self::SessionNotFound { .. } => "SessionNotFound",
             Self::ForeignSessionRequest { .. } => "ForeignSessionRequest",
             Self::InvalidWindowAnchor { .. } => "InvalidWindowAnchor",

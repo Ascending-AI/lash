@@ -484,6 +484,8 @@ pub enum RuntimeErrorCode {
     WriterFenced,
     /// The store's compatibility stamp or fleet format cannot be admitted.
     StoreIncompatible,
+    /// A store returned state belonging to another session.
+    StoreSessionMismatch,
     /// The deployment runs over stores whose session admitted another
     /// cancellation authority.
     TurnCancelBindingMismatch,
@@ -541,9 +543,7 @@ pub enum RuntimeErrorCode {
 /// is a store commit failure.
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
-        err @ (crate::store::StoreError::WriterFenced { .. }
-        | crate::store::StoreError::Incompatible { .. }
-        | crate::store::StoreError::TurnCancelBindingMismatch { .. }) => {
+        err if crate::store::StoreRefusal::of_store_error(&err).is_some() => {
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
@@ -580,9 +580,7 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
 
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
-        err @ (crate::store::StoreError::WriterFenced { .. }
-        | crate::store::StoreError::Incompatible { .. }
-        | crate::store::StoreError::TurnCancelBindingMismatch { .. }) => {
+        err if crate::store::StoreRefusal::of_store_error(&err).is_some() => {
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
@@ -651,21 +649,6 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
             format!("failed to snapshot dirty execution state: {message}"),
         ),
         crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
-        ref err @ crate::store::StoreError::SessionStateVersionUnsupported { found, current } => {
-            RuntimeError::new(
-                RuntimeErrorCode::SessionStateVersionUnsupported,
-                err.to_string(),
-            )
-            .with_session_state_version_refusal(SessionStateVersionRefusal { found, current })
-        }
-        ref err @ crate::store::StoreError::SessionStateVersionNewerThanRuntime {
-            found,
-            current,
-        } => RuntimeError::new(
-            RuntimeErrorCode::SessionStateVersionNewerThanRuntime,
-            err.to_string(),
-        )
-        .with_session_state_version_refusal(SessionStateVersionRefusal { found, current }),
         ref err @ (crate::store::StoreError::FollowOnPending { .. }
         | crate::store::StoreError::FollowOnFrameNotCurrent { .. }
         | crate::store::StoreError::FollowOnNotPending { .. }) => {
@@ -886,6 +869,7 @@ impl RuntimeErrorCode {
             Self::WriterFenced => "writer_fenced",
             Self::TurnCancelBindingMismatch => "turn_cancel_binding_mismatch",
             Self::StoreIncompatible => "store_incompatible",
+            Self::StoreSessionMismatch => "store_session_mismatch",
             Self::RuntimeStore => "runtime_store",
             Self::RuntimeStoreCorrupt => "runtime_store_corrupt",
             Self::SessionCommandRun => "session_command_run",
@@ -1163,6 +1147,7 @@ impl RuntimeErrorCode {
             "writer_fenced" => Self::WriterFenced,
             "turn_cancel_binding_mismatch" => Self::TurnCancelBindingMismatch,
             "store_incompatible" => Self::StoreIncompatible,
+            "store_session_mismatch" => Self::StoreSessionMismatch,
             "runtime_store" => Self::RuntimeStore,
             "runtime_store_corrupt" => Self::RuntimeStoreCorrupt,
             "session_command_run" => Self::SessionCommandRun,
@@ -1254,12 +1239,8 @@ pub struct IngressReservedSourceKeyRefusal {
 /// The session-state generations an admission refused (FIG-3619): the one
 /// the session's marker holds and the one this build admits.
 ///
-/// In-process only. A [`RuntimeError`] carries it to the host whose call was
-/// refused and never serializes it, so no reader of a stored error meets a
-/// shape an older build cannot decode. A stored error keeps the code
-/// ([`RuntimeErrorCode::SessionStateVersionUnsupported`] or
-/// [`RuntimeErrorCode::SessionStateVersionNewerThanRuntime`]) and a message
-/// naming both generations.
+/// A [`RuntimeError`] carries these fields in its typed store refusal, so
+/// they survive plugin journaling and the engine's answer to the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionStateVersionRefusal {
     pub found: u32,
@@ -1306,12 +1287,8 @@ pub struct RuntimeError {
     /// outcome.
     #[serde(skip)]
     foreign_cause: Option<TurnFailureCause>,
-    /// The generations a session-state admission refused (FIG-3619). Never
-    /// persisted; see [`SessionStateVersionRefusal`].
-    #[serde(skip)]
-    session_state_version_refusal: Option<SessionStateVersionRefusal>,
     /// The generations an executable-generation admission refused (FIG-3571).
-    /// Never persisted, like the session-state refusal above.
+    /// Never persisted.
     #[serde(skip)]
     executable_generation_refusal: Option<Box<ExecutableGenerationRefusal>>,
 }
@@ -1326,7 +1303,6 @@ impl RuntimeError {
             cause: None,
             turn_input_acceptance: None,
             foreign_cause: None,
-            session_state_version_refusal: None,
             executable_generation_refusal: None,
         }
     }
@@ -1423,17 +1399,24 @@ impl RuntimeError {
         self.executable_generation_refusal.as_deref()
     }
 
-    #[must_use]
-    fn with_session_state_version_refusal(mut self, refusal: SessionStateVersionRefusal) -> Self {
-        self.session_state_version_refusal = Some(refusal);
-        self
-    }
-
     /// The generations a session-state admission refused, on the error the
-    /// refused call returned (FIG-3619). `None` on any other error, and on an
-    /// error read back from storage, which keeps only the code and message.
+    /// refused call returned or read back from storage. `None` on any other
+    /// error, including an older record that holds only a code and message.
     pub fn session_state_version_refusal(&self) -> Option<SessionStateVersionRefusal> {
-        self.session_state_version_refusal
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::StoreRefusal { refusal } => match &**refusal {
+                crate::store::StoreRefusal::SessionStateVersionUnsupported { found, current }
+                | crate::store::StoreRefusal::SessionStateVersionNewerThanRuntime {
+                    found,
+                    current,
+                } => Some(SessionStateVersionRefusal {
+                    found: *found,
+                    current: *current,
+                }),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// Attaches the acceptance of the direct turn this error aborted.
@@ -1865,6 +1848,9 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
         let code = match &err {
             crate::StoreError::WriterFenced { .. } => RuntimeErrorCode::WriterFenced,
             crate::StoreError::Incompatible { .. } => RuntimeErrorCode::StoreIncompatible,
+            crate::StoreError::StoreSessionMismatch { .. } => {
+                RuntimeErrorCode::StoreSessionMismatch
+            }
             crate::StoreError::TurnCancelBindingMismatch { .. } => {
                 RuntimeErrorCode::TurnCancelBindingMismatch
             }

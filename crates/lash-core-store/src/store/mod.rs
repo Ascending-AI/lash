@@ -933,12 +933,9 @@ fn validate_window_session(
     if read.session_id == *session_id {
         Ok(())
     } else {
-        Err(StoreError::StoredDataCorrupt {
-            record_kind: "SessionWindowRead",
-            message: format!(
-                "a window read for session `{session_id}` names session `{}`",
-                read.session_id
-            ),
+        Err(StoreError::StoreSessionMismatch {
+            loaded: read.session_id.clone(),
+            requested: session_id.clone(),
         })
     }
 }
