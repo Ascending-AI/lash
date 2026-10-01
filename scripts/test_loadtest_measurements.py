@@ -733,23 +733,24 @@ class MeasurementsTests(unittest.TestCase):
                 rows = [run, *operations, *samples, *anchors, gap, *ledgers, witness]
                 log.write_text(''.join('load measurement ' + json.dumps(row) + '\n' for row in rows))
                 with contextlib.redirect_stdout(io.StringIO()):
-                    if attributed and not epochs:
+                    if attributed:
                         m.archive(log, Path(tmp) / 'results')
                     else:
-                        reason = 'load qualification is INCOMPLETE' if attributed else 'counter epoch gap' if epochs else 'load qualification is FAILED'
+                        reason = 'counter epoch gap' if epochs else 'load qualification is FAILED'
                         with self.assertRaisesRegex(ValueError, reason):
                             m.archive(log, Path(tmp) / 'results')
                 output = Path(tmp) / 'results' / 'fig-3790' / 'r'
                 saved = [json.loads(line) for line in (output / 'collection_gaps.jsonl').read_text().splitlines()]
                 summary = json.loads((output / 'summary.json').read_text())
                 self.assertEqual(summary['collection_gaps'], saved)
-                self.assertEqual(len(saved), 5 if epochs else 1)
+                # A worker restart is four worker counter gaps and its pool's.
+                self.assertEqual(len(saved), 6 if epochs else 1)
                 self.assertTrue(all(row['attribution']['status'] == ('FAULT_ATTRIBUTED' if attributed else 'UNATTRIBUTED')
                                     for row in saved))
                 if epochs and not attributed:
                     self.assertEqual(summary['verdict'], 'failed')
                 else:
-                    self.assertEqual(summary['qualification']['status'], 'INCOMPLETE' if attributed and epochs else 'PASSED' if attributed else 'FAILED')
+                    self.assertEqual(summary['qualification']['status'], 'PASSED' if attributed else 'FAILED')
                 if epochs:
                     self.assertTrue(all(row['unobserved_delta'] is None and not row['complete']
                                         for row in saved if row['record'] == 'counter_gap'))
@@ -765,16 +766,121 @@ class MeasurementsTests(unittest.TestCase):
             node['metrics_observed_ns'] = 82000
         observed['workers'][0]['resources']['processes'][0]['epoch'] = '2'
         observed['workers'][0]['resources']['cgroup_cpu']['usage_usec'] = 3
+        # The restarted pool is first seen with traffic still ahead of it.
+        for name, value in dict(ipc_sent_messages=2, ipc_sent_bytes=100, ipc_received_messages=4,
+                                ipc_received_bytes=200).items():
+            observed['workers'][0]['resources']['pool']['counters'][name] = value
         samples[-1]['workers'][0]['resources']['processes'][0]['epoch'] = '2'
         samples[-1]['workers'][0]['resources']['cgroup_cpu']['usage_usec'] = 5
         samples.insert(1, observed)
         return fixture
 
+    @staticmethod
+    def pool_gaps(gaps):
+        return [row for row in gaps if row.get('counter') == 'pool_identity']
+
+    @staticmethod
+    def counter_gaps(gaps):
+        return [row for row in gaps if row['record'] == 'counter_gap' and row['counter'] != 'pool_identity']
+
+    def assert_pool_restart_is_the_faults(self, result, interval):
+        """The pool restarted with its worker: one identity gap, attributed to
+        the fault on that worker, with the unobserved counters left unknown."""
+        pool = result['pool']
+        self.assertEqual((pool['status'], pool['reasons']), ('PASSED', []))
+        self.assertEqual((pool['epoch_gaps'], pool['fault_attributed_epoch_gaps'], pool['complete']), (1, 1, False))
+        gap, = self.pool_gaps(result['collection_gaps'])
+        self.assertEqual((gap['previous_observed_ns'], gap['monotonic_ns']), interval)
+        self.assertEqual(gap['target'], {'component': 'worker', 'endpoint': 'worker'})
+        self.assertEqual((gap['before']['epoch']['parent_epoch'], gap['after']['epoch']['parent_epoch']), ('1', '2'))
+        self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
+        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertIsNone(gap['unobserved_delta'])
+        self.assertFalse(gap['complete'])
+
+    def pool_only_restart(self):
+        """The pool is rebuilt inside a worker process that keeps running."""
+        fixture = self.gap_campaign()
+        samples = fixture[2]
+        observed = copy.deepcopy(samples[-1])
+        observed.update(monotonic_ns=80000, collection_finished_ns=85000)
+        observed['workers'][0]['observed_ns'] = 81000
+        for node in observed['restate']:
+            node['metrics_observed_ns'] = 82000
+        observed['workers'][0]['resources']['pool']['epoch'] = 2
+        for name, value in dict(ipc_sent_messages=2, ipc_sent_bytes=100, ipc_received_messages=4,
+                                ipc_received_bytes=200).items():
+            observed['workers'][0]['resources']['pool']['counters'][name] = value
+        samples[-1]['workers'][0]['resources']['pool']['epoch'] = 2
+        samples.insert(1, observed)
+        return fixture
+
+    def test_a_pool_restart_inside_its_workers_fault_window_is_attributed(self):
+        result = self.gap_summary(self.pool_only_restart())
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        gap, = self.pool_gaps(result['collection_gaps'])
+        self.assertEqual((gap['before']['epoch']['pool_epoch'], gap['after']['epoch']['pool_epoch']), (1, 2))
+        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertEqual(self.counter_gaps(result['collection_gaps']), [])
+
+    def test_a_pool_restart_no_fault_explains_leaves_qualification_incomplete(self):
+        for case in ['after', 'before', 'target', 'no-campaign']:
+            with self.subTest(case=case):
+                fixture = self.pool_only_restart()
+                samples = fixture[2]
+                if case == 'after':
+                    samples[1].update(monotonic_ns=120000, collection_finished_ns=125000)
+                    samples[1]['workers'][0]['observed_ns'] = 121000
+                    seen = copy.deepcopy(samples[0])
+                    seen.update(monotonic_ns=100000, collection_finished_ns=101000)
+                    seen['workers'][0]['observed_ns'] = 108000
+                    samples.insert(1, seen)
+                    samples[-1].update(monotonic_ns=130000, collection_finished_ns=135000)
+                elif case == 'before':
+                    samples[1].update(monotonic_ns=50000, collection_finished_ns=51000)
+                    samples[1]['workers'][0]['observed_ns'] = 51999
+                elif case == 'target':
+                    fixture[-3][0]['detail_json'] = json.dumps({'collection_targets': [
+                        {'component': 'worker', 'endpoint': 'other-worker'}]})
+                else:
+                    fixture = (*fixture[:4], [], [], None)
+                    fixture[0].update(fault_campaign=False, mode='smoke')
+                    for name in m.FAULT_CLASSES:
+                        del fixture[3]['verdict']['classes'][name]
+                    fixture[1].pop()
+                    fixture[3].update(sent=1, terminal=1)
+                if case == 'no-campaign':
+                    run, operations, samples, witness = fixture[:4]
+                    result = m.summarize(run, operations, samples, witness)
+                else:
+                    result = self.gap_summary(fixture)
+                # The fixture's sample error is unattributed too when its target is.
+                self.assertEqual(result['qualification']['status'], 'FAILED' if case == 'target' else 'INCOMPLETE')
+                self.assertEqual(result['pool']['status'], 'INCOMPLETE')
+                self.assertIn('pool epoch changed with an unobserved counter interval', result['pool']['reasons'])
+                gap, = self.pool_gaps(result['collection_gaps'])
+                self.assertEqual(gap['attribution'], {'status': 'UNATTRIBUTED'})
+
+    def test_a_pool_restart_two_faults_could_explain_is_not_attributed(self):
+        def fault(fault_id, phase, anchor, at):
+            return dict(fault_id=fault_id, kind='worker-kill' if fault_id == 'worker-kill' else 'rolling-deploy',
+                        phase=phase, anchor_id=anchor, clock_bounds_ns=[at, at],
+                        detail={'collection_targets': [{'component': 'worker', 'endpoint': 'worker'}]})
+        faults = [fault('worker-kill', 'injected', '1', 50000), fault('worker-kill', 'recovered', '2', 60000),
+                  fault('rolling-deploy', 'injected', '3', 70000), fault('rolling-deploy', 'recovered', '4', 80000)]
+        gap = dict(schema_version=1, record='counter_gap', run='r', sample_kind='periodic', counter='pool_identity',
+                   target={'component': 'worker', 'endpoint': 'worker'}, previous_observed_ns=40000, monotonic_ns=90000)
+        run = dict(run='r', fault_campaign=True)
+        both, = m.collection_gaps(run, [gap], faults)
+        self.assertEqual(both['attribution'], {'status': 'UNATTRIBUTED'})
+        one, = m.collection_gaps(run, [{**gap, 'monotonic_ns': 65000}], faults)
+        self.assertEqual((one['attribution']['status'], one['attribution']['fault_id']), ('FAULT_ATTRIBUTED', 'worker-kill'))
+
     def test_faulted_counter_epoch_gap_keeps_unknown_delta_and_values(self):
         result = self.gap_summary(self.epoch_campaign())
-        self.assertEqual(result['qualification']['status'], 'INCOMPLETE')
-        self.assertIn('pool epoch changed', result['pool']['reasons'][0])
-        gaps = [row for row in result['collection_gaps'] if row['record'] == 'counter_gap']
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        self.assert_pool_restart_is_the_faults(result, (5000, 81000))
+        gaps = self.counter_gaps(result['collection_gaps'])
         self.assertEqual(len(gaps), 4)
         gap = next(row for row in gaps if row['counter'] == 'worker_usage_usec')
         self.assertEqual(gap['before'], {'epoch': '1', 'value': 10})
@@ -797,9 +903,9 @@ class MeasurementsTests(unittest.TestCase):
         fixture[2][1]['workers'][0]['observed_ns'] = 108001
         fixture[2][-1].update(monotonic_ns=130000, collection_finished_ns=135000)
         result = self.gap_summary(fixture)
-        self.assertEqual(result['qualification']['status'], 'INCOMPLETE')
-        self.assertIn('pool epoch changed', result['pool']['reasons'][0])
-        gaps = [row for row in result['collection_gaps'] if row['record'] == 'counter_gap']
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        self.assert_pool_restart_is_the_faults(result, (5000, 108001))
+        gaps = self.counter_gaps(result['collection_gaps'])
         self.assertEqual(len(gaps), 4)
         for gap in gaps:
             self.assertEqual((gap['previous_observed_ns'], gap['monotonic_ns']), (5000, 108001))
@@ -837,9 +943,11 @@ class MeasurementsTests(unittest.TestCase):
                         {'component': 'worker', 'endpoint': 'other-worker'}]})
                 with self.assertRaisesRegex(ValueError, 'counter epoch gap') as refused:
                     self.gap_summary(fixture)
-                gaps = [row for row in refused.exception.collection_gaps if row['record'] == 'counter_gap']
+                gaps = self.counter_gaps(refused.exception.collection_gaps)
                 self.assertEqual(len(gaps), 4)
                 self.assertTrue(all(row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps))
+                pool = self.pool_gaps(refused.exception.collection_gaps)
+                self.assertEqual([row['attribution']['status'] for row in pool], ['UNATTRIBUTED'])
                 self.assertTrue(all(row['unobserved_delta'] is None and not row['complete'] for row in gaps))
 
     def test_campaign_recovery_is_complete_with_explicit_error_bars(self):

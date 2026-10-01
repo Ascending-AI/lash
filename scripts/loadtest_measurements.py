@@ -110,12 +110,21 @@ def pool_identity(worker):
     return (worker['node'], generation, parents[0]['epoch'], resources['pool']['epoch'])
 
 
+POOL_EPOCH_CHANGED = 'pool epoch changed with an unobserved counter interval'
+
+
 def pool_report(run, operations, samples):
-    """Require exporter-backed counters and independent workload/child evidence."""
+    """Require exporter-backed counters and independent workload/child evidence.
+
+    A worker's pool identity (generation, parent start epoch, pool epoch) may
+    change between two samples. Each change is returned in `epoch_gaps` as a
+    counter gap with an unknown delta; `summarize` decides whether a fault on
+    that worker explains it."""
     counters = defaultdict(CounterDeltas)
     receipts = {}
     child_epochs = set()
     epochs = {}
+    gaps = []
     series = []
     classes = Counter()
     unsampled_classes = Counter()
@@ -128,8 +137,6 @@ def pool_report(run, operations, samples):
                         'missing pool exporter evidence')
                 require(isinstance(pool.get('epoch'), int) and pool['epoch'] > 0, 'missing pool epoch')
                 identity = pool_identity(worker)
-                previous = epochs.setdefault(worker['node'], identity)
-                require(previous == identity, 'pool epoch changed with an unobserved counter interval')
                 expected_units = {**POOL_GAUGE_UNITS, **POOL_COUNTER_UNITS}
                 require(pool.get('units') == expected_units, 'missing or invalid pool metric units')
                 values = pool.get('counters', {})
@@ -139,6 +146,17 @@ def pool_report(run, operations, samples):
                 require(pool['idle'] <= pool['workers'], 'pool idle workers exceed workers')
                 require(pool['queued_items'] != 0 or pool['queued_bytes'] == 0, 'pool queue occupancy mismatch')
                 require(values['receipts_dropped'] == 0, 'pool execution receipt overflow')
+                previous = epochs.get(worker['node'])
+                if previous is not None and previous['identity'] != identity:
+                    describe = lambda row: {'epoch': dict(zip(('generation', 'parent_epoch', 'pool_epoch'), row['identity'][1:])),
+                                            'value': row['counters']}
+                    gaps.append(dict(schema_version=1, record='counter_gap', run=run['run'], sample_kind='periodic',
+                                     monotonic_ns=worker['observed_ns'], previous_observed_ns=previous['observed_ns'],
+                                     target={'component': 'worker', 'endpoint': worker['node']},
+                                     counter='pool_identity', identity=worker['node'], complete=False,
+                                     before=describe(previous),
+                                     after=describe(dict(identity=identity, counters=values)), unobserved_delta=None))
+                epochs[worker['node']] = dict(identity=identity, counters=values, observed_ns=worker['observed_ns'])
                 for name in POOL_COUNTER_UNITS:
                     counters[name].add(identity, identity, values[name])
                 execution_rows = pool.get('executions')
@@ -198,9 +216,10 @@ def pool_report(run, operations, samples):
         return dict(status='PASSED', reasons=[], units={**POOL_GAUGE_UNITS, **POOL_COUNTER_UNITS},
                     counters={name: counter.total for name, counter in sorted(counters.items())},
                     execution_classes=dict(classes), unsampled_execution_classes=dict(unsampled_classes),
-                    executions=matched, samples=series)
+                    executions=matched, samples=series, epoch_gaps=gaps)
     except (ValueError, KeyError, TypeError) as error:
-        return dict(status='INCOMPLETE', reasons=[str(error)], execution_classes=dict(classes), executions=[], samples=series)
+        return dict(status='INCOMPLETE', reasons=[str(error)], execution_classes=dict(classes), executions=[], samples=series,
+                    epoch_gaps=gaps)
 
 
 def deployment_memory(resources):
@@ -656,8 +675,10 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
     delta_summary = {name: {'observed_delta': value.total, 'epoch_gaps': value.gaps,
                             'complete': value.gaps == 0} for name, value in sorted(counters.items())}
     recovery = recovery_report(run, operations, witness, faults, anchors)
-    gaps = collection_gaps(run, [*sample_errors, *counter_gaps], recovery['normalized_rows'])
-    epoch_gaps = [row for row in gaps if row['record'] == 'counter_gap']
+    pool = pool_report(run, operations, samples)
+    gaps = collection_gaps(run, [*sample_errors, *counter_gaps, *pool.pop('epoch_gaps')], recovery['normalized_rows'])
+    pool_gaps = [row for row in gaps if row.get('counter') == 'pool_identity']
+    epoch_gaps = [row for row in gaps if row['record'] == 'counter_gap' and row not in pool_gaps]
     if any(row['attribution']['status'] == 'UNATTRIBUTED' for row in epoch_gaps):
         raise CounterEpochGapError(gaps)
     for name, counter in delta_summary.items():
@@ -671,8 +692,14 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
     missing_journals = [key for key in owned_invocations if key not in cancellations['explained_inbox_ids']
                         and (key not in journal['maxima'] or journal['maxima'][key]['entries'] == 0)]
     inputs = recovery['inputs']
-    unattributed = any(row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps)
-    pool = pool_report(run, operations, samples)
+    # A pool restart follows the counter epoch rule: the fault on its worker
+    # explains it, with the unobserved counters left unknown. One that no
+    # single fault explains leaves the pool, and so the run, incomplete.
+    pool_attributed = sum(row['attribution']['status'] == 'FAULT_ATTRIBUTED' for row in pool_gaps)
+    if pool_attributed != len(pool_gaps):
+        pool = {**pool, 'status': 'INCOMPLETE', 'reasons': [POOL_EPOCH_CHANGED, *pool['reasons']], 'executions': []}
+    pool.update(epoch_gaps=len(pool_gaps), fault_attributed_epoch_gaps=pool_attributed, complete=not pool_gaps)
+    unattributed = any(row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps if row not in pool_gaps)
     reasons = recovery['reasons'][:] + pool['reasons']
     if unattributed:
         reasons.append('required collection intervals are missing')

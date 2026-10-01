@@ -408,9 +408,15 @@ remains in `samples.jsonl` and per-epoch measurements appear in `metrics.jsonl`.
 
 `summary.pool.status` is `PASSED` only with complete, reconciled measurements and
 at least one independently sampled run-owned cell and durable body. Missing
-metrics, either missing sampled execution class, receipt overflow or an unobserved
+metrics, either missing sampled execution class, receipt overflow or an unexplained
 parent/pool restart interval makes qualification `INCOMPLETE` and the checker
-exits unsuccessfully. Fault attribution and the separate recovery report remain
+exits unsuccessfully. A restart follows the counter epoch rule below: it is a
+`counter_gap` of `pool_identity` in `collection_gaps.jsonl`, with both identities,
+the counters on each side and an unknown delta. When its unobserved interval
+meets exactly one window of a fault on that worker, it is `FAULT_ATTRIBUTED` and
+the pool can still pass; `summary.pool` then reports `fault_attributed_epoch_gaps`
+and `complete: false`. A restart that no fault, or more than one, could explain
+stays `UNATTRIBUTED` and incomplete. Fault attribution and the separate recovery report remain
 available. Overall qualification cannot pass while pool qualification is
 incomplete. These checks establish collection completeness, with no latency,
 saturation or release budget.
