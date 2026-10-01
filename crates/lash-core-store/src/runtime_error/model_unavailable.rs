@@ -83,6 +83,19 @@ impl RuntimeEffectControllerError {
         }
     }
 
+    /// Decode the typed fault an engine retained in a failed attempt's text.
+    /// Returns `None` when the text carries no valid fault record. The
+    /// surrounding prose supplies no classification or retry authority.
+    #[must_use]
+    pub fn from_attempt_failure_text(failure: &str) -> Option<Self> {
+        let AttemptFault::ModelUnavailable { model_key } = AttemptFault::in_failure(failure)?;
+        let mut error = Self::new(RuntimeErrorCode::ModelUnavailable, failure);
+        error.cause = Some(RuntimeErrorCause::ModelUnavailable {
+            model_key: Box::new(model_key),
+        });
+        Some(error)
+    }
+
     /// The recorded model key this error could not bind, when it is the
     /// typed fault of an unbound model (FIG-4404).
     #[must_use]

@@ -224,8 +224,14 @@ pub enum RestateEffectError {
 impl From<RestateEffectError> for RuntimeEffectControllerError {
     fn from(error: RestateEffectError) -> Self {
         match error {
-            RestateEffectError::Terminal { .. } => {
-                Self::new(RuntimeErrorCode::EngineEffectController, error.to_string())
+            RestateEffectError::Terminal { ref terminal, .. } => {
+                let message = error.to_string();
+                if let Some(mut fault) = Self::from_attempt_failure_text(terminal.message()) {
+                    fault.message = message;
+                    fault
+                } else {
+                    Self::new(RuntimeErrorCode::EngineEffectController, message)
+                }
             }
             RestateEffectError::Refused(refusal) => refusal,
         }

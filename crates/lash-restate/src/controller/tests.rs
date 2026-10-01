@@ -105,6 +105,53 @@ fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
 }
 
 #[test]
+fn a_model_bind_fault_survives_the_restate_terminal_and_plugin_boundaries() {
+    let key = lash_core::ModelKey::new("fast\"@worker");
+    let fault = RuntimeEffectControllerError::model_unavailable(&lash_core::ModelUnavailable::new(
+        key.clone(),
+        lash_core::ModelUnavailableReason::UnknownKey,
+    ));
+    let terminal = TerminalError::new(format!(
+        "Handler failed with retryable error: {}",
+        fault.attempt_failure_text()
+    ));
+    let bridged = RuntimeEffectControllerError::from(RestateEffectError::Terminal {
+        effect: "child-llm-call".into(),
+        terminal,
+    });
+    assert_eq!(bridged.code, RuntimeErrorCode::ModelUnavailable);
+    assert_eq!(bridged.cause, fault.cause);
+    assert_eq!(bridged.model_key(), Some(&key));
+    assert!(bridged.message.contains("child-llm-call"));
+    assert!(!bridged.journaled);
+    let plugin = PluginError::RuntimeEffectController(bridged);
+    assert!(plugin.is_retryable());
+    assert!(!plugin.is_terminal());
+    let runtime = plugin.into_turn_failure(RuntimeErrorCode::Plugin);
+    assert_eq!(runtime.code, RuntimeErrorCode::ModelUnavailable);
+    assert_eq!(runtime.model_key(), Some(&key));
+    assert!(runtime.is_retryable());
+    assert!(!runtime.is_terminal());
+
+    for message in [
+        "model_unavailable: model fast is unavailable",
+        r#"failed {"fault":"lash.model_unavailable","model_key":null}"#,
+        r#"failed {"fault":"lash.model_unavailable","model_key":"fast""#,
+        r#"failed {"fault":"lash.unknown","model_key":"fast"}"#,
+    ] {
+        let error = RestateEffectError::Terminal {
+            effect: "other-effect".into(),
+            terminal: TerminalError::new(message),
+        };
+        let diagnostic = error.to_string();
+        let bridged = RuntimeEffectControllerError::from(error);
+        assert_eq!(bridged.code, RuntimeErrorCode::EngineEffectController);
+        assert_eq!(bridged.message, diagnostic);
+        assert!(bridged.cause.is_none());
+    }
+}
+
+#[test]
 fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
     let parent_address = lash_core::EffectAddress::new(
         ExecutionScope::process(lash_core::ProcessId::fixture("restate-parent-process")),
