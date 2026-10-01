@@ -71,6 +71,15 @@ packages = ["lash-internal-protocol-rlm"]
 kinds = ["unit-test"]
 shards = 8
 
+# The crash-replay suite needs about 190 CPU-seconds in a 2-CPU, 300 s slot,
+# so it timed out whenever the pool was slow (FIG-4615). Six shards keep the
+# name hash's largest split to its single heaviest case.
+[[rule]]
+packages = ["lash-internal-restate-test"]
+kinds = ["test"]
+targets = ["process_crash_replay"]
+shards = 6
+
 [[rule]]
 packages = ["lash-runtime"]
 kinds = ["test"]
