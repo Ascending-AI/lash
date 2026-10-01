@@ -140,29 +140,6 @@ impl SessionCommitStore for SqliteStore {
             .map_err(sqlite_error)
     }
 
-    async fn drain_end_exists(
-        &self,
-        session_id: &SessionId,
-        drain_id: &str,
-    ) -> Result<bool, StoreError> {
-        let session_id = session_id.clone();
-        let key = lash_core_execution::store_backend_support::drain_end_receipt_storage_key(
-            &session_id,
-            drain_id,
-        )?;
-        self.read_connection()
-            .call(move |conn| {
-                let exists: bool = conn.query_row(
-                    session_sql().turn_commits.exists_for_turn.sql(),
-                    params![session_id.as_str(), key],
-                    |row| row.get(0),
-                )?;
-                Ok(exists)
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError> {
         let session_id = session_id.clone();
         let fleet = self.fleet_format();

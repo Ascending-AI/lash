@@ -82,14 +82,6 @@ mod tests {
             Ok(false)
         }
 
-        async fn drain_end_exists(
-            &self,
-            _session_id: &SessionId,
-            _drain_id: &str,
-        ) -> Result<bool, StoreError> {
-            Ok(false)
-        }
-
         async fn commit_runtime_state(
             &self,
             commit: RuntimeCommit,

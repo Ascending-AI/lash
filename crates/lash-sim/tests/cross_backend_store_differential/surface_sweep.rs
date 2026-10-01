@@ -105,8 +105,6 @@ pub(super) enum SurfaceMethod {
     CancelPendingTurnInputSuffix,
     CommittedTurnExists,
     UncommittedTurnExists,
-    CommitDrainEnd,
-    DrainEndExists,
     /// [`SessionCommitStore::raise_pending_follow_on_attempts`], driven over a
     /// live fact for the turn it names (`owed`) and for a turn it does not.
     RaisePendingFollowOnAttempts {
@@ -245,8 +243,6 @@ impl SurfaceMethod {
             Self::CancelPendingTurnInputSuffix => "surface:cancel_pending_turn_input_suffix",
             Self::CommittedTurnExists => "surface:committed_turn_exists_committed",
             Self::UncommittedTurnExists => "surface:committed_turn_exists_uncommitted",
-            Self::CommitDrainEnd => "surface:commit_drain_end_receipt",
-            Self::DrainEndExists => "surface:drain_end_exists",
             Self::RaisePendingFollowOnAttempts { owed: true } => {
                 "surface:raise_pending_follow_on_attempts"
             }
@@ -507,10 +503,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::CommittedTurnExists),
             surface(SurfaceMethod::UncommittedTurnExists),
             // One queued-headed root end to end (FIG-3927): no unfinished
-            // root, then its admission and a replay of it, its lost end, and
-            // the drain's end receipt. `drain_end_exists` is driven on both
-            // sides of that receipt, so a backend that answers `false`
-            // without looking cannot agree.
+            // root, then its admission and a replay of it, and its lost end.
             surface(SurfaceMethod::UnfinishedRoot),
             surface(SurfaceMethod::AdmitQueuedRoot),
             surface(SurfaceMethod::UnfinishedRoot),
@@ -520,9 +513,6 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             // The lost end wrote its root's evidence (FIG-3600 S7).
             surface(SurfaceMethod::RootTerminal),
             surface(SurfaceMethod::UnfinishedRoot),
-            surface(SurfaceMethod::DrainEndExists),
-            surface(SurfaceMethod::CommitDrainEnd),
-            surface(SurfaceMethod::DrainEndExists),
             // An input's root binding: unbound, bound once, read back, and a
             // second binding to another root refused.
             surface(SurfaceMethod::RootBinding),
@@ -765,7 +755,6 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::UnfinishedRoot),
             surface(SurfaceMethod::AdmitQueuedRoot),
-            surface(SurfaceMethod::DrainEndExists),
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
             surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
@@ -1252,46 +1241,6 @@ impl BackendRunner {
                         &session_id,
                         &lash_core::TurnId::from(UNCOMMITTED_TURN_ID),
                     )
-                    .await?;
-                format!("exists={exists}")
-            }
-            SurfaceMethod::CommitDrainEnd => {
-                // The drain epilogue's end fact, built the way the runtime
-                // builds it: a state-preserving commit receipted under the
-                // drain's own scope at the reserved `final` key, borrowing
-                // the held lane, claiming the committed head's frame and leaf.
-                let head = store.load_session_head_meta(&session_id).await?;
-                let mut commit = runtime_commit(
-                    &session_id,
-                    head.as_ref().map_or(0, |head| head.head_revision),
-                    &append(Vec::new(), None),
-                    None,
-                    None,
-                    HydratedSessionCheckpoint::default(),
-                    Vec::new(),
-                );
-                let (frame, leaf) = head
-                    .map(|head| {
-                        (
-                            head.current_frame_node_id
-                                .filter(|_| head.leaf_node_id.is_some()),
-                            head.leaf_node_id,
-                        )
-                    })
-                    .unwrap_or_default();
-                commit.current_frame_node_id = frame;
-                commit.graph_base_leaf_node_id = leaf;
-                commit.turn_commit = RuntimeTurnCommitStamp::new(
-                    lash_core::store::OperationId::new(surface_drain_scope(&session_id), "final"),
-                );
-                commit.drive_fence = Some(Box::new(lease_fence.clone()));
-                let result = store.commit_runtime_state(commit).await?;
-                self.surface.answer = Some("committed".to_string());
-                return Ok(Some(result.into()));
-            }
-            SurfaceMethod::DrainEndExists => {
-                let exists = store
-                    .drain_end_exists(&session_id, SURFACE_DRAIN_ID)
                     .await?;
                 format!("exists={exists}")
             }

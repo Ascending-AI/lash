@@ -181,13 +181,6 @@ impl SessionCommitStore for Integrator {
     ) -> Result<bool, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn drain_end_exists(
-        &self,
-        session_id: &SessionId,
-        drain_id: &str,
-    ) -> Result<bool, StoreError> {
-        unreachable!("external signature witness")
-    }
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,

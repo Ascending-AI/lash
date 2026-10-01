@@ -65,7 +65,6 @@ macro_rules! runtime_store_operations {
                 [session] fn load_session_head_meta(&self, session_id: &SessionId) -> Result<Option<SessionHeadMeta>, StoreError>;
                 [carried fence] fn retain_admission_base(&self, fence: &DriveFence, base: &SessionHeadRef) -> Result<(), StoreError>;
                 [session] fn committed_turn_exists(&self, session_id: &SessionId, turn_id: &crate::TurnId) -> Result<bool, StoreError>;
-                [session] fn drain_end_exists(&self, session_id: &SessionId, drain_id: &str) -> Result<bool, StoreError>;
                 [carried commit] fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError>;
                 [carried fence] fn raise_pending_follow_on_attempts(&self, fence: &DriveFence, follow_on_turn_id: &crate::TurnId) -> Result<PendingFollowOn, StoreError>;
                 [carried meta] fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;

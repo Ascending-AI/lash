@@ -1041,19 +1041,6 @@ pub trait SessionCommitStore: Send + Sync {
         turn_id: &TurnId,
     ) -> Result<bool, StoreError>;
 
-    /// Does the session hold a durable end receipt for `drain_id`?
-    ///
-    /// The same membership read as [`committed_turn_exists`](Self::committed_turn_exists),
-    /// keyed on the drain's `final` receipt: true means the drain's epilogue
-    /// committed, false means it did not (yet). The parent-end recovery sweep
-    /// is its only caller; a drain interrupted before its epilogue is left
-    /// alone for the retried drain under the same `drain_id` to end.
-    async fn drain_end_exists(
-        &self,
-        session_id: &SessionId,
-        drain_id: &str,
-    ) -> Result<bool, StoreError>;
-
     /// Atomically persist one settled runtime commit and its durable receipt
     /// for `commit.session_id`.
     ///

@@ -7,13 +7,6 @@
 //! `cancelled_turn_withheld_input_tests!` is deliberately absent: the B0-cov
 //! batch registers it separately.
 //!
-//! `drain_end_tests!` is deliberately absent too: its laws drive a drain's
-//! effect work on a runtime over the world's effect host, which on this tier
-//! is the deployment host — a boundary that refuses effects outside a handler
-//! — so most of the suite is red, and the macro is defined inside
-//! `conformance/drain_end.rs` (a shared law file this batch does not edit)
-//! with no `#[ignore]` form to park it under.
-//!
 //! The `turn_crash_matrix_tests!` catalogue's arms are already registered
 //! beside this module in `turn_crash_on_the_double.rs` through the split
 //! single-law macros.

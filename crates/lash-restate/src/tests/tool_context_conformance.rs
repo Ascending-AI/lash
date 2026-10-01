@@ -723,14 +723,6 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
         committed_head.is_some(),
         "the crashed worker's commit is durable"
     );
-    assert!(
-        !cell
-            .runtime_store
-            .drain_end_exists(drain_id)
-            .await
-            .expect("read the drain-end receipt"),
-        "the worker died before its drain ended"
-    );
     let tool_executions = cell.tool_executions.load(Ordering::SeqCst);
     assert_eq!(tool_executions, 1, "the live pass ran the tool once");
     assert_eq!(cell.llm_provider_calls.load(Ordering::SeqCst), 2);
