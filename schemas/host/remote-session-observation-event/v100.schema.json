@@ -180,6 +180,17 @@
     "CellFailure": {
       "description": "Structured failure returned by a code executor.",
       "properties": {
+        "exec_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecCodeFailureReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the `exec_code` effect failed before the executor produced a\nresponse, when that is the failure: the closed reason, kept typed\nthrough the protocol driver and the trajectory it records."
+        },
         "kind": {
           "$ref": "#/$defs/CellFailureKind"
         },
@@ -250,6 +261,31 @@
         "replay_key"
       ],
       "type": "object"
+    },
+    "ExecCodeFailureReason": {
+      "description": "Why an `exec_code` effect failed before the executor produced a response.\n\nThis is the closed classification offline trace analysis keys on; the human\ndetail lives in [`ExecCodeFailure::message`]. Serialized snake_case on the\ndurable journal and trace surfaces.",
+      "oneOf": [
+        {
+          "const": "executor_unavailable",
+          "description": "No code executor is installed on the session.",
+          "type": "string"
+        },
+        {
+          "const": "runtime_stopped",
+          "description": "The executor's language runtime exited unexpectedly.",
+          "type": "string"
+        },
+        {
+          "const": "session",
+          "description": "Any other session-layer failure; `message` carries the detail.",
+          "type": "string"
+        },
+        {
+          "const": "erased",
+          "description": "A journal entry written before the reason was typed: only the human\nmessage survived the erasure, so no closed reason can be recovered.",
+          "type": "string"
+        }
+      ]
     },
     "ExecutionScope": {
       "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
