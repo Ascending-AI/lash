@@ -416,6 +416,23 @@ in-process effect host. The server double supports crashes and always-replay
 through its backend constructor. Restate cancellation and process crash
 matrices exercise the production handlers. Upgrade proofs use synthetic-next.
 
+The stale-fence boundary in §9 has two turn-config laws:
+`a_committed_root_redriven_after_a_model_change_answers_from_its_receipt`
+and `an_older_admission_redriven_after_a_model_change_is_fenced_out`.
+Together they replace
+`a_committed_root_redriven_after_a_model_change_refuses_its_stale_epoch`,
+whose refusal of an exact stored commit contradicted §9. The refusal law
+still requires `StaleDriveFence` for changed or unrecorded commits and
+`StoreCommitSuperseded` at the runtime boundary.
+
+Both run in `//crates/lash-restate:lash-restate__unit_test`, under
+`tests::drive_laws_on_the_double`, on SQLite memory and file, plain and
+always-replay. CI's `buck2-tests` job selects that target through
+`//:workspace_core_tests`. The ignored PostgreSQL legs run through
+`scripts/ci/store-tests.sh pg-store`. Reproduction must select the current
+law names and confirm executed cases; selecting the retired name proves
+neither replay nor refusal.
+
 The §1 durable-path rule has a repository gate and a law harness. The gate,
 `replay_read_gate`, is a test over the workspace source (`crates/`,
 `examples/`, `runbooks/`). It finds every replay path: a function whose
