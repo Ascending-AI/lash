@@ -5,6 +5,7 @@ mod e2e_model;
 pub use e2e_model::{E2E_MODEL_KEY, e2e_model_metadata};
 pub mod load;
 pub mod local_restate;
+pub mod overflow_recovery_evidence;
 mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;

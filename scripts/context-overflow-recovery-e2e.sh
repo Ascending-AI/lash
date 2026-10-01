@@ -3,8 +3,9 @@ set -euo pipefail
 
 # Deterministic companion for runbooks/context-overflow-recovery (FIG-1272).
 #
-# No container, no token, no network beyond loopback: a SQLite scratch store
-# set, a scripted provider and a local restate-server, the zero-infra effect
+# No token or provider network: a SQLite scratch store set by default,
+# or a private PostgreSQL service, a scripted provider and a local restate-server,
+# the zero-infra effect
 # engine `scripts/ci/with-service.sh restate` runs (ADR 0104 section 4).
 # The RLM TypeScript row and standard-protocol row have separate artifact
 # directories; the harness makes a fresh data directory for each session.
@@ -131,13 +132,14 @@ mv "$staging/03-observed.jsonl" "$row_dir/03-observed.jsonl"
 rmdir "$staging"
 echo "context-overflow-recovery row: dialect=$dialect (read off the run, not chosen)" | tee -a "$run_log"
 
-python3 - "$dialect" "$row_dir" <<'PY'
+python3 - "$dialect" "$row_dir" "${LASH_CONTEXT_OVERFLOW_STORE:-sqlite}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 dialect = sys.argv[1]
 row = Path(sys.argv[2])
+store = sys.argv[3]
 
 
 def fail(message):
@@ -162,6 +164,8 @@ control = checkpoint("provider_error_control")
 for value in (observed, classified, control):
     if value.get("dialect") != dialect:
         fail(f"checkpoint did not record served dialect {dialect!r}: {value}")
+    if value.get("store") != store:
+        fail(f"checkpoint did not use store {store!r}: {value}")
 
 # The overflow really arrived mid-turn, carried by a tool result the prompt
 # budget never saw. Both arms must be honestly mid-turn.
@@ -203,6 +207,8 @@ if classified["overflow_stop"] != observed["overflow_stop"]:
     fail(f"the classifier arm produced a different stop: {classified}")
 
 standard = checkpoint("standard_plugin_recovered")
+if standard.get("store") != store:
+    fail(f"the standard recovery arm did not use store {store!r}: {standard}")
 if standard.get("protocol") != "standard":
     fail(f"the recovery arm did not use the standard protocol: {standard}")
 if standard["oversized_tool_result_bytes"] < 256 * 1024 or standard["provider_calls"] < 4:
@@ -210,9 +216,15 @@ if standard["oversized_tool_result_bytes"] < 256 * 1024 or standard["provider_ca
 if standard["overflow_stop"] != "context_overflow" or standard["overflow_is_context_overflow"] is not True:
     fail(f"the standard arm lost its overflow outcome: {standard}")
 if standard["plugin_recovery_pending"] is not True:
-    fail(f"the standard plugin did not persist the pending marker: {standard}")
+    fail(f"the standard plugin did not persist the typed pending node: {standard}")
 if standard["plugin_recovery_completed"] is not True:
-    fail(f"the standard plugin did not persist completion: {standard}")
+    fail(f"the standard plugin did not persist the typed completed node: {standard}")
+pending_id = standard.get("plugin_recovery_pending_node_id")
+completed_id = standard.get("plugin_recovery_completed_node_id")
+if not pending_id or not completed_id or pending_id == completed_id:
+    fail(f"the recovery records did not name distinct committed nodes: {standard}")
+if standard["plugin_recovery_pending_retained"] is not True:
+    fail(f"compaction lost the committed pending node: {standard}")
 if standard["plugin_recovery_summary_chars"] <= 0:
     fail(f"the standard plugin produced no recovery summary: {standard}")
 if standard["recovery_frame_reason"] != "compaction" or standard["recovery_frame_moved"] is not True:
@@ -230,7 +242,7 @@ print(
     f"context-overflow-recovery [{dialect}] gates: mid-turn overflow (injected + "
     "classified), own outcome, distinct from provider_error, session continued"
 )
-print("context-overflow-recovery [standard] gates: plugin recovery pending + completed, summary, compaction frame, session continued")
+print(f"context-overflow-recovery [standard] gates: durable typed pending + completed nodes, pending retained, summary, compaction frame, session continued; store={store}")
 PY
 
 echo "context-overflow-recovery e2e passed: rows=2 rlm_dialect=$dialect" | tee -a "$run_log"

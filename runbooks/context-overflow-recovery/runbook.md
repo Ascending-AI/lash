@@ -22,8 +22,10 @@ stays host policy. The kernel's whole obligation is to stop hiding the reason.
 
 **Standard plugin recovery (FIG-4030).** The companion also runs a standard-protocol
 session with the standard-compaction plugin. A native tool call supplies the oversized
-result. The plugin records the pending marker, summarizes the committed overflow,
-records completion, and opens a new compaction frame for the continuing turn.
+result. The plugin commits pending and completed
+`standard_compaction.overflow_recovery` plugin nodes, summarizes the committed
+overflow, and opens a new compaction frame for the continuing turn. Recovery
+records are control nodes, separate from conversation messages and the summary.
 The RLM sessions retain their separate overflow-outcome checks.
 
 **Deterministic companion.** Run with a fresh artifact directory:
@@ -41,7 +43,7 @@ leaves no second RLM dialect to select. It emits
 `context-overflow-recovery e2e passed: rows=N` only after the focused contract test and
 every row's gates pass.
 
-**No container or model token.** The store set is a SQLite scratch
+**Storage and engine.** The default store set is a SQLite scratch
 directory, fresh per row, and the engine is a local `restate-server` the
 companion starts through `scripts/ci/with-service.sh restate` (the zero-infra
 effect engine, ADR 0104); the provider is scripted and makes no provider
@@ -49,6 +51,21 @@ network call. In a Kiln fork, the
 companion builds through the shared Buck2 pool and runs the harness locally.
 Portable CI uses Cargo because it has no Kiln fork. Do not configure a live
 provider: a live model cannot be made to overflow on demand.
+
+For PostgreSQL acceptance, use a private provisioned service:
+
+```sh
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
+  env LASH_CONTEXT_OVERFLOW_STORE=postgres \
+  LASH_CONTEXT_OVERFLOW_ARTIFACT_DIR=<fresh-dir> \
+  bash scripts/context-overflow-recovery-e2e.sh
+```
+
+The service wrapper supplies `LASH_POSTGRES_DATABASE_URL` and provisions the
+schema. PostgreSQL stores session history; scratch SQLite stores attachment
+bytes. Every checkpoint reports `store`, which the companion checks against
+`LASH_CONTEXT_OVERFLOW_STORE`. The only RLM dialect is TypeScript; the second
+row uses the standard protocol. Run both rows on each store.
 
 **Two layers.** The RLM scripted layer calls the oversized tool and finishes through
 TypeScript cells. The standard session uses a native tool call and plain assistant
@@ -157,6 +174,14 @@ Read `standard_plugin_recovered` from the standard row's `03-observed.jsonl`.
 Require `protocol == "standard"`, a tool result of at least 256 KiB, at least four
 provider calls, and `overflow_stop == "context_overflow"`. Require
 `plugin_recovery_pending` and `plugin_recovery_completed` to be true,
+with distinct non-null `plugin_recovery_pending_node_id` and
+`plugin_recovery_completed_node_id`. The pending record must be read from
+durable history before the recovery turn. Require
+`plugin_recovery_pending_retained == true` after that turn: history across the
+old and new frames must still contain that same pending node. Both records
+must have plugin type `standard_compaction.overflow_recovery` and exact bodies
+`{"kind":"pending"}` and `{"kind":"completed"}`. Conversation text, trace
+events and a moved frame alone cannot satisfy these checks. Require
 `plugin_recovery_summary_chars` to be positive, `recovery_frame_reason` to be
 `"compaction"`, and `recovery_frame_moved` to be true. The same session must
 continue successfully without another overflow and produce an assistant answer.

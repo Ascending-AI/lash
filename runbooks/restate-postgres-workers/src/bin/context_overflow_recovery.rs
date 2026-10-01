@@ -1,7 +1,7 @@
 //! Context-overflow recovery harness (`runbooks/context-overflow-recovery`).
 //!
-//! One process, one SQLite scratch store set and a local `restate-server`,
-//! the zero-infra engine (ADR 0104 §4); no container and no token. Driven by
+//! One process, SQLite scratch storage or private PostgreSQL, and a local
+//! `restate-server`, the zero-infra engine (ADR 0104 §4); no model token. Driven by
 //! `scripts/context-overflow-recovery-e2e.sh`, which runs it under
 //! `scripts/ci/with-service.sh restate` and owns the artifact directory and
 //! the exact gates.
@@ -41,6 +41,7 @@ use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
     ToolDefinition, ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
 };
+use lash_restate_postgres_workers_e2e::overflow_recovery_evidence::recovery_record;
 use serde_json::{Value, json};
 
 /// The key the recovery run serves its one scripted model under.
@@ -53,8 +54,6 @@ const OVERSIZED_BYTES: usize = 512 * 1024;
 /// The tool the scripted cell calls to pull the oversized result into the
 /// turn's context.
 const OVERSIZED_TOOL: &str = "oversized_report";
-const RECOVERY_PENDING: &str = "Standard-compaction context-overflow recovery marker (pending):";
-const RECOVERY_COMPLETED: &str = "Standard-compaction context-overflow recovery completed:";
 const RECOVERY_SUMMARY: &str = "Compaction summary:";
 
 #[tokio::main]
@@ -93,10 +92,12 @@ fn emit(checkpoint: &Value) {
     println!("{checkpoint}");
 }
 
-/// Read committed messages across both the old and current frames.
-async fn durable_messages(session: &lash::LashSession) -> Result<Vec<lash_core::Message>> {
+/// Read committed nodes across both the old and current frames.
+async fn durable_history(
+    session: &lash::LashSession,
+) -> Result<Vec<lash::persistence::HistoryNode>> {
     let durable = session.durable();
-    let mut messages = Vec::new();
+    let mut nodes = Vec::new();
     let mut anchor = lash::persistence::HistoryAnchor::Head;
     loop {
         let page = durable
@@ -109,29 +110,14 @@ async fn durable_messages(session: &lash::LashSession) -> Result<Vec<lash_core::
                 },
             )
             .await?;
-        for node in page.nodes {
-            if let lash::persistence::SessionNodePayload::Event {
-                event: lash::persistence::SessionHistoryRecord::Conversation(message),
-            } = node.record.payload
-            {
-                messages.push(message.to_message());
-            }
-        }
+        nodes.extend(page.nodes);
         match page.next {
             Some(next) => anchor = lash::persistence::HistoryAnchor::Cursor(next),
             None => break,
         }
     }
-    messages.reverse();
-    Ok(messages)
-}
-
-fn plugin_record(message: &lash_core::Message, title: &str) -> bool {
-    matches!(message.origin, Some(lash_core::MessageOrigin::Plugin { ref plugin_id, .. }) if plugin_id == "standard_compaction")
-        && message
-            .parts
-            .iter()
-            .any(|part| part.content().starts_with(title))
+    nodes.reverse();
+    Ok(nodes)
 }
 
 /// A standard turn uses a native tool call, then the plugin summarizes the
@@ -146,10 +132,10 @@ async fn standard_plugin_recovery(run_id: &str) -> Result<Value> {
         .await
         .context("standard overflow turn")?;
     let before = session.read_view();
-    let pending = before
-        .messages()
+    let pending_history = durable_history(&session).await?;
+    let pending = pending_history
         .iter()
-        .any(|message| plugin_record(message, RECOVERY_PENDING));
+        .find(|node| recovery_record(&node.record.payload, &json!({"kind": "pending"})));
     let frame_before = before.to_snapshot().current_frame_node_id;
 
     let continued = session
@@ -165,7 +151,16 @@ async fn standard_plugin_recovery(run_id: &str) -> Result<Value> {
         .iter()
         .find(|frame| Some(&frame.frame_node_id) == frame_after.as_ref())
         .map(|frame| frame.reason.as_str().to_string());
-    let history = durable_messages(&session).await?;
+    let history = durable_history(&session).await?;
+    let completed = history
+        .iter()
+        .find(|node| recovery_record(&node.record.payload, &json!({"kind": "completed"})));
+    let pending_retained = pending.is_some_and(|pending| {
+        history.iter().any(|node| {
+            node.record.node_id == pending.record.node_id
+                && recovery_record(&node.record.payload, &json!({"kind": "pending"}))
+        })
+    });
     let summary_chars = after
         .messages()
         .iter()
@@ -181,13 +176,17 @@ async fn standard_plugin_recovery(run_id: &str) -> Result<Value> {
     Ok(json!({
         "checkpoint": "standard_plugin_recovered",
         "protocol": "standard",
+        "store": harness.store,
         "session_id": session_id.as_str(),
         "oversized_tool_result_bytes": harness.served_tool_bytes(),
         "provider_calls": harness.provider_calls(),
         "overflow_stop": stop_tag(&overflow.result.outcome)?,
         "overflow_is_context_overflow": overflow.result.is_context_overflow(),
-        "plugin_recovery_pending": pending,
-        "plugin_recovery_completed": history.iter().any(|message| plugin_record(message, RECOVERY_COMPLETED)),
+        "plugin_recovery_pending": pending.is_some(),
+        "plugin_recovery_pending_node_id": pending.map(|node| &node.record.node_id),
+        "plugin_recovery_pending_retained": pending_retained,
+        "plugin_recovery_completed": completed.is_some(),
+        "plugin_recovery_completed_node_id": completed.map(|node| &node.record.node_id),
         "plugin_recovery_summary_chars": summary_chars,
         "recovery_frame_reason": frame_reason,
         "recovery_frame_moved": frame_before != frame_after,
@@ -235,6 +234,7 @@ async fn overflow_and_recovery(
     Ok(json!({
         "checkpoint": checkpoint,
         "dialect": SERVED_DIALECT,
+        "store": harness.store,
         "session_id": session_id.as_str(),
         "oversized_tool_result_bytes": tool_bytes,
         "provider_calls": harness.provider_calls(),
@@ -277,6 +277,7 @@ async fn provider_error_control(run_id: &str) -> Result<Value> {
     Ok(json!({
         "checkpoint": "provider_error_control",
         "dialect": SERVED_DIALECT,
+        "store": harness.store,
         "session_id": session_id.as_str(),
         "control_stop": stop,
         "control_outcome": outcome,
@@ -317,6 +318,7 @@ enum Protocol {
 
 struct Harness {
     core: lash::LashCore,
+    store: &'static str,
     provider_calls: Arc<AtomicUsize>,
     tool_bytes: Arc<AtomicUsize>,
     _deployment: lash_restate_postgres_workers_e2e::local_restate::LocalDeployment,
@@ -324,7 +326,7 @@ struct Harness {
 }
 
 impl Harness {
-    /// A core on lash-restate's engine over a scratch SQLite store set, its
+    /// A core on lash-restate's engine over the selected store set, its
     /// endpoint served and registered with the local server: each arm is a
     /// deployment of its own, so its scripted provider is the one the server
     /// drives its turns with.
@@ -334,10 +336,34 @@ impl Harness {
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool_bytes = Arc::new(AtomicUsize::new(0));
 
-        let stores = lash_sqlite_store::SqliteStoreSet::open(scratch.path().join("sessions"))
+        let sqlite = lash_sqlite_store::SqliteStoreSet::open(scratch.path().join("sessions"))
             .await
             .context("open the SQLite store set")?;
-        let engine = restate.engine(Arc::new(stores));
+        let (store, stores): (_, Arc<dyn lash::StoreSet>) =
+            match std::env::var("LASH_CONTEXT_OVERFLOW_STORE").as_deref() {
+                Err(std::env::VarError::NotPresent) | Ok("sqlite") => ("sqlite", Arc::new(sqlite)),
+                Ok("postgres") => {
+                    let storage = lash_postgres_store::PostgresStorage::connect_with(
+                        &std::env::var("LASH_POSTGRES_DATABASE_URL")
+                            .context("PostgreSQL recovery requires LASH_POSTGRES_DATABASE_URL")?,
+                        lash_postgres_store::PostgresStoreConfig {
+                            max_connections: 16,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .context("open the PostgreSQL store set")?;
+                    (
+                        "postgres",
+                        Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                            &storage,
+                            sqlite.attachment_store(),
+                        )),
+                    )
+                }
+                selection => bail!("invalid LASH_CONTEXT_OVERFLOW_STORE: {selection:?}"),
+            };
+        let engine = restate.engine(stores);
         let backend = lash::Backend::new(engine.clone());
         let builder = match protocol {
             Protocol::Rlm => {
@@ -419,6 +445,7 @@ impl Harness {
 
         Ok(Self {
             core,
+            store,
             provider_calls,
             tool_bytes,
             _deployment: deployment,
