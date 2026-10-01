@@ -205,6 +205,7 @@ first_party_codes! {
         Self::StoreIncompatible,
         Self::StoreSessionMismatch,
         Self::TurnCancelBindingMismatch,
+        Self::TurnCancelClosureOwnerReleased,
         Self::RuntimeStore,
         Self::RuntimeStoreCorrupt,
         Self::SessionCommandRun,
@@ -1037,6 +1038,9 @@ fn store_refusals_keep_their_codes_and_fields_across_runtime_boundaries() {
     };
     use crate::store::StoreRefusal;
     for refusal in [
+        StoreRefusal::TurnCancelClosureOwnerReleased {
+            participant_id: "sqlite-catalog:released-owner".into(),
+        },
         StoreRefusal::WriterFenced {
             recorded: 2,
             writable: VersionRange::exactly(1),

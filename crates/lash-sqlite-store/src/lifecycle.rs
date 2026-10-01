@@ -210,7 +210,7 @@ impl SqliteStore {
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
         process_registry: Option<&DatabaseTarget>,
-        turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
+        turn_cancel_closure_owner: Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>,
         writable: lash_core_execution::compat::VersionRange,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {

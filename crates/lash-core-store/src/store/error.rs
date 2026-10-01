@@ -63,6 +63,10 @@ pub enum StoreRefusal {
         expected: String,
         presented: String,
     },
+    /// The bound cancellation owner has ended. Rebind the catalog to a live host.
+    TurnCancelClosureOwnerReleased {
+        participant_id: String,
+    },
 }
 
 impl StoreRefusal {
@@ -103,6 +107,11 @@ impl StoreRefusal {
                 expected: expected.clone(),
                 presented: presented.clone(),
             }),
+            StoreError::TurnCancelClosureOwnerReleased { participant_id } => {
+                Some(Self::TurnCancelClosureOwnerReleased {
+                    participant_id: participant_id.clone(),
+                })
+            }
             _ => None,
         }
     }
@@ -121,6 +130,9 @@ impl StoreRefusal {
             }
             Self::TurnCancelBindingMismatch { .. } => {
                 crate::RuntimeErrorCode::TurnCancelBindingMismatch
+            }
+            Self::TurnCancelClosureOwnerReleased { .. } => {
+                crate::RuntimeErrorCode::TurnCancelClosureOwnerReleased
             }
         }
     }
@@ -150,6 +162,9 @@ impl StoreRefusal {
                 expected,
                 presented,
             },
+            Self::TurnCancelClosureOwnerReleased { participant_id } => {
+                StoreError::TurnCancelClosureOwnerReleased { participant_id }
+            }
         }
     }
 }
@@ -389,6 +404,12 @@ pub enum StoreError {
         expected: String,
         presented: String,
     },
+    /// The catalog outlived its physical cancellation owner. The old owner
+    /// cannot authorize or release a participant; rebind to a live host first.
+    #[error(
+        "turn cancellation closure owner for `{participant_id}` has been released; rebind the catalog to a live effect host"
+    )]
+    TurnCancelClosureOwnerReleased { participant_id: String },
     /// A different exact closure operation already occupies this turn's
     /// non-overwritable authorization slot.
     #[error(
@@ -1014,6 +1035,7 @@ impl StoreError {
             | Self::HeadRevisionConflict { .. }
             | Self::TurnCancelIntentChanged { .. }
             | Self::TurnCancelBindingMismatch { .. }
+            | Self::TurnCancelClosureOwnerReleased { .. }
             | Self::TurnCancelClosureConflict { .. }
             | Self::TurnCancelClosureAuthorizationMismatch { .. }
             | Self::TurnCancelClosureLifecyclePinned { .. }
@@ -1128,6 +1150,7 @@ impl StoreError {
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
             Self::TurnCancelIntentChanged { .. } => "TurnCancelIntentChanged",
             Self::TurnCancelBindingMismatch { .. } => "TurnCancelBindingMismatch",
+            Self::TurnCancelClosureOwnerReleased { .. } => "TurnCancelClosureOwnerReleased",
             Self::TurnCancelClosureConflict { .. } => "TurnCancelClosureConflict",
             Self::TurnCancelClosureAuthorizationMismatch { .. } => {
                 "TurnCancelClosureAuthorizationMismatch"

@@ -1,8 +1,8 @@
-//! The shared async connection wrapper over [`tokio_rusqlite::Connection`].
+//! The shared async connection wrapper over SQLite.
 //!
 //! Every module in this crate talks to SQLite through [`SqliteConnection`]:
 //! a single cheaply-clonable handle whose database operations all run on the
-//! connection's own background thread via [`tokio_rusqlite::Connection::call`].
+//! connection's own background thread. The last handle drains and joins it.
 //!
 //! ## Why a wrapper and not raw `tokio_rusqlite::Connection`
 //!
@@ -60,7 +60,8 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
 #[cfg(feature = "perf-witness")]
 use std::time::Instant;
-use tokio_rusqlite::Connection as AsyncConnection;
+mod worker;
+use worker::Connection as AsyncConnection;
 
 use crate::SqliteDatabase;
 use crate::location::DatabaseTarget;
@@ -484,7 +485,7 @@ impl<'c> std::ops::Deref for FencedTx<'c> {
 }
 
 /// Cheaply-clonable async handle to one SQLite database. Cloning shares the
-/// same underlying connection thread (tokio-rusqlite reference-counts it), so
+/// same underlying connection thread, which the last handle joins, so
 /// the `SqliteStore` can keep a single `SqliteConnection` and hand `&self` borrows of
 /// it to every module.
 #[derive(Clone)]
@@ -554,7 +555,8 @@ impl SqliteConnection {
     ) -> tokio_rusqlite::Result<Self> {
         let gate = write_gate(target);
         let reads = read_gate(target);
-        let inner = AsyncConnection::open(target.open_name()).await?;
+        let path = target.open_name();
+        let inner = AsyncConnection::start(move || Connection::open(path)).await?;
         let pragmas = crate::connection_sql::open_pragmas(policy);
         inner
             .call(move |c| {
@@ -583,12 +585,15 @@ impl SqliteConnection {
 
     /// Used by the export/resume call sites that must never mutate the source database.
     pub(crate) async fn open_readonly(target: &DatabaseTarget) -> tokio_rusqlite::Result<Self> {
-        let inner = AsyncConnection::open_with_flags(
-            target.read_only_uri(),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )
+        let uri = target.read_only_uri();
+        let inner = AsyncConnection::start(move || {
+            Connection::open_with_flags(
+                uri,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+            )
+        })
         .await?;
         inner
             .call(move |c| {
@@ -637,12 +642,15 @@ impl SqliteConnection {
         target: &DatabaseTarget,
         busy_timeout: Duration,
     ) -> rusqlite::Result<()> {
-        let connection = AsyncConnection::open_with_flags(
-            target.uri(),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )
+        let uri = target.uri();
+        let connection = AsyncConnection::start(move || {
+            Connection::open_with_flags(
+                uri,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+            )
+        })
         .await?;
         let result = flatten(
             connection

@@ -111,7 +111,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 message: error.to_string(),
             })?;
         if authorization.admitted_scope().session_id().is_none()
-            && let Some(owner) = self.turn_cancel_closure_owner_binding()
+            && let Some(owner) = self.turn_cancel_closure_owner_binding()?
         {
             owner
                 .register(authorization.admitted_scope(), authorization.binding_id())

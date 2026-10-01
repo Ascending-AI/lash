@@ -504,6 +504,9 @@ pub enum RuntimeErrorCode {
     /// The deployment runs over stores whose session admitted another
     /// cancellation authority.
     TurnCancelBindingMismatch,
+    /// A catalog retained a binding to an effect host that has ended.
+    /// Rebind the catalog before authorizing or retiring cancellation work.
+    TurnCancelClosureOwnerReleased,
     RuntimeStore,
     /// Durable state is corrupt or an authoritative monotonic counter has
     /// exhausted its representable domain. Retrying unchanged cannot heal it.
@@ -892,6 +895,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectControllerTaskClosed => "runtime_effect_controller_task_closed",
             Self::WriterFenced => "writer_fenced",
             Self::TurnCancelBindingMismatch => "turn_cancel_binding_mismatch",
+            Self::TurnCancelClosureOwnerReleased => "turn_cancel_closure_owner_released",
             Self::StoreIncompatible => "store_incompatible",
             Self::StoreSessionMismatch => "store_session_mismatch",
             Self::RuntimeStore => "runtime_store",
@@ -1173,6 +1177,7 @@ impl RuntimeErrorCode {
             "runtime_effect_controller_task_closed" => Self::RuntimeEffectControllerTaskClosed,
             "writer_fenced" => Self::WriterFenced,
             "turn_cancel_binding_mismatch" => Self::TurnCancelBindingMismatch,
+            "turn_cancel_closure_owner_released" => Self::TurnCancelClosureOwnerReleased,
             "store_incompatible" => Self::StoreIncompatible,
             "store_session_mismatch" => Self::StoreSessionMismatch,
             "runtime_store" => Self::RuntimeStore,

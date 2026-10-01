@@ -68,7 +68,12 @@ mod recording_store;
 pub mod runtime_helpers;
 #[cfg(feature = "testing")]
 pub mod runtime_internals;
+#[cfg(target_os = "linux")]
+mod thread_census;
 mod turn_drive;
+
+#[cfg(target_os = "linux")]
+pub use thread_census::ThreadCensus;
 
 pub use turn_drive::TestTurnDrive;
 

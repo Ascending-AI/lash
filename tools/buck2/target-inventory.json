@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 217,
+  "cargo_target_count": 218,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4[static]",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce[static]",
@@ -46422,7 +46422,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_41763c4b"
     ]
   },
-  "generated_label_count": 283,
+  "generated_label_count": 284,
   "packages": [
     {
       "declared_features": [
@@ -48552,6 +48552,15 @@
           "clippy_label": "//crates/lash-restate-test:process_successor_after_prune__test[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-restate-test:process_successor_after_prune__test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-restate-test:resource_capacity__test",
+          "cargo": "resource_capacity",
+          "check_label": "//crates/lash-restate-test:resource_capacity__test[check]",
+          "clippy_label": "//crates/lash-restate-test:resource_capacity__test[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:resource_capacity__test",
           "tags": []
         },
         {
@@ -51377,6 +51386,7 @@
     "//crates/lash-restate-test:one_driver__test": 300,
     "//crates/lash-restate-test:process_crash_replay__test": 300,
     "//crates/lash-restate-test:process_successor_after_prune__test": 300,
+    "//crates/lash-restate-test:resource_capacity__test": 300,
     "//crates/lash-restate-test:root_close__test": 300,
     "//crates/lash-restate-test:server_semantics__test": 300,
     "//crates/lash-restate-test:session_driver__test": 300,
@@ -51917,6 +51927,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",
@@ -52201,6 +52212,7 @@
     "//crates/lash-restate-test:one_driver__test[check]",
     "//crates/lash-restate-test:process_crash_replay__test[check]",
     "//crates/lash-restate-test:process_successor_after_prune__test[check]",
+    "//crates/lash-restate-test:resource_capacity__test[check]",
     "//crates/lash-restate-test:root_close__test[check]",
     "//crates/lash-restate-test:server_semantics__test[check]",
     "//crates/lash-restate-test:session_driver__test[check]",
@@ -52485,6 +52497,7 @@
     "//crates/lash-restate-test:one_driver__test[clippy.txt]",
     "//crates/lash-restate-test:process_crash_replay__test[clippy.txt]",
     "//crates/lash-restate-test:process_successor_after_prune__test[clippy.txt]",
+    "//crates/lash-restate-test:resource_capacity__test[clippy.txt]",
     "//crates/lash-restate-test:root_close__test[clippy.txt]",
     "//crates/lash-restate-test:server_semantics__test[clippy.txt]",
     "//crates/lash-restate-test:session_driver__test[clippy.txt]",
@@ -52769,6 +52782,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",
@@ -53054,6 +53068,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",
@@ -53272,6 +53287,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",
@@ -53397,6 +53413,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",
@@ -53552,6 +53569,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",
@@ -53899,6 +53917,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",
@@ -54073,6 +54092,7 @@
     "//crates/lash-restate-test:one_driver__test",
     "//crates/lash-restate-test:process_crash_replay__test",
     "//crates/lash-restate-test:process_successor_after_prune__test",
+    "//crates/lash-restate-test:resource_capacity__test",
     "//crates/lash-restate-test:root_close__test",
     "//crates/lash-restate-test:server_semantics__test",
     "//crates/lash-restate-test:session_driver__test",

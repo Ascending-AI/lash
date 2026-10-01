@@ -188,15 +188,10 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
 #[async_trait::async_trait]
 impl lash_core_execution::DeploymentStore for SqliteStore {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
-        let catalog = self.location.target().canonical_name();
         *self
             .turn_cancel_closure_owner
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            Some(lash_core_execution::TurnCancelClosureOwnerBinding::new(
-                format!("sqlite-catalog:{catalog}"),
-                Arc::clone(effect_host),
-            ));
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::downgrade(effect_host));
     }
 
     async fn artifact_frame_is_retained(
@@ -603,7 +598,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             })
             .await
             .map_err(sqlite_error)??;
-        if let Some(owner) = self.turn_cancel_closure_owner_binding() {
+        if let Some(owner) = self.turn_cancel_closure_owner_binding()? {
             owner
                 .release(&scope)
                 .await

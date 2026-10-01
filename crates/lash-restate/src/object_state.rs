@@ -115,6 +115,10 @@ impl FleetView {
         Self(Some(store))
     }
 
+    pub(crate) fn weak_store(&self) -> Option<std::sync::Weak<dyn FleetFormatStore>> {
+        self.0.as_ref().map(Arc::downgrade)
+    }
+
     /// The epoch this invocation writes under.
     pub(crate) fn fleet_format(&self) -> FleetFormat {
         self.0

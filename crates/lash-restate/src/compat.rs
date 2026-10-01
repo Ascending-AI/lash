@@ -140,7 +140,7 @@ tokio::task_local! {
 /// runs under no lash handler: a host's own handler (a host workflow that
 /// sends turns, starts processes or opens effect scopes through its own
 /// controller). Set by [`crate::RestateEngine::endpoint_builder`].
-static HOST_FLEET: std::sync::RwLock<Option<crate::object_state::FleetView>> =
+static HOST_FLEET: std::sync::RwLock<Option<std::sync::Weak<dyn lash_core::FleetFormatStore>>> =
     std::sync::RwLock::new(None);
 
 impl DeploymentWire {
@@ -177,7 +177,8 @@ impl DeploymentWire {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .map(crate::object_state::FleetView::fleet_format);
+            .and_then(std::sync::Weak::upgrade)
+            .map(|store| store.fleet_format());
         let fleet = registered.unwrap_or_else(|| {
             static UNBOUND: std::sync::Once = std::sync::Once::new();
             UNBOUND.call_once(|| {
@@ -199,7 +200,7 @@ impl DeploymentWire {
     pub(crate) fn serve_host_fleet(fleet: crate::object_state::FleetView) {
         *HOST_FLEET
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(fleet);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = fleet.weak_store();
     }
 
     /// Run `handler` under this wire.
@@ -330,9 +331,8 @@ mod tests {
             }
         }
         let n_epoch = lash_core::FleetFormat::from_version(1);
-        super::DeploymentWire::serve_host_fleet(crate::object_state::FleetView::of(
-            std::sync::Arc::new(Recorded(n_epoch)),
-        ));
+        let store = std::sync::Arc::new(Recorded(n_epoch));
+        super::DeploymentWire::serve_host_fleet(crate::object_state::FleetView::of(store.clone()));
         assert_eq!(
             super::DeploymentWire::current().journaled(),
             VersionRange::exactly(1),

@@ -676,6 +676,9 @@ mod classification_tests {
         use crate::compat::{CompatRefusal, VersionRange};
         use crate::store::StoreRefusal;
         for refusal in [
+            StoreRefusal::TurnCancelClosureOwnerReleased {
+                participant_id: "postgres-catalog:released-owner".into(),
+            },
             StoreRefusal::WriterFenced {
                 recorded: 2,
                 writable: VersionRange::exactly(1),

@@ -201,7 +201,7 @@ pub struct SqliteStore {
     /// The durable-core database this store is open on. Held so a store
     /// opened on a memory backend keeps its database alive.
     location: DatabaseLocation,
-    turn_cancel_closure_owner: Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>,
+    turn_cancel_closure_owner: Mutex<Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>>,
     process_registry: Option<DatabaseTarget>,
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
@@ -441,11 +441,28 @@ impl SqliteStore {
 
     fn turn_cancel_closure_owner_binding(
         &self,
-    ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {
-        self.turn_cancel_closure_owner
+    ) -> Result<Option<lash_core_execution::TurnCancelClosureOwnerBinding>, StoreError> {
+        let owner = self
+            .turn_cancel_closure_owner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+            .clone();
+        owner
+            .map(|owner| {
+                let participant_id =
+                    format!("sqlite-catalog:{}", self.location.target().canonical_name());
+                let owner =
+                    owner
+                        .upgrade()
+                        .ok_or_else(|| StoreError::TurnCancelClosureOwnerReleased {
+                            participant_id: participant_id.clone(),
+                        })?;
+                Ok(lash_core_execution::TurnCancelClosureOwnerBinding::new(
+                    participant_id,
+                    owner,
+                ))
+            })
+            .transpose()
     }
 }
 

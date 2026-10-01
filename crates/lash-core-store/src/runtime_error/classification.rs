@@ -414,6 +414,7 @@ impl RuntimeErrorCode {
             Self::WriterFenced | Self::StoreIncompatible | Self::StoreSessionMismatch => Terminal,
             // the session admitted another cancellation authority.
             Self::TurnCancelBindingMismatch => Terminal,
+            Self::TurnCancelClosureOwnerReleased => Terminal,
             Self::RuntimeStore => Retryable,
             // durable state is corrupt or a counter is exhausted.
             Self::RuntimeStoreCorrupt => Terminal,

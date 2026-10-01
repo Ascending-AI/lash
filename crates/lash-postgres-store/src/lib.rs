@@ -719,7 +719,7 @@ pub struct PostgresStore {
     fence: guarded_tx::WriterFence,
     clock: Arc<dyn lash_core_execution::Clock>,
     turn_cancel_closure_owner:
-        Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
+        Arc<std::sync::Mutex<Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>>>,
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(any(test, feature = "testing"))]
