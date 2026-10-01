@@ -808,3 +808,4 @@ loadtest-chart-check:
   python3 "{{repo}}/scripts/test_loadtest_faults.py"
   python3 "{{repo}}/scripts/test_loadtest_upgrade.py"
   python3 "{{repo}}/scripts/test_loadtest_manifest.py"
+  python3 "{{repo}}/scripts/test_loadtest_repro.py"

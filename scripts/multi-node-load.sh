@@ -117,6 +117,13 @@ cleanup() {
     for pod in $("${k[@]}" get pods -o name 2>/dev/null); do
       "${k[@]}" logs "$pod" --all-containers --prefix > "$run/${pod#pod/}.log" 2>&1 || true
     done
+    # A failed load run keeps its repro (FIG-4264): the witness ledgers, the
+    # outer and open invocations, and the affected sessions' turn journals,
+    # read before the namespace goes. A green run skips it.
+    if ((status != 0)) && [[ -f "$run/load-values.yaml" ]]; then
+      python3 scripts/loadtest_repro.py --run-dir "$run" --kubeconfig "$KUBECONFIG" \
+        --namespace "$namespace" --name "$resource" > "$run/repro-capture.log" 2>&1 || true
+    fi
     "${k[@]}" delete namespace "$namespace" --wait=true --timeout=120s > "$run/namespace-cleanup.log" 2>&1 || status=1
     if kubectl --kubeconfig "$KUBECONFIG" get namespace "$namespace" >/dev/null 2>&1; then status=1; fi
     kind delete cluster --name "$name" > "$run/cluster-cleanup.log" 2>&1 || status=1

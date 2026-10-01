@@ -436,6 +436,8 @@ Normalization uses only the event's recorded anchor. Its absolute timestamp erro
 
 The accepted population includes all inputs accepted through the injection interval's upper bound. Every one must reach a durable terminal by the backlog recovery interval's upper bound. The controller records absolute witness microseconds for first service progress and for the observation where its full recovery conditions hold. The existing stable hold and durability verdict remain required. These bounds qualify the collection; they establish no performance budget.
 
+A failed load run keeps its repro before the recipe deletes the namespace. `scripts/loadtest_repro.py` writes `raw-journals/<utc>/` in the run directory. It contains both witness ledgers, every outer `E2eLoadWorkflow` invocation and every open invocation with their journals. For each affected session it also writes `session-<n>-invocations.json`, `session-<n>-open.json` and `session-<n>-journal-<g>.json`: that session's `LashSession` and `LashTurn` invocations, the open ones apart, and all their journals. A session is affected when a witness violation, a driver diagnosis or a failed fault names one of its operations. The witness events map the operation to its session, and the session's turns are the `LashTurn` keys that start with `{len}:{session}`. `complete.json` lists the sessions, and `repro-capture.log` records the attempt. A green run skips the capture.
+
 ## PostgreSQL capacity
 
 `postgres.maxConnections` must cover
