@@ -1552,6 +1552,15 @@ pub(super) async fn execute_test_code(
 ) -> RlmExecutionState {
     let double =
         crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    // This call opens a new cell backend, so its worker accounting belongs
+    // to that backend too. Keep the pool and VM state shared across cells.
+    let workers = state
+        .vm
+        .state()
+        .service()
+        .clone()
+        .with_recovery_store(double.lash_backend().worker_recovery());
+    state.vm.state_mut().replace_service(workers);
     let handler = double
         .open_handler(crate::testing::default_cell_scope())
         .await

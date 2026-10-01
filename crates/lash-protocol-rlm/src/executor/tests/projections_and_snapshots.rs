@@ -927,6 +927,55 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
     });
 }
 
+async fn exhaust_previous_growth_cell_cpu(state: &RlmExecutionState) {
+    use lash_core::store::worker_recovery::{WorkerRecoveryError, WorkerRecoveryLimits};
+
+    let workers = state.vm.state().service();
+    let store = workers.recovery_store().expect("previous cell accounting");
+    let backend = crate::testing::sqlite_memory_store_backend().await;
+    let context = lash_core::testing::code_execution_context(&backend);
+    let address = context
+        .parent_invocation()
+        .and_then(lash_core::RuntimeInvocation::effect_address)
+        .expect("cell address");
+    let scope = lash_vm_broker::CodeCallIdentities::cell(
+        lash_core::EffectOpener::for_scope(&context.admitted_scope()).expect("cell opener"),
+        address.replay_key.clone(),
+    )
+    .scope();
+    let limits = WorkerRecoveryLimits {
+        max_attempts: workers.config().deadlines.max_attempts,
+        max_cpu_nanos: workers
+            .config()
+            .deadlines
+            .cumulative_cpu
+            .as_nanos()
+            .try_into()
+            .expect("CPU budget fits the accounting counter"),
+    };
+    let claim = store
+        .reserve(&scope, limits)
+        .await
+        .expect("previous cell claim");
+    assert!(
+        claim.baseline.cpu_nanos > 0,
+        "the previous cell charged this scope"
+    );
+    let mut exhausted = claim.baseline;
+    exhausted.cpu_nanos = limits.max_cpu_nanos;
+    store
+        .settle(&claim, exhausted)
+        .await
+        .expect("exhaust previous cell CPU");
+    assert!(
+        matches!(
+            store.reserve(&scope, limits).await,
+            Err(WorkerRecoveryError::CpuExhausted)
+        ),
+        "the previous cell's accounting is exhausted before the next cell"
+    );
+}
+
 /// The failure geometry this arc exists for: a research session whose state
 /// is many mid-size composite bindings rather than a few large ones. Three
 /// live jitindex episodes committed 1.52/1.32/1.24 MB of exactly this shape
@@ -967,6 +1016,11 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("initial snapshot");
         state.acknowledge_execution_state_capture();
+
+        // Each helper call opens an independent cell backend. Exhaust the
+        // seed cell's accounting without consuming CPU, so budget leakage
+        // fails deterministically while the byte oracle stays unchanged.
+        exhaust_previous_growth_cell_cpu(&state).await;
 
         let mut measured = Vec::new();
         for turn in 0..20 {
