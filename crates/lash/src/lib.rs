@@ -1281,8 +1281,8 @@ pub mod runtime {
     };
     pub use lash_core::facade_support::CommittedGroupChildFinal;
     pub use lash_core::facade_support::{
-        ToolChildDriver, ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts,
-        UnrecordedSessionSources,
+        ToolChildDriver, ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest,
+        ToolChildSessionFacts, UnrecordedSessionSources,
     };
     pub use lash_core::runtime::DirectUsage;
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;

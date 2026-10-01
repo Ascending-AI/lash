@@ -24,6 +24,13 @@ pub trait GroupExecutors: Send + Sync {
     /// it with the typed refusal naming the capability instead (FIG-4550). It
     /// resolves nothing and may be asked any number of times. The default is
     /// `None`: a resolver that cannot tell claims nothing permanent.
+    ///
+    /// The engine records the first answer it gets and every worker of the
+    /// deployment must give the same one, so an implementation answers only
+    /// from what holds on all of them: what the envelope recorded and what
+    /// the deployment registered or wired. What this worker happens to hold
+    /// now, a live opener or a pinned context, is where the child was placed;
+    /// a miss that another worker would not have is a retry (FIG-4590).
     fn missing_capability(
         &self,
         _envelope: &RuntimeEffectEnvelope,

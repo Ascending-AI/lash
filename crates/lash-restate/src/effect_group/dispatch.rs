@@ -362,8 +362,8 @@ impl EffectGroupDispatchImpl {
 
         // A deployment that can never execute the child settles it with the
         // typed refusal naming what it lacks, so the opener's rank wait
-        // resolves; one that only does not carry it now fails its attempt
-        // below, which retries on a carrying deployment (FIG-4550).
+        // resolves; a worker that only does not carry it now fails its attempt
+        // below, which retries on a carrying one (FIG-4550, FIG-4590).
         if let EffectGroupChildRoute::Unroutable { missing } =
             self.record_child_route(&ctx, request).await?
         {
@@ -523,11 +523,12 @@ impl EffectGroupDispatchImpl {
     /// Decides, once, whether the child is this lane's to run at all, and
     /// journals the answer.
     ///
-    /// The resolver's answer is a fact of the deployment that gives it, and a
-    /// lane's deployments need not agree: the recorded route is what keeps a
-    /// retry on another deployment on the branch the first attempt took. The
-    /// step resolves no executor, so a resolver that hands each one out once
-    /// still has it for the child's run.
+    /// The resolver answers from what the child recorded and what its
+    /// deployment wired, never from what the worker asked holds now, so the
+    /// lane's workers agree (FIG-4590). The recorded route keeps every replay
+    /// on the branch the first attempt took all the same. The step resolves
+    /// no executor, so a resolver that hands each one out once still has it
+    /// for the child's run.
     async fn record_child_route(
         &self,
         ctx: &SharedWorkflowContext<'_>,

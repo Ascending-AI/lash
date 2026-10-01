@@ -71,7 +71,7 @@ use super::executor::{
     ScopedEffectController,
 };
 use super::live_openers::{LiveOpenerContext, LiveOpenerRegistry};
-use super::tool_child::ToolChildRequest;
+use super::tool_child::{ToolChildOpenerContext, ToolChildRequest};
 use super::tool_settlement::ToolSettlement;
 use crate::tool_dispatch::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 use crate::{
@@ -126,9 +126,15 @@ pub struct ToolChildHost {
     /// one live source makes the host ambiguous (see
     /// [`ContextSourceInstall`]).
     context_source: Arc<std::sync::Mutex<Vec<std::sync::Weak<dyn ToolChildContextSource>>>>,
+    /// Whether a context source was ever installed here. A deployment's
+    /// wiring installs one or does not, on every worker alike, so "never" is
+    /// a fact of the deployment; whether an installed one is still alive is a
+    /// fact of this process now (FIG-4590).
+    context_source_installed: Arc<AtomicBool>,
     /// Testing only: the resolver a law installs *behind* this host, asked
-    /// for a command no group child can be (a law's synthetic children). A
-    /// conformance world whose laws open synthetic groups and whose runtime
+    /// for a command no group child can be (a law's synthetic children) and
+    /// for a tool child this host has no context for (a law's other worker).
+    /// A conformance world whose laws open synthetic groups and whose runtime
     /// also forms product tool groups needs both answers on one controller,
     /// and a controller has one registered resolver.
     #[cfg(any(test, feature = "testing"))]
@@ -161,6 +167,7 @@ impl ToolChildHost {
             process_env_store: Arc::new(std::sync::Mutex::new(process_env_store)),
             clock: Arc::new(std::sync::Mutex::new(clock)),
             context_source: Arc::new(std::sync::Mutex::new(Vec::new())),
+            context_source_installed: Arc::new(AtomicBool::new(false)),
             #[cfg(any(test, feature = "testing"))]
             law_fallback: Arc::new(std::sync::OnceLock::new()),
         })
@@ -200,24 +207,29 @@ impl ToolChildHost {
 
     /// Retain this opener's context for the tool positions of a group before
     /// formation takes its first await. A handler may suspend at that await.
+    ///
+    /// Answers whether the opener had a context to lend, which the group's
+    /// tool children record ([`ToolChildOpenerContext`]): the forming process
+    /// is the opener's own, so this is the one place that fact is not a
+    /// matter of worker placement (FIG-4590).
     pub fn pin_open_tool_group(
         &self,
         group_key: &str,
         opener: &EffectOpener,
         positions: impl IntoIterator<Item = usize>,
-    ) {
-        if !self.pin_handler_groups.load(Ordering::Acquire) {
-            return;
-        }
+    ) -> ToolChildOpenerContext {
         let Some(context) = self.openers.context_for(opener) else {
-            return;
+            return ToolChildOpenerContext::Absent;
         };
-        let mut pinned = self.pinned_children.lock_recover();
-        for position in positions {
-            pinned
-                .entry((group_key.to_string(), position))
-                .or_insert_with(|| context.clone());
+        if self.pin_handler_groups.load(Ordering::Acquire) {
+            let mut pinned = self.pinned_children.lock_recover();
+            for position in positions {
+                pinned
+                    .entry((group_key.to_string(), position))
+                    .or_insert_with(|| context.clone());
+            }
         }
+        ToolChildOpenerContext::Lent
     }
 
     /// The installed context source, while exactly one is alive.
@@ -526,8 +538,9 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
     ///   turn "this worker cannot reach that opener" into a terminal the
     ///   journal keeps forever.
     ///
-    /// [`missing_capability`](Self::missing_capability) says which miss no
-    /// retry repairs.
+    /// [`missing_capability`](Self::missing_capability) says which child no
+    /// worker of the deployment can run, from what the child recorded and
+    /// what the deployment wired, never from this second `None`.
     ///
     /// The `Sleep`/`AwaitEvent` executors are built with turn-cancel
     /// observation off: a group child's cancellation is the group's — the
@@ -541,7 +554,15 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
         match &envelope.command {
             RuntimeEffectCommand::ToolInvocation { request } => {
-                let opener = self.child_opener(&request.scope.opener, envelope)?;
+                let Some(opener) = self.child_opener(&request.scope.opener, envelope) else {
+                    #[cfg(any(test, feature = "testing"))]
+                    return self
+                        .law_fallback
+                        .get()
+                        .and_then(|fallback| fallback.executor_for(envelope));
+                    #[cfg(not(any(test, feature = "testing")))]
+                    return None;
+                };
                 Some(crate::runtime::effect::executor::owned_runner_executor(
                     Box::new(ToolChildRunner {
                         host: self.clone(),
@@ -585,20 +606,26 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
         }
     }
 
-    /// A tool child with no live opener and no pin here is built from the
-    /// deployment's context source. With none installed nothing on this
-    /// deployment can build it, and the opener that could lend its context is
-    /// itself waiting on the child (FIG-4550). Every other child is this
-    /// deployment's to run or to leave to a carrying one.
+    /// A tool child runs under its opener's lent context or one the
+    /// deployment's context source builds. It can never run when both are
+    /// ruled out for the whole deployment: its request records that its
+    /// opener had no context to lend where it formed the group, and no
+    /// context source was ever installed (FIG-4550).
+    ///
+    /// Whether *this* worker holds the opener or a pin is not asked
+    /// (FIG-4590): a child whose opener lent a context runs on the worker
+    /// that holds it, and landing on another is a miss of placement that a
+    /// retry repairs. Every other child is this deployment's to run or to
+    /// leave to a carrying one.
     fn missing_capability(
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<crate::GroupChildCapability> {
         match &envelope.command {
-            RuntimeEffectCommand::ToolInvocation { request } => self
-                .child_opener(&request.scope.opener, envelope)
-                .is_none()
-                .then_some(crate::GroupChildCapability::ToolChildContextSource),
+            RuntimeEffectCommand::ToolInvocation { request } => (request.session.opener_context
+                == ToolChildOpenerContext::Absent
+                && !self.context_source_installed.load(Ordering::Acquire))
+            .then_some(crate::GroupChildCapability::ToolChildContextSource),
             RuntimeEffectCommand::Sleep { .. } | RuntimeEffectCommand::AwaitEvent { .. } => None,
             #[cfg(any(test, feature = "testing"))]
             _ => self
@@ -618,7 +645,8 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
 #[cfg(any(test, feature = "testing"))]
 impl ToolChildHost {
     /// Installs `fallback` behind this host: asked only for a command no
-    /// group child can be. Set once; a second call keeps the first.
+    /// group child can be, and for the executor of a tool child this host
+    /// has no context for. Set once; a second call keeps the first.
     pub fn with_law_fallback(
         self: &Arc<Self>,
         fallback: Arc<dyn super::group_executors::GroupExecutors>,
@@ -1779,6 +1807,7 @@ pub mod runtime_ops {
             &self,
             source: &Arc<dyn ToolChildContextSource>,
         ) -> ContextSourceInstall {
+            self.context_source_installed.store(true, Ordering::Release);
             let mut installed = self.context_source.lock_recover();
             installed.retain(|existing| existing.strong_count() > 0);
             if !installed.iter().any(|existing| {

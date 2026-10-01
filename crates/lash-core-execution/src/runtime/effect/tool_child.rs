@@ -179,7 +179,7 @@ use super::executor::RuntimeEffectControllerError;
 ///         path = "crates/lash-sansio/src/causal.rs",
 ///         path = "crates/lash-sansio/src/tool_call_id.rs", ToolChildRequest, ToolChildScope,
 ///         ToolAttemptLineage, ToolCallId, ToolChildAdmission, ToolChildCompletionRouting,
-///         ToolChildSessionFacts,
+///         ToolChildSessionFacts, ToolChildOpenerContext,
 ///         UnrecordedSessionSources, ToolDefinition, SessionToolAccessWire, SubagentSessionContext,
 ///         EffectOpener, AdmittedScope, AdmittedScopeWire, TurnControlBindingId, PreparedToolCall,
 ///         ToolExecutionGrant, RuntimeInvocation, RuntimeAttribution, RuntimeSubject, RuntimeReplay,
@@ -201,7 +201,10 @@ use super::executor::RuntimeEffectControllerError;
 pub const TOOL_CHILD_REQUEST_VERSION: u16 = 10;
 
 mod session_facts;
-pub use session_facts::{ToolChildRebuildRefusal, ToolChildSessionFacts, UnrecordedSessionSources};
+pub use session_facts::{
+    ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildSessionFacts,
+    UnrecordedSessionSources,
+};
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///

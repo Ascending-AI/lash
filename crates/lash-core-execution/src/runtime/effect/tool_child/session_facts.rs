@@ -40,6 +40,40 @@ pub struct ToolChildSessionFacts {
     /// The sources the opener's context had that no deployment can rebuild.
     #[serde(default)]
     pub unrecorded: UnrecordedSessionSources,
+    /// Whether the opener had a live context to lend its children at group
+    /// open, as its own process judged it.
+    #[serde(default, skip_serializing_if = "ToolChildOpenerContext::is_lent")]
+    pub opener_context: ToolChildOpenerContext,
+}
+
+/// Whether a group's opener had a live context to lend its tool children at
+/// group open (FIG-4590).
+///
+/// Judged once, by the process that forms the group, which is the opener's
+/// own: whether the opener is live there is not a matter of which worker
+/// asks. Every other worker reads the recorded answer. Whether *it* holds
+/// that opener says only where the child was placed, so it decides nothing
+/// about the deployment.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolChildOpenerContext {
+    /// The opener was live where it formed the group: the worker that holds
+    /// its context runs the child, and a worker that does not leaves the
+    /// child to it.
+    #[default]
+    Lent,
+    /// The opener had no live context where it formed the group, so no
+    /// worker has one to lend: only a deployment's context source can build
+    /// the child's.
+    Absent,
+}
+
+impl ToolChildOpenerContext {
+    /// Whether the opener lent a context: the unrecorded default.
+    #[must_use]
+    pub fn is_lent(&self) -> bool {
+        matches!(self, Self::Lent)
+    }
 }
 
 /// Sources of an opener's context that have no recorded form. Each is a

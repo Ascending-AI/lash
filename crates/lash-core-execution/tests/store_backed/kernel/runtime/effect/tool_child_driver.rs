@@ -468,9 +468,31 @@ mod tests {
         );
         assert_eq!(
             crate::GroupExecutors::missing_capability(tool_children.as_ref(), &envelope),
+            None,
+            "its opener lent a context, so the worker that holds it runs the child: this \
+             worker not holding it is where the child landed, not what the deployment lacks"
+        );
+        let opener = crate::EffectOpener::turn("child-session", "turn");
+        assert_eq!(
+            tool_children.pin_open_tool_group("group", &opener, [0]),
+            crate::runtime::effect::ToolChildOpenerContext::Absent,
+            "an opener that is not live where it forms its group lends nothing"
+        );
+        let unlent = {
+            let mut request = request();
+            request.session.opener_context = crate::runtime::effect::ToolChildOpenerContext::Absent;
+            crate::RuntimeEffectEnvelope::new(
+                envelope.invocation.clone(),
+                RuntimeEffectCommand::ToolInvocation {
+                    request: Box::new(request),
+                },
+            )
+        };
+        assert_eq!(
+            crate::GroupExecutors::missing_capability(tool_children.as_ref(), &unlent),
             Some(crate::GroupChildCapability::ToolChildContextSource),
-            "with no context source installed nothing on this deployment builds the \
-             child's context, so the miss is the deployment's and not this attempt's"
+            "no opener lent a context and no context source was ever installed, so nothing \
+             on the deployment builds the child's context"
         );
 
         let lent_dispatch = lent();
@@ -489,6 +511,16 @@ mod tests {
         assert!(
             crate::GroupExecutors::executor_for(tool_children.as_ref(), &envelope).is_some(),
             "the same child routes once its opener is live here"
+        );
+        assert_eq!(
+            tool_children.pin_open_tool_group("group", &opener, [0]),
+            crate::runtime::effect::ToolChildOpenerContext::Lent,
+            "a live opener lends its context to the group it forms"
+        );
+        assert_eq!(
+            crate::GroupExecutors::missing_capability(tool_children.as_ref(), &unlent),
+            Some(crate::GroupChildCapability::ToolChildContextSource),
+            "the recorded answer stands wherever the child lands"
         );
         drop(guard);
         assert!(

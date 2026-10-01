@@ -5,7 +5,10 @@
 //! executor for it. A deployment that only does not carry the child now
 //! leaves it accepted and its attempt retries; one whose wiring lacks what
 //! the child needs can never run it, and retrying there is a loop its opener
-//! waits on forever. Registered through `tool_child_unroutable_tests!`.
+//! waits on forever. Which of the two a miss is, is the deployment's fact and
+//! never one worker's: a child whose opener is live on another worker of the
+//! same deployment is only misplaced (FIG-4590). Registered through
+//! `tool_child_unroutable_tests!`.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -149,7 +152,8 @@ fn settle_one_child(
 ///   for it. The child stays accepted across at least
 ///   [`UNCARRIED_ATTEMPTS`] attempts, holds no rank meanwhile, and settles
 ///   with its own outcome once the resolver carries it.
-/// * **Never.** A tool child whose opener is live nowhere, on a host with no
+/// * **Never.** A tool child whose opener had no context to lend where it
+///   formed the group, which the child records, on a deployment with no
 ///   tool-child context source: nothing on the deployment can build the
 ///   context it runs under, and the opener that could lend one is the caller
 ///   waiting on this child. It settles `Failed` with
@@ -171,7 +175,7 @@ pub async fn a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_re
     .await
     .host;
     let later = Arc::new(CarriedLater::default());
-    install_child_host(&host, &process_env_store)
+    let child_host = install_child_host(&host, &process_env_store)
         .with_law_fallback(Arc::clone(&later) as Arc<dyn crate::GroupExecutors>);
 
     // Not carried: the child retries, and settles once it is carried.
@@ -226,7 +230,19 @@ pub async fn a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_re
         let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id);
         let admitted = crate::admit(scope.clone());
         let group_key = format!("{prefix}-unroutable-group");
-        let group = single_leaf_group(
+        // The opener forms its group as a session's does, and its own worker
+        // answers what it lends: nothing, for it never registered.
+        let opener_context = child_host.pin_open_tool_group(
+            &group_key,
+            &crate::EffectOpener::for_scope(&admitted).expect("a turn scope derives an opener"),
+            [0],
+        );
+        assert_eq!(
+            opener_context,
+            crate::runtime::effect::ToolChildOpenerContext::Absent,
+            "an opener that is not live where it forms its group lends no context"
+        );
+        let group = single_leaf_group_opened_with(
             &scope,
             &session_id,
             &group_key,
@@ -234,6 +250,7 @@ pub async fn a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_re
             LEAF_RECOVERY,
             ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&host, &admitted).await,
+            opener_context,
         );
         let settled = Arc::new(std::sync::Mutex::new(None));
         tokio::time::timeout(
@@ -273,4 +290,165 @@ pub async fn a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_re
             "the refusal is the child's outcome, which no engine retries"
         );
     }
+}
+
+/// The other worker of the law's deployment: the one its opener is live on.
+///
+/// Installed behind the endpoint's own tool-child host, which is the worker
+/// the child's invocation lands on. Until the law routes the child here,
+/// every attempt is that worker's alone, and each one it could not serve is
+/// counted; afterwards an attempt is served by this worker.
+struct OpenerWorker {
+    worker: Arc<crate::runtime::effect::ToolChildHost>,
+    routed_here: AtomicBool,
+    misses_elsewhere: AtomicUsize,
+}
+
+impl crate::GroupExecutors for OpenerWorker {
+    fn executor_for(
+        &self,
+        envelope: &crate::RuntimeEffectEnvelope,
+    ) -> Option<crate::RuntimeEffectLocalExecutor<'static>> {
+        if !matches!(
+            envelope.command,
+            crate::RuntimeEffectCommand::ToolInvocation { .. }
+        ) {
+            return None;
+        }
+        if !self.routed_here.load(Ordering::SeqCst) {
+            self.misses_elsewhere.fetch_add(1, Ordering::SeqCst);
+            return None;
+        }
+        crate::GroupExecutors::executor_for(self.worker.as_ref(), envelope)
+    }
+
+    fn routes(&self, _envelope: &crate::RuntimeEffectEnvelope) -> bool {
+        false
+    }
+}
+
+/// The placement law: a child that lands on a worker its opener is not live
+/// on, while the opener is live on another worker of the same deployment, is
+/// misplaced and not unroutable (FIG-4590).
+///
+/// One deployment, two workers, and no tool-child context source on either.
+/// The opener is live on worker A and forms its group there, so its child
+/// records a lent context. The child's invocation lands on worker B, which
+/// holds no opener, no pin and no source for it. B's lack is where the child
+/// was placed: the child stays accepted across at least
+/// [`UNCARRIED_ATTEMPTS`] attempts on B, holds no rank meanwhile, and runs
+/// once, to its own outcome, when an attempt is routed to A.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_child_whose_opener_is_live_on_another_worker_retries_until_routed_there(
+    fixture: &ToolChildLawFixture,
+    prefix: &str,
+) {
+    let session_id = crate::SessionId::from(format!("{prefix}-placed"));
+    let turn_id = crate::TurnId::from(format!("{prefix}-placed-turn"));
+    let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id);
+    let admitted = crate::admit(scope.clone());
+    let opener = crate::EffectOpener::for_scope(&admitted).expect("a turn scope derives an opener");
+    let group_key = format!("{prefix}-placed-group");
+    let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
+    let host = (fixture.make_world)(ToolChildWorldSpec {
+        lease_ttl_ms: LIVE_LEASE_MS,
+    })
+    .await
+    .host;
+
+    // Worker A: its own tool-child host over the deployment's substrate,
+    // with the opener live on it for the whole law.
+    let worker_a = crate::runtime::effect::ToolChildHost::new(
+        &host,
+        Arc::clone(&scenario.process_env_store),
+        Arc::new(crate::facade_support::SystemClock),
+    );
+    let _live_on_a = register_opener_on(
+        &worker_a,
+        &host,
+        &scope,
+        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
+        None,
+        Some(Arc::clone(&scenario.registry)),
+        Arc::clone(&scenario.process_env_store),
+        opener.clone(),
+        tokio_util::sync::CancellationToken::new(),
+        OpenerExtras::default(),
+    );
+    // Worker B: the endpoint's installed host, where the child's invocation
+    // lands. The opener never registers on it.
+    let placement = Arc::new(OpenerWorker {
+        worker: Arc::clone(&worker_a),
+        routed_here: AtomicBool::new(false),
+        misses_elsewhere: AtomicUsize::new(0),
+    });
+    install_child_host(&host, &scenario.process_env_store)
+        .with_law_fallback(Arc::clone(&placement) as Arc<dyn crate::GroupExecutors>);
+
+    // The opener forms its group on A, whose answer the child records.
+    let opener_context = worker_a.pin_open_tool_group(&group_key, &opener, [0]);
+    assert_eq!(
+        opener_context,
+        crate::runtime::effect::ToolChildOpenerContext::Lent,
+        "an opener live where it forms its group lends its context"
+    );
+    let group = single_leaf_group_opened_with(
+        &scope,
+        &session_id,
+        &group_key,
+        &scenario.env_ref,
+        LEAF_PLAIN,
+        ToolChildCompletionRouting::Inline,
+        recorded_cancellation_authority(&host, &admitted).await,
+        opener_context,
+    );
+
+    let settled = Arc::new(std::sync::Mutex::new(None));
+    let attempt = settle_one_child(group, Arc::default(), Arc::clone(&settled));
+    let route_to_a = {
+        let placement = Arc::clone(&placement);
+        let settled = Arc::clone(&settled);
+        async move {
+            while placement.misses_elsewhere.load(Ordering::SeqCst) < UNCARRIED_ATTEMPTS {
+                assert!(
+                    settled.lock_recover().is_none(),
+                    "a child whose opener is live on another worker of its deployment is \
+                     misplaced, and one worker's miss settled it: {:?}",
+                    settled.lock_recover()
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(
+                settled.lock_recover().is_none(),
+                "a child no attempt has run yet holds no rank"
+            );
+            placement.routed_here.store(true, Ordering::SeqCst);
+        }
+    };
+    tokio::time::timeout(ROUTE_BUDGET, async {
+        tokio::join!(fixture.turn_runner.run_turn(admitted, attempt), route_to_a)
+    })
+    .await
+    .expect("the misplaced child settles once an attempt is routed to its opener's worker");
+
+    let settlement = settled
+        .lock_recover()
+        .take()
+        .expect("the opener read its settlement");
+    let Ok(crate::RuntimeEffectOutcome::ToolInvocation { outcome, .. }) = &settlement.outcome
+    else {
+        panic!("the child runs on its opener's worker and settles its own outcome: {settlement:?}")
+    };
+    assert!(
+        format!("{:?}", outcome.record.output).contains("plain"),
+        "the settled output is the leaf's own: {outcome:?}"
+    );
+    assert_eq!(
+        scenario.observation.executions_of("law_plain").len(),
+        1,
+        "the leaf body ran exactly once, on the worker its opener is live on"
+    );
 }

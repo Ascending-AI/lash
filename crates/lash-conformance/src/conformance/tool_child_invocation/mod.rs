@@ -975,10 +975,6 @@ fn register_opener_with_processes(
 /// host, builds the lent dispatch from the supplied registry-or-processes and
 /// extras, and registers `opener` against it.
 #[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-#[expect(
     clippy::too_many_arguments,
     reason = "the registration's fields are the law's parameters; a struct would only rename the list"
 )]
@@ -994,6 +990,43 @@ fn register_opener_inner(
     extras: OpenerExtras,
 ) -> crate::runtime::effect::LiveOpenerGuard {
     let installed = install_child_host(host, &process_env_store);
+    register_opener_on(
+        &installed,
+        host,
+        scope,
+        provider,
+        processes,
+        registry,
+        process_env_store,
+        opener,
+        cooperative,
+        extras,
+    )
+}
+
+/// Registers `opener` as live on `worker`, one worker's tool-child host over
+/// `host`: the host's installed one, or another worker's a law built beside
+/// it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the registration's fields are the law's parameters; a struct would only rename the list"
+)]
+fn register_opener_on(
+    worker: &Arc<crate::runtime::effect::ToolChildHost>,
+    host: &Arc<dyn crate::EffectHost>,
+    scope: &crate::ExecutionScope,
+    provider: Arc<dyn crate::ToolProvider>,
+    processes: Option<Arc<dyn crate::ProcessService>>,
+    registry: Option<Arc<dyn crate::ProcessRegistry>>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    opener: crate::EffectOpener,
+    cooperative: tokio_util::sync::CancellationToken,
+    extras: OpenerExtras,
+) -> crate::runtime::effect::LiveOpenerGuard {
     let admitted = crate::AdmittedScope::new(scope.clone());
     assert_eq!(
         opener.process_id(),
@@ -1024,9 +1057,7 @@ fn register_opener_inner(
         crate::engine::GatedObservationSink::new(gate, crate::engine::NullObservationSink::arc()),
         cooperative,
     );
-    installed
-        .openers()
-        .register_with_token(opener, context, ended)
+    worker.openers().register_with_token(opener, context, ended)
 }
 
 /// The intent-admission gate a commit-boundary law installs around the tier's
@@ -1841,10 +1872,6 @@ async fn next_settlement(
 // =============================================================================
 
 /// A single-child group: one catalog-admitted leaf at rank 0.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 fn single_leaf_group(
     scope: &crate::ExecutionScope,
     session_id: &crate::SessionId,
@@ -1854,24 +1881,54 @@ fn single_leaf_group(
     routing: ToolChildCompletionRouting,
     cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
-    let parent = parent_invocation(scope);
-    let child = child_envelope(
+    single_leaf_group_opened_with(
         scope,
+        session_id,
         group_key,
-        0,
-        leaf_request(
-            scope,
-            session_id,
-            &format!("{group_key}-call-0"),
-            tool_id,
-            tool_id.trim_start_matches("tool:"),
-            catalog_admission(tool_id),
-            routing,
-            env_ref,
-            &parent,
-            cancellation,
-        ),
+        env_ref,
+        tool_id,
+        routing,
+        cancellation,
+        crate::runtime::effect::ToolChildOpenerContext::Lent,
+    )
+}
+
+/// [`single_leaf_group`], whose child records `opener_context`: what its
+/// opener's worker answered when the opener formed the group there
+/// (`ToolChildHost::pin_open_tool_group`).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the group's fields are the law's parameters; a struct would only rename the list"
+)]
+fn single_leaf_group_opened_with(
+    scope: &crate::ExecutionScope,
+    session_id: &crate::SessionId,
+    group_key: &str,
+    env_ref: &crate::ProcessExecutionEnvRef,
+    tool_id: &str,
+    routing: ToolChildCompletionRouting,
+    cancellation: crate::TurnControlBindingId,
+    opener_context: crate::runtime::effect::ToolChildOpenerContext,
+) -> crate::RuntimeEffectGroup {
+    let parent = parent_invocation(scope);
+    let mut request = leaf_request(
+        scope,
+        session_id,
+        &format!("{group_key}-call-0"),
+        tool_id,
+        tool_id.trim_start_matches("tool:"),
+        catalog_admission(tool_id),
+        routing,
+        env_ref,
+        &parent,
+        cancellation,
     );
+    request.session.opener_context = opener_context;
+    let child = child_envelope(scope, group_key, 0, request);
     crate::RuntimeEffectGroup::try_new(
         crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(scope.clone(), format!("{group_key}:group"))

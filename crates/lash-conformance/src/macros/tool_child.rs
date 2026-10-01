@@ -612,13 +612,17 @@ macro_rules! tool_child_live_fault_tests {
 
 /// The fixture is [`tool_child_invocation_tests!`]'s. Registered by a
 /// handler-driven engine, whose child invocations route on whichever
-/// deployment serves their lane (FIG-4550).
+/// worker of the deployment serving their lane takes them (FIG-4550,
+/// FIG-4590).
 #[macro_export]
 macro_rules! tool_child_unroutable_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
             (a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_retries,
              "tool-child-unroutable"));
+        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
+            (a_child_whose_opener_is_live_on_another_worker_retries_until_routed_there,
+             "tool-child-placed"));
     };
 }
 

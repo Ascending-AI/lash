@@ -16,8 +16,8 @@ pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
 mod tool_child;
 pub use tool_child::{
     TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting,
-    ToolChildRebuildRefusal, ToolChildRequest, ToolChildScope, ToolChildSessionFacts,
-    UnrecordedSessionSources,
+    ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest, ToolChildScope,
+    ToolChildSessionFacts, UnrecordedSessionSources,
 };
 mod tool_child_driver;
 pub(crate) use tool_child_driver::runtime_ops as tool_child_runtime_ops;

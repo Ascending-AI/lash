@@ -60,12 +60,23 @@ denies access to ranks already recorded.
 
 A resolver tells that miss apart from one no retry repairs
 (`GroupExecutors::missing_capability`). A deployment that serves the group's lane and
-lacks a capability the child needs can never run it: a tool child with no live
-opener on a deployment with no tool-child context source, or a host that serves
-the lane with no resolver registered. A handler-driven engine records, once and
-in the child's own journal, whether the deployment that first took the child
-ruled it out, so every replay takes the same branch on whichever deployment
-retries it. A child recorded as unroutable settles `Failed` with the terminal
+lacks a capability the child needs can never run it: a host that serves the
+lane with no resolver registered, or a tool child whose opener lent it no
+context on a deployment that installs no tool-child context source.
+
+That answer is the deployment's, so it is drawn only from facts every worker
+of the deployment shares: what the child's envelope recorded and what the
+deployment registered or wired. Which worker holds a child's live opener is not
+one of them. A tool child's request records whether its opener had a context to
+lend where it formed the group (`ToolChildOpenerContext`), judged there because
+the forming process is the opener's own. A child whose opener lent a context
+runs on the worker that holds it; landing on another worker of the same
+deployment is a miss of placement, and stays a retry whether or not the
+deployment installs a context source.
+
+A handler-driven engine records the answer once, in the child's own journal,
+so every replay takes the same branch on whichever worker retries it. A child
+recorded as unroutable settles `Failed` with the terminal
 `RuntimeEffectGroupChildUnroutable`, whose cause names the missing capability,
 and its opener's rank wait resolves. A child recorded as routable keeps the
 retry on any miss.

@@ -238,16 +238,23 @@ impl RuntimeExecutionContext<'_> {
             )
         })?;
 
-        if let Some(tool_children) = &self.tool_children {
-            tool_children.pin_open_tool_group(
-                &group_key,
-                &opener,
-                children
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(position, child)| child.tool().map(|_| position)),
-            );
-        }
+        // What this opener lends is this process's to judge, and the children
+        // record it (FIG-4590). A context with no tool-child host has no
+        // resolver that reads the answer, and records the default.
+        let opener_context = self
+            .tool_children
+            .as_ref()
+            .map(|tool_children| {
+                tool_children.pin_open_tool_group(
+                    &group_key,
+                    &opener,
+                    children
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(position, child)| child.tool().map(|_| position)),
+                )
+            })
+            .unwrap_or_default();
 
         let authority = controller
             .await_event_authority_binding_id()
@@ -321,7 +328,7 @@ impl RuntimeExecutionContext<'_> {
         // The group's unique children are reserved against the opener's bound
         // before anything is journaled or dispatched (ADR 0099 §9).
         self.reserve_group_work(&group_key, children.len()).await?;
-        let session_facts = self.tool_child_session_facts();
+        let session_facts = self.tool_child_session_facts(opener_context);
         let mut envelopes = Vec::with_capacity(children.len());
         for (position, child) in children.iter().enumerate() {
             let leaf = match child {
@@ -1285,8 +1292,12 @@ impl RuntimeExecutionContext<'_> {
     /// The session facts a group tool child this context opens records
     /// (FIG-3712): the tool surface its calls are admitted against, the
     /// session's tool access and subagent context, and which of this
-    /// context's sources have no recorded form.
-    pub(crate) fn tool_child_session_facts(&self) -> crate::runtime::effect::ToolChildSessionFacts {
+    /// context's sources have no recorded form, and whether its opener had a
+    /// context to lend (`opener_context`, FIG-4590).
+    pub(crate) fn tool_child_session_facts(
+        &self,
+        opener_context: crate::runtime::effect::ToolChildOpenerContext,
+    ) -> crate::runtime::effect::ToolChildSessionFacts {
         let plugins = &self.dispatch.plugins;
         crate::runtime::effect::ToolChildSessionFacts {
             tool_surface: self
@@ -1308,6 +1319,7 @@ impl RuntimeExecutionContext<'_> {
                     ..Default::default()
                 },
             ),
+            opener_context,
         }
     }
 }
