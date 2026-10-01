@@ -651,7 +651,7 @@ def validate_package_policy(metadata: dict) -> None:
     for service, names in PACKAGE_POLICY.get("service_packages", {}).items():
         if not names or any(name not in members for name in names):
             raise ValueError(f"package-policy.toml [service_packages] {service} names {names}")
-    for section in ("feature_compile_data", "filegroups", "ui_fixtures"):
+    for section in ("feature_compile_data", "filegroups", "exported_files", "ui_fixtures"):
         for name in PACKAGE_POLICY.get(section, {}):
             if name not in members:
                 raise ValueError(f"package-policy.toml [{section}] names unknown package {name}")
@@ -749,6 +749,19 @@ def filegroups(package_name: str) -> str:
             ")\n\n"
         )
     return "".join(chunks)
+
+
+def exported_files(package_name: str) -> str:
+    """Single package files other packages' rules take as source artifacts."""
+    return "".join(
+        "export_file(\n"
+        f"    name = {quote(path)},\n"
+        f"    src = {quote(path)},\n"
+        '    mode = "reference",\n'
+        '    visibility = ["PUBLIC"],\n'
+        ")\n\n"
+        for path in PACKAGE_POLICY.get("exported_files", {}).get(package_name, [])
+    )
 
 
 def render_package(package: dict, features: list[str], worker_tests: bool = False) -> tuple[str, dict]:
@@ -1145,6 +1158,7 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
                 )
 
     chunks.append(filegroups(package["name"]))
+    chunks.append(exported_files(package["name"]))
 
     # One batch is only worth its wrapper action when it replaces at least
     # two per-test runfiles forests.

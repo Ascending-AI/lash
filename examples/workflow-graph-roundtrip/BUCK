@@ -225,27 +225,24 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
-filegroup(
+export_file(
     name = "scripts/generate-contract-schema.py",
-    srcs = [
-        "scripts/generate-contract-schema.py",
-    ],
+    src = "scripts/generate-contract-schema.py",
+    mode = "reference",
     visibility = ["PUBLIC"],
 )
 
-filegroup(
+export_file(
     name = "frontend/src/generated/error-response.schema.json",
-    srcs = [
-        "frontend/src/generated/error-response.schema.json",
-    ],
+    src = "frontend/src/generated/error-response.schema.json",
+    mode = "reference",
     visibility = ["PUBLIC"],
 )
 
-filegroup(
+export_file(
     name = "frontend/src/generated/workflow-document.schema.json",
-    srcs = [
-        "frontend/src/generated/workflow-document.schema.json",
-    ],
+    src = "frontend/src/generated/workflow-document.schema.json",
+    mode = "reference",
     visibility = ["PUBLIC"],
 )
 

@@ -466,10 +466,19 @@ session_oracle_corpus = { glob = [
     "tests/test262/census/**",
 ] }
 
-[filegroups.workflow-graph-roundtrip]
-"scripts/generate-contract-schema.py" = { srcs = ["scripts/generate-contract-schema.py"] }
-"frontend/src/generated/error-response.schema.json" = { srcs = ["frontend/src/generated/error-response.schema.json"] }
-"frontend/src/generated/workflow-document.schema.json" = { srcs = ["frontend/src/generated/workflow-document.schema.json"] }
+# --- Exported files ------------------------------------------------------------
+
+# Single package files another package's rule names as one `attrs.source()`
+# input: a script it runs or a file it reads at its repository path. Each is
+# an `export_file(mode = "reference")`, so the consumer receives the source
+# artifact itself, materialized at its repository path. A filegroup would hand
+# it a symlinked directory instead.
+[exported_files]
+workflow-graph-roundtrip = [
+    "scripts/generate-contract-schema.py",
+    "frontend/src/generated/error-response.schema.json",
+    "frontend/src/generated/workflow-document.schema.json",
+]
 
 # --- trybuild fixtures ---------------------------------------------------------
 

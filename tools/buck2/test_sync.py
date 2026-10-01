@@ -814,6 +814,34 @@ def check_direct_buck_generator() -> None:
     ) in generated_graph
 
 
+def check_schema_source_inputs() -> None:
+    """Schema rules run and compare single files at their repository paths.
+
+    A filegroup's output is a symlinked directory, so `python3 <filegroup>`
+    fails and a check would compare against buck-out instead of the source.
+    """
+    root = (ROOT / "BUCK").read_text(encoding="utf-8")
+    calls = re.findall(r"(?ms)^schema_(?:documents|check)\(\n.*?^\)\n", root)
+    assert len(calls) == 4, f"expected four schema rule calls, found {len(calls)}"
+    labels = set()
+    for call in calls:
+        labels.update(re.findall(r"^\s+script = \"(//[^\"]+)\"", call, re.M))
+        checked = re.search(r"(?ms)^    checked = \[(.*?)^    \]", call)
+        if checked:
+            labels.update(re.findall(r"\"(//[^\"]+)\"", checked.group(1)))
+    assert labels, "schema rules name no cross-package source inputs"
+    for label in sorted(labels):
+        package, name = label.removeprefix("//").split(":", 1)
+        build = (ROOT / package / "BUCK").read_text(encoding="utf-8")
+        target = re.search(
+            rf"(?ms)^(\w+)\(\n    name = {re.escape(json.dumps(name))},\n(.*?)^\)\n", build
+        )
+        assert target, f"{label} is not defined"
+        assert target.group(1) == "export_file" and 'mode = "reference",' in target.group(2), (
+            f"{label} must be export_file(mode = \"reference\"), not {target.group(1)}"
+        )
+
+
 def main() -> int:
     checks = [
         check_inventory,
@@ -830,6 +858,7 @@ def main() -> int:
         check_external_buildscripts,
         check_buildscript_metadata_bridge,
         check_direct_buck_generator,
+        check_schema_source_inputs,
     ]
     for check in checks:
         check()
