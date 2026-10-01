@@ -810,7 +810,7 @@ where
             .get_process(&process_id)
             .await
             .map_err(HandlerError::from)?
-            .filter(ProcessRecord::is_refusing_park)
+            .filter(super::park_reconcile::segment_can_redrive_park)
         {
             self.registry
                 .begin_parked_rerun_with_authority(&process_id, &park_authority(&record, started))

@@ -28,7 +28,12 @@ pub enum EffectGroupCleanup {
         /// enum stays narrow once retirement is complete.
         live: Box<EffectGroupStateLiveRecord>,
     },
-    Complete,
+    Complete {
+        /// Retirement can pause after cleanup but before its reply. Keep
+        /// its owner so that invocation still parks and resumes normally.
+        #[serde(with = "lash_core::admitted_scope_wire")]
+        opener: lash_core::AdmittedScope,
+    },
 }
 
 /// The group's phase, shaped enum-per-phase so a phase that has live state
@@ -218,7 +223,9 @@ fn completed_retirement_index_serializes_as_tombstone_only() {
         shape_digest: "shape-digest".to_owned(),
         dispatch_route: "EffectGroupDispatch".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
-            cleanup: EffectGroupCleanup::Complete,
+            cleanup: EffectGroupCleanup::Complete {
+                opener: lash_core::AdmittedScope::turn("session", "turn"),
+            },
         },
     };
 
@@ -229,7 +236,7 @@ fn completed_retirement_index_serializes_as_tombstone_only() {
             "dispatch_route": "EffectGroupDispatch",
             "lifecycle": {
                 "type": "retired",
-                "cleanup": { "type": "complete" }
+                "cleanup": { "type": "complete", "opener": { "scope": { "type": "turn", "session_id": "session", "turn_id": "turn" } } }
             }
         })
     );
@@ -242,7 +249,9 @@ fn retired_index_live_read_is_a_typed_terminal_error() {
         shape_digest: "shape-digest".to_owned(),
         dispatch_route: "EffectGroupDispatch".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
-            cleanup: EffectGroupCleanup::Complete,
+            cleanup: EffectGroupCleanup::Complete {
+                opener: lash_core::AdmittedScope::turn("session", "turn"),
+            },
         },
     };
 
@@ -476,7 +485,9 @@ mod admission_tests {
             EffectGroupAdmissionResponse::CancelDecided
         );
         let retired = EffectGroupLifecycle::Retired {
-            cleanup: EffectGroupCleanup::Complete,
+            cleanup: EffectGroupCleanup::Complete {
+                opener: lash_core::AdmittedScope::turn("session", "turn"),
+            },
         };
         assert_eq!(
             decide_group_child_admission(&retired, 0, "child-invocation-0"),

@@ -287,7 +287,14 @@ impl DurableProcessWorker {
         // process from its attempt budget: a run that refuses again re-parks
         // it, and a run that goes on to fail for any other reason spends its
         // budget as usual (FIG-3659 NOW-B).
-        if current.is_refusing_park() {
+        // An exhausted engine child can park a still-running process.
+        // Admission replay cannot redrive that child; control clears its
+        // refusing flag when it resumes the engine work explicitly.
+        if current.park.as_deref().is_some_and(|park| {
+            park.refusing
+                && (park.engine.is_some()
+                    || park.reason.code() != crate::store::ParkReasonCode::EngineRetryExhausted)
+        }) {
             self.config
                 .process_registry()
                 .begin_parked_rerun_with_authority(&process_id, &execution_write_authority)

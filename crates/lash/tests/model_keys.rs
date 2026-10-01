@@ -23,6 +23,14 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[path = "model_keys/parked_group.rs"]
+mod parked_group;
+use parked_group::{
+    a_paused_group_retire_parks_its_process_opener, a_paused_group_retire_parks_its_root_opener,
+    a_paused_group_run_parks_its_process_opener, a_paused_group_run_parks_its_root_opener,
+    a_process_opened_group_child_parks_resumes_and_reparks_idempotently,
+};
+
 use lash::direct::LlmOutputPart;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::{LashCore, ModelKey, ModelMetadata, ModelRegistry, RegisteredModel, TurnInput};
@@ -87,17 +95,36 @@ impl ArtifactProbe {
 }
 
 async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
-    let config = lash_restate_test::ServerConfig {
+    double_with_hooks(
+        tier,
+        replay,
+        seed,
+        lash_restate_test::DeploymentHooks::default(),
+    )
+    .await
+}
+
+async fn double_with_hooks(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+    hooks: lash_restate_test::DeploymentHooks,
+) -> Option<Double> {
+    let mut config = lash_restate_test::ServerConfig {
         always_replay: replay,
         ..lash_restate_test::ServerConfig::default()
     };
-    let hooks = lash_restate_test::DeploymentHooks::default;
+    if hooks.refuse.is_some() {
+        config.retry.initial_interval = std::time::Duration::ZERO;
+        config.retry.max_interval = std::time::Duration::ZERO;
+        config.retry.max_attempts = Some(8);
+    }
     match tier {
         Tier::SqliteMemory => {
             let inspection = Arc::new(Mutex::new(None));
             let captured = Arc::clone(&inspection);
             let double =
-                lash_restate_test::backend_with_store_set(seed, config, hooks(), |clock| async {
+                lash_restate_test::backend_with_store_set(seed, config, hooks, |clock| async {
                     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
                         .await
                         .expect("SQLite memory stores");
@@ -123,7 +150,7 @@ async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
             let root = tempfile::tempdir().expect("SQLite store directory");
             let path = root.path().to_path_buf();
             let double =
-                lash_restate_test::backend_with_store_set(seed, config, hooks(), |clock| async {
+                lash_restate_test::backend_with_store_set(seed, config, hooks, |clock| async {
                     Ok(Arc::new(
                         lash_sqlite_store::SqliteStoreSet::open_with_clock(&path, clock)
                             .await
@@ -150,7 +177,7 @@ async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
             let attachments = tempfile::tempdir().expect("attachment directory");
             let attachment_path = attachments.path().to_path_buf();
             let double =
-                lash_restate_test::backend_with_store_set(seed, config, hooks(), |clock| async {
+                lash_restate_test::backend_with_store_set(seed, config, hooks, |clock| async {
                     Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
                         &storage,
                         Arc::new(lash::persistence::FileAttachmentStore::new(
@@ -2203,3 +2230,13 @@ tiered!(
     a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording,
     0x4603_1100
 );
+
+tiered!(
+    a_process_opened_group_child_parks_resumes_and_reparks_idempotently,
+    0x4617_1100
+);
+
+tiered!(a_paused_group_run_parks_its_root_opener, 0x4617_2100);
+tiered!(a_paused_group_run_parks_its_process_opener, 0x4617_2200);
+tiered!(a_paused_group_retire_parks_its_root_opener, 0x4617_2300);
+tiered!(a_paused_group_retire_parks_its_process_opener, 0x4617_2400);

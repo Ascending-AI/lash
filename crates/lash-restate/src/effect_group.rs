@@ -184,7 +184,7 @@ pub(crate) trait EffectGroupState {
     #[shared]
     async fn unsettled_children(call: Call<()>) -> HandlerResult<Reply<usize>>;
     #[shared]
-    async fn opener(call: Call<()>) -> HandlerResult<Reply<EffectGroupOpenerResponse>>;
+    async fn opener(call: Call<String>) -> HandlerResult<Reply<EffectGroupOpenerResponse>>;
     async fn open(
         call: Call<EffectGroupOpenRequest>,
     ) -> HandlerResult<Reply<EffectGroupOpenResponse>>;
@@ -326,33 +326,40 @@ impl EffectGroupState for EffectGroupStateImpl {
         Ok(Reply::at(wire, unsettled))
     }
 
-    /// The admitted scope this group's children run for, while its opener
-    /// still waits on them: what parks a child the engine stopped retrying
-    /// on the work that waits for it (FIG-4607). A closed or retired group's
-    /// opener no longer needs its children (FIG-3725), unless it reopened
-    /// the group (FIG-3481).
+    /// The retained opener of paused dispatcher work. Children need their
+    /// live interest; retirement needs its owner through the cleanup and
+    /// reply windows, including the final tombstone (FIG-4617).
     async fn opener(
         &self,
         ctx: SharedObjectContext<'_>,
-        call: Call<()>,
+        call: Call<String>,
     ) -> HandlerResult<Reply<EffectGroupOpenerResponse>> {
-        let (wire, ()) = call.open()?;
+        let (wire, handler) = call.open()?;
         object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let response = match load_index_shared(&ctx).await? {
-            Some(EffectGroupStateRecord {
-                lifecycle:
+            Some(record) => {
+                let opener = match record.lifecycle {
                     EffectGroupLifecycle::Preparing { live, .. }
-                    | EffectGroupLifecycle::Ready { live, .. }
-                    | EffectGroupLifecycle::Closed {
-                        reopened: true,
-                        live,
-                        ..
-                    },
-                ..
-            }) => EffectGroupOpenerResponse::Waiting {
-                opener: live.shape.opener,
-            },
-            _ => EffectGroupOpenerResponse::Released,
+                    | EffectGroupLifecycle::Ready { live, .. } => Some(live.shape.opener),
+                    EffectGroupLifecycle::Closed { reopened, live, .. }
+                        if reopened || handler == "run" || handler == "retire" =>
+                    {
+                        Some(live.shape.opener)
+                    }
+                    EffectGroupLifecycle::Retired { cleanup } if handler == "retire" => {
+                        Some(match cleanup {
+                            EffectGroupCleanup::Pending { live, .. } => live.shape.opener,
+                            EffectGroupCleanup::Complete { opener } => opener,
+                        })
+                    }
+                    _ => None,
+                };
+                match opener {
+                    Some(opener) => EffectGroupOpenerResponse::Waiting { opener },
+                    None => EffectGroupOpenerResponse::Released,
+                }
+            }
+            None => EffectGroupOpenerResponse::Released,
         };
         Ok(Reply::at(wire, response))
     }
@@ -1134,7 +1141,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                             cleanup: facts.clone(),
                         }
                     }
-                    EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
+                    EffectGroupCleanup::Complete { .. } => EffectGroupRetireResponse::Tombstone,
                 },
             ));
         }
@@ -1184,7 +1191,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                                 cleanup: facts.clone(),
                             }
                         }
-                        EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
+                        EffectGroupCleanup::Complete { .. } => EffectGroupRetireResponse::Tombstone,
                     },
                 ));
             }
@@ -1226,10 +1233,12 @@ impl EffectGroupState for EffectGroupStateImpl {
         };
         let response = match record.lifecycle {
             EffectGroupLifecycle::Retired {
-                cleanup: EffectGroupCleanup::Pending { facts, .. },
+                cleanup: EffectGroupCleanup::Pending { facts, live },
             } => {
                 record.lifecycle = EffectGroupLifecycle::Retired {
-                    cleanup: EffectGroupCleanup::Complete,
+                    cleanup: EffectGroupCleanup::Complete {
+                        opener: live.shape.opener,
+                    },
                 };
                 store_index(&ctx, object.writer, record);
                 // Nothing rebuilds a child of a tombstone, and nothing seats
@@ -1241,7 +1250,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 EffectGroupFinishRetirementResponse::Finished
             }
             EffectGroupLifecycle::Retired {
-                cleanup: EffectGroupCleanup::Complete,
+                cleanup: EffectGroupCleanup::Complete { .. },
             } => EffectGroupFinishRetirementResponse::AlreadyFinished,
             _ => EffectGroupFinishRetirementResponse::NotRetired,
         };
@@ -1269,7 +1278,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     cleanup: EffectGroupCleanup::Pending { facts, live },
                 } => (facts, live),
                 EffectGroupLifecycle::Retired {
-                    cleanup: EffectGroupCleanup::Complete,
+                    cleanup: EffectGroupCleanup::Complete { .. },
                 } => {
                     return Ok(Reply::at(
                         wire,

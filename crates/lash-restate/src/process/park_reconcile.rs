@@ -64,6 +64,16 @@ use crate::ingress::{
 };
 use crate::services::LashService;
 
+/// Replaying an opener cannot redrive its paused engine child. Control
+/// clears that park before child resume; a segment only redrives its own.
+pub(crate) fn segment_can_redrive_park(record: &ProcessRecord) -> bool {
+    record.park.as_deref().is_some_and(|park| {
+        park.refusing
+            && (park.engine.is_some()
+                || park.reason.code() != lash_core::store::ParkReasonCode::EngineRetryExhausted)
+    })
+}
+
 /// What one reconcile pass did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProcessParkReconcileReport {
@@ -82,8 +92,8 @@ pub struct ProcessParkReconcileReport {
 /// §3): park each one's live process on its kept journal, or release a
 /// terminal one's invocation once its terminal publication is delivered.
 /// The session-control pass feeds each paused invocation it listed through
-/// here; `paused` is already the engine's listing, so this asks Restate
-/// nothing.
+/// here. A nonrefusing park rechecks the invocation's status so a stale
+/// listing cannot re-park a retry that the operator already resumed.
 ///
 /// Idempotent: a process whose park already refuses is left as it is, so a
 /// repeated pass over the same pause writes nothing.
@@ -106,47 +116,120 @@ pub(crate) async fn reconcile_process_invocations(
             report.unchanged += 1;
             continue;
         };
-        if record.is_terminal() {
-            if release_terminal_segment(admin, registry, &record, &invocation).await? {
-                report.released.push(record.id);
-            } else {
-                report.unchanged += 1;
-            }
-            continue;
-        }
-        if record.is_refusing_park() {
-            report.unchanged += 1;
-            continue;
-        }
-        let Some(authority) = execution_authority(&record) else {
-            report.unchanged += 1;
-            continue;
-        };
-        // The park carries the generation of the build whose checkpoint it
-        // resumes (FIG-3795 S8): the paused segment's recorded admission
-        // stamp, never the reconciling build's own.
-        let build_generation =
-            segment_checkpoint_generation(&record, continuations, segment_ordinal).await?;
-        let park = ProcessParkWrite {
-            reason: exhausted_reason(&invocation),
-            engine: Some(EnginePark::new(invocation.id.clone())),
-            build_generation,
-        };
-        let parked = registry
-            .park_process_with_authority(&record.id, park, &authority)
-            .await?;
-        let reason = lash_core::store::ParkReasonCode::EngineRetryExhausted;
-        lash_core::operational_metrics::record_work_parked("process", reason.as_str());
-        tracing::warn!(
-            event = "process.parked",
-            process_id = record.id.as_str(),
-            reason_code = reason.as_str(),
-            invocation_id = invocation.id.as_str(),
-            attempts = parked.park.as_deref().map_or(0, |park| park.attempts),
-            "a process whose engine retries ran out is parked"
-        );
-        report.parked.push(record.id);
+        let pass = reconcile_process_work(
+            admin,
+            registry,
+            continuations,
+            &invocation,
+            record,
+            segment_ordinal,
+            Some(EnginePark::new(invocation.id.clone())),
+        )
+        .await?;
+        report.parked.extend(pass.parked);
+        report.released.extend(pass.released);
+        report.unchanged += pass.unchanged;
     }
+    Ok(report)
+}
+
+/// A stopped dispatcher invocation parks the process that opened its
+/// group through the same registry transition as a stopped segment. No
+/// child handle is retained: redrive discovers all work by its opener.
+pub(crate) async fn reconcile_process_group_work(
+    admin: &RestateAdminClient,
+    registry: &Arc<dyn ProcessRegistry>,
+    continuations: &Arc<dyn ProcessContinuationStore>,
+    invocation: &RestatePausedInvocation,
+    process: &ProcessId,
+) -> Result<ProcessParkReconcileReport, PluginError> {
+    let Some(record) = registry.get_process(process).await? else {
+        admin
+            .kill_invocation(&invocation.invocation_id())
+            .await
+            .map_err(|error| PluginError::Session(error.to_string()))?;
+        return Ok(ProcessParkReconcileReport {
+            released: vec![process.clone()],
+            ..Default::default()
+        });
+    };
+    let ordinal = record
+        .external_ref
+        .as_ref()
+        .map_or(0, |reference| reference.segment_ordinal());
+    reconcile_process_work(
+        admin,
+        registry,
+        continuations,
+        invocation,
+        record,
+        ordinal,
+        None,
+    )
+    .await
+}
+
+async fn reconcile_process_work(
+    admin: &RestateAdminClient,
+    registry: &Arc<dyn ProcessRegistry>,
+    continuations: &Arc<dyn ProcessContinuationStore>,
+    invocation: &RestatePausedInvocation,
+    record: ProcessRecord,
+    segment_ordinal: u64,
+    engine: Option<EnginePark>,
+) -> Result<ProcessParkReconcileReport, PluginError> {
+    let mut report = ProcessParkReconcileReport::default();
+    if record.is_terminal() {
+        if release_terminal_segment(admin, registry, &record, invocation).await? {
+            report.released.push(record.id);
+        } else {
+            report.unchanged += 1;
+        }
+        return Ok(report);
+    }
+    if record.is_refusing_park() {
+        report.unchanged += 1;
+        return Ok(report);
+    }
+    let Some(authority) = execution_authority(&record) else {
+        report.unchanged += 1;
+        return Ok(report);
+    };
+    // Re-read after the park: a redrive may have resumed this invocation
+    // since the listing. A running child must not re-park its opener.
+    if record.park.is_some()
+        && !admin
+            .invocation_status(&invocation.invocation_id())
+            .await
+            .map_err(|error| PluginError::Session(error.to_string()))?
+            .is_some_and(|status| {
+                status.status == crate::ingress::RestateInvocationLifecycle::Paused
+            })
+    {
+        report.unchanged += 1;
+        return Ok(report);
+    }
+    let build_generation =
+        segment_checkpoint_generation(&record, continuations, segment_ordinal).await?;
+    let park = ProcessParkWrite {
+        reason: exhausted_reason(invocation),
+        engine,
+        build_generation,
+    };
+    let parked = registry
+        .park_process_with_authority(&record.id, park, &authority)
+        .await?;
+    let reason = lash_core::store::ParkReasonCode::EngineRetryExhausted;
+    lash_core::operational_metrics::record_work_parked("process", reason.as_str());
+    tracing::warn!(
+        event = "process.parked",
+        process_id = record.id.as_str(),
+        reason_code = reason.as_str(),
+        invocation_id = invocation.id.as_str(),
+        attempts = parked.park.as_deref().map_or(0, |park| park.attempts),
+        "a process whose engine retries ran out is parked"
+    );
+    report.parked.push(record.id);
     Ok(report)
 }
 
@@ -400,7 +483,7 @@ async fn release_terminal_segment(
     Ok(true)
 }
 
-/// Resume the paused invocation holding `process_id`'s park: a fresh retry
+/// Resume the paused segment holding `process_id`'s park: a fresh retry
 /// loop over its kept journal. The park stays until that retry gets past the
 /// refusal. Its first fact of progress, or its terminal, ends the park, and
 /// a retry that fails again re-parks it.
@@ -418,30 +501,52 @@ pub async fn resume_parked_process(
         .get_process(process_id)
         .await?
         .ok_or_else(|| lash_core::runtime::registry_transitions::unknown_process(process_id))?;
-    let Some(park) = record.park.as_deref() else {
+    if record.park.is_none() {
         return Err(PluginError::Session(format!(
             "process `{process_id}` is not parked"
         )));
+    }
+    resume_process_invocation(admin, namespace, &record)
+        .await?
+        .ok_or_else(|| {
+            PluginError::Session(format!(
+                "no paused invocation holds process `{process_id}`'s park"
+            ))
+        })
+}
+
+/// The segment half of a park redrive. Group work can hold a process park
+/// while the segment itself is running and needs no resume.
+pub(crate) async fn resume_process_invocation(
+    admin: &RestateAdminClient,
+    namespace: &crate::RestateNamespace,
+    record: &ProcessRecord,
+) -> Result<Option<RestateInvocationId>, PluginError> {
+    let invocation = match record.park.as_deref().and_then(|park| park.engine.as_ref()) {
+        Some(engine) => Some(RestateInvocationId::new(engine.as_str().to_string())),
+        None => paused_invocation_of(admin, namespace, &record.id).await?,
     };
-    let invocation = match &park.engine {
-        Some(engine) => RestateInvocationId::new(engine.as_str().to_string()),
-        None => paused_invocation_of(admin, namespace, process_id)
-            .await?
-            .ok_or_else(|| {
-                PluginError::Session(format!(
-                    "no paused invocation holds process `{process_id}`'s park"
-                ))
-            })?,
+    let Some(invocation) = invocation else {
+        return Ok(None);
     };
+    if !admin
+        .invocation_status(&invocation)
+        .await
+        .map_err(|error| PluginError::Session(error.to_string()))?
+        .is_some_and(|status| status.status == crate::ingress::RestateInvocationLifecycle::Paused)
+    {
+        return Ok(None);
+    }
     admin
         .resume_invocation(&invocation)
         .await
         .map_err(|error| {
             PluginError::Session(format!(
-                "resume process `{process_id}`'s invocation `{invocation}`: {error}"
+                "resume process `{}`'s invocation `{invocation}`: {error}",
+                record.id
             ))
         })?;
-    Ok(invocation)
+    Ok(Some(invocation))
 }
 
 /// The paused `run` invocation of any of `process_id`'s segments.

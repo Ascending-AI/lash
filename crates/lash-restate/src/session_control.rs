@@ -477,7 +477,7 @@ impl RestateSessionControl {
             );
             report.unchanged += pass.unchanged;
         } else if service == Some(crate::LashService::EffectGroupDispatch) {
-            self.reconcile_group_child(parks, invocation, &key, report)
+            self.reconcile_group_work(parks, invocation, &key, report)
                 .await?;
         } else if let Some((session, root)) = parse_turn_workflow_key(&key) {
             let target = ParkTarget::Root {
@@ -528,11 +528,11 @@ impl RestateSessionControl {
         Ok(())
     }
 
-    /// The scope a paused child of group `group_key` runs for, while that
-    /// group's opener still waits on its children; `None` once it does not.
-    async fn group_child_opener(
+    /// The retained scope waiting on this group handler, read from the index.
+    async fn group_work_opener(
         &self,
         group_key: &str,
+        handler: &str,
     ) -> Result<Option<lash_core::ExecutionScope>, EngineRefusal> {
         let opener: crate::effect_group::EffectGroupOpenerResponse = self
             .ingress
@@ -543,7 +543,7 @@ impl RestateSessionControl {
                     .name(),
                 group_key,
                 "opener",
-                &(),
+                &handler,
             )
             .await
             .map_err(refusal)?;
@@ -555,25 +555,42 @@ impl RestateSessionControl {
         })
     }
 
-    /// Settle one paused effect-group child (FIG-4607): a tool attempt whose
-    /// retries the engine spent runs in an invocation of its own, and the
-    /// root that opened its group only waits for it. The child parks that
-    /// root, with its typed cause and no engine handle: the park's redrive
-    /// finds the root's paused children ([`Self::resume_session_children`]).
-    /// A child whose root already ended is killed, as a root's own execution
-    /// is. One whose group no longer needs it, or whose opener is no root, is
-    /// left as it is.
-    async fn reconcile_group_child(
+    /// Stopped group preparation, a child or retirement parks the retained
+    /// opener with its typed cause and no child handle. Redrive discovers
+    /// all its paused work by that same opener. A terminal opener releases
+    /// stopped work instead of acquiring another park.
+    async fn reconcile_group_work(
         &self,
         parks: &dyn ParkRecoveryWriter,
         invocation: crate::ingress::RestatePausedInvocation,
         group_key: &str,
         report: &mut ParkReconcileReport,
     ) -> Result<(), EngineRefusal> {
+        let opener = self
+            .group_work_opener(group_key, &invocation.target_handler_name)
+            .await?;
+        if let Some(lash_core::ExecutionScope::Process { process_id }) = &opener {
+            let pass = crate::process::park_reconcile::reconcile_process_group_work(
+                &self.admin,
+                &self.processes,
+                &self.continuations,
+                &invocation,
+                process_id,
+            )
+            .await
+            .map_err(refusal)?;
+            report.parked.extend(
+                pass.parked
+                    .into_iter()
+                    .map(|process| ParkTarget::Process { process }),
+            );
+            report.unchanged += pass.unchanged;
+            return Ok(());
+        }
         let Some(lash_core::ExecutionScope::Turn {
             session_id: session,
             turn_id: root,
-        }) = self.group_child_opener(group_key).await?
+        }) = opener
         else {
             report.unchanged += 1;
             return Ok(());
@@ -718,32 +735,47 @@ impl RestateSessionControl {
         Ok(!paused.is_empty())
     }
 
-    /// Resume every paused effect-group child a root of `session` waits on:
-    /// the half of a park's redrive that reaches the tool attempts the engine
-    /// stopped retrying (FIG-4607). A session runs one root at a time, so its
-    /// paused children are the parked root's. Whether any was resumed.
-    async fn resume_session_children(
+    /// Resume all paused dispatcher work of this exact retained opener.
+    /// A process's own segment can still be running while it waits for this
+    /// work, so the child redrive starts the registry's parked rerun itself.
+    async fn resume_group_work(
         &self,
-        session: &lash_core::SessionId,
+        scope: &lash_core::ExecutionScope,
     ) -> Result<bool, EngineRefusal> {
         let paused = self
             .admin
-            .paused_group_children(&self.namespace)
+            .paused_group_work(&self.namespace)
             .await
             .map_err(refusal)?;
         let mut resumed = false;
-        for child in &paused {
-            let Some(group_key) = child.target_service_key.as_deref() else {
+        for invocation in &paused {
+            let Some(group_key) = invocation.target_service_key.as_deref() else {
                 continue;
             };
-            if !matches!(
-                self.group_child_opener(group_key).await?,
-                Some(lash_core::ExecutionScope::Turn { session_id, .. }) if session_id == *session
-            ) {
+            if self
+                .group_work_opener(group_key, &invocation.target_handler_name)
+                .await?
+                .as_ref()
+                != Some(scope)
+            {
                 continue;
             }
+            if !resumed && let lash_core::ExecutionScope::Process { process_id } = scope {
+                let record = self
+                    .processes
+                    .get_process(process_id)
+                    .await
+                    .map_err(refusal)?
+                    .ok_or_else(|| refusal("process is gone"))?;
+                let authority = crate::process::park_reconcile::execution_authority(&record)
+                    .ok_or_else(|| refusal("process execution is not started"))?;
+                self.processes
+                    .begin_parked_rerun_with_authority(process_id, &authority)
+                    .await
+                    .map_err(refusal)?;
+            }
             self.admin
-                .resume_invocation(&child.invocation_id())
+                .resume_invocation(&invocation.invocation_id())
                 .await
                 .map_err(refusal)?;
             resumed = true;
@@ -773,7 +805,12 @@ impl SessionControlEngine for RestateSessionControl {
             }
             _ => false,
         };
-        let children = self.resume_session_children(&target.session).await?;
+        let children = self
+            .resume_group_work(&lash_core::ExecutionScope::turn(
+                target.session.clone(),
+                target.root.clone(),
+            ))
+            .await?;
         let drive = self.resume_session_drives(&target.session).await?;
         Ok(if root || children || drive {
             EngineAck::Resumed
@@ -800,15 +837,22 @@ impl SessionControlEngine for RestateSessionControl {
         if current.park_id != park {
             return Err(refusal("process park was superseded"));
         }
-        crate::process::resume_parked_process(
+        let work = self
+            .resume_group_work(&lash_core::ExecutionScope::process(process.clone()))
+            .await?;
+        let segment = crate::process::park_reconcile::resume_process_invocation(
             &self.admin,
             &self.namespace,
-            &self.processes,
-            process,
+            &record,
         )
         .await
-        .map_err(refusal)?;
-        Ok(EngineAck::Resumed)
+        .map_err(refusal)?
+        .is_some();
+        Ok(if work || segment {
+            EngineAck::Resumed
+        } else {
+            EngineAck::NothingHeld
+        })
     }
 
     async fn release_root(

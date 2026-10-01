@@ -1071,25 +1071,24 @@ impl RestateAdminClient {
         let drives = namespace.service_lanes_sql(crate::LashService::SessionDriver);
         let roots = namespace.service_lanes_sql(crate::LashService::TurnDriver);
         let segments = namespace.service_lanes_sql(crate::LashService::ProcessWorkflow);
-        // A group child runs in an invocation of its own, which the work
-        // that opened its group waits on (FIG-4607).
-        let children = namespace.service_lanes_sql(crate::LashService::EffectGroupDispatch);
+        // Preparation, children and retirement run outside their opener's
+        // invocation, so every dispatcher handler can hold its park.
+        let groups = namespace.service_lanes_sql(crate::LashService::EffectGroupDispatch);
         self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({drives} AND target_handler_name = 'drive') OR (({roots} OR {segments}) AND target_handler_name = 'run') OR ({children} AND target_handler_name = 'child')) ORDER BY id LIMIT {}", limit.get()
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({drives} AND target_handler_name = 'drive') OR (({roots} OR {segments}) AND target_handler_name = 'run') OR ({groups} AND target_handler_name IN ('run', 'child', 'retire'))) ORDER BY id LIMIT {}", limit.get()
         )).await
     }
 
-    /// The paused effect-group children, on every lane of the dispatcher:
-    /// each a child's own invocation the engine stopped retrying, keyed by
-    /// its group.
-    pub(crate) async fn paused_group_children(
+    /// Paused preparation, children and retirement on every dispatcher lane,
+    /// keyed by the group whose retained opener recovery parks and resumes.
+    pub(crate) async fn paused_group_work(
         &self,
         namespace: &crate::RestateNamespace,
     ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
         let paused = RestateInvocationLifecycle::Paused.sql_literal();
-        let children = namespace.service_lanes_sql(crate::LashService::EffectGroupDispatch);
+        let groups = namespace.service_lanes_sql(crate::LashService::EffectGroupDispatch);
         self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {children} AND target_handler_name = 'child' ORDER BY id"
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {groups} AND target_handler_name IN ('run', 'child', 'retire') ORDER BY id"
         ))
         .await
     }
