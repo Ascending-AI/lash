@@ -3,6 +3,28 @@ use std::collections::BTreeSet;
 use lash_typescript::workflow_graph::workflow_graph_from_source;
 use lashlang::{WorkflowContainer, WorkflowDeclaration, WorkflowNodeKind};
 
+#[allow(clippy::disallowed_methods)]
+fn published_graph_schema() -> serde_json::Value {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/host/workflow-graph");
+    let paths: Vec<_> = std::fs::read_dir(&directory)
+        .expect("read published graph schema directory")
+        .map(|entry| entry.expect("read published graph schema entry"))
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with('v') && name.ends_with(".schema.json")
+        })
+        .map(|entry| entry.path())
+        .collect();
+    let [path] = paths.as_slice() else {
+        panic!("exactly one published graph schema is required: {paths:?}");
+    };
+    let source = std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("read published schema {}: {error}", path.display()));
+    serde_json::from_str(&source).expect("published graph schema parses")
+}
+
 #[test]
 fn published_schema_accepts_real_graph_with_every_node_and_container_kind() {
     let source = r#"const child = async () => {
@@ -70,10 +92,7 @@ finish(values);
             .any(|declaration| matches!(declaration, WorkflowDeclaration::Process(_)))
     );
 
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/host/workflow-graph/v21.schema.json"
-    ))
-    .expect("published graph schema parses");
+    let schema = published_graph_schema();
     let validator = jsonschema::validator_for(&schema).expect("graph schema compiles");
     let value = serde_json::to_value(&graph).expect("real graph serializes");
     if !validator.is_valid(&value) {
@@ -100,7 +119,7 @@ finish(values);
 fn published_schema_requires_a_closed_workflow_diagnostic_classification() {
     let graph = workflow_graph_from_source("finish(1);").expect("fixture projects");
     let mut value = serde_json::to_value(graph).expect("graph encodes");
-    value["facet_schema_version"] = serde_json::json!(4);
+    value["facet_schema_version"] = serde_json::json!(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION);
     value["main"]["nodes"][0]["type_facets"] = serde_json::json!({
         "diagnostics": [{
             "node_id": value["main"]["nodes"][0]["id"].clone(),
@@ -109,10 +128,7 @@ fn published_schema_requires_a_closed_workflow_diagnostic_classification() {
             "message": "fixture"
         }]
     });
-    let schema = serde_json::from_str::<serde_json::Value>(include_str!(
-        "../../../schemas/host/workflow-graph/v21.schema.json"
-    ))
-    .expect("published schema parses");
+    let schema = published_graph_schema();
     let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
     for classification in ["definite", "advisory"] {
         value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =

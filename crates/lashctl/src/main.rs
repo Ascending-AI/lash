@@ -1001,6 +1001,27 @@ mod tests {
     use lash_core_store::compat::CompatRefusal;
 
     #[test]
+    fn release_inventory_build_probe() {
+        let formats: Vec<_> = lash::formats::durable_formats()
+            .map(|entry| {
+                let value = match entry.version {
+                    lash::formats::FormatVersion::Counter(value) => json!(value),
+                    lash::formats::FormatVersion::Identity(value) => json!(value),
+                    other => panic!("unhandled format version: {other:?}"),
+                };
+                json!({"constant": entry.constant, "value": value})
+            })
+            .collect();
+        assert!(!formats.is_empty(), "the build exposes its durable formats");
+        println!(
+            "release-inventory-build={}",
+            json!({
+                "version": version_result(&[]), "formats": formats,
+            })
+        );
+    }
+
+    #[test]
     fn incompatible_store_error_keeps_the_typed_refusal() {
         let error = CliError::store(StoreError::Incompatible {
             refusal: CompatRefusal::Unstamped {

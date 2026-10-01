@@ -1,4 +1,4 @@
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -13,9 +13,18 @@ const repository = path.resolve(frontend, '../../..');
 const generated = path.join(frontend, 'src/generated');
 const check = process.argv.slice(2).includes('--check');
 
+async function currentSchema(shape) {
+  const directory = path.join(repository, 'schemas/host', shape);
+  const files = (await readdir(directory)).filter((name) => /^v\d+\.schema\.json$/.test(name));
+  if (files.length !== 1) {
+    throw new Error(`${shape} must publish exactly one current schema, found ${files.length}`);
+  }
+  return `${shape}/${files[0]}`;
+}
+
 const documents = [
-  ['workflow-graph/v21.schema.json', 'workflow-graph.d.ts'],
-  ['workflow-type-facets/v4.schema.json', 'workflow-type-facets.d.ts'],
+  [await currentSchema('workflow-graph'), 'workflow-graph.d.ts'],
+  [await currentSchema('workflow-type-facets'), 'workflow-type-facets.d.ts'],
   [
     '../../examples/workflow-graph-roundtrip/frontend/src/generated/workflow-document.schema.json',
     'workflow-document.d.ts',

@@ -98,6 +98,31 @@ async fn ledger_rows(url: &str) -> Vec<(String, String, Option<i32>, i32)> {
     rows
 }
 
+async fn catalog_definitions(url: &str) -> Vec<String> {
+    let mut connection = PgConnection::connect(url).await.expect("inspect catalog");
+    let definitions = sqlx::query_scalar::<_, String>(
+        "SELECT definition FROM (
+            SELECT c.relname || ':' || a.attname || ':' ||
+                   pg_catalog.format_type(a.atttypid, a.atttypmod) || ':' || a.attnotnull AS definition
+            FROM pg_catalog.pg_class c
+            JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+            WHERE c.relnamespace = current_schema()::regnamespace AND a.attnum > 0
+                  AND NOT a.attisdropped
+            UNION ALL
+            SELECT conname || ':' || pg_get_constraintdef(oid)
+            FROM pg_catalog.pg_constraint WHERE connamespace = current_schema()::regnamespace
+            UNION ALL
+            SELECT indexname || ':' || indexdef FROM pg_catalog.pg_indexes
+            WHERE schemaname = current_schema()
+         ) definitions ORDER BY definition",
+    )
+    .fetch_all(&mut connection)
+    .await
+    .expect("read catalog definitions");
+    connection.close().await.expect("close catalog inspector");
+    definitions
+}
+
 /// The 1.0 compatibility stamp `schema.sql` provisions, as
 /// `(version, min_reader)` (ADR 0115 §1.2, §7): what open admits by. The
 /// pre-1.0 DDL revision is the migration ledger's, never the stamp's.
@@ -520,11 +545,10 @@ async fn migrate_advances_a_stamped_predecessor_component() {
 }
 
 /// Component 139 (FIG-3607) re-keys the process relations, which no expand
-/// step can do, so the expand catalog has no step from 138: a catalog at DDL
-/// revision 138 is a recreate boundary. It lacks what 139 and 140 added, so
-/// open refuses its shape; planning and migrating it refuse with the typed
-/// range error, and the refused run writes nothing — no ledger row, no stamp
-/// move.
+/// step can do. The nearest unsupported predecessor is derived from this
+/// build's baseline and catalog. Missing required relations make worker open
+/// refuse its shape; planning and migrating refuse typed without changing the
+/// catalog, stamp or ledger.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_component_without_an_expand_step_is_refused() {
     let Some(database) = migrator_database().await else {
@@ -533,9 +557,32 @@ async fn a_component_without_an_expand_step_is_refused() {
     let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
-    let found = 138;
+    let baseline = PostgresStorage::schema_version();
+    let mut found = baseline.checked_sub(1).expect("baseline has a predecessor");
     record_component(&database_url, &schema, found).await;
-    // A 138 catalog predates the logical-root family component 140 added.
+    // Find the nearest unsupported predecessor in the active catalog. The cut
+    // empties that catalog, so its immediate predecessor is then unsupported.
+    while PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
+        .await
+        .is_ok()
+    {
+        found = found
+            .checked_sub(1)
+            .expect("a missing predecessor path exists");
+        let mut connection = PgConnection::connect(&url)
+            .await
+            .expect("rewind DDL revision");
+        sqlx::query("UPDATE lash_migrations SET to_version = $1")
+            .bind(found)
+            .execute(&mut connection)
+            .await
+            .expect("record predecessor DDL revision");
+        connection.close().await.expect("close predecessor setup");
+    }
+    assert!(
+        found < baseline,
+        "the fixture is an unsupported predecessor"
+    );
     let mut admin = PgConnection::connect(&database_url)
         .await
         .expect("connect scratch provisioner");
@@ -545,13 +592,15 @@ async fn a_component_without_an_expand_step_is_refused() {
     ))
     .execute(&mut admin)
     .await
-    .expect("remove the tables component 140 added");
+    .expect("remove required relations from the populated predecessor");
     admin.close().await.expect("close scratch provisioner");
     let ledger_before = ledger_rows(&url).await;
+    let stamp_before = compat_stamp(&url).await;
+    let catalog_before = catalog_definitions(&url).await;
 
     assert!(
         PostgresStorage::connect(&url).await.is_err(),
-        "a catalog at DDL revision 138 must not open directly"
+        "an unsupported populated predecessor must not open directly"
     );
     for (what, refused) in [
         (
@@ -567,9 +616,17 @@ async fn a_component_without_an_expand_step_is_refused() {
                 .map(|_| ()),
         ),
     ] {
-        let rendered = refused
-            .expect_err("a catalog with no expand step must refuse")
-            .to_string();
+        let error = refused.expect_err("a catalog with no expand step must refuse");
+        assert!(
+            matches!(
+                &error,
+                MigrateError::Store(lash_core_execution::StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { component, .. }
+                }) if component == lash_core_execution::compat::ComponentId::POSTGRES.as_str()
+            ),
+            "the {what} refusal stays typed: {error:?}"
+        );
+        let rendered = error.to_string();
         assert!(
             rendered.contains(&format!("has version {found}")),
             "the {what} refusal names the found version: {rendered}"
@@ -579,7 +636,8 @@ async fn a_component_without_an_expand_step_is_refused() {
             "the {what} refusal names the missing migration path: {rendered}"
         );
     }
-    assert_eq!(compat_stamp(&url).await, COMPAT_STAMP);
+    assert_eq!(compat_stamp(&url).await, stamp_before);
+    assert_eq!(catalog_definitions(&url).await, catalog_before);
     assert_eq!(
         ledger_rows(&url).await,
         ledger_before,
@@ -587,6 +645,31 @@ async fn a_component_without_an_expand_step_is_refused() {
     );
     drop_scratch_schema(&database_url, &schema).await;
     drop(database);
+}
+
+#[cfg(not(feature = "synthetic-next"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-4493: certify fresh production ledger at the 1.0 cut"]
+async fn fresh_release_ledger_has_only_baseline_bootstrap_evidence() {
+    let database = migrator_database()
+        .await
+        .expect("the ledger law requires PostgreSQL");
+    let database_url = database.url().to_string();
+    let schema = create_scratch_schema(&database_url).await;
+    let url = scratch_url(&database_url, &schema);
+    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("provision release baseline");
+    let rows = ledger_rows(&url).await;
+    assert_eq!(rows.len(), 1, "only baseline bootstrap evidence: {rows:?}");
+    assert_eq!(rows[0].0, "expand");
+    assert_eq!(
+        rows[0].1,
+        format!("bootstrap-{}", PostgresStorage::schema_version())
+    );
+    assert_eq!(rows[0].2, None, "bootstrap has no predecessor");
+    assert_eq!(rows[0].3, PostgresStorage::schema_version());
+    drop_scratch_schema(&database_url, &schema).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
