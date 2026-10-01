@@ -138,8 +138,11 @@ pool's critical path rather than a sequential `cargo check` per lane on a
 4-vCPU runner. It compiles and lints the lanes on every trusted merge group,
 dispatch, and pull request whose diff can move a Rust build; the lane tests
 run on merge groups, dispatches, and pull requests whose diff touches
-feature-gated code. Deferred Unicode and the lashlang consumer remain
-dispatch-only.
+feature-gated code. The job is a matrix of four shards:
+`scripts/ci/feature_lane_shards.py` gives every lane target one owning shard,
+keeping each lane whole and balancing by measured compile reservation, and
+`CI conclusion` requires all four. Deferred Unicode and the lashlang consumer
+remain dispatch-only.
 `docs/agents/hermetic-build.md` records how the resolution is computed and
 reconciled against Cargo, and the one faithfulness limitation that remains.
 

@@ -478,6 +478,7 @@ jobs:
           python3 scripts/test_with_service.py
           python3 scripts/test_pg_service.py
           python3 scripts/test_check_feature_coverage.py
+          python3 scripts/test_feature_lane_shards.py
           python3 scripts/test_fast_test.py
           python3 scripts/test_buck2_test_contract.py
           python3 scripts/test_buck2_action_sizes.py
@@ -658,15 +659,33 @@ jobs:
   # used to be named individually for the Lint job. It needs the pool's cache
   # credentials, so an untrusted pull request skips it; the merge group is
   # always trusted and proves every variant before anything lands.
+  #
+  # The job is a matrix of shards: one runner building the whole lane graph
+  # ran past its 45-minute limit. `scripts/ci/feature_lane_shards.py` gives
+  # every lane target exactly one owning shard, keeping each coverage lane
+  # whole so a shard builds its dependency variants once, and balancing the
+  # shards by measured compile reservation. Each step below still names its
+  # aggregate; the script passes the command the shard's members of it, and
+  # skips a step whose aggregate the shard owns nothing of. The floors are
+  # held by the shard that executes the floored target. The shard list here
+  # must be 1..SHARDS of that script (scripts/test_feature_lane_shards.py),
+  # and `ci-conclusion` reads the matrix as one result: any shard failing or
+  # cancelled fails or cancels `feature-lanes`.
   feature-lanes:
-    name: Feature lanes
+    name: Feature lanes (${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 40
     needs: plan
     if: >-
       needs.plan.outputs.buck2_trusted == 'true'
       && needs.plan.outputs.rust == 'true'
     environment: build-cache
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      FEATURE_LANE_SHARD: ${{ matrix.shard }}
     steps:
       - *checkout
 
@@ -690,16 +709,16 @@ jobs:
       - name: Compile every feature lane
         shell: bash
         run: |
-          scripts/hermetic-build.sh build \
+          python3 scripts/ci/feature_lane_shards.py "$FEATURE_LANE_SHARD" //:feature_lane_compile -- \
+            scripts/hermetic-build.sh build \
             --jobs 32 --materializations none \
             --build-report "${RUNNER_TEMP}/feature-build-report.json" \
-            --event-log "${RUNNER_TEMP}/feature-events.json-lines" \
-            //:feature_lane_compile
-          scripts/hermetic-build.sh clippy \
+            --event-log "${RUNNER_TEMP}/feature-events.json-lines"
+          python3 scripts/ci/feature_lane_shards.py "$FEATURE_LANE_SHARD" //:feature_lane_clippy -- \
+            scripts/hermetic-build.sh clippy \
             --jobs 32 --materializations none \
             --build-report "${RUNNER_TEMP}/feature-clippy-build-report.json" \
-            --event-log "${RUNNER_TEMP}/feature-clippy-events.json-lines" \
-            //:feature_lane_clippy
+            --event-log "${RUNNER_TEMP}/feature-clippy-events.json-lines"
 
       # The lane commands that are `cargo test`, not `cargo check`. They are
       # service-free, so the pool executes them under the same feature
@@ -711,13 +730,15 @@ jobs:
           github.event_name != 'pull_request'
           || needs.plan.outputs.feature_lanes == 'true'
         shell: bash
-        run: scripts/ci/buck2-test.sh feature-lanes //:feature_lane_tests
+        run: |
+          python3 scripts/ci/feature_lane_shards.py "$FEATURE_LANE_SHARD" //:feature_lane_tests -- \
+            scripts/ci/buck2-test.sh feature-lanes
 
       - name: Upload failing test logs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: failed-testlogs-${{ github.job }}-${{ github.run_attempt }}
+          name: failed-testlogs-${{ github.job }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/failed-testlogs/
           if-no-files-found: ignore
           include-hidden-files: true
@@ -733,7 +754,7 @@ jobs:
           github.event_name != 'pull_request'
           || needs.plan.outputs.feature_lanes == 'true'
         shell: bash
-        run: python3 scripts/ci/check_feature_lane_test_floors.py
+        run: python3 scripts/ci/check_feature_lane_test_floors.py --shard "$FEATURE_LANE_SHARD"
 
       - name: Summarize feature-lane build events
         if: always()
@@ -745,7 +766,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: buck2-events-${{ github.job }}-${{ github.run_attempt }}
+          name: buck2-events-${{ github.job }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/feature-events.json-lines
             ${{ runner.temp }}/feature-build-report.json

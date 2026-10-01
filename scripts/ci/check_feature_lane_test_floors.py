@@ -12,6 +12,10 @@ generator writes. A variant's name is a hash of its resolved closure, so no
 caller reconstructs it. A lane command's name filter (`cargo test ... --lib
 conformance`) is part of what the variant executes, so the count applies the
 same libtest arguments: a floor on a filtered selection counts that selection.
+
+`--shard <k>` holds only the floors of the targets that `feature-lanes` matrix
+shard executes (`feature_lane_shards.py`). Every floor's target has exactly one
+owning shard, so the shards together hold every floor once.
 """
 
 from __future__ import annotations
@@ -22,6 +26,8 @@ import pathlib
 import re
 import subprocess
 import sys
+
+import feature_lane_shards
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 INVENTORY = ROOT / "tools" / "buck2" / "target-inventory.json"
@@ -47,10 +53,23 @@ def floors() -> tuple[dict[str, int], dict[str, list[str]]]:
     return values, arguments
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     expected, arguments = floors()
     if not expected:
         raise SystemExit("feature_lane_test_floors is empty")
+    if argv:
+        if len(argv) != 2 or argv[0] != "--shard":
+            raise SystemExit("usage: check_feature_lane_test_floors.py [--shard <k>]")
+        try:
+            shard = feature_lane_shards.parse_shard(argv[1])
+            expected = feature_lane_shards.shard_floors(
+                *feature_lane_shards.load(), shard
+            )
+        except ValueError as error:
+            raise SystemExit(f"check_feature_lane_test_floors: {error}")
+        if not expected:
+            print(f"feature-lane shard {shard}/{feature_lane_shards.SHARDS} owns no floors")
+            return 0
     report_dir = pathlib.Path(os.environ.get("RUNNER_TEMP", ROOT / ".buck2" / "ci-reports"))
     report_dir.mkdir(parents=True, exist_ok=True)
     report = report_dir / "feature-lane-floor-build-report.json"
@@ -104,4 +123,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
