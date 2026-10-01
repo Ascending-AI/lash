@@ -40,6 +40,9 @@ pub struct OpenHandler {
     context: LentContext,
     admitted: AdmittedScope,
     authority: RestateAuthorityId,
+    /// The backend's build: the lane the groups the lent controller opens
+    /// dispatch on (FIG-4454).
+    build_generation: lash_core::engine::BuildGeneration,
     release: oneshot::Sender<()>,
     invocation: JoinHandle<Result<bool, String>>,
 }
@@ -69,6 +72,7 @@ impl OpenHandler {
         Arc::new(RestateRuntimeEffectController::new(
             context,
             self.authority.clone(),
+            self.build_generation.clone(),
         ))
         .into_scoped_effect_controller(self.admitted.clone())
         .expect("open_handler admitted this scope when it opened")
@@ -148,6 +152,7 @@ impl<Stores: lash_core::StoreSet + ?Sized> RestateTestBackend<Stores> {
             context,
             admitted,
             authority: self.authority().clone(),
+            build_generation: self.build_generation().clone(),
             release,
             invocation,
         })

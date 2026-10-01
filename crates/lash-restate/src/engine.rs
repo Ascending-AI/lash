@@ -119,10 +119,10 @@ impl RestateEngine {
             admin_connection,
             namespace,
         } = config;
-        let effect_host = Arc::new(RestateEffectHost::new_for_build(
+        let effect_host = Arc::new(RestateEffectHost::in_namespace(
             connection.clone(),
             authority.clone(),
-            Some(build_generation.clone()),
+            build_generation.clone(),
             namespace.clone(),
         ));
         let process = Arc::new(RestateProcessDeployment::in_namespace(
@@ -447,6 +447,12 @@ impl lash_core::EffectEngine for RestateEngine {
 
     fn session_work(&self) -> Arc<dyn SessionWorkEngine> {
         Arc::clone(&self.session_work) as Arc<dyn SessionWorkEngine>
+    }
+
+    /// The Restate server's deployments and the groups whose committed
+    /// children owe a drain on a lane, read through the admin API (FIG-4454).
+    fn deployment_registry(&self) -> Arc<dyn lash_core::store::fleet_finalize::DeploymentRegistry> {
+        Arc::new(crate::RestateDeploymentRegistry::new(self.admin.clone()))
     }
 }
 

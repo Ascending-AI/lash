@@ -376,6 +376,7 @@ impl SqliteStoreSet {
             self.generation_drain().as_ref(),
             self.session_delete_ledger().as_ref(),
             |kind| self.obligation_ledger(kind),
+            registry,
             retired,
             now_ms,
         )

@@ -266,12 +266,13 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     authority_id: RestateAuthorityId,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
-    /// The drain generation of the build whose lash handler runs this
-    /// controller (FIG-3795): an effect group it opens dispatches on that
+    /// The drain generation of the build whose handler runs this controller
+    /// (FIG-3795, FIG-4454): an effect group it opens dispatches on that
     /// build's lane, so the group's children run on the build that opened
-    /// it. A controller a host builds inside its own handler names none, and
-    /// its groups dispatch on the stable lane.
-    build_generation: Option<lash_core::engine::BuildGeneration>,
+    /// it, and the processes it starts carry it as their sender. Every
+    /// controller names one — a lash handler's and one a host builds inside
+    /// its own handler alike — so no group dispatches on a stable route.
+    build_generation: lash_core::engine::BuildGeneration,
     /// The generation sentinel its first recorded entry carries (FIG-3980).
     folded_sentinel: Option<Arc<crate::sentinel::FoldedSentinel>>,
     /// The namespace of the deployment whose services this controller calls
@@ -299,10 +300,19 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         self.commit_receipts.rank(group_key, scope_id, replay_key)
     }
 
-    pub fn new(context: C, authority_id: RestateAuthorityId) -> Self {
+    /// A controller over `context`, journaling under `authority_id`, of the
+    /// build whose drain generation is `build_generation` — the engine's
+    /// [`build_generation`](crate::RestateEngine::build_generation), whose
+    /// lanes the deployment's endpoint binds.
+    pub fn new(
+        context: C,
+        authority_id: RestateAuthorityId,
+        build_generation: lash_core::engine::BuildGeneration,
+    ) -> Self {
         Self::with_options(
             context,
             authority_id,
+            build_generation,
             RestateEffectControllerOptions::default(),
         )
     }
@@ -310,6 +320,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     pub fn with_options(
         context: C,
         authority_id: RestateAuthorityId,
+        build_generation: lash_core::engine::BuildGeneration,
         options: RestateEffectControllerOptions,
     ) -> Self {
         Self {
@@ -317,7 +328,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             authority_id,
             options,
             trace: None,
-            build_generation: None,
+            build_generation,
             folded_sentinel: None,
             namespace: crate::RestateNamespace::default(),
             read_ahead: group_read::GroupReadAhead::default(),
@@ -339,23 +350,12 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         &self.namespace
     }
 
-    /// Run as a controller of the build of `generation`: the groups it
-    /// opens dispatch on that build's `EffectGroupDispatch` lane and the
-    /// processes it starts carry the generation as their sender (FIG-3795).
-    /// Lash's own handlers set it; a host's never do.
-    pub(crate) fn with_build_generation(
-        mut self,
-        generation: lash_core::engine::BuildGeneration,
-    ) -> Self {
-        self.build_generation = Some(generation);
-        self
-    }
-
     #[cfg(test)]
     pub(crate) fn new_for_test(context: C) -> Self {
         Self::new(
             context,
             RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+            crate::tests::test_build_generation(),
         )
     }
 
@@ -367,6 +367,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         Self::with_options(
             context,
             RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+            crate::tests::test_build_generation(),
             options,
         )
     }
@@ -781,9 +782,9 @@ where
         // lane, so the group runs on the build that opened it.
         let dispatch_route = self
             .namespace
-            .own_or_stable(
+            .generation(
                 crate::LashService::EffectGroupDispatch,
-                self.build_generation.as_ref(),
+                self.build_generation.clone(),
             )
             .name()
             .into_owned();
@@ -1118,7 +1119,7 @@ where
                 &self.context,
                 &self.namespace,
                 &self.authority_id,
-                self.build_generation.as_ref(),
+                Some(&self.build_generation),
                 self.options.process_cancel,
                 &invocation,
                 *command,
@@ -1162,7 +1163,7 @@ where
                                 &self.context,
                                 &self.namespace,
                                 &self.authority_id,
-                                self.build_generation.as_ref(),
+                                Some(&self.build_generation),
                                 self.options.process_cancel,
                                 &invocation,
                                 *command,

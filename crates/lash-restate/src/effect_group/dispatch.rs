@@ -209,9 +209,11 @@ impl EffectGroupDispatchImpl {
         // FIG-3619: the owning session's generation is checked before
         // anything else this invocation does — before admission, before its
         // membership record, before an effect key is derived, and so before
-        // its effect can be dispatched. A session's state generation moves
-        // independently of the build that opened the group, so a child can
-        // still land on a session another build moved on. A refused child
+        // its effect can be dispatched. The lane's builds all admit the
+        // sessions its opener's build admitted: the session admission is an
+        // input to the lane's generation (FIG-4454), and the marker moves
+        // under no production writer. The gate is defence in depth: it
+        // refuses only forged or operator-forced state. A refused child
         // settles with the typed refusal, which resolves the opener's rank
         // wait instead of stranding it; its effect never runs.
         if let Some(refusal) = session_generation_refusal(self.sessions.as_ref(), request).await? {
@@ -235,12 +237,14 @@ impl EffectGroupDispatchImpl {
         let admission = match first {
             EffectGroupAdmissionResponse::Admitted => EffectGroupAdmissionResponse::Admitted,
             EffectGroupAdmissionResponse::AttachExpired => {
-                // §8: the index retains a different invocation id for this
-                // position — the original's retention expired and the
-                // idempotency-keyed dispatch minted this successor. The child
-                // never runs under an identity the group never recorded: it
-                // seats a final the original committed, or its typed failure
-                // where none is committed.
+                // §8: this invocation is not the one that holds the position —
+                // the index retains a different invocation id, or the
+                // position's final is committed and the invocation that
+                // committed it is gone (FIG-4454). The idempotency-keyed
+                // dispatch minted this successor. The child is never driven
+                // again: it seats a final the original committed, drained by
+                // this child's own driver, or its typed failure where none is
+                // committed.
                 return self
                     .settle_unrun_child(ctx, request, UnrunChild::AttachExpired)
                     .await;
@@ -252,6 +256,7 @@ impl EffectGroupDispatchImpl {
                 release_unadmitted_wait(
                     ctx,
                     self.authority_id.clone(),
+                    self.build_generation.clone(),
                     self.route.namespace().clone(),
                     request,
                 )
@@ -295,6 +300,7 @@ impl EffectGroupDispatchImpl {
                 release_unadmitted_wait(
                     ctx,
                     self.authority_id.clone(),
+                    self.build_generation.clone(),
                     self.route.namespace().clone(),
                     request,
                 )
@@ -380,10 +386,13 @@ impl EffectGroupDispatchImpl {
                 ))
                 .into());
             };
-            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
-                .in_namespace(self.route.namespace().clone())
-                .with_build_generation(self.build_generation.clone())
-                .with_group_child_cancel(child_cancel);
+            let controller = RestateRuntimeEffectController::new(
+                ctx,
+                self.authority_id.clone(),
+                self.build_generation.clone(),
+            )
+            .in_namespace(self.route.namespace().clone())
+            .with_group_child_cancel(child_cancel);
             let envelope = RuntimeEffectEnvelope {
                 group: None,
                 ..request.envelope.clone()
@@ -518,10 +527,13 @@ impl EffectGroupDispatchImpl {
             ))
             .into());
         };
-        let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
-            .in_namespace(self.route.namespace().clone())
-            .with_build_generation(self.build_generation.clone())
-            .with_group_child_cancel(child_cancel);
+        let controller = RestateRuntimeEffectController::new(
+            ctx,
+            self.authority_id.clone(),
+            self.build_generation.clone(),
+        )
+        .in_namespace(self.route.namespace().clone())
+        .with_group_child_cancel(child_cancel);
         // The child's own admitted controller, bound to its recorded
         // identity: the recorded pair — claim scope and the incarnation
         // it was admitted under — never the dispatching scope and never
@@ -1413,7 +1425,9 @@ impl UnrunChild {
     fn why_unrealized(&self) -> String {
         match self {
             Self::GenerationRefused(refusal) => format!(
-                "this invocation cannot run under its session's state generation ({refusal})"
+                "this lane's build refuses a session state generation its opener's build \
+                 admitted, which only a forged marker or operator-forced state produces \
+                 ({refusal})"
             ),
             Self::AttachExpired => {
                 "the invocation that committed it is gone, and its retention expired".to_owned()
@@ -1441,13 +1455,15 @@ enum ToolChildTerminal {
 async fn release_unadmitted_wait(
     ctx: SharedWorkflowContext<'_>,
     authority_id: crate::ingress::RestateAuthorityId,
+    build_generation: lash_core::engine::BuildGeneration,
     namespace: crate::RestateNamespace,
     request: &EffectGroupChildRequest,
 ) -> HandlerResult<()> {
     let RuntimeEffectCommand::AwaitEvent { key } = &request.envelope.command else {
         return Ok(());
     };
-    let controller = RestateRuntimeEffectController::new(ctx, authority_id).in_namespace(namespace);
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id, build_generation)
+        .in_namespace(namespace);
     lash_core::AwaitEventResolver::resolve_await_event(
         &controller,
         key,

@@ -62,9 +62,11 @@
 //! A host's own services are named once, under their stable names. A host
 //! submits work to the engine and never drives it (ADR 0104): no host handler
 //! runs a lash turn, so no host service carries a journal that needs a
-//! generation lane. A controller a host builds inside its own handler names
-//! no build generation, so an effect group it opens dispatches on the stable
-//! `EffectGroupDispatch` lane.
+//! generation lane. A controller or effect host a host builds still names its
+//! build's generation (FIG-4454): an effect group it opens dispatches on that
+//! build's `EffectGroupDispatch` lane, as a group a lash handler opens does,
+//! so no group's children escape their opener's build through the stable
+//! name.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -231,20 +233,6 @@ impl RestateNamespace {
             service,
             lane: Lane::Generation(generation),
         }
-    }
-
-    /// `service` under `generation`'s lane when there is one, its stable
-    /// name otherwise: where the work of a caller that may or may not know
-    /// its build goes.
-    pub(crate) fn own_or_stable(
-        &self,
-        service: LashService,
-        generation: Option<&BuildGeneration>,
-    ) -> ServiceRoute {
-        generation.map_or_else(
-            || self.stable(service),
-            |generation| self.generation(service, generation.clone()),
-        )
     }
 
     /// Reads back a route recorded in this namespace: `None` for a name that

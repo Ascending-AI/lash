@@ -557,26 +557,42 @@ macro_rules! tool_child_invocation_tests {
     };
 }
 
-/// Register the successor laws (ADR 0099 §5, §8): a child whose final
-/// committed and whose invocation died before its seat and outlived its
-/// retention is finished by the successor its dispatch mints.
+/// Register the committed-final recovery laws (ADR 0099 §5, §8, W7;
+/// FIG-4454): a child whose final committed and whose invocation died before
+/// its seat and outlived its retention is re-sent by its opener's reopen and
+/// drained on the opener's lane, across a deployment change, with the group
+/// open and after a `Cancel` close.
 ///
 /// The fixture hands back a guard, a session prefix, a
-/// [`ToolChildLawFixture`](crate::ToolChildLawFixture) and the tier's
-/// [`ChildInvocationExpiry`](crate::ChildInvocationExpiry): the operator that
-/// kills a child's invocation, expires its retention and dispatches its
-/// successor.
+/// [`ToolChildLawFixture`](crate::ToolChildLawFixture), the tier's
+/// [`ChildInvocationExpiry`](crate::ChildInvocationExpiry) — the operator
+/// that kills a child's invocation and expires its retention — and its
+/// [`DeploymentChange`](crate::DeploymentChange).
 #[macro_export]
-macro_rules! tool_child_successor_tests {
+macro_rules! tool_child_committed_recovery_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $(#[$attr])*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn a_successor_drains_the_final_its_expired_predecessor_committed() {
-            let (_guard, prefix, fixture, expire) = $fixture;
-            $crate::registration_macro_support::a_successor_drains_the_final_its_expired_predecessor_committed(
+        async fn a_committed_final_is_recovered_on_its_lane_across_a_deployment_change() {
+            let (_guard, prefix, fixture, expire, change) = $fixture;
+            $crate::registration_macro_support::a_committed_final_is_recovered_on_its_lane_across_a_deployment_change(
                 &fixture,
                 prefix,
                 &expire,
+                &change,
+            )
+            .await;
+        }
+
+        $(#[$attr])*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn a_cancel_closed_groups_committed_final_is_recovered_on_its_lane() {
+            let (_guard, prefix, fixture, expire, change) = $fixture;
+            $crate::registration_macro_support::a_cancel_closed_groups_committed_final_is_recovered_on_its_lane(
+                &fixture,
+                prefix,
+                &expire,
+                &change,
             )
             .await;
         }

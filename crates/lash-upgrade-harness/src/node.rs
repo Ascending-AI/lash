@@ -401,10 +401,14 @@ async fn sqlite_upgrade(args: SqliteUpgradeArgs) -> Result<serde_json::Value> {
     match args.action {
         SqliteUpgradeAction::Drain => {
             drain.mark_draining(&args.generation, now).await?;
+            let registry = lash_restate::RestateDeploymentRegistry::new(
+                lash_restate::RestateAdminClient::new(args.restate.admin_url.clone()),
+            );
             let status = GenerationDrainStatus::collect(
                 drain.as_ref(),
                 stores.session_delete_ledger().as_ref(),
                 |kind| stores.obligation_ledger(kind),
+                &registry,
                 &args.generation,
                 now,
             )
@@ -642,6 +646,7 @@ impl Serving {
             process::HarnessProcesses {
                 core: core.clone(),
                 artifacts,
+                build_generation: engine.build_generation().clone(),
                 authority: lash::restate::RestateAuthorityId::new(&restate.authority)
                     .map_err(|error| anyhow!("authority id: {error}"))?,
                 namespace: lash::restate::RestateNamespace::new(&restate.namespace)

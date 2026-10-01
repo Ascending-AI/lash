@@ -66,8 +66,10 @@ pub struct DeploymentRegistryError {
     pub detail: String,
 }
 
-/// The engine's record of which deployments are registered: what "the
-/// retired generation's deployment is removed" is checked against.
+/// The engine's retirement evidence: which deployments are registered —
+/// what "the retired generation's deployment is removed" is checked against
+/// — and what the engine itself still owes on a generation's lanes, which no
+/// store row records.
 #[async_trait::async_trait]
 pub trait DeploymentRegistry: Send + Sync {
     /// Every deployment the engine holds that serves any lane of
@@ -76,6 +78,39 @@ pub trait DeploymentRegistry: Send + Sync {
         &self,
         generation: &BuildGeneration,
     ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError>;
+
+    /// The committed effect-group children whose group dispatches on a lane
+    /// of `generation`, in any namespace, and whose seat is still owed
+    /// (FIG-4454): each one's drain runs, or is recovered, on that lane, so
+    /// the generation's deployment cannot retire before it seats. The
+    /// group's own record is the obligation of record, whoever opened the
+    /// group — a host-built opener has no root the store counts.
+    async fn undrained_group_children(
+        &self,
+        generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError>;
+}
+
+/// The registry of an engine that keeps no deployments: it serves no lane
+/// and owes nothing on one.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoDeployments;
+
+#[async_trait::async_trait]
+impl DeploymentRegistry for NoDeployments {
+    async fn deployments_serving(
+        &self,
+        _generation: &BuildGeneration,
+    ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
+        Ok(Vec::new())
+    }
+
+    async fn undrained_group_children(
+        &self,
+        _generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError> {
+        Ok(0)
+    }
 }
 
 /// A finalize that must not run yet. Nothing changed.
@@ -86,8 +121,8 @@ pub enum FinalizeRefusal {
     /// it was never marked draining.
     #[error(
         "generation {} has not drained: marked draining {}, {} live and {} parked processes, \
-         {} parked and {} in-flight turns, {} closing sessions; run `lashctl drain {}` and \
-         wait for `lashctl drain-status {}` to read drained",
+         {} parked and {} in-flight turns, {} closing sessions, {} undrained group children; \
+         run `lashctl drain {}` and wait for `lashctl drain-status {}` to read drained",
         status.generation.as_str(),
         status.draining_since_ms.is_some(),
         status.live_processes,
@@ -95,6 +130,7 @@ pub enum FinalizeRefusal {
         status.parked_turns,
         status.in_flight_turns,
         status.closing_sessions,
+        status.undrained_group_children,
         status.generation.as_str(),
         status.generation.as_str()
     )]
@@ -216,6 +252,13 @@ mod tests {
         ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
             Ok(self.0.clone())
         }
+
+        async fn undrained_group_children(
+            &self,
+            _generation: &BuildGeneration,
+        ) -> Result<u64, DeploymentRegistryError> {
+            Ok(0)
+        }
     }
 
     fn status(marked: bool, parked_turns: u64) -> GenerationDrainStatus {
@@ -227,6 +270,7 @@ mod tests {
             parked_turns,
             in_flight_turns: 0,
             closing_sessions: 0,
+            undrained_group_children: 0,
             stalled_obligations: BTreeMap::new(),
             checked_at: 9,
         }

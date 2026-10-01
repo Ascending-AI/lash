@@ -233,7 +233,7 @@ fn object_sweep_crash_resume() -> Result<()> {
     operator_next.run("drain", Some(&n_generation))?;
     n_first.stop()?;
     n_back.stop()?;
-    let status = operator_next.run("drain-status", Some(&n_generation))?;
+    let status = operator_next.run_args(&case.drain_status_args(&n_generation))?;
     ensure!(status["drained"] == true, "N did not drain: {status}");
     let finalized = case.retire_and_finalize(&operator_next, &n_generation)?;
     ensure!(

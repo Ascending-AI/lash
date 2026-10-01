@@ -76,6 +76,17 @@ pub trait EffectEngine: Send + Sync {
     /// [`Self::process_work`]: a wrapper that forgot to forward it would
     /// answer for an engine that is not the one running the sessions.
     fn session_work(&self) -> Arc<dyn SessionWorkEngine>;
+
+    /// The engine's retirement evidence (FIG-4454): the deployments that
+    /// serve a generation's lanes and the committed effect-group children
+    /// still owed a drain on them, which a generation's drain status waits
+    /// for. An engine that keeps no deployments answers
+    /// [`NoDeployments`](crate::store::fleet_finalize::NoDeployments).
+    ///
+    /// Required, with no default, for the same reason as
+    /// [`Self::process_work`]: a wrapper that forgot to forward it would
+    /// report a drained generation while its engine still owes a drain.
+    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry>;
 }
 
 /// The one value a runtime takes every port from: one effect engine, and
@@ -184,6 +195,11 @@ impl Backend {
     /// The recovery leader lease over the store set's storage.
     pub fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {
         self.stores().recovery_leader()
+    }
+
+    /// The engine's retirement evidence (FIG-4454).
+    pub fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
+        self.engine.deployment_registry()
     }
 
     /// The store set's build-generation drain marks and work reads.

@@ -536,7 +536,12 @@ pub(super) struct LiveConformanceHarness {
     host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
     /// The storage the endpoint's process workflow and a law's runtime share.
-    stores: lash_sqlite_store::SqliteStoreSet,
+    stores: Arc<dyn lash_core::StoreSet>,
+    /// The same store set as SQLite's own type, for the laws that open a
+    /// conformance handle on its catalog: `None` on another store tier.
+    sqlite: Option<lash_sqlite_store::SqliteStoreSet>,
+    /// What keeps a file or PostgreSQL tier's substrate alive.
+    _tier: Option<super::effect_group_committed_recovery::HarnessTierResources>,
     process_runner: Arc<LawProcessRunner>,
     shutdown_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     server: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -595,6 +600,37 @@ impl LiveConformanceHarness {
         executors: Arc<ConformanceExecutors>,
         register: impl FnOnce(&RestateEffectHost),
     ) -> Self {
+        Self::start_with_stores(
+            target,
+            executors,
+            register,
+            super::effect_group_committed_recovery::HarnessStoreTier::SqliteMemory,
+        )
+        .await
+    }
+
+    /// The tool-child laws' endpoint over the store tier `tier`: the
+    /// endpoint's session catalog, process registry and a law's runtime all
+    /// run over it.
+    pub(super) async fn start_for_tool_children_over(
+        target: HarnessServer,
+        tier: super::effect_group_committed_recovery::HarnessStoreTier,
+    ) -> Self {
+        Self::start_with_stores(
+            target,
+            Arc::new(ConformanceExecutors::default()),
+            |_| {},
+            tier,
+        )
+        .await
+    }
+
+    async fn start_with_stores(
+        target: HarnessServer,
+        executors: Arc<ConformanceExecutors>,
+        register: impl FnOnce(&RestateEffectHost),
+        tier: super::effect_group_committed_recovery::HarnessStoreTier,
+    ) -> Self {
         let (connection, admin, live) = match &target {
             HarnessServer::Live => {
                 let ingress_url = required("RESTATE_INGRESS_URL");
@@ -651,14 +687,11 @@ impl LiveConformanceHarness {
         let ingress = RestateIngressClient::new(connection.clone());
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         register(&host);
-        let stores = lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("open the endpoint's SQLite memory store set");
+        let (stores, sqlite, tier) = tier.open().await;
         // The endpoint's accounting continuation settles into the store set
         // a law's runtime admits its runs into, as `RestateEngine::new`
         // binds a deployment's (ADR 0125).
-        host.bind_usage_accounting(lash_core::StoreSet::usage_accounting(&stores));
-        let process_registry = stores.process_registry();
+        host.bind_usage_accounting(stores.usage_accounting());
         let process_runner = Arc::new(LawProcessRunner::default());
         let session_driver = crate::RestateSessionDriverSlot::new();
         let endpoint = crate::services::bind_lash_services(
@@ -666,19 +699,17 @@ impl LiveConformanceHarness {
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress,
-                sessions: stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>,
-                attachments: stores.session_store_factory() as Arc<dyn lash_core::AttachmentReferrers>,
+                sessions: stores.session_store_factory(),
+                attachments: stores.attachment_referrers(),
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     Arc::clone(&process_runner),
-                    Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
-                    Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessContinuationStore>,
+                    stores.process_registry(),
+                    stores.process_continuations(),
                 ),
                 // The laws run their turns in the probe's handler; no core
                 // installs a session driver on this endpoint.
                 session_driver: session_driver.clone(),
-                build_generation: lash_core::engine::BuildGeneration::for_test(
-                    "effect-group-conformance",
-                ),
+                build_generation: lash_core::engine::BuildGeneration::for_test(HARNESS_BUILD),
             namespace: crate::RestateNamespace::default(),
             fleet: crate::object_state::FleetView::default(),
             },
@@ -733,6 +764,8 @@ impl LiveConformanceHarness {
             host,
             executors,
             stores,
+            sqlite,
+            _tier: tier,
             process_runner,
             shutdown_tx: tokio::sync::Mutex::new(shutdown_tx),
             server: tokio::sync::Mutex::new(server),
@@ -773,8 +806,7 @@ impl LiveConformanceHarness {
                 ingress: crate::RestateIngressClient::new(self.connection.clone()),
                 namespace: crate::RestateNamespace::default(),
                 processes: self.stores.process_registry(),
-                continuations: self.stores.process_registry()
-                    as Arc<dyn lash_core::ProcessContinuationStore>,
+                continuations: self.stores.process_continuations(),
                 sessions: self.stores.session_store_factory(),
             }),
         )
@@ -801,7 +833,7 @@ impl LiveConformanceHarness {
             // do not collide because scenario prefixes keep process ids
             // distinct. Every other port is the same store set's.
             make_processes: Arc::new({
-                let stores = Arc::new(self.stores.clone()) as Arc<dyn lash_core::StoreSet>;
+                let stores = Arc::clone(&self.stores);
                 move || {
                     let stores = Arc::clone(&stores);
                     Box::pin(async move { stores })
@@ -811,61 +843,37 @@ impl LiveConformanceHarness {
         }
     }
 
-    /// The retention sweep over one group child, on the server double (ADR
-    /// 0099 §8): the child's open invocation is killed, as an operator kills
-    /// it, before its seat; it is purged, as its retention's expiry purges it;
-    /// and its successor is dispatched with the child's own request under a
-    /// fresh invocation id, which is what the idempotency-keyed dispatch
-    /// mints once the retained invocation is gone.
-    pub(super) fn child_invocation_expiry(&self) -> lash_conformance::ChildInvocationExpiry {
-        let server = self
-            .server_double()
-            .expect("a child's retention expires on the server double");
-        let ingress = self.ingress();
-        Arc::new(move |group_key: String, position: usize| {
-            let server = server.clone();
-            let ingress = ingress.clone();
-            Box::pin(async move {
-                let (id, service, request) = server
-                    .invocations()
-                    .into_iter()
-                    .filter(|view| view.status != "completed")
-                    .find_map(|view| {
-                        let (service, rest) = view.target.split_once('/')?;
-                        let (key, handler) = rest.rsplit_once('/')?;
-                        if key != group_key || handler != "child" {
-                            return None;
-                        }
-                        let input = server.journal(&view.id)?.first()?.input()?;
-                        let request: serde_json::Value = serde_json::from_slice(&input).ok()?;
-                        (request["body"]["position"].as_u64() == Some(position as u64))
-                            .then(|| (view.id.clone(), service.to_owned(), request))
-                    })
-                    .unwrap_or_else(|| {
-                        panic!("an open invocation of group {group_key}'s child {position}")
-                    });
-                assert_eq!(
-                    server.kill_and_await(&id).await,
-                    Some(true),
-                    "kill the open invocation of group {group_key}'s child {position}"
-                );
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-                loop {
-                    match server.purge(&id) {
-                        Some(true) => break,
-                        Some(false) if tokio::time::Instant::now() < deadline => {
-                            tokio::time::sleep(Duration::from_millis(10)).await;
-                        }
-                        other => panic!("purge `{id}`: {other:?}"),
-                    }
-                }
-                ingress
-                    .send_workflow_json(&service, &group_key, "child", &request)
-                    .await
-                    .unwrap_or_else(|error| {
-                        panic!("dispatch the successor of group {group_key}'s child {position}: {error}")
-                    });
-            })
+    /// A maker of another build's endpoint over this harness's stores and
+    /// process runner (FIG-4454's deployment change): every lash service,
+    /// bound under the newer build's lanes, whose session-scope children read
+    /// their session's generation from the catalog the maker is given.
+    pub(super) fn another_build_maker(
+        &self,
+    ) -> Arc<dyn Fn(Arc<dyn lash_core::DeploymentStore>) -> Endpoint + Send + Sync> {
+        let connection = self.connection.clone();
+        let stores = Arc::clone(&self.stores);
+        let process_runner = Arc::clone(&self.process_runner);
+        Arc::new(move |sessions| {
+            let host = RestateEffectHost::new_for_test(connection.clone());
+            crate::services::bind_lash_services(
+                Endpoint::builder(),
+                crate::services::LashServiceParts {
+                    effect_host: &host,
+                    ingress: RestateIngressClient::new(connection.clone()),
+                    sessions,
+                    attachments: stores.attachment_referrers(),
+                    process_workflow: LashProcessWorkflowImpl::new_for_test(
+                        Arc::clone(&process_runner),
+                        stores.process_registry(),
+                        stores.process_continuations(),
+                    ),
+                    session_driver: crate::RestateSessionDriverSlot::new(),
+                    build_generation: super::effect_group_committed_recovery::newer_build(),
+                    namespace: crate::RestateNamespace::default(),
+                    fleet: crate::object_state::FleetView::default(),
+                },
+            )
+            .build()
         })
     }
 
@@ -919,7 +927,7 @@ impl LiveConformanceHarness {
     /// process port that delivers to the workflows it runs.
     pub(super) fn law_backend(&self) -> lash_core::Backend {
         lash_core::Backend::new(Arc::new(crate::RestateEngine::new(
-            Arc::new(self.stores.clone()),
+            Arc::clone(&self.stores),
             crate::RestateConfig::new(
                 self.connection.clone(),
                 self.admin_connection(),
@@ -943,7 +951,7 @@ impl LiveConformanceHarness {
     /// The storage a law's runtime runs over: the store set whose registry
     /// the endpoint's `LashProcessWorkflow` writes terminals into.
     pub(super) fn law_stores(&self) -> Arc<dyn lash_core::StoreSet> {
-        Arc::new(self.stores.clone())
+        Arc::clone(&self.stores)
     }
 
     /// A maker of fresh, unbound conformance handles on this endpoint's
@@ -953,7 +961,10 @@ impl LiveConformanceHarness {
     pub(super) fn law_persistence(
         &self,
     ) -> impl Fn(&str) -> Arc<lash_sqlite_store::SqliteStore> + Send + Sync + 'static + use<> {
-        let stores = self.stores.clone();
+        let stores = self
+            .sqlite
+            .clone()
+            .expect("a conformance handle opens on the SQLite memory tier's catalog");
         move |_scenario| {
             let stores = stores.clone();
             super::conformance_and_poison::sync_await(async move {
@@ -969,8 +980,8 @@ impl LiveConformanceHarness {
     pub(super) fn session_catalog_factory(
         &self,
     ) -> impl Fn() -> Arc<dyn lash_core::DeploymentStore> + Send + Sync + 'static {
-        let stores = self.stores.clone();
-        move || stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>
+        let stores = Arc::clone(&self.stores);
+        move || stores.session_store_factory()
     }
 
     pub(super) fn effect_host_factory(
@@ -1134,7 +1145,7 @@ impl LiveConformanceHarness {
                 &EffectGroupOpenRequest {
                     shape,
                     membership: witness_membership(std::slice::from_ref(&child)),
-                    dispatch_route: "EffectGroupDispatch".to_string(),
+                    dispatch_route: witness_dispatch_route(),
                     content_checked: false,
                 },
             )
@@ -1143,7 +1154,7 @@ impl LiveConformanceHarness {
         assert_eq!(
             opened,
             EffectGroupOpenResponse::OpenedFresh {
-                dispatch_route: "EffectGroupDispatch".to_owned()
+                dispatch_route: witness_dispatch_route()
             }
         );
         let adopted: EffectGroupProbeAdoptResponse = ingress
@@ -1278,7 +1289,7 @@ impl LiveConformanceHarness {
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
                     membership: witness_membership(std::slice::from_ref(&child)),
-                    dispatch_route: "EffectGroupDispatch".to_string(),
+                    dispatch_route: witness_dispatch_route(),
                     content_checked: false,
                 },
             )
@@ -1287,7 +1298,7 @@ impl LiveConformanceHarness {
         assert_eq!(
             opened,
             EffectGroupOpenResponse::OpenedFresh {
-                dispatch_route: "EffectGroupDispatch".to_owned()
+                dispatch_route: witness_dispatch_route()
             }
         );
         let _: EffectGroupProbeAdoptResponse = ingress
@@ -1397,7 +1408,7 @@ impl LiveConformanceHarness {
         let replay_key = shape.replay_keys[0].clone();
         let record = EffectGroupStateRecord {
             shape_digest: shape.digest(&membership).expect("shape digest"),
-            dispatch_route: "EffectGroupDispatch".to_string(),
+            dispatch_route: witness_dispatch_route(),
             lifecycle: EffectGroupLifecycle::Ready {
                 addresses: BTreeMap::new(),
                 live: EffectGroupStateLiveRecord {
@@ -1559,7 +1570,7 @@ impl LiveConformanceHarness {
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
                     membership: witness_membership(&children),
-                    dispatch_route: "EffectGroupDispatch".to_string(),
+                    dispatch_route: witness_dispatch_route(),
                     content_checked: false,
                 },
             )
@@ -1568,7 +1579,7 @@ impl LiveConformanceHarness {
         assert_eq!(
             opened,
             EffectGroupOpenResponse::OpenedFresh {
-                dispatch_route: "EffectGroupDispatch".to_owned()
+                dispatch_route: witness_dispatch_route()
             }
         );
         ingress
@@ -1950,7 +1961,7 @@ async fn run_design_witnesses(
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
                 membership: witness_membership(std::slice::from_ref(&child)),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: witness_dispatch_route(),
                 content_checked: false,
             },
         )
@@ -1959,7 +1970,7 @@ async fn run_design_witnesses(
     assert_eq!(
         opened,
         EffectGroupOpenResponse::OpenedFresh {
-            dispatch_route: "EffectGroupDispatch".to_owned()
+            dispatch_route: witness_dispatch_route()
         }
     );
     let request = EffectGroupDispatchRequest {
@@ -2003,7 +2014,7 @@ async fn run_design_witnesses(
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
                 membership: witness_membership(std::slice::from_ref(&child)),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: witness_dispatch_route(),
                 content_checked: false,
             },
         )
@@ -2115,7 +2126,7 @@ async fn run_design_witnesses(
             &EffectGroupOpenRequest {
                 shape: admission_shape.clone(),
                 membership: witness_membership(std::slice::from_ref(&admission_child)),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: witness_dispatch_route(),
                 content_checked: false,
             },
         )
@@ -2124,7 +2135,7 @@ async fn run_design_witnesses(
     assert_eq!(
         opened,
         EffectGroupOpenResponse::OpenedFresh {
-            dispatch_route: "EffectGroupDispatch".to_owned()
+            dispatch_route: witness_dispatch_route()
         }
     );
     let adopted: EffectGroupProbeAdoptResponse = ingress
@@ -2235,7 +2246,7 @@ async fn run_design_witnesses(
             &EffectGroupOpenRequest {
                 shape: gap_shape.clone(),
                 membership: witness_membership(std::slice::from_ref(&gap_child)),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: witness_dispatch_route(),
                 content_checked: false,
             },
         )
@@ -2297,7 +2308,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
                 membership: witness_membership(&children),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: witness_dispatch_route(),
                 content_checked: false,
             },
         )
@@ -2306,7 +2317,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     assert_eq!(
         opened,
         EffectGroupOpenResponse::OpenedFresh {
-            dispatch_route: "EffectGroupDispatch".to_owned()
+            dispatch_route: witness_dispatch_route()
         }
     );
     let mut ranks = Vec::new();
@@ -2362,7 +2373,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             &EffectGroupOpenRequest {
                 shape: stale_shape.clone(),
                 membership: witness_membership(std::slice::from_ref(&stale_child)),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: witness_dispatch_route(),
                 content_checked: false,
             },
         )
@@ -2476,6 +2487,21 @@ pub(super) fn witness_child(group_key: &str, position: usize) -> RuntimeEffectEn
             operation: format!("witness-child-{position}"),
         },
     )
+}
+
+/// The drain generation the harness's endpoint serves.
+pub(super) const HARNESS_BUILD: &str = "effect-group-conformance";
+
+/// The dispatcher lane of the harness's build: the route an index-level
+/// law's group records at open (FIG-4454: every group dispatches on a lane).
+pub(super) fn witness_dispatch_route() -> String {
+    crate::services::DEFAULT_NAMESPACE
+        .generation(
+            crate::LashService::EffectGroupDispatch,
+            lash_core::engine::BuildGeneration::for_test(HARNESS_BUILD),
+        )
+        .name()
+        .into_owned()
 }
 
 pub(super) fn witness_key(label: &str) -> String {

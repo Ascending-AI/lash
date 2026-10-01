@@ -271,6 +271,8 @@ struct ToolBatchProbeImpl {
     /// besides the effect host.
     stores: Arc<dyn lash_core::StoreSet>,
     authority: lash_restate::RestateAuthorityId,
+    /// The backend's build: the lane the batch's group dispatches on.
+    build_generation: lash_core::engine::BuildGeneration,
     producers: Vec<lash_conformance::ToolBatchProducer>,
 }
 
@@ -281,8 +283,11 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
         Json(request): Json<ProbeRequest>,
     ) -> HandlerResult<Json<ProbeResponse>> {
         let session_id = lash_sansio::SessionId::from(request.session_id.clone());
-        let controller =
-            lash_restate::RestateRuntimeEffectController::new(ctx, self.authority.clone());
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            self.authority.clone(),
+            self.build_generation.clone(),
+        );
         let scoped = controller
             .scoped_effect_controller(lash_core::AdmittedScope::turn(
                 &session_id,
@@ -465,6 +470,7 @@ async fn run_restate(
                 host: backend.restate_effect_host(),
                 stores: Arc::clone(backend.store_set()),
                 authority: authority.clone(),
+                build_generation: backend.build_generation().clone(),
                 producers: producers.to_vec(),
             }
             .serve(),

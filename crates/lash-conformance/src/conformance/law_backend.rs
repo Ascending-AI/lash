@@ -103,6 +103,10 @@ impl crate::EffectEngine for HostOverStores {
     fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
         Arc::new(crate::NoSessionWork::new())
     }
+
+    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
+        Arc::new(crate::store::fleet_finalize::NoDeployments)
+    }
 }
 
 /// `stores`' session catalog with `session_id` admitted as a fresh root:
@@ -216,6 +220,10 @@ impl crate::EffectEngine for StoreLawBackend {
 
     fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
         Arc::new(crate::NoSessionWork::new())
+    }
+
+    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
+        Arc::new(crate::store::fleet_finalize::NoDeployments)
     }
 }
 

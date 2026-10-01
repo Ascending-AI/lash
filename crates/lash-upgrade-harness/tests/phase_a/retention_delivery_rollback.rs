@@ -461,7 +461,7 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
     }
     n_node.stop()?;
     if let Some(operator) = operator {
-        drained_with_the_stalled_row_listed(operator, &n_generation)?;
+        drained_with_the_stalled_row_listed(operator, case, &n_generation)?;
         operator.run("end-drain", Some(&n_generation))?;
     }
     let relay_next: RelayReport = next.retention(case, &["relay"])?;
@@ -550,8 +550,12 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
 /// unknown-kind row is stalled: no build of the window can decode that row,
 /// and keeping N's deployment would not settle it. The status lists it alone,
 /// by its obligation id, with its typed reason and the kind no build knows.
-fn drained_with_the_stalled_row_listed(operator: &Operator, generation: &str) -> Result<()> {
-    let (code, status) = operator.answer("drain-status", Some(generation))?;
+fn drained_with_the_stalled_row_listed(
+    operator: &Operator,
+    case: &Case,
+    generation: &str,
+) -> Result<()> {
+    let (code, status) = operator.answer_args(&case.drain_status_args(generation))?;
     let result = &status["result"];
     let counts = &result["stalled_obligations"];
     let listed = result["stalled"].as_array();
@@ -564,6 +568,7 @@ fn drained_with_the_stalled_row_listed(operator: &Operator, generation: &str) ->
             && result["in_flight_turns"] == 0
             && result["parked_turns"] == 0
             && result["closing_sessions"] == 0
+            && result["undrained_group_children"] == 0
             && counts["artifact_cleanup"] == 1
             && counts.as_object().is_some_and(|kinds| kinds
                 .values()

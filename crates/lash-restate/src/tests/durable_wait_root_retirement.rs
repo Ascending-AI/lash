@@ -248,6 +248,7 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
     let host = Arc::new(RestateEffectHost::new(
         connection.clone(),
         test_restate_authority_id(),
+        crate::tests::test_build_generation(),
     ));
     let attach = crate::RestateTurnAttach::new(connection, test_restate_authority_id());
     let stores = memory_process_stores().await;

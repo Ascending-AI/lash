@@ -53,6 +53,13 @@ impl DeploymentRegistry for Registry {
     ) -> Result<Vec<RetainedDeployment>, DeploymentRegistryError> {
         Ok(self.0.lock().expect("registry").clone())
     }
+
+    async fn undrained_group_children(
+        &self,
+        _generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError> {
+        Ok(0)
+    }
 }
 
 async fn isolated() -> Option<IsolatedDatabase> {

@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let authority_id = RestateAuthorityId::new(
         std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
     )?;
-    let host = RestateEffectHost::new(ingress, authority_id);
+    let host = RestateEffectHost::new(ingress, authority_id, lash::formats::build_generation());
     let key = host
         .await_event_key(&scope, wait)
         .await

@@ -61,6 +61,8 @@ mod group_waits;
 mod notifications;
 mod protocol;
 mod rank_run;
+mod recovery;
+pub(crate) use recovery::{INDEX_RECORD_KEY, undrained_children_on};
 mod reopen;
 mod wire;
 use drain_barrier::blocking_positions;
@@ -326,16 +328,21 @@ impl EffectGroupState for EffectGroupStateImpl {
         let object = self.admit(&ctx).await?;
         request.shape.validate_membership(&request.membership)?;
         // The route is recorded verbatim, so it must name a dispatcher lane
-        // a deployment binds (FIG-3795): an opener cannot declare a route
-        // no dispatch could ever run under.
+        // a deployment binds (FIG-3795), and a generation's lane (FIG-4454):
+        // an opener cannot declare a route no dispatch could ever run under,
+        // nor one that hands the group's children to whichever build is
+        // newest.
         if !self
             .namespace
             .parse(&request.dispatch_route)
-            .is_some_and(|route| route.service() == crate::LashService::EffectGroupDispatch)
+            .is_some_and(|route| {
+                route.service() == crate::LashService::EffectGroupDispatch
+                    && matches!(route.lane(), crate::services::Lane::Generation(_))
+            })
         {
             return Err(TerminalError::new(format!(
                 "effect group {} open declared dispatch route `{}`, which names no \
-                 EffectGroupDispatch lane",
+                 generation lane of EffectGroupDispatch",
                 ctx.key(),
                 request.dispatch_route
             ))
@@ -419,6 +426,20 @@ impl EffectGroupState for EffectGroupStateImpl {
             }
             EffectGroupLifecycle::Retired { .. } => EffectGroupOpenResponse::Retired,
         };
+        // A reopen recovers every committed child whose seat is owed: its
+        // committing invocation may be gone, and nothing else would drain it
+        // (FIG-4454).
+        if matches!(
+            &record.lifecycle,
+            EffectGroupLifecycle::Ready { .. }
+                | EffectGroupLifecycle::Closed {
+                    effective: EffectGroupCloseOutcome::RunToCompletion
+                        | EffectGroupCloseOutcome::Cancel,
+                    ..
+                }
+        ) {
+            recovery::resend_owed_children(&ctx, &self.namespace, &record).await?;
+        }
         if marked {
             store_index(&ctx, object.writer, record);
         }
@@ -437,6 +458,18 @@ impl EffectGroupState for EffectGroupStateImpl {
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Reply::at(wire, EffectGroupProbeAdoptResponse::Retired));
+        }
+        // A dispatcher started for a group that is already ready or closed
+        // sends no child of its own, so the index recovers every committed
+        // child whose seat is owed (FIG-4454).
+        let ready_or_closed = match &record.lifecycle {
+            EffectGroupLifecycle::Ready { .. } => Some(EffectGroupProbeAdoptResponse::Ready),
+            EffectGroupLifecycle::Closed { .. } => Some(EffectGroupProbeAdoptResponse::Closed),
+            EffectGroupLifecycle::Preparing { .. } | EffectGroupLifecycle::Retired { .. } => None,
+        };
+        if let Some(response) = ready_or_closed {
+            recovery::resend_owed_children(&ctx, &self.namespace, &record).await?;
+            return Ok(Reply::at(wire, response));
         }
         // Read before the mutable match below: the adopting dispatcher gets
         // the recorded shape and membership so its children are always the

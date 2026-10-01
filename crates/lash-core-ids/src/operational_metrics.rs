@@ -151,7 +151,8 @@ pub fn record_obligations_stalled(kind: &'static str, count: u64) {
 
 /// Report one (generation, kind) cell of a build generation's drain status,
 /// including zero so a drained cell drops back (FIG-3884). `kind` is one of
-/// `live_processes`, `parked_processes`, `parked_turns`, `in_flight_turns`.
+/// `live_processes`, `parked_processes`, `parked_turns`, `in_flight_turns`,
+/// `undrained_group_children`.
 pub fn record_generation_drain_work(generation: &str, kind: &'static str, count: u64) {
     #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.generation_drain.work");

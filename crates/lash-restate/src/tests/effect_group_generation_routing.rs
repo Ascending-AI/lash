@@ -104,10 +104,10 @@ pub(super) async fn build_endpoint_reading(
     log: &RunLog,
     reads: crate::VersionRange,
 ) -> (Arc<RestateEffectHost>, Endpoint) {
-    let host = Arc::new(RestateEffectHost::new_for_build(
+    let host = Arc::new(RestateEffectHost::in_namespace(
         connection.clone(),
         test_restate_authority_id(),
-        Some(generation(build)),
+        generation(build),
         crate::RestateNamespace::default(),
     ));
     host.register_group_executors(Arc::new(BuildExecutors {
@@ -377,4 +377,85 @@ async fn l4_a_groups_children_run_on_the_build_that_opened_it() {
             .all(|view| view.target != format!("EffectGroupIndex/{gone}/open")),
         "the refused group was never opened: no group state exists for it"
     );
+}
+
+/// FIG-4454 L-host: a host builds its own opener through the public
+/// constructor, beside build N's endpoint, while build N+1 is the newest
+/// deployment. The group it opens dispatches on N's lane, as a group a lash
+/// handler opens does: no group escapes its opener's build through a stable
+/// route that hands its children to whichever build is newest.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_host_built_opener_dispatches_on_its_builds_lane() {
+    const CHILDREN: usize = 2;
+    let server = RestateTestServer::new(ServerConfig::default().with_seed(0x4454_0001))
+        .expect("start the server double");
+    let connection = RestateConnection::with_transport(server.ingress_url(), server.transport());
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open the shared store set");
+    let served: Arc<Mutex<Vec<(&'static str, AttemptDispatch)>>> = Arc::default();
+    let log = RunLog::default();
+    let (_host_n, endpoint_n) = build_endpoint(&connection, &stores, "N", &log).await;
+    let (_host_next, endpoint_next) = build_endpoint(&connection, &stores, "N+1", &log).await;
+    server
+        .register_with(endpoint_n, "build-N", recording("N", &served))
+        .await
+        .expect("register build N");
+    server
+        .register_with(endpoint_next, "build-N+1", recording("N+1", &served))
+        .await
+        .expect("register build N+1");
+    let lane = crate::services::DEFAULT_NAMESPACE
+        .generation(crate::LashService::EffectGroupDispatch, generation("N"))
+        .name()
+        .into_owned();
+
+    // The host's own opener, built as a host builds it: build N's.
+    let host = RestateEffectHost::new(
+        connection.clone(),
+        test_restate_authority_id(),
+        generation("N"),
+    );
+    let key = "fig-4454-host-opener";
+    let scoped = host
+        .scoped(lash_core::AdmittedScope::runtime_operation(key))
+        .expect("the host opener's controller");
+    let mut handle = scoped
+        .controller()
+        .open_effect_group(group(key, CHILDREN))
+        .await
+        .expect("the host opens its group while N+1 is newest");
+    for _ in 0..CHILDREN {
+        let settled = tokio::time::timeout(
+            Duration::from_secs(60),
+            scoped.controller().await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+            ),
+        )
+        .await
+        .expect("a child settles within the budget")
+        .expect("the settlement is served");
+        assert!(settled.outcome.is_ok(), "each child succeeds: {settled:?}");
+    }
+    server.settle().await;
+    let dispatches: Vec<_> = served
+        .lock_recover()
+        .iter()
+        .filter(|(_, dispatch)| dispatch.service.starts_with(DISPATCH))
+        .cloned()
+        .collect();
+    assert!(
+        !dispatches.is_empty()
+            && dispatches
+                .iter()
+                .all(|(build, dispatch)| *build == "N" && dispatch.service == lane),
+        "the host opener's dispatcher and children ran on N's lane: {dispatches:#?}"
+    );
+    let mut runs = log.lock_recover().clone();
+    runs.sort();
+    let expected: Vec<(&'static str, String)> = (0..CHILDREN)
+        .map(|position| ("N", format!("{key}:child:{position}")))
+        .collect();
+    assert_eq!(runs, expected, "each child ran once, on N");
 }

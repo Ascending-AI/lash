@@ -503,10 +503,10 @@ impl HandOff {
         build: &'static str,
     ) -> (Arc<RestateEffectHost>, Endpoint) {
         let generation = lash_core::engine::BuildGeneration::for_test(build);
-        let host = Arc::new(RestateEffectHost::new_for_build(
+        let host = Arc::new(RestateEffectHost::in_namespace(
             connection.clone(),
             test_restate_authority_id(),
-            Some(generation.clone()),
+            generation.clone(),
             crate::RestateNamespace::default(),
         ));
         // The endpoint's accounting continuation needs a ledger to settle

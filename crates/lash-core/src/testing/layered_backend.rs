@@ -245,6 +245,7 @@ impl LayeredBackend {
             stores,
             effect_host: self.effect_host,
             build_generation: self.inner.build_generation().clone(),
+            deployment_registry: self.inner.deployment_registry(),
             process_work: self.process_work,
             session_work: self.session_work,
         }))
@@ -374,6 +375,9 @@ struct LayeredEngine {
     stores: Arc<LayeredStoreSet>,
     effect_host: Arc<dyn EffectHost>,
     build_generation: BuildGeneration,
+    /// The inner engine's retirement evidence: the layered backend decorates
+    /// store ports, never the engine's deployments.
+    deployment_registry: Arc<dyn crate::store::fleet_finalize::DeploymentRegistry>,
     process_work: ProcessWorkWiring,
     session_work: Arc<dyn crate::SessionWorkEngine>,
 }
@@ -399,6 +403,10 @@ impl EffectEngine for LayeredEngine {
 
     fn session_work(&self) -> Arc<dyn crate::SessionWorkEngine> {
         Arc::clone(&self.session_work)
+    }
+
+    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
+        Arc::clone(&self.deployment_registry)
     }
 }
 

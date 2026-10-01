@@ -57,6 +57,64 @@ impl DeploymentRegistry for RestateDeploymentRegistry {
             })
             .collect())
     }
+
+    /// Every effect-group index record the server retains, in any
+    /// namespace, read through the admin API's `state` table: the committed
+    /// children of the groups on a lane of `generation` whose seat is owed
+    /// (FIG-4454). A record that does not decode fails the read closed —
+    /// an unread group is never a drained one.
+    async fn undrained_group_children(
+        &self,
+        generation: &BuildGeneration,
+    ) -> Result<u64, DeploymentRegistryError> {
+        #[derive(serde::Deserialize)]
+        struct Row {
+            service_name: String,
+            service_key: String,
+            value_utf8: Option<String>,
+        }
+        let query = format!(
+            "SELECT service_name, service_key, value_utf8 FROM state WHERE key = {}",
+            crate::ingress::sql_string_literal(crate::effect_group::INDEX_RECORD_KEY)
+        );
+        let rows: Vec<Row> =
+            self.admin
+                .query_json(&query)
+                .await
+                .map_err(|error| DeploymentRegistryError {
+                    detail: format!("read the effect-group index records: {error}"),
+                })?;
+        let index = crate::LashService::EffectGroupState.base_name();
+        let mut undrained = 0_u64;
+        for row in rows {
+            let local = row
+                .service_name
+                .rsplit_once('.')
+                .map_or(row.service_name.as_str(), |(_, local)| local);
+            if local != index {
+                continue;
+            }
+            let unreadable = |detail: String| DeploymentRegistryError {
+                detail: format!(
+                    "effect group {} in {}: {detail}",
+                    row.service_key, row.service_name
+                ),
+            };
+            let raw = row
+                .value_utf8
+                .as_deref()
+                .ok_or_else(|| unreadable("its index record is not UTF-8".to_owned()))
+                .and_then(|text| {
+                    serde_json::from_str::<serde_json::Value>(text).map_err(|error| {
+                        unreadable(format!("its index record is not JSON: {error}"))
+                    })
+                })?;
+            undrained +=
+                crate::effect_group::undrained_children_on(&row.service_key, raw, generation)
+                    .map_err(|error| unreadable(error.to_string()))?;
+        }
+        Ok(undrained)
+    }
 }
 
 #[cfg(test)]

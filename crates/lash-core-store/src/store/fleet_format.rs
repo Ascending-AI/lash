@@ -212,6 +212,18 @@ impl FleetFormat {
         surface.build_newest()
     }
 
+    /// Every pin this fleet format's table holds for `surface`, whatever
+    /// generation `F` records: the static half of a reader's admission, which
+    /// the recorded `F` selects one pin from (FIG-4454).
+    pub fn writer_pins(self, surface: SurfaceFormat) -> Vec<WriterPin> {
+        let constant = surface.constant_name();
+        self.pins
+            .iter()
+            .filter(|pin| pin.constant == constant)
+            .copied()
+            .collect()
+    }
+
     /// The recorded versions a reader of `surface` admits (ADR 0106 §2,
     /// ADR 0115 §5): the supported range of a [`GUARDED_SURFACES`] row, plus
     /// the version `F` pins the surface's writers to.

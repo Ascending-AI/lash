@@ -409,13 +409,20 @@ pub(super) fn restate_connection_timeout_config_has_serde_defaults() {
 pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authority() {
     let authority = RestateAuthorityId::new("production-authority").unwrap();
     let other_authority = RestateAuthorityId::new("other-authority").unwrap();
-    let first_host =
-        RestateEffectHost::new("https://old-endpoint.example/restate", authority.clone());
-    let restarted_host =
-        RestateEffectHost::new("https://new-endpoint.example/restate", authority.clone());
+    let first_host = RestateEffectHost::new(
+        "https://old-endpoint.example/restate",
+        authority.clone(),
+        crate::tests::test_build_generation(),
+    );
+    let restarted_host = RestateEffectHost::new(
+        "https://new-endpoint.example/restate",
+        authority.clone(),
+        crate::tests::test_build_generation(),
+    );
     let other_host = RestateEffectHost::new(
         "https://old-endpoint.example/restate",
         other_authority.clone(),
+        crate::tests::test_build_generation(),
     );
     assert_eq!(
         first_host.turn_control_binding_id(),

@@ -328,7 +328,7 @@ class UpgradeCampaign(Campaign):
 
         def target() -> dict[str, Any] | None:
             nonlocal drain_status
-            _, status = self.lashctl(new, 'drain-status', self.g['n+1'], expect=(EXIT_DONE, EXIT_NOT_YET))
+            _, status = self.lashctl(new, 'drain-status', self.g['n+1'], '--restate-admin-url', self.admin, expect=(EXIT_DONE, EXIT_NOT_YET))
             drain_status = status['result']
             pinned = self.pinned_unfinished(old_deployment)
             if not drained(drain_status, pinned):
@@ -376,7 +376,7 @@ class UpgradeCampaign(Campaign):
         })
 
         def target() -> dict[str, Any] | None:
-            _, status = self.lashctl(new, 'drain-status', self.g['n'], expect=(EXIT_DONE, EXIT_NOT_YET))
+            _, status = self.lashctl(new, 'drain-status', self.g['n'], '--restate-admin-url', self.admin, expect=(EXIT_DONE, EXIT_NOT_YET))
             pinned = sum(self.pinned_unfinished(deployment) for deployment in deployments.values())
             if not drained(status['result'], pinned):
                 return None
@@ -443,7 +443,7 @@ class UpgradeCampaign(Campaign):
         attempts: list[dict[str, Any]] = []
 
         def attempt() -> dict[str, Any] | None:
-            _, status = self.lashctl(operator, 'drain-status', self.g['n'], expect=(EXIT_DONE, EXIT_NOT_YET))
+            _, status = self.lashctl(operator, 'drain-status', self.g['n'], '--restate-admin-url', self.admin, expect=(EXIT_DONE, EXIT_NOT_YET))
             if not drained(status['result'], 0):
                 return None
             code, body = self.lashctl(operator, *finalize, expect=(expect, EXIT_NOT_YET))
@@ -471,7 +471,7 @@ class UpgradeCampaign(Campaign):
         })
         if status < 500 or not fenced(body):
             raise FaultFailed(f'the live N worker wrote after finalize: HTTP {status} {body}')
-        _, mark = self.lashctl('final', 'drain-status', self.g['n+1'], expect=(EXIT_DONE, EXIT_NOT_YET))
+        _, mark = self.lashctl('final', 'drain-status', self.g['n+1'], '--restate-admin-url', self.admin, expect=(EXIT_DONE, EXIT_NOT_YET))
         if mark['result'].get('draining_since_ms') is not None:
             raise FaultFailed(f'the fenced drain mark was written: {mark}')
         # A fresh N process refuses the store before it serves anything.

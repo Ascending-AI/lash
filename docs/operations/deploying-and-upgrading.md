@@ -134,14 +134,18 @@ state while investigating either refusal.
 
    ```sh
    lashctl drain "$OLD_GENERATION" --json
-   lashctl drain-status "$OLD_GENERATION" --json
+   lashctl drain-status "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json
    ```
 
    Repeat `drain-status` until its `drained` field is true and exit code is 0.
    Drained means nothing left needs N's deployment: the generation is marked,
-   and it holds no live or parked process, no parked or in-flight turn, and no
-   session is closing. A code 5 means some of that remains; inspect those
-   counts. Keep N's deployment registered while any invocation or recorded
+   and it holds no live or parked process, no parked or in-flight turn, no
+   session is closing, and no effect-group child on its lane whose final
+   committed is still owed its seat. `drain-status` reads that last count,
+   `undrained_group_children`, from Restate's admin API, so it requires
+   `--restate-admin-url`; an unreachable or unreadable admin API fails the
+   command rather than reporting drained. A code 5 means some of that remains;
+   inspect those counts. Keep N's deployment registered while any invocation or recorded
    route still needs it. Settle stuck work through the owning host; do not
    treat a missing heartbeat or an empty host queue as retirement evidence.
 
@@ -188,7 +192,7 @@ Finalize changes nothing, and refuses typed, until all of these hold:
 
 | Refusal | Exit | Meaning and action |
 | --- | --- | --- |
-| `generation_not_drained` | 5 | N's generation is not marked draining, or it still holds a live or parked process, a parked or in-flight turn, or a closing session. The refusal carries the drain status; keep polling `drain-status`. |
+| `generation_not_drained` | 5 | N's generation is not marked draining, or it still holds a live or parked process, a parked or in-flight turn, a closing session, or an undrained committed effect-group child. The refusal carries the drain status; keep polling `drain-status`. |
 | `deployments_retained` | 3 | The Restate server still holds a deployment serving N's generation lanes, in any namespace. The refusal lists each by id and URI. Remove them once their pinned invocations have drained. |
 | `held` | 3 | An operator holds the automatic finalize. The refusal carries the hold's reason and when it was set. |
 
@@ -297,7 +301,7 @@ retire it and end its drain:
 
 ```sh
 lashctl drain "$NEW_GENERATION" --json
-lashctl drain-status "$NEW_GENERATION" --json
+lashctl drain-status "$NEW_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json
 lashctl end-drain "$NEW_GENERATION" --json
 ```
 

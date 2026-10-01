@@ -62,6 +62,7 @@ pub(crate) async fn run_session_delete_in_handler(
             core.session_administration().await,
             double.connection(),
             authority,
+            double.server().config().build_generation.clone(),
         ),
         attempt: Arc::clone(&attempt),
     };

@@ -184,7 +184,7 @@ async fn run_round(
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
                 membership: witness_membership(&children),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: super::effect_group_conformance::witness_dispatch_route(),
                 content_checked: false,
             },
         )

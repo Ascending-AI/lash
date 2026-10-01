@@ -1,5 +1,6 @@
-//! The admin API's `sys_invocation` table, queried with the small SQL subset
-//! lash sends: `SELECT cols | COUNT(1) FROM sys_invocation [WHERE ...]
+//! The admin API's `sys_invocation` and `state` tables, queried with the
+//! small SQL subset lash sends: `SELECT cols | COUNT(1) FROM sys_invocation
+//! | state [WHERE ...]
 //! [GROUP BY col] [ORDER BY col [ASC|DESC]] [LIMIT n]`, where conditions are
 //! `=`, `!=`, `IN (...)`, `LIKE 'prefix%'` and `IS [NOT] NULL` joined by
 //! `AND`/`OR` and parentheses. Anything else is refused loudly rather than
@@ -16,12 +17,18 @@ use super::processor::State;
 /// Run `sql` over the server's invocations.
 pub(super) fn run(state: &State, sql: &str) -> Result<Vec<Value>, String> {
     let query = Parser::new(sql)?.query()?;
-    let mut rows: Vec<Map<String, Value>> = state
-        .invocations
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| state.is_retained(super::model::InvKey(*index)))
-        .map(|(_, invocation)| row(state, invocation))
+    let rows: Vec<Map<String, Value>> = match query.table {
+        Table::Invocations => state
+            .invocations
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| state.is_retained(super::model::InvKey(*index)))
+            .map(|(_, invocation)| row(state, invocation))
+            .collect(),
+        Table::State => state_rows(state),
+    };
+    let mut rows: Vec<Map<String, Value>> = rows
+        .into_iter()
         .filter(|row| query.filter.as_ref().is_none_or(|filter| filter.eval(row)))
         .collect();
     if let Some((column, descending)) = &query.order_by {
@@ -103,6 +110,32 @@ fn compare(left: Option<&Value>, right: Option<&Value>) -> std::cmp::Ordering {
             .unwrap_or(std::cmp::Ordering::Equal),
         (left, right) => left.map(Value::to_string).cmp(&right.map(Value::to_string)),
     }
+}
+
+/// One `state` row per retained object or workflow state entry, in
+/// `(service_name, service_key, key)` order: the value as UTF-8 when it is.
+fn state_rows(state: &State) -> Vec<Map<String, Value>> {
+    let mut rows: Vec<Map<String, Value>> = state
+        .keys
+        .iter()
+        .flat_map(|((service, key), record)| {
+            record.state.iter().map(move |(name, value)| {
+                let mut row = Map::new();
+                row.insert("service_name".into(), json!(service));
+                row.insert("service_key".into(), json!(key));
+                row.insert("key".into(), json!(name));
+                row.insert("value_utf8".into(), json!(std::str::from_utf8(value).ok()));
+                row
+            })
+        })
+        .collect();
+    rows.sort_by(|left, right| {
+        let order = |row: &Map<String, Value>| {
+            ["service_name", "service_key", "key"].map(|column| row[column].to_string())
+        };
+        order(left).cmp(&order(right))
+    });
+    rows
 }
 
 /// The `sys_invocation` status of an invocation.
@@ -268,8 +301,16 @@ fn like(text: &str, pattern: &str) -> bool {
     rest.ends_with(last)
 }
 
+/// The admin table a query reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Table {
+    Invocations,
+    State,
+}
+
 #[derive(Debug)]
 struct Query {
+    table: Table,
     select: Vec<Select>,
     filter: Option<Cond>,
     group_by: Option<String>,
@@ -447,12 +488,15 @@ impl Parser {
             }
         }
         self.expect_keyword("from")?;
-        let table = self.ident()?;
-        if table != "sys_invocation" {
-            return Err(format!(
-                "the double serves only sys_invocation, not {table}"
-            ));
-        }
+        let table = match self.ident()?.as_str() {
+            "sys_invocation" => Table::Invocations,
+            "state" => Table::State,
+            table => {
+                return Err(format!(
+                    "the double serves only sys_invocation and state, not {table}"
+                ));
+            }
+        };
         let filter = if self.keyword("where") {
             Some(self.or()?)
         } else {
@@ -493,6 +537,7 @@ impl Parser {
             ));
         }
         Ok(Query {
+            table,
             select,
             filter,
             group_by,
@@ -578,6 +623,8 @@ mod tests {
             "SELECT id FROM sys_invocation WHERE status = 'paused' AND last_failure IS NOT NULL",
             "SELECT id, target_service_name, target_service_key, target_handler_name, retry_count, last_failure, last_failure_error_code FROM sys_invocation WHERE status = 'paused' AND target_service_name = 'LashProcessWorkflow'",
             "SELECT id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure FROM sys_invocation WHERE (target_service_name = 'LashProcessWorkflow' OR target_service_name LIKE 'LashProcessWorkflow_g%') AND target_handler_name = 'run' AND target_service_key IN ('p_01x', 'p_01y#2')",
+            "SELECT service_name, service_key, value_utf8 FROM state WHERE key = 'effect-group/v1/state'",
+            "SELECT service_key, value_utf8 FROM state WHERE service_name = 'EffectGroupIndex' AND key = '_compat'",
         ] {
             Parser::new(sql).and_then(Parser::query).unwrap();
         }

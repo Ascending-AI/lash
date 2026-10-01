@@ -198,12 +198,25 @@ pub struct ToolChildLawFixture {
 
 /// A tier's operator over one group child's invocation (ADR 0099 §5, §8),
 /// called with the group key and the child's position: the invocation dies
-/// before its seat, as an operator's kill ends it; its retention expires; and
-/// the idempotency-keyed dispatch mints a successor for the position, which
-/// presents an invocation id the group never recorded. It returns once the
-/// successor is dispatched.
+/// before its seat, as an operator's kill ends it, and its retention expires.
+/// It dispatches nothing: the engine's own recovery re-sends the child
+/// (FIG-4454), and the idempotency-keyed send then mints a successor whose
+/// journal starts empty — under a fresh invocation id, or under the very id
+/// the group retains, as Restate derives one from the key. It returns once
+/// the invocation is gone.
 pub type ChildInvocationExpiry =
     Arc<dyn Fn(String, usize) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+/// A tier's deployment change under a group (FIG-4454), called with the
+/// session a group's opener runs under: a newer build, of another drain
+/// generation, becomes the newest deployment of every service the engine
+/// serves, and that build's session admission refuses the session's
+/// state-generation marker, which the build that opened the group admits.
+/// It returns once the newer build is the newest deployment. A tier whose
+/// engine has no deployments makes no change.
+pub type DeploymentChange = Arc<
+    dyn Fn(crate::SessionId) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+>;
 
 /// The lease window the lane law and the recovery law's live phases use:
 /// longer than the law, so a claim expiring mid-test can never be mistaken
@@ -1035,6 +1048,9 @@ struct IntentSink {
     held_all: std::sync::atomic::AtomicBool,
     /// Call ids individually held.
     held: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// One intent kind of one call held: its earlier intents land, and the
+    /// drain parks at this one.
+    held_kinds: std::sync::Mutex<std::collections::HashSet<(String, &'static str)>>,
     /// Call ids parked inside `admit` right now — the "past its §4 commit,
     /// inside its drain" observation the laws wait on.
     blocked: std::sync::Mutex<std::collections::HashSet<String>>,
@@ -1059,6 +1075,15 @@ impl IntentSink {
         self.changed.notify_waiters();
     }
 
+    /// Holds only `call_id`'s `kind` intent: the drain lands every intent
+    /// declared before it and parks there.
+    fn hold_kind(&self, call_id: &str, kind: &'static str) {
+        self.held_kinds
+            .lock_recover()
+            .insert((call_id.to_string(), kind));
+        self.changed.notify_waiters();
+    }
+
     fn release(&self, call_id: &str) {
         self.held.lock_recover().remove(call_id);
         self.changed.notify_waiters();
@@ -1068,6 +1093,7 @@ impl IntentSink {
         self.held_all
             .store(false, std::sync::atomic::Ordering::SeqCst);
         self.held.lock_recover().clear();
+        self.held_kinds.lock_recover().clear();
         self.changed.notify_waiters();
     }
 
@@ -1075,9 +1101,10 @@ impl IntentSink {
         self.landed.lock_recover().clone()
     }
 
-    /// The gate every recorded-intent write crosses: parks while `call_id` is
-    /// held, recording itself in `blocked` for the law to observe.
-    async fn admit(&self, call_id: &str) {
+    /// The gate every recorded-intent write crosses: parks while `call_id`,
+    /// or its `kind` intent, is held, recording itself in `blocked` for the
+    /// law to observe.
+    async fn admit(&self, call_id: &str, kind: &'static str) {
         loop {
             let notified = self.changed.notified();
             tokio::pin!(notified);
@@ -1085,7 +1112,11 @@ impl IntentSink {
             {
                 let held_all = self.held_all.load(std::sync::atomic::Ordering::SeqCst);
                 let held = self.held.lock_recover();
-                if !held_all && !held.contains(call_id) {
+                let held_kind = self
+                    .held_kinds
+                    .lock_recover()
+                    .contains(&(call_id.to_string(), kind));
+                if !held_all && !held.contains(call_id) && !held_kind {
                     if self.blocked.lock_recover().remove(call_id) {
                         self.changed.notify_waiters();
                     }
@@ -1200,7 +1231,7 @@ impl crate::ProcessService for GatedProcessService {
             Some(start_key) => format!("start:{start_key}"),
             None => "start:<keyless>".to_string(),
         };
-        self.sink.admit(&call_id).await;
+        self.sink.admit(&call_id, "start").await;
         self.sink.record_landed(&call_id, "start", &identity);
         let started = self
             .inner
@@ -1225,7 +1256,7 @@ impl crate::ProcessService for GatedProcessService {
             .unwrap_or("<unlabelled>")
             .to_string();
         let identity = format!("event:{replay_key}");
-        self.sink.admit(&call_id).await;
+        self.sink.admit(&call_id, "event").await;
         self.sink.record_landed(&call_id, "event", &identity);
         let event = self
             .inner
@@ -1863,6 +1894,7 @@ fn single_leaf_group(
 mod admission_fence;
 mod batch_group;
 mod commit_boundary;
+mod committed_recovery;
 mod deferred_commit;
 mod driver;
 mod foreign_opener;
@@ -1878,6 +1910,7 @@ mod siblings;
 pub use admission_fence::*;
 pub use batch_group::*;
 pub use commit_boundary::*;
+pub use committed_recovery::*;
 pub use deferred_commit::*;
 pub use driver::*;
 pub use foreign_opener::*;

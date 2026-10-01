@@ -21,19 +21,28 @@ use crate::{
 pub struct RestateSessionAdministration {
     administration: SessionAdministration,
     authority_id: RestateAuthorityId,
+    build_generation: lash_core::engine::BuildGeneration,
 }
 
 impl RestateSessionAdministration {
+    /// `build_generation` is the deployment's build, whose lanes its
+    /// endpoint binds (FIG-4454).
     pub fn new(
         administration: SessionAdministration,
         connection: impl Into<RestateConnection>,
         authority_id: RestateAuthorityId,
+        build_generation: lash_core::engine::BuildGeneration,
     ) -> Self {
         let connection = connection.into();
-        let effect_host = Arc::new(RestateEffectHost::new(connection, authority_id.clone()));
+        let effect_host = Arc::new(RestateEffectHost::new(
+            connection,
+            authority_id.clone(),
+            build_generation.clone(),
+        ));
         Self {
             administration: administration.with_effect_host(effect_host),
             authority_id,
+            build_generation,
         }
     }
 
@@ -46,7 +55,11 @@ impl RestateSessionAdministration {
     {
         RestateSessionDeleteExecution {
             administration: &self.administration,
-            controller: RestateRuntimeEffectController::new(context, self.authority_id.clone()),
+            controller: RestateRuntimeEffectController::new(
+                context,
+                self.authority_id.clone(),
+                self.build_generation.clone(),
+            ),
         }
     }
 }

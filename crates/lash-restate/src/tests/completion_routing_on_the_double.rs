@@ -27,6 +27,7 @@ lash_conformance::effect_host_await_event_tests!(@foreign {
             ),
             RestateAuthorityId::new("lash-restate-foreign")
                 .expect("valid foreign authority id"),
+            crate::tests::test_build_generation(),
         )) as Arc<dyn EffectHost>
     };
     (harness, make, (), make_foreign)

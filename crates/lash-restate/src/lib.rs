@@ -37,9 +37,12 @@
 //!         let authority_id = lash_restate::RestateAuthorityId::new(
 //!             "production-restate-authority",
 //!         ).map_err(TerminalError::from_error)?;
+//!         // The deployment's build: the lanes its endpoint binds, where the
+//!         // effect groups this controller opens dispatch (FIG-4454).
 //!         let effect_controller = RestateRuntimeEffectController::new(
 //!             ctx,
 //!             authority_id,
+//!             lash::formats::build_generation(),
 //!         );
 //!         let turn_id = req.turn_id.clone();
 //!         let scoped_effect_controller = effect_controller

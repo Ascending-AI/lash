@@ -261,6 +261,7 @@ fn live_restate_participant_host(ingress_url: String) -> Arc<lash_restate::Resta
         lash_restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
         lash_restate::RestateAuthorityId::new("agent-workbench-tests")
             .expect("valid live Restate authority"),
+        lash::formats::build_generation(),
     ))
 }
 
@@ -519,6 +520,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 lash_restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
                 lash_restate::RestateAuthorityId::new("agent-workbench-tests")
                     .expect("valid live Restate authority"),
+                lash::formats::build_generation(),
             ));
             let effect_host: Arc<dyn lash::durability::EffectHost> = host.clone();
             let factory_a = open_catalog(data_dir.join("closure-catalog-a")).await;

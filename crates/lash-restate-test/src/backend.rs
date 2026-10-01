@@ -394,6 +394,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
             HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority: authority.clone(),
+                build_generation: restate.build_generation().clone(),
                 namespace: namespace.clone(),
             },
         )
@@ -446,11 +447,12 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
     ) -> Result<DeploymentId, BackendError> {
         let builder = bind_handler_host(
             self.restate
-                .sibling_build(generation)
+                .sibling_build(generation.clone())
                 .endpoint_builder(self.processes.clone()),
             HandlerHost {
                 jobs: Arc::clone(&self.jobs),
                 authority: self.authority.clone(),
+                build_generation: generation,
                 namespace: self.namespace().clone(),
             },
         )
@@ -516,6 +518,11 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
 
     pub(crate) fn authority(&self) -> &RestateAuthorityId {
         &self.authority
+    }
+
+    /// The drain generation of the build this backend's engine runs.
+    pub(crate) fn build_generation(&self) -> &lash_core::engine::BuildGeneration {
+        self.restate.build_generation()
     }
 
     /// The storage-only store set [`backend_with`]'s `decorate_stores` was
@@ -948,6 +955,9 @@ impl ParkedJobs {
 pub(crate) struct HandlerHost {
     pub(crate) jobs: Arc<ParkedJobs>,
     pub(crate) authority: RestateAuthorityId,
+    /// The build the host is bound in: the lane the groups a job's
+    /// controller opens dispatch on (FIG-4454).
+    pub(crate) build_generation: lash_core::engine::BuildGeneration,
     /// The namespace of the deployment the host serves: the controller it
     /// runs a job on calls that namespace's lash services, and the host is
     /// bound under its name there.
@@ -1002,9 +1012,12 @@ mod handler_host {
                 ))
                 .into());
             };
-            let controller =
-                lash_restate::RestateRuntimeEffectController::new(ctx, self.authority.clone())
-                    .in_namespace(self.namespace.clone());
+            let controller = lash_restate::RestateRuntimeEffectController::new(
+                ctx,
+                self.authority.clone(),
+                self.build_generation.clone(),
+            )
+            .in_namespace(self.namespace.clone());
             let scoped = controller
                 .scoped_effect_controller(admitted)
                 .map_err(TerminalError::from_error)?;

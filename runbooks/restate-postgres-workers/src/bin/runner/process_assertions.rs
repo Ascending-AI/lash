@@ -9,7 +9,11 @@ pub(super) async fn drive_durable_wait_index_scenarios(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
-    let host = RestateEffectHost::new(ingress_url.to_string(), restate_authority_id()?);
+    let host = RestateEffectHost::new(
+        ingress_url.to_string(),
+        restate_authority_id()?,
+        lash::formats::build_generation(),
+    );
     // 1) A controller-owned wait registers in the real Restate session index
     //    and observes cancel_all as a terminal cancellation.
     let cancel_key = host

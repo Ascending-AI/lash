@@ -78,6 +78,7 @@ impl E2eLoadWorkflow for DeleteProbe {
                     services.core.session_administration().await,
                     self.connection.clone(),
                     services.authority.clone(),
+                    lash::formats::build_generation(),
                 ))
                 .is_ok()
         );
@@ -95,7 +96,11 @@ struct Probe {
 impl LoadBehaviorReplayProbe for Probe {
     async fn run(&self, context: WorkflowContext<'_>) -> HandlerResult<Json<Evidence>> {
         let services = self.services.get().expect("the core precedes the handler");
-        let controller = Controller::new(context, services.authority.clone());
+        let controller = Controller::new(
+            context,
+            services.authority.clone(),
+            lash::formats::build_generation(),
+        );
         let run = controller.context().key().to_string();
         let session_id = session_of(&run);
         let core = &services.core;

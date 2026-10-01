@@ -12,7 +12,7 @@
 #![allow(clippy::disallowed_methods)]
 #![expect(clippy::expect_used, reason = "integration-test setup and assertions")]
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -21,7 +21,8 @@ use serde_json::{Value, json};
 use sqlx::{Connection, PgConnection};
 
 /// A stand-in for the Restate admin API: `GET /deployments` answers the
-/// listing the law last set.
+/// listing the law last set, and `POST /query` answers that no effect-group
+/// index record exists.
 struct Admin {
     url: String,
     listing: Arc<Mutex<Value>>,
@@ -41,16 +42,29 @@ impl Admin {
                 if reader.read_line(&mut request_line).is_err() {
                     continue;
                 }
+                let mut length = 0_usize;
                 loop {
                     let mut header = String::new();
                     match reader.read_line(&mut header) {
                         Ok(0) | Err(_) => break,
                         Ok(_) if header == "\r\n" => break,
-                        Ok(_) => {}
+                        Ok(_) => {
+                            if let Some(value) =
+                                header.to_ascii_lowercase().strip_prefix("content-length:")
+                            {
+                                length = value.trim().parse().unwrap_or(0);
+                            }
+                        }
                     }
                 }
+                let mut request = vec![0_u8; length];
+                let _ = reader.read_exact(&mut request);
                 let (status, body) = if request_line.starts_with("GET /deployments ") {
                     ("200 OK", served.lock().expect("listing").to_string())
+                } else if request_line.starts_with("POST /query ") {
+                    // The effect-group index records the drain status reads
+                    // (FIG-4454): this stand-in's server holds none.
+                    ("200 OK", json!({"rows": []}).to_string())
                 } else {
                     ("404 Not Found", "{}".to_owned())
                 };

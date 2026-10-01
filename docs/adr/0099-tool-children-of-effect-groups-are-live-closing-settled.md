@@ -414,7 +414,7 @@ phase are three separate facts; nothing below waits on opener close.
 |---|---|---|---|---|---|
 | **accepted, unclaimed** | → **cancel-decided** | n/a | n/a | n/a | → *accepted* (recovered while the opener lives, §1) |
 | **executing, uncommitted** | → **cancel-decided**; body signalled, grace armed | → **committed** | n/a | n/a | → *executing* (resumed from the retained request) |
-| **committed** (final recorded, intents not drained) | **refused** — the point is already taken | n/a | → **drained** | not armed | → **committed**; recovery finishes the drain from the retained final (§5) |
+| **committed** (final recorded, intents not drained) | **refused** — the point is already taken; a successor minted after a `Cancel` close is still admitted to drain (§8) | n/a | → **drained** | not armed | → **committed**; recovery finishes the drain from the retained final (§5, §8) |
 | **drained** (intents recorded, projection durable) | refused | n/a | n/a | n/a | → **drained** |
 | **rankable** → **settled** | refused | n/a | n/a | n/a | → unchanged |
 | **cancel-decided** | no-op (idempotent) | **refused**, typed, no journal write | discharges any already-admitted protected obligation | → **logically cancelled** | → *cancel-decided* (resumed from the record) |
@@ -581,6 +581,22 @@ committed by one that ended before its seat:
   generation. A committed final's obligations are realized or reported by name,
   never replaced.
 
+**A generation refusal over a committed tool final is a violated precondition,
+not a routine loss.** Every invocation of a group child runs on the lane its
+opener recorded (§8), and a lane's builds admit the same session-state
+generations: the drain generation `G` hashes the build's session admission —
+its supported range and every writer pin of the session-state surface
+(`SessionAdmissionWindow`, `crates/lash-core-store/src/store/state_version.rs`;
+`build_generation`, `crates/lash/src/formats.rs`). The session's marker moves
+under no production writer (ADR 0077). So a successor that drains a committed
+final runs on a build that admits every session its opener's build admitted,
+and drains it. `CommittedFinalLost` for a generation refusal remains only as
+the typed backstop for forged or operator-forced state: a marker stamped by
+hand, or a draining generation's deployment force-removed. A future marker
+mover needs replay-safe exclusion of committed-undrained children, not only a
+drive fence: an invocation whose marker moved between its journaled admission
+and its commit would choose a different command sequence on replay.
+
 A seat that drains nothing waits on no sibling.
 
 **What is refused is an undefined barrier**, in particular any rule of the form
@@ -604,8 +620,10 @@ the committed final beside the index record, one key per position, and the
 dispatch's `settle_unrun_child` seats it
 (`crates/lash-restate/src/effect_group/dispatch.rs`); the tool driver's
 `drain_committed` drains a retained tool final. The
-`a_successor_drains_the_final_its_expired_predecessor_committed` law pins W7
-across an expired attach.
+`a_committed_final_is_recovered_on_its_lane_across_a_deployment_change` and
+`a_cancel_closed_groups_committed_final_is_recovered_on_its_lane` laws
+(`crates/lash-conformance/src/conformance/tool_child_invocation/committed_recovery.rs`)
+pin W7 across an expired attach and a deployment change.
 
 ---
 
@@ -786,6 +804,40 @@ Retained child ids, the typed expired-attachment failure
 the group authority; a Lashlang segment carries each outstanding group's key and
 consumed cursor, and its successor reattaches through
 `EffectGroupHandle::restored`.
+
+**A committed child whose seat is owed is recovered by its group, on its
+lane.** The group's own record is the obligation of record: the index retains
+the committed final and the rank its commit reserved until the child seats. A
+child's drain has one authority, the child's own driver, and nothing but the
+child's invocation runs it — but when that invocation ends before its seat (an
+operator's kill, a terminal protocol error) nothing else schedules the drain. So
+the index re-sends every committed, unseated child whenever its opener reopens
+the group, and whenever a dispatcher starts for a group already ready or closed
+(`resend_owed_children`, `crates/lash-restate/src/effect_group/recovery.rs`).
+The re-send is the dispatch's own child call again: the retained membership's
+envelope, the recorded shape, the child's replay key as its idempotency key, on
+the group's recorded lane. While the committing invocation is retained the key
+attaches to it and nothing new runs; once its retention has expired the key
+mints a successor with an empty journal. Restate may mint it under the very id
+the index retains, so the index admits by the §4 point as well as by id: a live
+admission of a committed child is always a successor's, since the invocation
+that committed journaled its own admission first, and it is answered
+`AttachExpired` whatever id it presents (`decide_group_child_admission`,
+`crates/lash-restate/src/effect_group/state_record.rs`). The successor drains
+the retained final through the child's driver and seats it at its reserved
+rank; it never drives the child again. No timeout, lease or unseated rank alone
+authorizes a drain.
+
+**Every opener has a lane.** A group's dispatch route is a generation lane of
+`EffectGroupDispatch`, whoever opened it: a lash handler's controller, a
+controller a host builds inside its own handler, and an effect host all carry
+their build's generation (`RestateRuntimeEffectController::new`,
+`RestateEffectHost::new`), and the index refuses an open that declares any other
+route. No group's children reach whichever build is newest through the stable
+name. A generation's drain waits for its lane's committed children: the
+engine's retirement evidence counts the committed, unseated children of every
+group on the lane (`DeploymentRegistry::undrained_group_children`), a host-built
+opener's included, and `GenerationDrainStatus::drained` waits for none.
 
 ---
 
@@ -1101,7 +1153,7 @@ both.
 | W4 | after a child settled and ranked, before the opener consumed it | The rank is durable; replay serves rank `consumed + 1` and yields the same settlement. |
 | W5 | after the opener consumed the winner and checkpointed past the aggregate, losers in flight | Losers are recovered under the live opener. This is the window Endpoint B-prime would have abandoned. |
 | W6 | after a loser's final attempt record committed, before its in-memory commit notification was published | The record is **protected** (§4). Recovery finishes the drain; the missing notification is not evidence of a lost commit. |
-| W7 | after the final record committed, before its intents drained | Recovery finishes the drain and realizes the declared intents — the child's own redrive, or, once its invocation is gone, a successor draining the final the point retained (§5). |
+| W7 | after the final record committed, before its intents drained | Recovery finishes the drain and realizes the declared intents — the child's own redrive, or, once its invocation is gone, a successor the opener's reopen re-sends on the group's lane, draining the final the point retained (§5, §8). It holds across a deployment change and after a `Cancel` close. |
 | W8 | after intents realized, before the opener incorporated them | Recovery reconstructs the recorded child outcomes and follows §6's observation protocol. Realization alone does not advance the prefix; no later settlement is added retroactively. |
 | W9 | **closing recorded, before any cancel was issued** | Recovery resumes closing. No child is retried as though the opener were live, and the recorded terminal disposition is reused rather than re-decided. |
 | W10 | **all drains complete, before the terminal/accounting commit** | Recovery resumes at finalization step 2 (§7). Obligations are not re-run and usage is not double-counted. |
@@ -1109,7 +1161,7 @@ both.
 | W12 | closing recorded with a committed child still draining | Recovery finishes every protected committed obligation; **closing stays recorded** until they finish. Finalization waits at the drain barrier before committing the opener's outcome and accounting. |
 | W13 | segment handover: continuation committed, successor not started | ADR 0025's three handover requirements apply unchanged, and outstanding children are reattached by the successor (§8). Handover does not enter closing. |
 | W14 | child handler death with the opener alive | The child invocation is retried or reattached by invocation id. Abandonment is never inferred from a dead handler. |
-| W15 | attach retention expired before the successor attached | Where no final is committed, the typed recovery failure. A committed final wins: the successor drains and seats a committed tool final from its retained drain input, and reports any other it cannot realize lost by name (§5). Never a re-execution of an opaque tool body, never a synthesized success. |
+| W15 | attach retention expired before the successor attached | Where no final is committed, the typed recovery failure. A committed final wins: the successor — answered `AttachExpired` whatever id it presents — drains and seats a committed tool final from its retained drain input, and reports any other it cannot realize lost by name (§5); a generation refusal reaches that report only through forged or operator-forced state. Never a re-execution of an opaque tool body, never a synthesized success. |
 | W16 | session delete requested while the group is accepted or closing | Refused until settled (§7). |
 | W17 | a late completion arrives after the cancel decision committed | Refused, typed, with **no journal write**; the refusal's evidence survives retirement. Already-admitted descendant commands are not undone (§4). |
 | W18 | OS process death | No host holds group state only in memory (§14), so process death is worker loss: recovery reads the journal. |

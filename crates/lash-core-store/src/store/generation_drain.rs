@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use super::fleet_finalize::DeploymentRegistry;
 use super::session_delete::SessionDeleteLedger;
 use super::{ObligationKind, ObligationLedger, StoreError};
 use crate::ProcessId;
@@ -130,6 +131,11 @@ pub struct GenerationDrainStatus {
     /// which revokes the waits their roots registered with the engine, has
     /// not run. Not per generation, as stalled obligations are not.
     pub closing_sessions: u64,
+    /// Committed effect-group children whose group dispatches on the
+    /// generation's lane and whose seat is still owed (FIG-4454): the
+    /// engine's count ([`DeploymentRegistry::undrained_group_children`]),
+    /// since a group's record lives in the engine, not the store.
+    pub undrained_group_children: u64,
     /// Stalled store→engine delivery obligations per kind (ADR 0109 §1.5),
     /// every kind present, zero included. Not per generation, and they do
     /// not hold the drain: see [`drained`](Self::drained).
@@ -140,8 +146,9 @@ pub struct GenerationDrainStatus {
 
 impl GenerationDrainStatus {
     /// Compose the status over `drain`'s reads, `session_delete`'s closing
-    /// sessions and the stalled counts of the ledgers `obligation_ledger`
-    /// hands out, stamped `now_ms`.
+    /// sessions, the stalled counts of the ledgers `obligation_ledger` hands
+    /// out and the engine's undrained group children `registry` reports,
+    /// stamped `now_ms`.
     ///
     /// Reporting is part of the read: the per-generation work gauges and
     /// each kind's stalled count record here, so polling this status is also
@@ -150,6 +157,7 @@ impl GenerationDrainStatus {
         drain: &dyn GenerationDrainStore,
         session_delete: &dyn SessionDeleteLedger,
         obligation_ledger: impl Fn(ObligationKind) -> Arc<dyn ObligationLedger>,
+        registry: &dyn DeploymentRegistry,
         generation: &BuildGeneration,
         now_ms: u64,
     ) -> Result<Self, StoreError> {
@@ -182,6 +190,18 @@ impl GenerationDrainStatus {
             work.in_flight_turns,
         );
         let closing_sessions = session_delete.count_closing().await?;
+        let undrained_group_children = registry
+            .undrained_group_children(generation)
+            .await
+            .map_err(|error| StoreError::StorageFailure {
+                backend: "engine deployment registry",
+                message: error.to_string(),
+            })?;
+        crate::operational_metrics::record_generation_drain_work(
+            label,
+            "undrained_group_children",
+            undrained_group_children,
+        );
         let mut stalled_obligations = BTreeMap::new();
         for kind in ObligationKind::ALL {
             let count = obligation_ledger(kind).count_stalled().await?;
@@ -196,15 +216,16 @@ impl GenerationDrainStatus {
             parked_turns: work.parked_turns,
             in_flight_turns: work.in_flight_turns,
             closing_sessions,
+            undrained_group_children,
             stalled_obligations,
             checked_at: now_ms,
         })
     }
 
     /// True only when the generation is marked draining, it holds no live
-    /// process, no parked process or turn and no in-flight turn, and no
-    /// session is closing: nothing is left that needs the generation's own
-    /// deployment.
+    /// process, no parked process or turn and no in-flight turn, no session
+    /// is closing, and no committed group child on its lane owes its seat:
+    /// nothing is left that needs the generation's own deployment.
     ///
     /// Stalled obligations do not hold it (ADR 0115 §3.5, FIG-4076). They
     /// are not pinned to any generation and none of them moves until an
@@ -218,6 +239,7 @@ impl GenerationDrainStatus {
             && self.parked_turns == 0
             && self.in_flight_turns == 0
             && self.closing_sessions == 0
+            && self.undrained_group_children == 0
     }
 }
 
@@ -234,6 +256,7 @@ impl serde::Serialize for GenerationDrainStatus {
             parked_turns: u64,
             in_flight_turns: u64,
             closing_sessions: u64,
+            undrained_group_children: u64,
             stalled_obligations: &'a BTreeMap<ObligationKind, u64>,
             checked_at: u64,
             drained: bool,
@@ -246,6 +269,7 @@ impl serde::Serialize for GenerationDrainStatus {
             parked_turns: self.parked_turns,
             in_flight_turns: self.in_flight_turns,
             closing_sessions: self.closing_sessions,
+            undrained_group_children: self.undrained_group_children,
             stalled_obligations: &self.stalled_obligations,
             checked_at: self.checked_at,
             drained: self.drained(),
@@ -267,6 +291,7 @@ mod tests {
             parked_turns: 0,
             in_flight_turns: 0,
             closing_sessions: 0,
+            undrained_group_children: 0,
             stalled_obligations: ObligationKind::ALL
                 .into_iter()
                 .map(|kind| (kind, 0))
@@ -290,13 +315,14 @@ mod tests {
 
     #[test]
     fn work_pinned_to_the_generation_holds_the_drain() {
-        let holds: [fn(&mut GenerationDrainStatus); 6] = [
+        let holds: [fn(&mut GenerationDrainStatus); 7] = [
             |status| status.draining_since_ms = None,
             |status| status.live_processes = 1,
             |status| status.parked_processes = 1,
             |status| status.parked_turns = 1,
             |status| status.in_flight_turns = 1,
             |status| status.closing_sessions = 1,
+            |status| status.undrained_group_children = 1,
         ];
         for hold in holds {
             let mut status = marked_and_empty();

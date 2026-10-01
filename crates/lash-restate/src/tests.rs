@@ -66,6 +66,13 @@ use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+/// The drain generation every test-built controller and host names: the
+/// build the effect-group harness's endpoint serves, so a group a test's
+/// host opens dispatches on a lane that endpoint binds (FIG-4454).
+pub(crate) fn test_build_generation() -> lash_core::engine::BuildGeneration {
+    lash_core::engine::BuildGeneration::for_test(effect_group_conformance::HARNESS_BUILD)
+}
+
 fn test_restate_authority_id() -> RestateAuthorityId {
     RestateAuthorityId::new("lash-restate-tests").expect("valid test Restate authority id")
 }
@@ -258,6 +265,7 @@ mod compat_on_the_double;
 mod determinism;
 mod drive_laws_on_the_double;
 mod effect_group_child_cancel;
+mod effect_group_committed_recovery;
 mod effect_group_conformance;
 mod effect_group_drain_transitivity;
 mod effect_group_generation_routing;
@@ -384,6 +392,7 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
     let host = RestateEffectHost::new(
         RestateConnection::with_transport("https://restate.example", transport.clone()),
         test_restate_authority_id(),
+        crate::tests::test_build_generation(),
     );
     let scoped = host
         .scoped(durable_admission(&ExecutionScope::process(

@@ -33,7 +33,12 @@ Evidence: `crates/lash-core-execution/src/engine/contracts.rs:23`,
 ### 1. Long-running work and build generations
 
 `G` is the build's drain generation. `lash::formats::build_generation` hashes
-the sorted drain-policy format names and versions with `JOURNAL_LOGIC_EPOCH`.
+the sorted drain-policy format names and versions with `JOURNAL_LOGIC_EPOCH`
+and the build's `SessionAdmissionWindow`: its supported session-state range
+and every writer pin the recorded `F` could select (FIG-4454). Two builds
+whose session admission differs therefore never share a lane, so work sent on
+its opener's lane runs on a build that admits every session its opener
+admitted.
 The host gives `G` to the engine, whose journal-bearing services bind a stable
 name and a generation name, `<Service>_g<G>`. Shared state services keep one
 stable name. The fleet epoch `F`, described in §2, selects durable writer
@@ -44,7 +49,10 @@ and child dispatch use that route rather than deriving it from the current
 caller. Restate keys workflow and idempotency identity by service name, so
 recomputing a route can start different work. New segment successors use the
 stable route to the latest build; incompatible handovers retain their writer's
-generation route. Process terminal and attach use the stable root.
+generation route. Process terminal and attach use the stable root. Every
+effect-group opener — a runtime controller or a host — names its build's `G`
+at construction, and a group's dispatch route is always its opener's
+generation lane; there is no stable fallback.
 
 Journal-bearing handlers check the recorded build generation before replaying
 work. The session and turn handlers fold that sentinel into their first
@@ -57,18 +65,23 @@ An operator marks a generation draining. The recovery leader wakes its live
 processes for handover through a distinct handoff arm, not cancellation.
 Generation status counts store-tracked live and parked processes, parked and
 in-flight turns, and closing sessions. A submitted successor remains counted
-until its admission changes the process's generation. Stalled obligations are
+until its admission changes the process's generation. The engine's
+`DeploymentRegistry` also reports the group children on the generation's lane
+whose final committed and whose seat is still owed; each holds the drain until
+its group seats it (ADR 0099 §8). Stalled obligations are
 reported separately and do not hold the drain. These reads are not one atomic
 snapshot or an enumeration of every engine invocation. Finalize additionally
 checks retained deployments in §2. Parked work requires compatible replay or
 an operator control decision.
 
-Evidence: `crates/lash/src/formats.rs:610`,
+Evidence: `crates/lash/src/formats.rs:594`,
+`crates/lash-core-store/src/store/state_version.rs:51`,
 `crates/lash-restate/src/services.rs:35`,
+`crates/lash-restate/src/deployment_registry.rs:66`,
 `crates/lash-restate/src/sentinel.rs:49`,
 `crates/lash-restate/src/sentinel.rs:89`,
 `crates/lash-core-store/src/store/generation_drain.rs:28`,
-`crates/lash-core-store/src/store/generation_drain.rs:149`,
+`crates/lash-core-store/src/store/generation_drain.rs:156`,
 `crates/lash-restate/src/process/workflow.rs:1`,
 `crates/lash-restate/src/tests/wait_handoff_generations.rs:1`.
 

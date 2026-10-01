@@ -257,14 +257,25 @@ fn retired_index_live_read_is_a_typed_terminal_error() {
 }
 
 /// The §8 admission decision, pure so its arms are exercisable without an
-/// `ObjectContext`: the index's retained invocation id for a position is the
-/// authority over the id a child invocation presents.
+/// `ObjectContext`: the index's retained invocation id for a position, and
+/// the position's §4 point, are the authority over the id a child invocation
+/// presents.
 ///
-/// A `Some(_)` mismatch is [`EffectGroupAdmissionResponse::AttachExpired`],
-/// not `Refused`: for the idempotency key to mint a second invocation id,
-/// the retained one's retention expired. `Refused` stays for a position that
-/// was never dispatched and for the `Cancel`/`Refused` close dispositions,
-/// where a late child is simply disallowed.
+/// - A dispatched child presenting its retained id is admitted.
+/// - A `Some(_)` mismatch is [`EffectGroupAdmissionResponse::AttachExpired`],
+///   not `Refused`: for the idempotency key to mint a second invocation id,
+///   the retained one's retention expired.
+/// - A child whose final is already committed is `AttachExpired` whatever id
+///   it presents (FIG-4454). The invocation that committed it journaled its
+///   own admission before its commit and replays that answer, so a live
+///   admission of a committed child comes from an invocation whose journal
+///   is gone: a successor the idempotency-keyed re-send minted, which Restate
+///   may mint under the very id it retains. It drains the committed final and
+///   never drives the child again.
+/// - `Refused` stays for a position that was never dispatched and for the
+///   `Cancel`/`Refused` close dispositions, where a late child is simply
+///   disallowed — except a child committed before a `Cancel` close, which
+///   the close protects and which drains as under `RunToCompletion`.
 pub(crate) fn decide_group_child_admission(
     lifecycle: &EffectGroupLifecycle,
     position: usize,
@@ -274,35 +285,52 @@ pub(crate) fn decide_group_child_admission(
         // A preparing group records no child id yet: the registration that
         // records them makes the group ready in the same step (FIG-4308).
         EffectGroupLifecycle::Preparing { .. } => EffectGroupAdmissionResponse::NotYetRecorded,
-        EffectGroupLifecycle::Ready { addresses, .. } => match addresses.get(&position) {
-            Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
-            Some(_) => EffectGroupAdmissionResponse::AttachExpired,
-            None => EffectGroupAdmissionResponse::Refused,
-        },
+        EffectGroupLifecycle::Ready { addresses, live } => {
+            admit_dispatched(addresses, live, position, invocation_id)
+        }
         EffectGroupLifecycle::Closed {
             effective,
             addresses,
             live,
             ..
         } => match effective {
-            EffectGroupCloseOutcome::RunToCompletion => match addresses.get(&position) {
-                Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
-                Some(_) => EffectGroupAdmissionResponse::AttachExpired,
+            EffectGroupCloseOutcome::RunToCompletion => {
+                admit_dispatched(addresses, live, position, invocation_id)
+            }
+            EffectGroupCloseOutcome::Cancel => match live.commit_states.get(&position) {
+                Some(EffectGroupChildCommitState::CancelDecided) => {
+                    EffectGroupAdmissionResponse::CancelDecided
+                }
+                Some(EffectGroupChildCommitState::Committed { .. }) => {
+                    admit_dispatched(addresses, live, position, invocation_id)
+                }
                 None => EffectGroupAdmissionResponse::Refused,
             },
-            EffectGroupCloseOutcome::Cancel
-                if matches!(
-                    live.commit_states.get(&position),
-                    Some(EffectGroupChildCommitState::CancelDecided)
-                ) =>
-            {
-                EffectGroupAdmissionResponse::CancelDecided
-            }
-            EffectGroupCloseOutcome::Cancel | EffectGroupCloseOutcome::Refused { .. } => {
-                EffectGroupAdmissionResponse::Refused
-            }
+            EffectGroupCloseOutcome::Refused { .. } => EffectGroupAdmissionResponse::Refused,
         },
         EffectGroupLifecycle::Retired { .. } => EffectGroupAdmissionResponse::Retired,
+    }
+}
+
+/// The admission of a dispatched position of a group whose children may run.
+fn admit_dispatched(
+    addresses: &BTreeMap<usize, String>,
+    live: &EffectGroupStateLiveRecord,
+    position: usize,
+    invocation_id: &str,
+) -> EffectGroupAdmissionResponse {
+    match addresses.get(&position) {
+        None => EffectGroupAdmissionResponse::Refused,
+        Some(_)
+            if matches!(
+                live.commit_states.get(&position),
+                Some(EffectGroupChildCommitState::Committed { .. })
+            ) =>
+        {
+            EffectGroupAdmissionResponse::AttachExpired
+        }
+        Some(id) if id == invocation_id => EffectGroupAdmissionResponse::Admitted,
+        Some(_) => EffectGroupAdmissionResponse::AttachExpired,
     }
 }
 
@@ -366,6 +394,48 @@ mod admission_tests {
                 EffectGroupAdmissionResponse::AttachExpired,
                 "{lifecycle:?}"
             );
+        }
+    }
+
+    /// FIG-4454 R3: a `Cancel` close protects a committed child (ADR 0099
+    /// §4), so a successor minted for it after its invocation expired is
+    /// admitted to drain the committed final — named `AttachExpired`, as
+    /// under `RunToCompletion` — and never refused. A committed child's
+    /// live admission is always a successor's, whichever id it presents:
+    /// the idempotency-keyed re-send may mint the very id the index retains.
+    #[test]
+    fn a_cancel_closed_groups_committed_child_admits_its_successor_to_drain() {
+        let mut committed = live_record();
+        committed
+            .commit_states
+            .insert(0, EffectGroupChildCommitState::Committed { rank: 1 });
+        let addresses: BTreeMap<usize, String> =
+            [(0, "child-invocation-0".to_owned())].into_iter().collect();
+        for lifecycle in [
+            EffectGroupLifecycle::Closed {
+                effective: EffectGroupCloseOutcome::Cancel,
+                reopened: false,
+                addresses: addresses.clone(),
+                live: committed.clone(),
+            },
+            EffectGroupLifecycle::Closed {
+                effective: EffectGroupCloseOutcome::RunToCompletion,
+                reopened: false,
+                addresses: addresses.clone(),
+                live: committed.clone(),
+            },
+            EffectGroupLifecycle::Ready {
+                addresses: addresses.clone(),
+                live: committed.clone(),
+            },
+        ] {
+            for presented in ["a-fresh-invocation-id", "child-invocation-0"] {
+                assert_eq!(
+                    decide_group_child_admission(&lifecycle, 0, presented),
+                    EffectGroupAdmissionResponse::AttachExpired,
+                    "{presented} under {lifecycle:?}"
+                );
+            }
         }
     }
 

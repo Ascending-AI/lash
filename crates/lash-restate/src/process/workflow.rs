@@ -1295,8 +1295,9 @@ where
             .segment_effect_budget(policy.effect_budget)
             .process_segment_drive()
             .segment_generation(self.build_generation.clone());
+        let (authority, generation) = (self.authority_id.clone(), self.build_generation.clone());
         let controller =
-            RestateRuntimeEffectController::with_options(ctx, self.authority_id.clone(), options)
+            RestateRuntimeEffectController::with_options(ctx, authority, generation, options)
                 .in_namespace(self.route.namespace().clone());
         let trace = self
             .trace_sink

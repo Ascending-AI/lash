@@ -30,6 +30,10 @@ impl EffectEngine for WrappedEngine {
     fn session_work(&self) -> Arc<dyn SessionWorkEngine> {
         Arc::clone(&self.sessions)
     }
+
+    fn deployment_registry(&self) -> Arc<dyn crate::store::fleet_finalize::DeploymentRegistry> {
+        self.inner.deployment_registry()
+    }
 }
 
 #[tokio::test]

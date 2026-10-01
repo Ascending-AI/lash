@@ -276,8 +276,10 @@ impl LashCore {
     /// What `generation` still holds (FIG-3799): whether it is marked
     /// draining, its live processes, the parked processes and turns its
     /// checkpoints hold, the turns its drives admitted that have not settled
-    /// (FIG-3884), the closing sessions every drain waits on, and the stalled
-    /// obligations, which it counts but does not wait on (FIG-4076).
+    /// (FIG-3884), the closing sessions every drain waits on, the committed
+    /// effect-group children still owed a drain on its lane (FIG-4454), and
+    /// the stalled obligations, which it counts but does not wait on
+    /// (FIG-4076).
     ///
     /// Reading the status is also the metrics refresh: the per-generation
     /// work gauges and each obligation kind's stalled gauge record inside
@@ -288,11 +290,13 @@ impl LashCore {
     ) -> Result<GenerationDrainStatus> {
         let drain = self.backend.generation_drain();
         let session_delete = self.backend.session_delete_ledger();
+        let registry = self.backend.deployment_registry();
         let backend = self.backend.clone();
         Ok(GenerationDrainStatus::collect(
             drain.as_ref(),
             session_delete.as_ref(),
             move |kind| backend.obligation_ledger(kind),
+            registry.as_ref(),
             generation,
             self.env.core.clock.timestamp_ms(),
         )

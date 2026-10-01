@@ -255,6 +255,22 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
     )
 }
 
+// FIG-4454's committed-final recovery on a live server: the second endpoint
+// the recipe provides serves the newer build the deployment change registers.
+lash_conformance::tool_child_committed_recovery_tests!(
+    #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let fixture = harness.tool_child_law_fixture();
+        let expire = harness.child_invocation_expiry();
+        let change = harness.deployment_change();
+        let prefix: &'static str =
+            Box::leak(format!("restate-live-recovery-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, fixture, expire, change)
+    }
+);
+
 lash_conformance::tool_child_turn_cancel_tests!(
     #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
     {
@@ -997,6 +1013,7 @@ lash_conformance::effect_host_await_event_witness_tests!(
 /// server double: the same endpoint and the same laws, with the Restate
 /// server simulated in process — no sockets, no Docker, virtual time.
 mod on_the_server_double {
+    use super::effect_group_committed_recovery::HarnessStoreTier;
     use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
     use super::*;
 
@@ -1033,15 +1050,56 @@ mod on_the_server_double {
         (harness, "restate", fixture)
     });
 
-    // A child's invocation dies before its seat and outlives its retention:
-    // the double's operator kills and purges it, and dispatches its successor.
-    lash_conformance::tool_child_successor_tests!({
+    // FIG-4454: a committed child's invocation dies before its seat and
+    // outlives its retention, and a newer build that refuses the session
+    // registers; the opener's reopen recovers the child on its own lane. One
+    // registration per store tier the endpoint and the law's runtime run over.
+    mod committed_recovery_over_sqlite_memory {
+        use super::*;
+
+        lash_conformance::tool_child_committed_recovery_tests!({
+            committed_recovery_fixture(HarnessStoreTier::SqliteMemory).await
+        });
+    }
+
+    mod committed_recovery_over_sqlite_file {
+        use super::*;
+
+        lash_conformance::tool_child_committed_recovery_tests!({
+            committed_recovery_fixture(HarnessStoreTier::SqliteFile).await
+        });
+    }
+
+    mod committed_recovery_over_postgres {
+        use super::*;
+
+        lash_conformance::tool_child_committed_recovery_tests!(
+            #[ignore = "requires isolated PostgreSQL; run through the effect-group suite with pg16"]
+            {
+                committed_recovery_fixture(HarnessStoreTier::Postgres).await
+            }
+        );
+    }
+
+    async fn committed_recovery_fixture(
+        tier: HarnessStoreTier,
+    ) -> (
+        LiveConformanceHarness,
+        &'static str,
+        lash_conformance::ToolChildLawFixture,
+        lash_conformance::ChildInvocationExpiry,
+        lash_conformance::DeploymentChange,
+    ) {
         let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+            LiveConformanceHarness::start_for_tool_children_over(HarnessServer::in_process(), tier)
+                .await;
         let fixture = harness.tool_child_law_fixture();
         let expire = harness.child_invocation_expiry();
-        (harness, "restate", fixture, expire)
-    });
+        let change = harness.deployment_change();
+        let prefix: &'static str =
+            Box::leak(format!("restate-recovery-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, fixture, expire, change)
+    }
 
     lash_conformance::turn_runner_tests!({
         let harness =

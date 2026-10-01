@@ -63,7 +63,7 @@ impl Group {
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
                     membership: witness_membership(&children),
-                    dispatch_route: "EffectGroupDispatch".to_string(),
+                    dispatch_route: super::effect_group_conformance::witness_dispatch_route(),
                     content_checked: false,
                 },
             )
@@ -103,7 +103,7 @@ impl Group {
                 &EffectGroupOpenRequest {
                     shape: self.shape.clone(),
                     membership: witness_membership(&self.children),
-                    dispatch_route: "EffectGroupDispatch".to_string(),
+                    dispatch_route: super::effect_group_conformance::witness_dispatch_route(),
                     content_checked: false,
                 },
             )
@@ -538,7 +538,13 @@ async fn the_rank_is_reserved_at_the_commit_and_published_at_the_seat() {
 
 /// The approved decision order: a cancel decided while a committed sibling is
 /// still draining ranks after it, and B's cancellation is held behind A's
-/// drain even for a reopened caller.
+/// drain: no reader is served past A's unseated rank, and a reopened caller
+/// is served the run once A seats.
+///
+/// The group's recorded children are stand-ins, so A has no invocation of
+/// its own: a reopen while A owes its seat would re-send A, as recovery does
+/// for a committed child whose invocation is gone (FIG-4454). The caller
+/// therefore reopens once A has seated.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cancel_decided_behind_a_draining_commit_ranks_after_it() {
     let harness = harness().await;
@@ -555,12 +561,11 @@ async fn a_cancel_decided_behind_a_draining_commit_ranks_after_it() {
         ),
         "B's cancel decision took rank 2, after A's commit"
     );
-    group.reopen().await;
     for rank in [1, 2] {
         assert!(
             matches!(
-                group.read(rank, true, true).await,
-                EffectGroupReadRankResponse::NotSettled
+                group.read(rank, false, true).await,
+                EffectGroupReadRankResponse::Closed
             ),
             "rank {rank} is not observable until A seats"
         );
@@ -572,6 +577,7 @@ async fn a_cancel_decided_behind_a_draining_commit_ranks_after_it() {
         ),
         "A publishes rank 1 when its drain finishes"
     );
+    group.reopen().await;
     let EffectGroupReadRankResponse::SettledRun { ranks } = group.read(1, true, true).await else {
         panic!("the reopened caller is served once A seats");
     };

@@ -27,6 +27,24 @@ transaction before reading the marker. Its result carries the session id,
 version, and drive epoch. This admission checks compatibility; it does not
 execute a per-session converter chain or advance the marker.
 
+A tool child of an effect group (ADR 0099) passes the same gate before its
+tool body runs, but there the gate is defence in depth, not the compatibility
+seam. A build's drain generation `G` hashes its `SessionAdmissionWindow` —
+the supported range and every writer pin the recorded `F` could select
+(FIG-4454) — so every build that serves the child's lane admits every marker
+its opener's build admitted. A child or a successor sent on its opener's lane
+therefore never meets a refusal its opener would not have met. A child whose
+final already committed is past the gate: it drains whatever the marker says,
+and a generation refusal of a committed child reports a violated
+precondition, not a compatibility outcome.
+
+The marker has no production writer. It moves only by fleet conversion under
+a drive fence, and a drive fence excludes drives, not group children: a
+committed child whose seat is still owed may drain after the fence is taken.
+A future marker mover must therefore also exclude committed, undrained group
+children on the sessions it moves, replay-safely, before it advances a marker
+(ADR 0099 §5).
+
 ### Record counters remain codec discriminators
 
 Head, checkpoint, component, wake, and protocol counters remain independent.
@@ -78,7 +96,8 @@ validation, while fleet conversion owns supported format transitions.
 
 ## Code references
 
-- `crates/lash-core-store/src/store/state_version.rs:4-61` defines marker admission and the fleet window.
+- `crates/lash-core-store/src/store/state_version.rs:4-101` defines marker admission, the fleet window, and the `SessionAdmissionWindow` descriptor.
+- `crates/lash/src/formats.rs:594-660` folds the session admission window into the drain generation `G`.
 - `crates/lash-core/src/runtime/drive/admission.rs:108-113` gates drive admission.
 - `crates/lash-sqlite-store/src/persistence/session_commit.rs:166-199` validates the drive fence.
 - `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:220-239` implements the same transaction.

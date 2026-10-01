@@ -1047,10 +1047,10 @@ async fn drive_session_journal(
     // The generation sentinel rides admission 0, the drive's first command
     // (FIG-3980): a journal of another build parks before it replays past it.
     let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
-    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
-        .in_namespace(route.namespace().clone())
-        .with_build_generation(generation.clone())
-        .with_folded_sentinel(Arc::clone(&sentinel));
+    let controller =
+        RestateRuntimeEffectController::new(ctx, authority_id.clone(), generation.clone())
+            .in_namespace(route.namespace().clone())
+            .with_folded_sentinel(Arc::clone(&sentinel));
     sentinel
         .guard(drive_admissions(
             driver.as_ref(),
@@ -1256,10 +1256,10 @@ async fn run_root_journal(
     // marker (FIG-3980): a journal of another build parks before it replays
     // past it.
     let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
-    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
-        .in_namespace(route.namespace().clone())
-        .with_build_generation(generation.clone())
-        .with_folded_sentinel(Arc::clone(&sentinel));
+    let controller =
+        RestateRuntimeEffectController::new(ctx, authority_id.clone(), generation.clone())
+            .in_namespace(route.namespace().clone())
+            .with_folded_sentinel(Arc::clone(&sentinel));
     let scoped = controller
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
@@ -1339,10 +1339,10 @@ async fn close_root_journal(
     // The generation sentinel rides the close, the handler's first recorded
     // step: a journal of another build parks before it replays past it.
     let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
-    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
-        .in_namespace(route.namespace().clone())
-        .with_build_generation(generation.clone())
-        .with_folded_sentinel(Arc::clone(&sentinel));
+    let controller =
+        RestateRuntimeEffectController::new(ctx, authority_id.clone(), generation.clone())
+            .in_namespace(route.namespace().clone())
+            .with_folded_sentinel(Arc::clone(&sentinel));
     let scoped = controller
         .scoped_effect_controller(drive_root_scope(&session, &admitted_root))
         .map_err(refused_scope)?;

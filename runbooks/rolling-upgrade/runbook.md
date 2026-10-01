@@ -244,10 +244,10 @@ set to the PostgreSQL test database. Every command uses the Buck2-built
 | `lashctl migrate` | N before its first start; N+1 before its first start | migrates on open | `lashctl migrate --json` |
 | `lashctl preflight` | before N and N+1 start, and before each return deployment | opens and checks stores on node start | `lashctl preflight --json` |
 | `lashctl drain` | reverse drain before N+1 retires in rollback | node uses the SQLite generation drain API | `lashctl drain "$NEW_GENERATION" --json` |
-| `lashctl drain-status` | require drained after N+1 retires | node uses the SQLite generation drain API | `lashctl drain-status "$NEW_GENERATION" --json` |
+| `lashctl drain-status` | require drained after N+1 retires | node uses the SQLite generation drain API | `lashctl drain-status "$NEW_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json` |
 | `lashctl end-drain` | clear reverse drain after N+1 retires | node uses the SQLite generation drain API | `lashctl end-drain "$NEW_GENERATION" --json` |
 | `lashctl drain` | forward drain at the half roll, ended by the rollback, and again before N retires in roll | node uses the SQLite generation drain API | `lashctl drain "$OLD_GENERATION" --json` |
-| `lashctl drain-status` | require drained after N retires | node uses the SQLite generation drain API | `lashctl drain-status "$OLD_GENERATION" --json` |
+| `lashctl drain-status` | require drained after N retires | node uses the SQLite generation drain API | `lashctl drain-status "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json` |
 | `lashctl finalize` | refused while N's deployments are registered and while held, then finalizes after they are removed | SQLite finalize is `SqliteStoreSet::finalize`, not a `lashctl` verb | `lashctl finalize "$OLD_GENERATION" --restate-admin-url "$RESTATE_ADMIN_URL" --json` |
 | `lashctl finalize-hold` | set before finalize to prove the hold, then cleared | no SQLite hold | `lashctl finalize-hold set --reason <text> --json`, `lashctl finalize-hold clear --json` |
 | `lashctl end-drain` | clear forward drain after finalize | node uses the SQLite generation drain API | `lashctl end-drain "$OLD_GENERATION" --json` |

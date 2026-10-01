@@ -55,6 +55,7 @@
 
 use lash_core::engine::BuildGeneration;
 pub use lash_core::engine::UpgradePolicy;
+use lash_core::store::SessionAdmissionWindow;
 use lash_sansio::core_support::Blake3DomainHasher;
 
 pub use lash_core::store::{
@@ -570,21 +571,32 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 }
 
 /// The build's drain generation `G` (FIG-3795): the digest of the
-/// drain-policy durable formats this build writes plus the journal-logic
-/// epoch, stamped on every journal-bearing Restate deployment so a journal
-/// written by another build is never replayed here.
+/// drain-policy durable formats this build writes, the journal-logic epoch
+/// and the build's session admission, stamped on every journal-bearing
+/// Restate deployment so a journal written by another build is never
+/// replayed here.
 ///
 /// The preimage is the sorted `(name, version)` rows of the
 /// [`UpgradePolicy::Drain`] entries of [`durable_formats`], then the
 /// `JOURNAL_LOGIC_EPOCH` — the manual counter beside the process handler's
 /// step names, bumped when handler logic moves without a format version —
-/// hashed under the `lash-build-generation/v1` BLAKE3 domain, first six
-/// bytes. Feature gating is honest: a build without `rlm` serves no Lashlang
+/// then the build's [`SessionAdmissionWindow`] (FIG-4454): its supported
+/// range and every writer pin of the session-state surface, hashed under the
+/// `lash-build-generation/v1` BLAKE3 domain, first six bytes. The stored
+/// marker still migrates, so the session-state row stays outside the
+/// drain-policy rows; its admission is hashed because work routed on a lane
+/// — an effect group's children, a successor — must run on a build that
+/// admits every session the lane's opener admitted. Two builds whose session
+/// admission differs therefore never share a lane. Feature gating is honest: a build without `rlm` serves no Lashlang
 /// journals and so has a different `G`. There is no environment or host
 /// input; the same code gives the same `G`, which is what makes a generation
 /// routable.
 pub fn build_generation() -> BuildGeneration {
-    build_generation_of(durable_formats(), journal_logic_epoch())
+    build_generation_of(
+        durable_formats(),
+        journal_logic_epoch(),
+        &SessionAdmissionWindow::of_this_build(),
+    )
 }
 
 /// The epoch input to [`build_generation`]: the Restate journal handlers'
@@ -601,12 +613,13 @@ fn journal_logic_epoch() -> Option<u32> {
     None
 }
 
-/// The hash behind [`build_generation`], over an explicit manifest and epoch
-/// so the tests below can move one row at a time instead of depending on
-/// which durable format next bumps.
+/// The hash behind [`build_generation`], over an explicit manifest, epoch
+/// and session admission so the tests below can move one input at a time
+/// instead of depending on which durable format next bumps.
 fn build_generation_of(
     entries: impl Iterator<Item = DurableFormatEntry>,
     epoch: Option<u32>,
+    session_admission: &SessionAdmissionWindow,
 ) -> BuildGeneration {
     let mut rows: Vec<(String, String)> = entries
         .filter(|entry| entry.format.upgrade_policy() == UpgradePolicy::Drain)
@@ -623,6 +636,20 @@ fn build_generation_of(
     if let Some(epoch) = epoch {
         hasher.update(b"journal-logic-epoch");
         hasher.update(epoch.to_be_bytes());
+    }
+    hasher.update(b"session-admission-window");
+    hasher.update(session_admission.oldest.to_be_bytes());
+    hasher.update(session_admission.newest.to_be_bytes());
+    let mut pins: Vec<(u32, u32)> = session_admission
+        .pins
+        .iter()
+        .map(|pin| (pin.generation, pin.version))
+        .collect();
+    pins.sort_unstable();
+    hasher.update((pins.len() as u64).to_be_bytes());
+    for (generation, version) in pins {
+        hasher.update(generation.to_be_bytes());
+        hasher.update(version.to_be_bytes());
     }
     let digest = hasher.finalize();
     let mut bytes = [0_u8; 6];
@@ -739,7 +766,11 @@ mod tests {
         assert_eq!(build_generation(), build_generation());
         assert_eq!(
             build_generation(),
-            build_generation_of(durable_formats(), journal_logic_epoch())
+            build_generation_of(
+                durable_formats(),
+                journal_logic_epoch(),
+                &SessionAdmissionWindow::of_this_build()
+            )
         );
     }
 
@@ -754,7 +785,11 @@ mod tests {
                 FormatVersion::Counter(v) => FormatVersion::Counter(v + 1),
                 FormatVersion::Identity(_) => FormatVersion::Identity("moved-identity"),
             };
-            let generation = build_generation_of(moved.iter().copied(), journal_logic_epoch());
+            let generation = build_generation_of(
+                moved.iter().copied(),
+                journal_logic_epoch(),
+                &SessionAdmissionWindow::of_this_build(),
+            );
             if moved[index].format.upgrade_policy() == UpgradePolicy::Drain {
                 assert_ne!(
                     generation,
@@ -773,6 +808,45 @@ mod tests {
         }
     }
 
+    /// FIG-4454 L-lane: two builds whose session admission differs — in its
+    /// oldest admitted marker, its newest, or any writer pin the recorded
+    /// `F` could select — never share a lane; an identical admission does.
+    #[test]
+    fn two_builds_with_different_session_windows_never_share_a_lane() {
+        let this = SessionAdmissionWindow::of_this_build();
+        let generation_of = |window: &SessionAdmissionWindow| {
+            build_generation_of(durable_formats(), journal_logic_epoch(), window)
+        };
+        assert_eq!(generation_of(&this.clone()), build_generation());
+        let narrower = SessionAdmissionWindow {
+            oldest: this.oldest + 1,
+            ..this.clone()
+        };
+        let newer = SessionAdmissionWindow {
+            newest: this.newest + 1,
+            ..this.clone()
+        };
+        let mut pinned = this.clone();
+        pinned.pins.push(lash_core::store::WriterPin {
+            constant: "CURRENT_SESSION_STATE_VERSION",
+            generation: 99,
+            version: this.oldest.saturating_sub(1),
+        });
+        let mut repinned = pinned.clone();
+        if let Some(pin) = repinned.pins.last_mut() {
+            pin.version += 1;
+        }
+        let generations = [&this, &narrower, &newer, &pinned, &repinned]
+            .into_iter()
+            .map(generation_of)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            generations.len(),
+            5,
+            "each session admission is its own lane: {generations:?}"
+        );
+    }
+
     #[test]
     fn the_journal_logic_epoch_changes_the_generation() {
         // L0: the epoch is in the preimage, so a handler-logic change that
@@ -782,17 +856,34 @@ mod tests {
         assert_ne!(
             build_generation_of(
                 durable_formats(),
-                Some(journal_logic_epoch().unwrap_or(0) + 1)
+                Some(journal_logic_epoch().unwrap_or(0) + 1),
+                &SessionAdmissionWindow::of_this_build(),
             ),
             build_generation()
         );
         assert_ne!(
-            build_generation_of(durable_formats(), Some(0)),
-            build_generation_of(durable_formats(), None)
+            build_generation_of(
+                durable_formats(),
+                Some(0),
+                &SessionAdmissionWindow::of_this_build()
+            ),
+            build_generation_of(
+                durable_formats(),
+                None,
+                &SessionAdmissionWindow::of_this_build()
+            )
         );
         assert_ne!(
-            build_generation_of(durable_formats(), Some(1)),
-            build_generation_of(durable_formats(), Some(2))
+            build_generation_of(
+                durable_formats(),
+                Some(1),
+                &SessionAdmissionWindow::of_this_build()
+            ),
+            build_generation_of(
+                durable_formats(),
+                Some(2),
+                &SessionAdmissionWindow::of_this_build()
+            )
         );
     }
 

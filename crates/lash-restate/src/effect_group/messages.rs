@@ -88,12 +88,16 @@ pub enum EffectGroupRegisterRefusalResponse {
 pub enum EffectGroupAdmissionResponse {
     Admitted,
     NotYetRecorded,
-    /// The index retains a *different* invocation id for this position: the
-    /// retained invocation's retention expired and the idempotency-keyed
-    /// re-dispatch minted a fresh one. Distinct from `Refused` because the
-    /// successor must surface the typed `AttachExpired` failure rather than
-    /// exit silently — the rank it would never settle is a caller's wait
-    /// (ADR 0099 §8).
+    /// The presenting invocation is not the one that holds this position: the
+    /// index retains a *different* invocation id for it — the retained
+    /// invocation's retention expired and the idempotency-keyed re-dispatch
+    /// minted a fresh one — or the position's final is already committed, so
+    /// the invocation that committed it is gone and this one re-runs its
+    /// journal from nothing (FIG-4454). Distinct from `Refused` because the
+    /// successor must seat the committed final, or surface the typed
+    /// `AttachExpired` failure where none is committed, rather than exit
+    /// silently — the rank it would never settle is a caller's wait (ADR 0099
+    /// §8).
     AttachExpired,
     /// The close decided this child `Cancel` before it was admitted. The
     /// close owns everything that follows, including releasing a wait

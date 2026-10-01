@@ -36,7 +36,11 @@ struct Probe {
 impl WorkloadDeleteProbe for Probe {
     async fn run(&self, context: WorkflowContext<'_>) -> HandlerResult<u64> {
         let services = self.services.get().expect("the core precedes the handler");
-        let controller = Controller::new(context, services.authority.clone());
+        let controller = Controller::new(
+            context,
+            services.authority.clone(),
+            lash::formats::build_generation(),
+        );
         let ctx = controller.context();
         let cleaned = cleanup_model_children(
             ctx,

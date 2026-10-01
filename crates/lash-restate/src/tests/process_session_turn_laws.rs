@@ -210,6 +210,7 @@ async fn run(
     let controller = RestateRuntimeEffectController::with_options(
         context,
         authority,
+        crate::tests::test_build_generation(),
         RestateEffectControllerOptions::default().process_segment_drive(),
     )
     .in_namespace(namespace);

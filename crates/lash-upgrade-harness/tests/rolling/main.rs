@@ -208,7 +208,7 @@ fn roll_postgres(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) 
     operator_next.run("end-drain", Some(&n_generation))?;
     operator_next.run("drain", Some(&next_generation))?;
     next_first.stop()?;
-    let status = operator_next.run("drain-status", Some(&next_generation))?;
+    let status = operator_next.run_args(&case.drain_status_args(&next_generation))?;
     ensure!(status["drained"] == true, "N+1 did not drain: {status}");
     operator_next.run("end-drain", Some(&next_generation))?;
     operator_n.run("preflight", None)?;
@@ -228,7 +228,7 @@ fn roll_postgres(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) 
     let next_again = next.serve(case)?;
     operator_next.run("drain", Some(&n_generation))?;
     n_again.stop()?;
-    let status = operator_next.run("drain-status", Some(&n_generation))?;
+    let status = operator_next.run_args(&case.drain_status_args(&n_generation))?;
     ensure!(status["drained"] == true, "N did not drain: {status}");
     finalize(case, n, &operator_next, &n_generation)?;
     turn(

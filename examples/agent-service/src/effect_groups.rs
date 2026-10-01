@@ -101,7 +101,13 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
                 |_| restate_sdk::errors::TerminalError::new("RESTATE_AUTHORITY_ID is required"),
             )?)
             .map_err(restate_sdk::errors::TerminalError::from_error)?;
-        let controller = RestateRuntimeEffectController::new(ctx, authority_id);
+        // This build's lane: the deployment's endpoint binds it, so the
+        // group's children run on the build that opened it (FIG-4454).
+        let controller = RestateRuntimeEffectController::new(
+            ctx,
+            authority_id,
+            lash::formats::build_generation(),
+        );
         let mut handle = controller
             .open_effect_group(group)
             .await

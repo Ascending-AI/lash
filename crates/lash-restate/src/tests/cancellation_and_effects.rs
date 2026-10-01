@@ -54,7 +54,11 @@ pub(super) async fn execute_await_event_rejects_foreign_authority_before_context
     let owner = RestateAuthorityId::new("execute-await-owner").expect("valid owner authority");
     let foreign =
         RestateAuthorityId::new("execute-await-foreign").expect("valid foreign authority");
-    let controller = RestateRuntimeEffectController::new(context.clone(), owner);
+    let controller = RestateRuntimeEffectController::new(
+        context.clone(),
+        owner,
+        crate::tests::test_build_generation(),
+    );
     let key = restate_await_event_key_for_authority(
         &foreign,
         &durable_turn_scope("foreign-await-session", "turn"),
@@ -577,16 +581,20 @@ pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_c
     let task_cancellation = cancellation.clone();
     let task_authority = authority.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context, task_authority)
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "suspended-await-event"),
-                    RuntimeEffectCommand::AwaitEvent { key: awaited_key },
-                ),
-                RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
-                    .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
-            )
-            .await
+        RestateRuntimeEffectController::new(
+            task_context,
+            task_authority,
+            crate::tests::test_build_generation(),
+        )
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::AwaitEvent, "suspended-await-event"),
+                RuntimeEffectCommand::AwaitEvent { key: awaited_key },
+            ),
+            RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
+                .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
+        )
+        .await
     });
     wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
     assert!(
@@ -689,16 +697,20 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
     let task_cancellation = cancellation.clone();
     let task_authority = authority.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context, task_authority)
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "cancel-wait"),
-                    RuntimeEffectCommand::AwaitEvent { key: task_key },
-                ),
-                RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
-                    .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
-            )
-            .await
+        RestateRuntimeEffectController::new(
+            task_context,
+            task_authority,
+            crate::tests::test_build_generation(),
+        )
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::AwaitEvent, "cancel-wait"),
+                RuntimeEffectCommand::AwaitEvent { key: task_key },
+            ),
+            RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
+                .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
+        )
+        .await
     });
     wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
     assert!(
@@ -736,7 +748,11 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
         }
     ));
 
-    let host = RestateRuntimeEffectController::new(context, authority);
+    let host = RestateRuntimeEffectController::new(
+        context,
+        authority,
+        crate::tests::test_build_generation(),
+    );
     assert_eq!(
         host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("late")))
             .await
@@ -1277,6 +1293,7 @@ pub(super) async fn a_process_parked_on_a_signal_is_cancelled_by_its_durable_rac
         RestateRuntimeEffectController::with_options(
             task_context,
             authority,
+            crate::tests::test_build_generation(),
             RestateEffectControllerOptions::default().process_segment_drive(),
         )
         .execute_effect(

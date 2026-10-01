@@ -290,18 +290,18 @@ async fn restate_await_rejects_cancel_scope_for_a_different_physical_turn() {
         "follow-on-await",
     );
     let context = Arc::new(RecordingContext::default());
-    let error =
-        RestateRuntimeEffectController::new(Arc::clone(&context), cancel_mode_authority_id())
-            .execute_effect(
-                RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
-                RuntimeEffectLocalExecutor::await_event(
-                    tokio_util::sync::CancellationToken::new(),
-                    None,
-                )
-                .with_turn_cancel_scope(admitted_scope),
-            )
-            .await
-            .expect_err("a root cancellation scope must not guard a follow-on physical turn");
+    let error = RestateRuntimeEffectController::new(
+        Arc::clone(&context),
+        cancel_mode_authority_id(),
+        crate::tests::test_build_generation(),
+    )
+    .execute_effect(
+        RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
+        RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new(), None)
+            .with_turn_cancel_scope(admitted_scope),
+    )
+    .await
+    .expect_err("a root cancellation scope must not guard a follow-on physical turn");
     assert_eq!(
         error.code,
         lash_core::RuntimeErrorCode::EngineTurnCancelScopeMismatch

@@ -100,6 +100,9 @@ pub(crate) struct HarnessProcesses {
     pub(crate) core: lash::LashCore,
     pub(crate) artifacts: lashlang::LashlangArtifacts,
     pub(crate) authority: lash_restate::RestateAuthorityId,
+    /// The node's build: the lane the groups its controller opens dispatch
+    /// on (FIG-4454).
+    pub(crate) build_generation: lash_core::engine::BuildGeneration,
     pub(crate) namespace: lash_restate::RestateNamespace,
     pub(crate) model: lash::ModelSpec,
 }
@@ -115,9 +118,12 @@ impl UpgradeHarnessProcesses for HarnessProcesses {
         Json(op): Json<HarnessOp>,
     ) -> HandlerResult<Json<HarnessReply>> {
         let operation = format!("upgrade-harness:{}", ctx.key());
-        let controller =
-            lash_restate::RestateRuntimeEffectController::new(ctx, self.authority.clone())
-                .in_namespace(self.namespace.clone());
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            self.authority.clone(),
+            self.build_generation.clone(),
+        )
+        .in_namespace(self.namespace.clone());
         let scoped = controller
             .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(operation))
             .map_err(terminal)?;

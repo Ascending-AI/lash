@@ -178,8 +178,11 @@ impl AppState {
         )
         .await?;
 
-        let controller =
-            RestateRuntimeEffectController::new(ctx, self.restate_authority_id.clone());
+        let controller = RestateRuntimeEffectController::new(
+            ctx,
+            self.restate_authority_id.clone(),
+            lash::formats::build_generation(),
+        );
         if request.scenario == TurnScenario::SignalProcess {
             return Box::pin(self.signal_process(&controller, core, &request))
                 .await
@@ -959,10 +962,14 @@ async fn direct_resolve_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitResolveRequest>,
 ) -> Result<AxumJson<DirectDurableWaitResolveResponse>, (StatusCode, String)> {
-    let outcome = RestateEffectHost::new(state.restate_ingress_url, state.restate_authority_id)
-        .resolve_await_event(&request.key, request.resolution)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let outcome = RestateEffectHost::new(
+        state.restate_ingress_url,
+        state.restate_authority_id,
+        lash::formats::build_generation(),
+    )
+    .resolve_await_event(&request.key, request.resolution)
+    .await
+    .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(AxumJson(DirectDurableWaitResolveResponse {
         worker_id: state.worker_id,
         outcome,
@@ -973,14 +980,18 @@ async fn direct_await_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitAwaitRequest>,
 ) -> Result<AxumJson<DirectDurableWaitAwaitResponse>, (StatusCode, String)> {
-    let resolution = RestateEffectHost::new(state.restate_ingress_url, state.restate_authority_id)
-        .await_await_event(
-            &request.key,
-            tokio_util::sync::CancellationToken::new(),
-            None,
-        )
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let resolution = RestateEffectHost::new(
+        state.restate_ingress_url,
+        state.restate_authority_id,
+        lash::formats::build_generation(),
+    )
+    .await_await_event(
+        &request.key,
+        tokio_util::sync::CancellationToken::new(),
+        None,
+    )
+    .await
+    .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(AxumJson(DirectDurableWaitAwaitResponse {
         worker_id: state.worker_id,
         resolution,

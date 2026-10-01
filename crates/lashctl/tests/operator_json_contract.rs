@@ -36,6 +36,44 @@ fn run(args: &[&str], database_url: Option<&str>) -> (i32, Value) {
     (code, body)
 }
 
+/// A stand-in for a Restate admin API whose server holds no effect-group
+/// index record: `POST /query` answers no rows. Its URL.
+fn empty_admin() -> String {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind the admin stand-in");
+    let url = format!("http://{}", listener.local_addr().expect("admin address"));
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut reader = BufReader::new(stream.try_clone().expect("clone the stream"));
+            let mut length = 0_usize;
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) if line == "\r\n" => break,
+                    Ok(_) => {
+                        if let Some(value) =
+                            line.to_ascii_lowercase().strip_prefix("content-length:")
+                        {
+                            length = value.trim().parse().unwrap_or(0);
+                        }
+                    }
+                }
+            }
+            let mut request = vec![0_u8; length];
+            let _ = reader.read_exact(&mut request);
+            let body = json!({"rows": []}).to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    url
+}
+
 fn assert_envelope(body: &Value, command: &str, has_result: bool, has_error: bool) {
     let object = body.as_object().expect("object");
     assert_eq!(object.len(), 4);
@@ -61,7 +99,13 @@ fn operator_json_contract() {
         ("drain", vec!["drain", "0123456789ab", "--json"]),
         (
             "drain-status",
-            vec!["drain-status", "0123456789ab", "--json"],
+            vec![
+                "drain-status",
+                "0123456789ab",
+                "--restate-admin-url",
+                "http://127.0.0.1:1",
+                "--json",
+            ],
         ),
         ("end-drain", vec!["end-drain", "0123456789ab", "--json"]),
         (
@@ -88,9 +132,11 @@ fn operator_json_contract() {
         );
     }
 
-    // Finalize reads retirement from the engine, so it names the engine.
+    // Finalize reads retirement from the engine, and a drain's status the
+    // group children the engine still owes (FIG-4454), so both name it.
     for args in [
         vec!["finalize", "0123456789ab", "--json"],
+        vec!["drain-status", "0123456789ab", "--json"],
         vec![
             "finalize",
             "not-a-generation",
@@ -295,7 +341,15 @@ async fn operator_json_contract_postgres() {
     }
 
     let generation = "0123456789ab";
-    let (code, before) = run(&["drain-status", generation, "--json"], Some(&scratch_url));
+    let admin_url = empty_admin();
+    let drain_status = [
+        "drain-status",
+        generation,
+        "--restate-admin-url",
+        admin_url.as_str(),
+        "--json",
+    ];
+    let (code, before) = run(&drain_status, Some(&scratch_url));
     assert_eq!(code, 5);
     assert_envelope(&before, "drain-status", true, true);
     assert_eq!(before["error"]["code"], "not_yet");
@@ -314,6 +368,7 @@ async fn operator_json_contract_postgres() {
             "parked_turns",
             "stalled",
             "stalled_obligations",
+            "undrained_group_children",
         ],
     );
     assert_eq!(before["result"]["stalled"], json!([]));
@@ -356,7 +411,7 @@ async fn operator_json_contract_postgres() {
     assert!(text.contains("0123456789ab (draining: true, source: postgres)"));
     assert!(text.contains("fedcba987654 (draining: false, source: postgres)"));
 
-    let (code, drained) = run(&["drain-status", generation, "--json"], Some(&scratch_url));
+    let (code, drained) = run(&drain_status, Some(&scratch_url));
     assert_eq!(code, 0);
     assert_envelope(&drained, "drain-status", true, false);
     assert_eq!(drained["result"]["drained"], true);

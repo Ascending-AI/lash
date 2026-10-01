@@ -28,7 +28,7 @@ const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -132,6 +132,9 @@ enum Command {
     },
     DrainStatus {
         generation: BuildGeneration,
+        /// The engine's admin API: the committed effect-group children still
+        /// owed a drain on the generation's lane are read there (FIG-4454).
+        restate_admin_url: String,
     },
     EndDrain {
         generation: BuildGeneration,
@@ -229,13 +232,30 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
             }
             Command::Migrate { phase, dry_run }
         }
-        "drain" | "drain-status" | "end-drain" if rest.len() == 1 => {
+        "drain" | "end-drain" if rest.len() == 1 => {
             let generation = BuildGeneration::parse(&rest[0])
                 .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
             match verb {
                 "drain" => Command::Drain { generation },
-                "drain-status" => Command::DrainStatus { generation },
                 _ => Command::EndDrain { generation },
+            }
+        }
+        "drain-status" if !rest.is_empty() => {
+            let generation = BuildGeneration::parse(&rest[0])
+                .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
+            let restate_admin_url = match &rest[1..] {
+                [flag, url] if flag == "--restate-admin-url" => url.clone(),
+                [] => {
+                    return Err(CliError::new(
+                        Exit::Usage,
+                        "drain-status needs --restate-admin-url: undrained group children are read from the engine",
+                    ));
+                }
+                _ => return Err(CliError::new(Exit::Usage, USAGE)),
+            };
+            Command::DrainStatus {
+                generation,
+                restate_admin_url,
             }
         }
         "finalize" if !rest.is_empty() => {
@@ -572,6 +592,7 @@ fn drain_status_result(status: &GenerationDrainStatus, stalled: &[StalledObligat
         "parked_turns": status.parked_turns,
         "in_flight_turns": status.in_flight_turns,
         "closing_sessions": status.closing_sessions,
+        "undrained_group_children": status.undrained_group_children,
         "stalled_obligations": status.stalled_obligations.iter().map(|(kind, count)| (kind.label(), *count)).collect::<std::collections::BTreeMap<_, _>>(),
         "stalled": stalled.iter().map(stalled_result).collect::<Vec<_>>(),
         "drained": status.drained(),
@@ -797,7 +818,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
         }
         Command::Drain { generation }
         | Command::EndDrain { generation }
-        | Command::DrainStatus { generation } => {
+        | Command::DrainStatus { generation, .. } => {
             let storage = PostgresStorage::connect_with(
                 &database_url()?,
                 PostgresStoreConfig {
@@ -832,11 +853,19 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                         Exit::Done,
                     )
                 }
-                Command::DrainStatus { .. } => {
+                Command::DrainStatus {
+                    restate_admin_url, ..
+                } => {
+                    let registry = lash_restate::RestateDeploymentRegistry::new(
+                        lash_restate::RestateAdminClient::new(
+                            lash_restate::RestateConnection::new(restate_admin_url.clone()),
+                        ),
+                    );
                     let status = GenerationDrainStatus::collect(
                         drain.as_ref(),
                         storage.session_delete_ledger().as_ref(),
                         |kind| storage.obligation_ledger(kind),
+                        &registry,
                         generation,
                         lash_core_execution::facade_support::SystemClock.timestamp_ms(),
                     )

@@ -105,7 +105,11 @@ impl LashDeterminismHost for LashDeterminismHostImpl {
         ctx: WorkflowContext<'_>,
         Json(_key): Json<String>,
     ) -> HandlerResult<Json<serde_json::Value>> {
-        let controller = RestateRuntimeEffectController::new(ctx, test_restate_authority_id());
+        let controller = RestateRuntimeEffectController::new(
+            ctx,
+            test_restate_authority_id(),
+            crate::tests::test_build_generation(),
+        );
         let scoped = controller
             .scoped_effect_controller(durable_admission(&self.scope))
             .map_err(TerminalError::from_error)?;

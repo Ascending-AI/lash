@@ -437,6 +437,7 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
             HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority,
+                build_generation: restate.build_generation().clone(),
                 namespace: config.namespace.clone(),
             },
         )

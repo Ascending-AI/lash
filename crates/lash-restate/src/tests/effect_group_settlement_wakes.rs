@@ -50,7 +50,7 @@ async fn a_seat_completes_its_rank_drained_and_cancel_subscribers_in_its_own_jou
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
                 membership: witness_membership(&children),
-                dispatch_route: "EffectGroupDispatch".to_string(),
+                dispatch_route: super::effect_group_conformance::witness_dispatch_route(),
                 content_checked: false,
             },
         )

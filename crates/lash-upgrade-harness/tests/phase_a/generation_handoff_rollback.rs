@@ -416,7 +416,7 @@ fn signals_race_the_hand_off(
     record(leg, "signal-race.json", &evidence)?;
 
     let status = wait_for("N's generation to drain", || {
-        let status = operator.run("drain-status", Some(g_n))?;
+        let status = operator.run_args(&case.drain_status_args(g_n))?;
         Ok((status["result"]["drained"] == true || status["drained"] == true).then_some(status))
     })?;
     record(leg, "drain-status.json", &status)?;

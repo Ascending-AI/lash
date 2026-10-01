@@ -213,6 +213,7 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
         drain.as_ref(),
         fixture.stores.session_delete_ledger().as_ref(),
         |kind| fixture.stores.obligation_ledger(kind),
+        &crate::store::fleet_finalize::NoDeployments,
         &a,
         2,
     )
@@ -236,6 +237,7 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
         drain.as_ref(),
         fixture.stores.session_delete_ledger().as_ref(),
         |kind| fixture.stores.obligation_ledger(kind),
+        &crate::store::fleet_finalize::NoDeployments,
         &a,
         3,
     )

@@ -1092,6 +1092,18 @@ impl Case {
         })
     }
 
+    /// The `lashctl drain-status` arguments for `generation` against this
+    /// case's Restate server, where the committed effect-group children
+    /// still owed a drain on its lane are read (FIG-4454).
+    pub fn drain_status_args<'a>(&'a self, generation: &'a str) -> [&'a str; 4] {
+        [
+            "drain-status",
+            generation,
+            "--restate-admin-url",
+            self.services.admin_url.as_str(),
+        ]
+    }
+
     /// The `lashctl finalize` arguments that retire `generation` against
     /// this case's Restate server.
     pub fn finalize_args<'a>(&'a self, generation: &'a str) -> [&'a str; 4] {

@@ -305,6 +305,7 @@ mod restate_tests {
         let wait_host = RestateEffectHost::new(
             ingress_url,
             lash_restate::RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
+            lash::formats::build_generation(),
         );
         let wait_scope = ExecutionScope::turn(
             format!("agent-service-await-session-{}", uuid::Uuid::new_v4()),

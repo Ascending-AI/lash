@@ -21,6 +21,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
     runtime_host.control.effect_host = Arc::new(RestateEffectHost::new(
         RestateConnection::new("https://restate.invalid"),
         test_restate_authority_id(),
+        crate::tests::test_build_generation(),
     ));
     runtime_host.providers.provider_resolver =
         Arc::new(lash_core::facade_support::SingleProviderResolver::new(
