@@ -1185,9 +1185,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         suites = {name for name, spec in registry.items()
                   if spec["cwd"] == "runbooks/restate-postgres-workers"}
         self.assertTrue(suites)
-        recipes = json.loads(subprocess.check_output(
-            ["just", "--dump", "--dump-format", "json"], cwd=ROOT, text=True
-        ))["recipes"]
+        recipes = ci_plan._justfile_recipes((ROOT / "justfile").read_text())
         job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["functional-e2e"]
         selected = {row["recipe"] for row in job["strategy"]["matrix"]["include"]}
         run = next(step["run"] for step in job["steps"] if step.get("name") == "Run functional E2E")
@@ -1196,7 +1194,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             for leg in ("live", "replay"):
                 with self.subTest(suite=suite, leg=leg):
                     self.assertTrue(any(
-                        f"suite {suite} --leg {leg}" in str(recipes[recipe]["body"])
+                        f"suite {suite} --leg {leg}" in recipes[recipe]
                         for recipe in selected
                     ), f"{suite} {leg} has no CI-selected recipe")
 

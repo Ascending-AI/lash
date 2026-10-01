@@ -718,11 +718,15 @@ def _justfile_recipes(text: str) -> dict[str, str]:
     current: list[str] | None = None
     for line in text.splitlines():
         if line[:1] in {" ", "\t"}:
-            if current is not None:
+            if line.strip() and current is not None:
                 current.append(line)
             continue
+        # A blank line does not end a recipe body; the first dedented
+        # non-blank line does.
+        if not line.strip():
+            continue
         current = None
-        if not line.strip() or line.startswith("#"):
+        if line.startswith("#"):
             continue
         header = _RECIPE_HEADER.match(line)
         if header:
