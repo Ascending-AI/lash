@@ -93,6 +93,20 @@ class WorkerTest(unittest.TestCase):
         with self.assertRaises(faults.FaultFailed):
             faults.pod_restart(before, pod('uid-1', 1, exit_code=1), 'worker', (137,))
 
+    def test_a_restart_whose_exit_the_kubelet_did_not_retain_is_still_the_same_pod_restarted(self):
+        # The kubelet reports `lastState` only while the runtime still holds
+        # the stopped container. FIG-4264's campaign lost it: restartCount 1,
+        # ready, `lastState: {}`, for the whole watchdog.
+        before = pod('uid-1', 0)
+        self.assertIsNone(faults.pod_restart(before, pod('uid-1', 1, ready=False), 'worker', (137,)))
+        evidence = faults.pod_restart(before, pod('uid-1', 1), 'worker', (137,))
+        self.assertEqual((evidence['same_pod'], evidence['restarts_before'], evidence['restarts_after'],
+                          evidence['exit_code']), (True, 0, 1, None))
+        # No restart is still no restart, and a reported exit is still judged.
+        self.assertIsNone(faults.pod_restart(before, pod('uid-1', 0), 'worker', (137,)))
+        with self.assertRaises(faults.FaultFailed):
+            faults.pod_restart(before, pod('uid-1', 1, exit_code=101), 'worker', (137,))
+
 
 class RecoveryTest(unittest.TestCase):
     STATE = {'in_flight_unfinished': 0, 'turn': True, 'queued': True, 'cron': True, 'moved': True,

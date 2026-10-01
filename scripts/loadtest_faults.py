@@ -157,20 +157,24 @@ def container_status(pod: dict[str, Any], container: str) -> dict[str, Any]:
 
 def pod_restart(before: dict[str, Any], after: dict[str, Any], container: str,
                 exit_codes: tuple[int, ...]) -> dict[str, Any] | None:
-    """The same pod's container restarted after stopping with one of
-    `exit_codes`, and is ready again; else `None`."""
+    """The same pod's container restarted and is ready again; else `None`.
+    The restart is the restart count, which the kubelet always reports. The
+    stopped container's exit is in `lastState` only while the runtime still
+    holds that container: a reported exit must be one of `exit_codes`, and an
+    unreported one is recorded as `None`. The caller's restart hold ties the
+    restart to its fault."""
     if after['metadata']['uid'] != before['metadata']['uid']:
         return {'same_pod': False}
     was, now = container_status(before, container), container_status(after, container)
-    terminated = now.get('lastState', {}).get('terminated')
-    if now['restartCount'] <= was['restartCount'] or not terminated or not now.get('ready'):
+    if now['restartCount'] <= was['restartCount'] or not now.get('ready'):
         return None
-    if terminated['exitCode'] not in exit_codes:
+    terminated = now.get('lastState', {}).get('terminated')
+    if terminated and terminated['exitCode'] not in exit_codes:
         raise FaultFailed(f"{container} stopped with exit code {terminated['exitCode']}, expected {exit_codes}")
     return {
         'same_pod': True, 'pod': after['metadata']['name'], 'pod_ip': after['status'].get('podIP'),
         'restarts_before': was['restartCount'], 'restarts_after': now['restartCount'],
-        'exit_code': terminated['exitCode'],
+        'exit_code': terminated['exitCode'] if terminated else None,
     }
 
 

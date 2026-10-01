@@ -185,7 +185,10 @@ phase starts after the warm-up that follows the driver's first send:
    in the busiest worker's `/fault` volume and SIGKILLs its process. The pod
    shares its process namespace, so the worker is not PID 1. The kubelet
    restarts the container in the same pod, which waits out the hold once
-   before serving at the identical endpoint.
+   before serving at the identical endpoint. The restart is the pod's
+   restart count and the hold marker. The exit code is judged when the
+   kubelet still reports the stopped container, and recorded as null when
+   it does not.
 2. **Restate node restart.** From `restatectl sql` it picks the node leading
    the most partitions whose applied log advanced between two samples, then
    restarts `restate-server` in place with SIGTERM after the same hold. The
