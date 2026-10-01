@@ -478,13 +478,10 @@ impl SqliteStore {
                             if let Some(replay) = replay {
                                 // A stale receipt replay has no write authority,
                                 // including cleanup of its own settled closure.
-                                if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
-                        && superseded.is_none()
-                        && settlement.authorization().session_id() == commit.session_id
-                        && commit.interrupted_turn_input_turn_id.as_ref() == Some(settlement.authorization().turn_id())
-                        && commit.interrupted_turn_input_cancellation.as_ref() == settlement.effective_cancellation()
-                    {
-                                    let closure = settlement.authorization();
+                                if let Some(interrupted) = commit.interrupted_turn.as_ref()
+                                    && superseded.is_none()
+                                {
+                                    let closure = interrupted.settlement.authorization();
                                     crate::conn::cached_execute(tx, crate::turn_ingress::turn_ingress_sql().closures.delete_settled.sql(),
                                         params![closure.session_id().as_str(), closure.turn_id().as_str(), encode_json(closure)?],
                                     ).map_err(sqlite_error)?;
@@ -496,36 +493,8 @@ impl SqliteStore {
                     if let Some(superseded) = superseded {
                         return Err(superseded);
                     }
-                    if commit.interrupted_turn_cancel_intent.is_some()
-                        && commit.turn_cancel_closure_settlement.is_none()
-                    {
-                        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                            session_id: commit.session_id.clone(),
-                            turn_id: commit
-                                .interrupted_turn_input_turn_id
-                                .clone()
-                                .unwrap_or_else(|| lash_core_execution::TurnId::from("missing-turn-id")),
-                        });
-                    }
-                    if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
-                        let closure = settlement.authorization();
-                        if commit.interrupted_turn_input_cancellation.as_ref()
-                            != settlement.effective_cancellation()
-                        {
-                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                                session_id: commit.session_id.clone(),
-                                turn_id: closure.turn_id().clone(),
-                            });
-                        }
-                        if closure.session_id() != commit.session_id
-                            || commit.interrupted_turn_input_turn_id.as_ref()
-                                != Some(closure.turn_id())
-                        {
-                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                                session_id: commit.session_id.clone(),
-                                turn_id: closure.turn_id().clone(),
-                            });
-                        }
+                    if let Some(interrupted) = commit.interrupted_turn.as_ref() {
+                        let closure = interrupted.settlement.authorization();
                         if closure.admitted_scope().session_id().is_none() {
                             let scope_id = closure.admitted_scope().journal_identity()
                                 .map_err(|error| StoreError::Backend(error.to_string()))?.key().to_string();
@@ -567,18 +536,16 @@ impl SqliteStore {
                             });
                         }
                     }
-                    if let (Some(turn_id), Some(observed)) = (
-                        commit.interrupted_turn_input_turn_id.as_ref(),
-                        commit.interrupted_turn_cancel_intent.as_ref(),
-                    ) && load_turn_cancel_intent_snapshot_conn(
-                        tx,
-                        &commit.session_id,
-                        turn_id,
-                    )? != *observed
+                    if let Some(interrupted) = commit.interrupted_turn.as_ref()
+                        && load_turn_cancel_intent_snapshot_conn(
+                            tx,
+                            &commit.session_id,
+                            interrupted.turn_id(),
+                        )? != interrupted.observed_intent
                     {
                         return Err(StoreError::TurnCancelIntentChanged {
                             session_id: commit.session_id.clone(),
-                            turn_id: turn_id.clone(),
+                            turn_id: interrupted.turn_id().clone(),
                         });
                     }
                     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
@@ -840,8 +807,8 @@ impl SqliteStore {
                         )
                         .map_err(sqlite_error)?;
                     }
-                    if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
-                        let closure = settlement.authorization();
+                    if let Some(interrupted) = commit.interrupted_turn.as_ref() {
+                        let closure = interrupted.settlement.authorization();
                         crate::conn::cached_execute(tx,
                             crate::turn_ingress::turn_ingress_sql()
                                 .closures

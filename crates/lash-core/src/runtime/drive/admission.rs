@@ -230,7 +230,7 @@ impl AdmitDriveRunner {
         {
             return Ok(AdmitVerdict::RootTerminal {
                 commit: terminal.commit().cloned(),
-                kind: terminal.kind,
+                kind: terminal.kind(),
                 root,
             });
         }

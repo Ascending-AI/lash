@@ -933,7 +933,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drive epoch read");
     assert_eq!(stored_epoch.epoch, 2);
     assert_eq!(
-        stored_epoch.admission.as_ref().map(|id| id.as_str()),
+        stored_epoch.admission().map(|id| id.as_str()),
         Some("durable-read-retained-admission")
     );
 

@@ -614,8 +614,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     RuntimeCommit::persisted_state_for_test(&commit_state),
                     &turn_id,
                     &turn_root,
-                )
-                .deferring_interrupted_turn_inputs(turn_id.clone(), None);
+                );
                 if let Some(settlement) = completing.ingress.as_mut() {
                     settlement
                         .completed_inputs
@@ -626,6 +625,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                         store.as_ref(),
                         &turn_control,
                         &fence,
+                        turn_id.clone(),
                         completing,
                     )
                     .await?;

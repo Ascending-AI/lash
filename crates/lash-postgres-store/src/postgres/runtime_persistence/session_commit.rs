@@ -519,15 +519,10 @@ impl PostgresStore {
                 if let Some(replay) = replay {
                     // A stale receipt replay has no write authority,
                     // including cleanup of its own settled closure.
-                    if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
+                    if let Some(interrupted) = commit.interrupted_turn.as_ref()
                         && superseded.is_none()
-                        && settlement.authorization().session_id() == commit.session_id
-                        && commit.interrupted_turn_input_turn_id.as_ref()
-                            == Some(settlement.authorization().turn_id())
-                        && commit.interrupted_turn_input_cancellation.as_ref()
-                            == settlement.effective_cancellation()
                     {
-                        let closure = settlement.authorization();
+                        let closure = interrupted.settlement.authorization();
                         let encoded = serde_json::to_string(closure).map_err(|error| {
                             StoreError::RecordEncodingFailed {
                                 record_kind: "TurnCancelClosureAuthorization".to_string(),
@@ -589,35 +584,8 @@ impl PostgresStore {
         } else {
             None
         };
-        if commit.interrupted_turn_cancel_intent.is_some()
-            && commit.turn_cancel_closure_settlement.is_none()
-        {
-            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                session_id: commit.session_id.clone(),
-                turn_id: commit
-                    .interrupted_turn_input_turn_id
-                    .clone()
-                    .unwrap_or_else(|| TurnId::from("missing-turn-id")),
-            });
-        }
-        if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
-            let closure = settlement.authorization();
-            if commit.interrupted_turn_input_cancellation.as_ref()
-                != settlement.effective_cancellation()
-            {
-                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                    session_id: commit.session_id.clone(),
-                    turn_id: closure.turn_id().clone(),
-                });
-            }
-            if closure.session_id() != commit.session_id
-                || commit.interrupted_turn_input_turn_id.as_ref() != Some(closure.turn_id())
-            {
-                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                    session_id: commit.session_id.clone(),
-                    turn_id: closure.turn_id().clone(),
-                });
-            }
+        if let Some(interrupted) = commit.interrupted_turn.as_ref() {
+            let closure = interrupted.settlement.authorization();
             if closure.admitted_scope().session_id().is_none() {
                 let scope_id = closure
                     .admitted_scope()
@@ -685,15 +653,18 @@ impl PostgresStore {
                 });
             }
         }
-        if let (Some(turn_id), Some(observed)) = (
-            commit.interrupted_turn_input_turn_id.as_ref(),
-            commit.interrupted_turn_cancel_intent.as_ref(),
-        ) && load_turn_cancel_intent_snapshot_tx(&mut tx, &commit.session_id, turn_id).await?
-            != *observed
+        if let Some(interrupted) = commit.interrupted_turn.as_ref()
+            && load_turn_cancel_intent_snapshot_tx(
+                &mut tx,
+                &commit.session_id,
+                interrupted.turn_id(),
+            )
+            .await?
+                != interrupted.observed_intent
         {
             return Err(StoreError::TurnCancelIntentChanged {
                 session_id: commit.session_id.clone(),
-                turn_id: turn_id.clone(),
+                turn_id: interrupted.turn_id().clone(),
             });
         }
         // Publication owns the complete sorted blob-row set before this fresh
@@ -1050,8 +1021,8 @@ impl PostgresStore {
                 .await
                 .map_err(store_sqlx_error)?;
         }
-        if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
-            let closure = settlement.authorization();
+        if let Some(interrupted) = commit.interrupted_turn.as_ref() {
+            let closure = interrupted.settlement.authorization();
             sqlx::query(
                 crate::turn_ingress::turn_ingress_sql()
                     .closures

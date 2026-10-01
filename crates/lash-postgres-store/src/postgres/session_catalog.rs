@@ -1,4 +1,5 @@
 use crate::*;
+use lash_core_execution::SessionEntry;
 
 pub(crate) async fn list_sessions(
     pool: &PgPool,
@@ -16,27 +17,34 @@ pub(crate) async fn list_sessions(
     let mut views = Vec::with_capacity(rows.len());
     for row in rows {
         let stored = crate::session_meta::stored_relation_from_row(&row)?;
-        let relation_label = stored.relation_kind.clone();
-        let relation = match relation_label.as_str() {
-            "root" => SessionRelationKind::Root,
-            "child" => SessionRelationKind::Child,
-            "fork" => SessionRelationKind::Fork,
-            other => {
-                return Err(StoreError::StoredDataCorrupt {
-                    record_kind: "SessionView",
-                    message: format!("unknown relation_kind `{other}`"),
-                });
-            }
-        };
-        let parent_session_id = stored.parent_session_id.clone();
         let deleted: bool = row.get("deleted");
-        let durable_relation = if deleted {
-            None
+        let closing: bool = row.get("closing");
+        let entry = if deleted {
+            let kind = match stored.relation_kind.as_str() {
+                "root" => SessionRelationKind::Root,
+                "child" => SessionRelationKind::Child,
+                "fork" => SessionRelationKind::Fork,
+                other => {
+                    return Err(StoreError::StoredDataCorrupt {
+                        record_kind: "SessionView",
+                        message: format!("unknown relation_kind `{other}`"),
+                    });
+                }
+            };
+            SessionEntry::Deleted {
+                kind,
+                parent: stored.parent_session_id.clone(),
+            }
         } else {
-            Some(crate::session_meta::decode_catalog_relation(
+            let relation = crate::session_meta::decode_catalog_relation(
                 stored,
                 row.get("observer_intent_rows_json"),
-            )?)
+            )?;
+            if closing {
+                SessionEntry::Closing { relation }
+            } else {
+                SessionEntry::Live { relation }
+            }
         };
         let view = SessionView {
             session_id: SessionId::from(row.get::<String, _>("session_id")),
@@ -46,10 +54,7 @@ pub(crate) async fn list_sessions(
                 .map(|value| u64_from_sql("SessionView", "last_commit_at_ms", value))
                 .transpose()?,
             head_revision: u64_from_sql("SessionView", "head_revision", row.get("head_revision"))?,
-            relation,
-            durable_relation,
-            parent_session_id,
-            deleted,
+            entry,
         };
         if !filter.matches(&view) {
             continue;

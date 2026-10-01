@@ -283,7 +283,7 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
         .await
         .expect("cancel the parked root");
     assert_eq!(
-        cancelled.terminal.kind,
+        cancelled.terminal.kind(),
         lash_core::store::RootTerminalKind::Cancelled
     );
     let status = core.drain_status(false).await?;

@@ -1317,10 +1317,14 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 })
                 .collect(),
             pending_follow_on: commit.pending_follow_on.as_ref(),
-            interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_ref(),
+            interrupted_turn_input_turn_id: commit
+                .interrupted_turn
+                .as_ref()
+                .map(super::InterruptedTurnClosure::turn_id),
             interrupted_turn_input_cancellation: commit
-                .interrupted_turn_input_cancellation
-                .as_ref(),
+                .interrupted_turn
+                .as_ref()
+                .and_then(super::InterruptedTurnClosure::cancellation),
             committed_attachment_ids: &commit.committed_attachment_ids,
         }
     }

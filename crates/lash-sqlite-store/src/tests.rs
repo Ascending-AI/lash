@@ -375,7 +375,7 @@ async fn session_listing_statement_count_is_session_count_invariant() {
     assert_eq!(many.len(), expected_relations.len());
     for summary in many {
         assert_eq!(
-            summary.durable_relation.as_ref(),
+            summary.relation(),
             expected_relations.get(&summary.session_id)
         );
     }

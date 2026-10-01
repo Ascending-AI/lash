@@ -1856,7 +1856,7 @@ pub(super) async fn wake_admitted_at_a_terminal_checkpoint_drives_a_follow_on_tu
                         .await
                         .expect("read the sealed drive epoch");
                         epoch
-                            .admission
+                            .admission()
                             .map(|admission| (admission.as_str().to_owned(), epoch.epoch))
                     }
                     None => None,

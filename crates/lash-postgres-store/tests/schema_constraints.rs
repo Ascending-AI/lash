@@ -543,6 +543,89 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         .expect("drop Postgres CHECK fixture schema");
 }
 
+/// The drive-authority columns as `(drive_epoch, drive_admission_id,
+/// drive_root_start, closing_intent)` literals: every combination no raise
+/// writes, and every one a raise does.
+const UNREAL_DRIVE_STATES: &[(&str, &str)] = &[
+    (
+        "an unraised epoch naming an admission",
+        "0, 'a', NULL, NULL",
+    ),
+    (
+        "an unraised epoch naming a start marker",
+        "0, NULL, 'n', NULL",
+    ),
+    ("an unraised epoch naming a seal", "0, 'a', 'n', NULL"),
+    ("a raised epoch naming no admission", "1, NULL, NULL, NULL"),
+    ("a start marker without its admission", "1, NULL, 'n', NULL"),
+    ("a closing session no close raised", "0, NULL, NULL, 1"),
+    ("a closing session an execution sealed", "1, 'a', 'n', 1"),
+];
+const REAL_DRIVE_STATES: &[(&str, &str)] = &[
+    ("unraised", "0, NULL, NULL, NULL"),
+    ("sealed by an execution", "1, 'a', 'n', NULL"),
+    ("raised by a control verb", "1, 'a', NULL, NULL"),
+    ("closing under the raise of its close", "1, 'a', NULL, 1"),
+];
+
+#[tokio::test]
+async fn postgres_drive_authority_check_admits_only_real_drive_states_when_configured() {
+    const SCHEMA: &str = "lash_fig4661_drive_authority";
+    let Some(url) = database_url() else {
+        eprintln!("skipping Postgres drive-authority CHECK witnesses: database URL is not set");
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&url).await;
+    let mut connection = PgConnection::connect(&url)
+        .await
+        .expect("connect Postgres drive-authority fixture");
+    sqlx::raw_sql(&format!(
+        "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
+         CREATE SCHEMA {SCHEMA};
+         SET search_path TO {SCHEMA};"
+    ))
+    .execute(&mut connection)
+    .await
+    .expect("create isolated Postgres drive-authority fixture schema");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut connection)
+        .await
+        .expect("apply Postgres schema DDL to drive-authority fixture");
+    sqlx::query("BEGIN")
+        .execute(&mut connection)
+        .await
+        .expect("begin drive-authority witness transaction");
+    let insert = |case: &str, values: &str| {
+        format!(
+            "INSERT INTO lash_session_meta (session_id, relation_kind, drive_epoch,
+                 drive_admission_id, drive_root_start, closing_intent)
+             VALUES ('{case}', 'root', {values})"
+        )
+    };
+    for (case, values) in UNREAL_DRIVE_STATES {
+        assert_check_rejects(
+            &mut connection,
+            &insert(case, values),
+            "ck_session_meta_drive_authority",
+        )
+        .await;
+    }
+    for (case, values) in REAL_DRIVE_STATES {
+        sqlx::query(&insert(case, values))
+            .execute(&mut connection)
+            .await
+            .unwrap_or_else(|error| panic!("{case} is a real drive state: {error}"));
+    }
+    sqlx::query("ROLLBACK")
+        .execute(&mut connection)
+        .await
+        .expect("roll the drive-authority witnesses back");
+    sqlx::raw_sql(&format!("DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
+        .execute(&mut connection)
+        .await
+        .expect("drop the drive-authority fixture schema");
+}
+
 #[path = "support/obligation_constraint_cases.rs"]
 mod obligation_constraint_cases;
 

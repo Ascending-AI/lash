@@ -266,3 +266,57 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         "ck_trigger_deliveries_obligation",
     );
 }
+
+/// The drive-authority columns as `(drive_epoch, drive_admission_id,
+/// drive_root_start, closing_intent)` literals: every combination no raise
+/// writes, and every one a raise does.
+const UNREAL_DRIVE_STATES: &[(&str, &str)] = &[
+    (
+        "an unraised epoch naming an admission",
+        "0, 'a', NULL, NULL",
+    ),
+    (
+        "an unraised epoch naming a start marker",
+        "0, NULL, 'n', NULL",
+    ),
+    ("an unraised epoch naming a seal", "0, 'a', 'n', NULL"),
+    ("a raised epoch naming no admission", "1, NULL, NULL, NULL"),
+    ("a start marker without its admission", "1, NULL, 'n', NULL"),
+    ("a closing session no close raised", "0, NULL, NULL, 1"),
+    ("a closing session an execution sealed", "1, 'a', 'n', 1"),
+];
+const REAL_DRIVE_STATES: &[(&str, &str)] = &[
+    ("unraised", "0, NULL, NULL, NULL"),
+    ("sealed by an execution", "1, 'a', 'n', NULL"),
+    ("raised by a control verb", "1, 'a', NULL, NULL"),
+    ("closing under the raise of its close", "1, 'a', NULL, 1"),
+];
+
+#[test]
+fn sqlite_drive_authority_check_admits_only_real_drive_states() {
+    let core = Connection::open_in_memory().expect("open drive-authority constraint fixture");
+    core.execute_batch(SCHEMA)
+        .expect("create drive-authority constraint fixture");
+    let insert = |case: &str, values: &str| {
+        format!(
+            "INSERT INTO session_meta (session_id, relation_kind, drive_epoch,
+                 drive_admission_id, drive_root_start, closing_intent)
+             VALUES ('{case}', 'root', {values})"
+        )
+    };
+    for (case, values) in UNREAL_DRIVE_STATES {
+        let error = core
+            .execute_batch(&insert(case, values))
+            .expect_err(&format!("{case} must violate the drive-authority CHECK"));
+        assert!(
+            error
+                .to_string()
+                .contains("ck_session_meta_drive_authority"),
+            "{case}: SQLite reported the wrong CHECK: {error}"
+        );
+    }
+    for (case, values) in REAL_DRIVE_STATES {
+        core.execute_batch(&insert(case, values))
+            .unwrap_or_else(|error| panic!("{case} is a real drive state: {error}"));
+    }
+}

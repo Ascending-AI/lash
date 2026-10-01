@@ -122,12 +122,7 @@ async fn consume_closure_by_commit(
         ))
     };
     let mut commit = lash::persistence::RuntimeCommit::persisted_state_for_test(&state)
-        .deferring_interrupted_turn_inputs(
-            authorization.turn_id().clone(),
-            settlement.effective_cancellation().cloned(),
-        );
-    commit.interrupted_turn_cancel_intent = Some(authorization.observed_intent().clone());
-    commit.turn_cancel_closure_settlement = Some(settlement);
+        .closing_interrupted_turn(settlement, authorization.observed_intent().clone());
     commit.drive_fence = Some(Box::new(lease.clone()));
     store.commit_runtime_state(commit).await.map(|_| ())
 }

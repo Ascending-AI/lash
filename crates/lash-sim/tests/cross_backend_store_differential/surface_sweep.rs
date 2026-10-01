@@ -1112,7 +1112,7 @@ impl BackendRunner {
                 format!(
                     "epoch={} admission_present={}",
                     observed.epoch,
-                    observed.admission.is_some()
+                    observed.admission().is_some()
                 )
             }
             SurfaceMethod::ListQueuedWork => {
@@ -1289,7 +1289,7 @@ impl BackendRunner {
                             }
                             other => format!("{other:?}"),
                         };
-                        format!("kind={:?} cause={cause}", terminal.kind)
+                        format!("kind={:?} cause={cause}", terminal.kind())
                     }
                     None => "terminal=none".to_string(),
                 }
@@ -1330,7 +1330,7 @@ impl BackendRunner {
                     .end_lost_root(&root, lash_core::engine::RootRunLoss::NoRun, 1)
                     .await?
                 {
-                    Some(terminal) => format!("ended={:?}", terminal.kind),
+                    Some(terminal) => format!("ended={:?}", terminal.kind()),
                     None => "ended=none".to_string(),
                 }
             }
@@ -1345,10 +1345,10 @@ impl BackendRunner {
                     .await?
                 {
                     lash_core::store::RootEnd::Ended(terminal) => {
-                        format!("ended={:?}", terminal.kind)
+                        format!("ended={:?}", terminal.kind())
                     }
                     lash_core::store::RootEnd::AlreadyEnded(terminal) => {
-                        format!("already_ended={:?}", terminal.kind)
+                        format!("already_ended={:?}", terminal.kind())
                     }
                     lash_core::store::RootEnd::Superseded => "superseded".to_string(),
                     lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
@@ -1358,10 +1358,10 @@ impl BackendRunner {
                 let root = lash_core::TurnId::from(format!("drive-commands:{session_id}-surface"));
                 let end = match store.end_command_root(&lease_fence, &root, 1).await? {
                     lash_core::store::RootEnd::Ended(terminal) => {
-                        format!("ended={:?}/{:?}", terminal.kind, terminal.cause)
+                        format!("ended={:?}/{:?}", terminal.kind(), terminal.cause)
                     }
                     lash_core::store::RootEnd::AlreadyEnded(terminal) => {
-                        format!("already_ended={:?}/{:?}", terminal.kind, terminal.cause)
+                        format!("already_ended={:?}/{:?}", terminal.kind(), terminal.cause)
                     }
                     lash_core::store::RootEnd::Superseded => "superseded".to_string(),
                     lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
@@ -1369,7 +1369,7 @@ impl BackendRunner {
                 let recorded = store
                     .root_terminal(&session_id, &root)
                     .await?
-                    .map(|terminal| format!("{:?}", terminal.kind));
+                    .map(|terminal| format!("{:?}", terminal.kind()));
                 format!("{end} recorded={recorded:?}")
             }
             SurfaceMethod::RootBinding => {

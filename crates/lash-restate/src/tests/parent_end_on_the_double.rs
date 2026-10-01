@@ -297,7 +297,6 @@ impl World {
         let terminal = lash_core::store::RootTerminal {
             session_id: self.session_id.clone(),
             root: root.clone(),
-            kind: lash_core::store::RootTerminalKind::Answered,
             cause: lash_core::store::RootTerminalCause::Committed {
                 commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
                 turn: root.clone(),
@@ -661,7 +660,6 @@ async fn a_lost_parent_end_delivery_is_retried_and_delivered_once() {
     let terminal = lash_core::store::RootTerminal {
         session_id: world.session_id.clone(),
         root: root.clone(),
-        kind: lash_core::store::RootTerminalKind::Answered,
         cause: lash_core::store::RootTerminalCause::Committed {
             commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
             turn: root.clone(),

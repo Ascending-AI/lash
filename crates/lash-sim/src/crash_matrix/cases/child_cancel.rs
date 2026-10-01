@@ -238,10 +238,10 @@ fn child_settled(
                 .await
             {
                 Ok(Some(terminal))
-                    if terminal.kind == lash_core::store::RootTerminalKind::Cancelled => {}
+                    if terminal.kind() == lash_core::store::RootTerminalKind::Cancelled => {}
                 Ok(other) => violations.push(format!(
                     "root `{ROOT}` of `{session}` ended {:?}, not cancelled",
-                    other.map(|terminal| (terminal.kind, terminal.cause))
+                    other.map(|terminal| (terminal.kind(), terminal.cause))
                 )),
                 Err(error) => violations.push(format!("read the root's terminal: {error}")),
             }

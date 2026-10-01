@@ -394,10 +394,13 @@ async fn recover_turn_cancel_closure(
                     crate::MaxToolCalls::new(1024),
                 ))
             });
+        assert_eq!(
+            settlement.effective_cancellation(),
+            Some(&evidence),
+            "the settled closure carries the requested cancellation"
+        );
         let mut commit = RuntimeCommit::persisted_state_for_test(&state)
-            .deferring_interrupted_turn_inputs(identity.turn_id.clone(), Some(evidence));
-        commit.interrupted_turn_cancel_intent = Some(observed);
-        commit.turn_cancel_closure_settlement = Some(settlement);
+            .closing_interrupted_turn(settlement, observed);
         commit.drive_fence = Some(Box::new(lease.clone()));
         store
             .commit_runtime_state(commit)

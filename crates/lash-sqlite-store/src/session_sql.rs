@@ -116,8 +116,10 @@ lash_store_sql::statements! {
                      SELECT 1 FROM session_head WHERE session_id = ?1
                      LIMIT 1";
 
-        /// Every session this catalog knows, live and deleted, with the
-        /// observer-intent rows of each.
+        /// Every session this catalog knows, live, closing and deleted, with
+        /// the observer-intent rows of each. `closing` is the live row's
+        /// `closing_intent`, so a session whose close has begun never lists
+        /// as live.
         ///
         /// Forks three ways: the head table's name, the `deleted` flag's
         /// integer spelling, and `json_group_array` where PostgreSQL has
@@ -135,14 +137,15 @@ lash_store_sql::statements! {
                     meta.caused_by_subscription_revision, meta.caused_by_node_id,
                     meta.source_session_id, meta.source_node_id,
                     meta.created_at_ms,
-                    meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted
+                    meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted,
+                    meta.closing_intent IS NOT NULL AS closing
              FROM session_meta AS meta
              LEFT JOIN session_head AS head ON head.session_id = meta.session_id
              UNION ALL
-             SELECT session_id, COALESCE(relation_kind, 'root'),
+             SELECT session_id, relation_kind,
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    created_at_ms, last_commit_at_ms, head_revision, 1
+                    created_at_ms, last_commit_at_ms, head_revision, 1, 0
              FROM deleted_sessions
          )
          SELECT catalog.*,

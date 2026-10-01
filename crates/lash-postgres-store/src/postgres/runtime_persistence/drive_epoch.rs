@@ -58,16 +58,16 @@ async fn read_drive_epoch(
     let admission: Option<String> = row.try_get(1).map_err(store_sqlx_error)?;
     let root_start: Option<String> = row.try_get(2).map_err(store_sqlx_error)?;
     let closing: Option<i64> = row.try_get(3).map_err(store_sqlx_error)?;
-    Ok(StoredDriveEpoch {
-        control_pending: row.try_get(4).map_err(store_sqlx_error)?,
-        epoch: u64_from_sql("SessionMeta", "drive_epoch", epoch)?,
-        admission: admission.map(AdmissionId::new),
-        root_start: root_start.map(RootStartNonce::new),
-        closing: closing
+    StoredDriveEpoch::from_stored(
+        u64_from_sql("SessionMeta", "drive_epoch", epoch)?,
+        admission,
+        root_start,
+        closing
             .map(|intent| u64_from_sql("SessionMeta", "closing_intent", intent))
             .transpose()?
             .map(lash_core_execution::store::ControlIntentId::from_sequence),
-    })
+        row.try_get(4).map_err(store_sqlx_error)?,
+    )
 }
 
 /// Refuse `fence` unless it is the session's current drive fence, read in the

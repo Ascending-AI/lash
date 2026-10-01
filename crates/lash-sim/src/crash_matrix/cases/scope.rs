@@ -279,7 +279,6 @@ fn host_root_terminal(
     lash_core::store::RootTerminal {
         session_id: session.clone(),
         root: TurnId::from(root),
-        kind: lash_core::store::RootTerminalKind::Answered,
         cause: lash_core::store::RootTerminalCause::Committed {
             commit: lash_core::store::TurnCommitId::new(TurnId::from(root), 0),
             turn: TurnId::from(root),

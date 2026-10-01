@@ -388,12 +388,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         ))
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state)
-        .deferring_interrupted_turn_inputs(
-            turn_id.clone(),
-            settlement.effective_cancellation().cloned(),
-        );
-    commit.interrupted_turn_cancel_intent = Some(lash_core::TurnCancelIntentSnapshot::Absent);
-    commit.turn_cancel_closure_settlement = Some(settlement);
+        .closing_interrupted_turn(settlement, lash_core::TurnCancelIntentSnapshot::Absent);
     commit.drive_fence = Some(Box::new(lease.clone()));
     store.commit_runtime_state(commit).await?;
     let report = core

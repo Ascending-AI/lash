@@ -423,7 +423,11 @@ async fn assert_owned(
         .await
         .expect("read the root's terminal evidence")
         .unwrap_or_else(|| panic!("{case}: root `{root}` has terminal evidence"));
-    assert_eq!(terminal.kind, kind, "{case}: root `{root}` ended {kind:?}");
+    assert_eq!(
+        terminal.kind(),
+        kind,
+        "{case}: root `{root}` ended {kind:?}"
+    );
     assert_eq!(
         closes.closes_of(root),
         vec![true],

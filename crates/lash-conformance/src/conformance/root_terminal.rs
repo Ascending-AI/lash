@@ -149,7 +149,7 @@ pub async fn a_committed_root_answers_its_terminal_by_root(
     let evidence = terminal(&parts, &root)
         .await
         .expect("the root's final commit wrote its evidence");
-    assert_eq!(evidence.kind, RootTerminalKind::Answered);
+    assert_eq!(evidence.kind(), RootTerminalKind::Answered);
     // The evidence carries the outcome the root committed, so a follower
     // answers from this row alone (FIG-4345).
     assert_eq!(
@@ -671,7 +671,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
     let evidence = terminal(&parts, &root)
         .await
         .expect("the root's terminal commit landed before the crash");
-    assert_eq!(evidence.kind, RootTerminalKind::Answered);
+    assert_eq!(evidence.kind(), RootTerminalKind::Answered);
     assert_eq!(
         scope_close_state(&stores, &parts.session_id, &root).await,
         Some(lash_core::store::ObligationState::Claimed),
@@ -920,7 +920,7 @@ pub async fn a_root_crashed_at_its_report_handover_still_closes_its_scope(
     let evidence = terminal(&parts, &root)
         .await
         .expect("the root's terminal commit landed before the handover");
-    assert_eq!(evidence.kind, RootTerminalKind::Answered);
+    assert_eq!(evidence.kind(), RootTerminalKind::Answered);
     assert_eq!(
         scope_close_state(&stores, &parts.session_id, &root).await,
         Some(lash_core::store::ObligationState::Due),
@@ -1069,7 +1069,7 @@ pub async fn a_command_roots_redrive_replays_its_recorded_outcome(
         .await
         .expect("a command root's end writes its terminal evidence");
     assert_eq!(ended.cause, RootTerminalCause::CommandsApplied);
-    assert_eq!(ended.kind, RootTerminalKind::Answered);
+    assert_eq!(ended.kind(), RootTerminalKind::Answered);
     assert_eq!(
         closes.closes(),
         vec![(root.clone(), true)],

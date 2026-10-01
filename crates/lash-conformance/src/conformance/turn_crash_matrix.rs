@@ -628,7 +628,7 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         let operation = if commit.turn_commit.operation.key == "root-end" {
             TurnSeamOperation::Store(StoreOperation::CommitRootEnd)
-        } else if commit.turn_cancel_closure_settlement.is_some() {
+        } else if commit.interrupted_turn.is_some() {
             TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
         } else {
             TurnSeamOperation::Store(StoreOperation::CommitFinalHead {

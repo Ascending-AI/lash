@@ -522,20 +522,15 @@ fn validate_interrupted_turn_plan(commit: &RuntimeCommit) -> Result<(), StoreErr
                 .to_string(),
         ));
     }
-    if commit.interrupted_turn_input_cancellation.is_some()
-        && commit.interrupted_turn_input_turn_id.is_none()
+    // The closure names its turn and evidence itself; the one fact left to
+    // agree is the session it was authorized in.
+    if let Some(closure) = commit.interrupted_turn.as_ref()
+        && *closure.session_id() != commit.session_id
     {
-        return Err(StoreError::Backend(
-            "runtime commit cancellation evidence requires an interrupted turn id".to_string(),
-        ));
-    }
-    if commit.interrupted_turn_cancel_intent.is_some()
-        != commit.interrupted_turn_input_turn_id.is_some()
-    {
-        return Err(StoreError::Backend(
-            "runtime commit cancellation intent predicate and interrupted turn id must be present together"
-                .to_string(),
-        ));
+        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+            session_id: commit.session_id.clone(),
+            turn_id: closure.turn_id().clone(),
+        });
     }
     Ok(())
 }
@@ -552,34 +547,75 @@ mod tests {
     use super::*;
 
     #[test]
-    fn commit_rejects_cancellation_evidence_without_an_interrupted_turn() {
+    fn commit_refuses_a_closure_authorized_in_another_session_with_its_typed_cause() {
         let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("orphan-cancellation-evidence"),
+            session_id: SessionId::from("closure-of-another-session"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ))
         };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-        commit.interrupted_turn_input_cancellation = Some(crate::TurnCancellationEvidence {
+        let commit = RuntimeCommit::persisted_state_for_test(&state).closing_interrupted_turn(
+            crate::store::tests::settled_closure_for_test("another-session", "turn-1", None),
+            crate::TurnCancelIntentSnapshot::Absent,
+        );
+
+        let error =
+            match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
+                Ok(_) => panic!("a closure settles only its own session's commit"),
+                Err(error) => error,
+            };
+        assert!(
+            matches!(
+                &error,
+                StoreError::TurnCancelClosureAuthorizationMismatch { session_id, turn_id }
+                    if session_id.as_str() == "closure-of-another-session"
+                        && turn_id.as_str() == "turn-1"
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_commits_interrupted_turn_and_cancellation_are_its_closures() {
+        let state = crate::RuntimeSessionState {
+            session_id: SessionId::from("closure-session"),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
+        };
+        let evidence = crate::TurnCancellationEvidence {
             request_id: "request".to_string(),
             origin: None,
             reason: None,
             undelivered: crate::TurnCancelUndeliveredInputPolicy::Defer,
             mode: crate::TurnCancelMode::Immediate,
             honoured_after_step: None,
-        });
-
-        let error =
-            match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
-                Ok(_) => panic!("cancellation evidence must name its interrupted turn"),
-                Err(error) => error,
-            };
-        assert!(matches!(
-            error,
-            StoreError::Backend(message)
-                if message == "runtime commit cancellation evidence requires an interrupted turn id"
-        ));
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(&state).closing_interrupted_turn(
+            crate::store::tests::settled_closure_for_test(
+                "closure-session",
+                "turn-1",
+                Some(evidence.clone()),
+            ),
+            crate::TurnCancelIntentSnapshot::Absent,
+        );
+        let closure = commit.interrupted_turn.as_ref().expect("closure");
+        assert_eq!(closure.turn_id().as_str(), "turn-1");
+        assert_eq!(closure.cancellation(), Some(&evidence));
+        // The serialized commit records exactly the closure's turn and
+        // evidence, under the names it always has.
+        let serialized = serde_json::to_value(&commit).expect("serialize the commit");
+        assert_eq!(serialized["interrupted_turn_input_turn_id"], "turn-1");
+        assert_eq!(
+            serialized["interrupted_turn_input_cancellation"],
+            serde_json::to_value(&evidence).expect("serialize the evidence")
+        );
+        assert!(serialized.get("interrupted_turn").is_none());
+        RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current())
+            .map(|_| ())
+            .expect("a closure of the commit's own session plans");
     }
 
     #[test]

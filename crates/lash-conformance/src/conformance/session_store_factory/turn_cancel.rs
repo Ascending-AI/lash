@@ -161,13 +161,13 @@ pub(super) async fn commit_teardown(
                 crate::MaxToolCalls::new(1024),
             ))
         });
+    assert_eq!(
+        settlement.authorization().turn_id(),
+        turn,
+        "the teardown commit closes the turn its settlement was authorized for"
+    );
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state)
-        .deferring_interrupted_turn_inputs(
-            turn.clone(),
-            settlement.effective_cancellation().cloned(),
-        );
-    commit.interrupted_turn_cancel_intent = Some(observed.clone());
-    commit.turn_cancel_closure_settlement = Some(settlement.clone());
+        .closing_interrupted_turn(settlement.clone(), observed.clone());
     commit.drive_fence = Some(Box::new(fence.clone()));
     store
         .commit_runtime_state(commit)
@@ -240,9 +240,10 @@ pub async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical<F, Fut
         ))
         .expect("stamp the final commit");
     commit.drive_fence = Some(Box::new(first.clone()));
-    commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
-    commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
-    commit.turn_cancel_closure_settlement = Some(settled_closure(&authorization, None));
+    commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
+        settlement: settled_closure(&authorization, None),
+        observed_intent: crate::TurnCancelIntentSnapshot::Absent,
+    });
     let receipt = store
         .commit_runtime_state(commit.clone())
         .await
@@ -366,9 +367,10 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
             "final",
         ))
         .expect("stamp exact replay operation");
-    commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
-    commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
-    commit.turn_cancel_closure_settlement = Some(settled_closure(&first_authorization, None));
+    commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
+        settlement: settled_closure(&first_authorization, None),
+        observed_intent: crate::TurnCancelIntentSnapshot::Absent,
+    });
     store
         .commit_runtime_state(commit.clone())
         .await
@@ -662,9 +664,10 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
             "stale-closure-final",
         ))
         .expect("stamp stale closure commit operation");
-    stale_commit.interrupted_turn_input_turn_id = Some(turn.clone());
-    stale_commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
-    stale_commit.turn_cancel_closure_settlement = Some(settled_closure(&exact, None));
+    stale_commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
+        settlement: settled_closure(&exact, None),
+        observed_intent: crate::TurnCancelIntentSnapshot::Absent,
+    });
     assert!(matches!(
         store.commit_runtime_state(stale_commit).await,
         Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch { .. })
@@ -1219,18 +1222,13 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
                     "final",
                 ))
                 .expect("stamp exact turn final operation");
-            commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
-            commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&cancel));
-            commit.interrupted_turn_cancel_intent = Some(
-                store
+            commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
+                settlement: settled_closure(&closure_authorization, Some(cancel_evidence(&cancel))),
+                observed_intent: store
                     .turn_cancel_request_intent(&cancel.address)
                     .await
                     .expect("snapshot cancellation intent before final commit"),
-            );
-            commit.turn_cancel_closure_settlement = Some(settled_closure(
-                &closure_authorization,
-                Some(cancel_evidence(&cancel)),
-            ));
+            });
             let receipt = store
                 .commit_runtime_state(commit)
                 .await
@@ -2013,13 +2011,10 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
             "final",
         ))
         .expect("stamp final operation");
-    commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
-    commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&after_step));
-    commit.interrupted_turn_cancel_intent = Some(stale);
-    commit.turn_cancel_closure_settlement = Some(settled_closure(
-        &closure_authorization,
-        Some(cancel_evidence(&after_step)),
-    ));
+    commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
+        settlement: settled_closure(&closure_authorization, Some(cancel_evidence(&after_step))),
+        observed_intent: stale,
+    });
 
     let immediate =
         crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:immediate", None)
@@ -2062,19 +2057,17 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
             .expect("read receipt")
     );
 
-    commit.interrupted_turn_cancel_intent = Some(
-        store
-            .turn_cancel_request_intent(&address)
-            .await
-            .expect("refresh cancellation predicate"),
-    );
-    commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&immediate));
-    commit.turn_cancel_closure_settlement =
-        Some(crate::TurnCancelClosureSettlement::settled_for_test(
+    commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
+        settlement: crate::TurnCancelClosureSettlement::settled_for_test(
             closure_authorization.clone(),
             Some(cancel_evidence(&after_step)),
             Some(cancel_evidence(&immediate)),
-        ));
+        ),
+        observed_intent: store
+            .turn_cancel_request_intent(&address)
+            .await
+            .expect("refresh cancellation predicate"),
+    });
     let receipt = store
         .commit_runtime_state(commit.clone())
         .await

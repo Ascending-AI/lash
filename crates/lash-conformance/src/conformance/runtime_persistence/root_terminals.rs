@@ -133,7 +133,7 @@ pub async fn root_terminal_evidence_commits_in_the_head_transaction(store: Arc<d
     let terminal = terminal_of(&store, &session_id, "r")
         .await
         .expect("the landed commit wrote the root's evidence");
-    assert_eq!(terminal.kind, RootTerminalKind::Answered);
+    assert_eq!(terminal.kind(), RootTerminalKind::Answered);
     assert_eq!(terminal.cause, ends("r", 0, None).cause());
     assert_eq!(terminal.head_revision, Some(receipt.head_revision));
     assert_eq!(
@@ -307,7 +307,7 @@ pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(store: Arc<d
     let terminal = terminal_of(&store, &session_id, "q")
         .await
         .expect("the landed commit wrote the root's evidence");
-    assert_eq!(terminal.kind, RootTerminalKind::Answered);
+    assert_eq!(terminal.kind(), RootTerminalKind::Answered);
     assert_eq!(terminal.cause, ends("q", 0, None).cause());
     assert_eq!(terminal.head_revision, Some(receipt.head_revision));
     assert_eq!(

@@ -155,7 +155,6 @@ impl ControlIntent {
         matches!(self.kind, ControlIntentKind::CloseSession { .. }).then(|| super::RootTerminal {
             session_id: self.session_id.clone(),
             root: root.clone(),
-            kind: super::RootTerminalKind::Cancelled,
             cause: super::RootTerminalCause::SessionDeleted { intent: self.id },
             head_revision: None,
             at_ms: self.created_at_ms,

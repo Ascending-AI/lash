@@ -53,6 +53,71 @@ pub fn frames_left_by_commit(
         .collect()
 }
 
+/// One interrupted turn's settled cancellation closure, as its final commit
+/// carries it. The turn and its cancellation evidence are the settlement's
+/// own, so a commit cannot name a turn or evidence its closure did not
+/// settle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterruptedTurnClosure {
+    /// Exact pending closure authorization, settled by its promise owner,
+    /// consumed atomically with a fresh cancellation-dependent commit.
+    /// Receipt replay is adjudicated first and may consume only the same
+    /// exact still-pending authorization.
+    pub settlement: crate::TurnCancelClosureSettlement,
+    /// Transient predicate observed before the turn gate was settled.
+    /// Backends compare it atomically before cancellation-dependent
+    /// publication.
+    pub observed_intent: crate::TurnCancelIntentSnapshot,
+}
+
+impl InterruptedTurnClosure {
+    /// The session the closure was authorized in.
+    #[must_use]
+    pub fn session_id(&self) -> &SessionId {
+        self.settlement.authorization().session_id()
+    }
+
+    /// The interrupted turn.
+    #[must_use]
+    pub fn turn_id(&self) -> &TurnId {
+        self.settlement.authorization().turn_id()
+    }
+
+    /// Exact cancellation evidence returned by the authoritative turn gate.
+    /// Absence explicitly selects ordinary non-cancellation re-deferral; a
+    /// store never infers this decision from a request row.
+    #[must_use]
+    pub fn cancellation(&self) -> Option<&crate::TurnCancellationEvidence> {
+        self.settlement.effective_cancellation()
+    }
+}
+
+/// The recorded content of a commit's interrupted turn: the two fields the
+/// serialized commit has always carried, read from the closure.
+fn serialize_interrupted_turn<S: serde::Serializer>(
+    interrupted: &Option<InterruptedTurnClosure>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    #[derive(serde::Serialize)]
+    struct Recorded<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        interrupted_turn_input_turn_id: Option<&'a TurnId>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        interrupted_turn_input_cancellation: Option<&'a crate::TurnCancellationEvidence>,
+    }
+    serde::Serialize::serialize(
+        &Recorded {
+            interrupted_turn_input_turn_id: interrupted
+                .as_ref()
+                .map(InterruptedTurnClosure::turn_id),
+            interrupted_turn_input_cancellation: interrupted
+                .as_ref()
+                .and_then(InterruptedTurnClosure::cancellation),
+        },
+        serializer,
+    )
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeCommit {
     /// Host policy carried to the shared facade and backend validation seams.
@@ -132,7 +197,7 @@ pub struct RuntimeCommit {
     /// checkpoint to its cancellation here (FIG-3531, FIG-3543): withheld
     /// input is released or dropped by the undelivered disposition, withheld
     /// wakes are always released, and the backend records each row on the
-    /// cancellation's outcome beside `interrupted_turn_input_turn_id`.
+    /// cancellation's outcome beside [`Self::interrupted_turn`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ingress: Option<super::IngressSettlement>,
     /// The session-command batches this commit applied (design §2.7). The
@@ -153,23 +218,18 @@ pub struct RuntimeCommit {
     /// it, and every other commit carries the head's value unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_follow_on: Option<super::PendingFollowOn>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interrupted_turn_input_turn_id: Option<TurnId>,
-    /// Exact cancellation evidence returned by the authoritative turn gate.
-    ///
-    /// Absence explicitly selects ordinary non-cancellation re-deferral. Store
-    /// implementations must never infer this decision from a request row.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
-    /// Transient predicate observed before the turn gate was settled. Backends
-    /// compare it atomically before cancellation-dependent publication.
-    #[serde(skip)]
-    pub interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
-    /// Exact pending closure authorization consumed atomically with a fresh
-    /// cancellation-dependent commit. Receipt replay is adjudicated first and
-    /// may consume only the same exact still-pending authorization.
-    #[serde(skip)]
-    pub turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
+    /// The interrupted turn whose cancellation gate this commit closes:
+    /// present exactly on a turn's final commit, whose backend atomically
+    /// settles the turn's undelivered active-turn inputs. The serialized
+    /// form and the commit identity record its turn id and cancellation
+    /// evidence, the commit's content; the settlement and the observed
+    /// intent are store instructions, never serialized.
+    #[serde(
+        flatten,
+        skip_deserializing,
+        serialize_with = "serialize_interrupted_turn"
+    )]
+    pub interrupted_turn: Option<InterruptedTurnClosure>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins. Per ADR

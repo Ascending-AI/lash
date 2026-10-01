@@ -383,10 +383,7 @@ impl TurnBoundary {
         session: Option<&mut Session>,
         ingress_settlement: TurnIngressSettlement,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
-        interrupted_turn_input_turn_id: Option<TurnId>,
-        interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
-        interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
-        turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
+        interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
         turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     ) -> Result<(), StoreError> {
@@ -453,10 +450,7 @@ impl TurnBoundary {
                 outcome: &returned_turn.outcome,
                 ingress_settlement,
                 pending_follow_on,
-                interrupted_turn_input_turn_id,
-                interrupted_turn_input_cancellation,
-                interrupted_turn_cancel_intent,
-                turn_cancel_closure_settlement,
+                interrupted_turn,
                 turn_control_resolver,
                 recorded_attachment_intent_ids,
             })
@@ -584,10 +578,7 @@ impl TurnBoundary {
             outcome,
             ingress_settlement,
             pending_follow_on,
-            interrupted_turn_input_turn_id,
-            interrupted_turn_input_cancellation,
-            interrupted_turn_cancel_intent,
-            turn_cancel_closure_settlement,
+            interrupted_turn,
             turn_control_resolver,
             recorded_attachment_intent_ids,
         } = input;
@@ -688,10 +679,7 @@ impl TurnBoundary {
                 crate::store::TurnCommitOutcome::from_terminal(outcome),
                 operation,
                 ingress_settlement,
-                interrupted_turn_input_turn_id,
-                interrupted_turn_input_cancellation,
-                interrupted_turn_cancel_intent,
-                turn_cancel_closure_settlement,
+                interrupted_turn,
                 turn_control_resolver,
                 committed_attachment_ids,
                 adopted_intent_rows,
@@ -723,10 +711,7 @@ impl TurnBoundary {
         outcome: crate::store::TurnCommitOutcome,
         operation: crate::OperationId,
         ingress_settlement: TurnIngressSettlement,
-        interrupted_turn_input_turn_id: Option<TurnId>,
-        interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
-        interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
-        turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
+        interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
         _turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
@@ -783,15 +768,13 @@ impl TurnBoundary {
         commit.adopted_intent_rows = adopted_intent_rows;
         // A cancelled turn's undelivered input follows the cancellation's
         // disposition; every other handed-back row is deferred.
-        let disposition = interrupted_turn_input_cancellation
+        let disposition = interrupted_turn
             .as_ref()
+            .and_then(crate::store::InterruptedTurnClosure::cancellation)
             .map_or(crate::TurnCancelUndeliveredInputPolicy::Defer, |evidence| {
                 evidence.undelivered
             });
-        commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
-        commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
-        commit.interrupted_turn_cancel_intent = interrupted_turn_cancel_intent;
-        commit.turn_cancel_closure_settlement = turn_cancel_closure_settlement;
+        commit.interrupted_turn = interrupted_turn;
         // The rows a turn settles are its root's, settled under the root's
         // drive fence (FIG-3927): a turn that runs under no admitted root
         // admitted nothing and settles nothing.
@@ -822,20 +805,15 @@ impl TurnBoundary {
         let result = loop {
             match store.commit_runtime_state_verified(commit.clone()).await {
                 Ok(result) => break result,
-                Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
-                    let turn_id =
-                        commit
-                            .interrupted_turn_input_turn_id
-                            .as_ref()
-                            .ok_or_else(|| {
-                                StoreError::Backend(
-                                    "cancellation intent CAS failed without an interrupted turn id"
-                                        .to_string(),
-                                )
-                            })?;
-                    let address = crate::TurnAddress::new(&session_id, turn_id);
-                    let observed = store.turn_cancel_request_intent(&address).await?;
-                    commit.interrupted_turn_cancel_intent = Some(observed);
+                Err(error @ crate::StoreError::TurnCancelIntentChanged { .. }) => {
+                    // Only a commit closing an interrupted turn carries the
+                    // predicate this refusal names.
+                    let Some(interrupted) = commit.interrupted_turn.as_mut() else {
+                        return Err(error);
+                    };
+                    let address = crate::TurnAddress::new(&session_id, interrupted.turn_id());
+                    interrupted.observed_intent =
+                        store.turn_cancel_request_intent(&address).await?;
                 }
                 Err(err) => return Err(err),
             }

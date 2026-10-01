@@ -327,7 +327,7 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
             .await
             .expect("read deleted root")
             .expect("deletion tombstone answers root");
-        assert_eq!(terminal.kind, RootTerminalKind::Cancelled);
+        assert_eq!(terminal.kind(), RootTerminalKind::Cancelled);
         assert_eq!(
             terminal.cause,
             RootTerminalCause::SessionDeleted { intent: intent.id }
@@ -512,7 +512,7 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
         .await
         .expect("tombstone read")
         .expect("the deleted session answers from its tombstone");
-    assert_eq!(terminal.kind, RootTerminalKind::Cancelled);
+    assert_eq!(terminal.kind(), RootTerminalKind::Cancelled);
     assert_eq!(
         terminal.cause,
         RootTerminalCause::SessionDeleted { intent: first.id }
@@ -892,7 +892,7 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
             .await
             .expect("read a deleted session's root")
             .expect("the tombstone answers every root of the deleted session");
-        assert_eq!(terminal.kind, RootTerminalKind::Cancelled);
+        assert_eq!(terminal.kind(), RootTerminalKind::Cancelled);
         assert_eq!(
             terminal.cause,
             RootTerminalCause::SessionDeleted { intent: open.id }

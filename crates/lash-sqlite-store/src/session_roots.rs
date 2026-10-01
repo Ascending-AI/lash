@@ -11,10 +11,9 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootEnd, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWriteDecision, RootTurns, UnfinishedRoot, close_admission,
-    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict,
-    scope_close_obligation_id, stored_intent_kind, stored_intent_state,
+    RootAdmission, RootEnd, RootStore, RootTerminal, RootTerminalCause, RootTerminalWriteDecision,
+    RootTurns, UnfinishedRoot, close_admission, decide_root_terminal_write, refused_run_owns_root,
+    root_binding_conflict, scope_close_obligation_id, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
@@ -65,9 +64,9 @@ fn sql_i64(field: &str, value: u64) -> Result<i64, StoreError> {
         .map_err(|_| StoreError::Backend(format!("{field} {value} exceeds the stored range")))
 }
 
-/// The stored terminal-evidence row: kind, serialized cause, head revision and
+/// The stored terminal-evidence row: serialized cause, head revision and
 /// the terminal instant, all unset until the root goes terminal.
-type TerminalRow = (Option<String>, Option<String>, Option<i64>, Option<i64>);
+type TerminalRow = (Option<String>, Option<i64>, Option<i64>);
 
 /// The terminal evidence of `root` in `session_id`, read on `conn`.
 pub(crate) fn root_terminal_conn(
@@ -79,11 +78,11 @@ pub(crate) fn root_terminal_conn(
         .query_row(
             session_roots_sql().roots.select_terminal.sql(),
             params![session_id.as_str(), root.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((kind, cause_json, head_revision, at_ms)) = row else {
+    let Some((cause_json, head_revision, at_ms)) = row else {
         let deleted = conn
             .query_row(
                 crate::session_sql::session_sql()
@@ -102,13 +101,12 @@ pub(crate) fn root_terminal_conn(
         return Ok(close_session_intent_conn(conn, session_id)?
             .and_then(|intent| intent.session_deleted_terminal(root)));
     };
-    let (Some(kind), Some(cause_json), Some(at_ms)) = (kind, cause_json, at_ms) else {
+    let (Some(cause_json), Some(at_ms)) = (cause_json, at_ms) else {
         return Ok(None);
     };
     RootTerminal::from_stored(
         session_id.clone(),
         root.clone(),
-        &kind,
         &cause_json,
         head_revision
             .map(|revision| stored_u64("RootTerminal", revision))
@@ -380,7 +378,6 @@ pub(crate) fn end_command_root_conn(
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
-        kind: RootTerminalCause::CommandsApplied.kind(),
         cause: RootTerminalCause::CommandsApplied,
         head_revision: None,
         at_ms,
@@ -443,7 +440,6 @@ fn write_unanswered_root_end_conn(
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
-        kind: cause.kind(),
         cause,
         head_revision: None,
         at_ms,
@@ -1054,7 +1050,6 @@ pub(crate) fn begin_session_close_conn(
                 &RootTerminal {
                     session_id: session_id.clone(),
                     root: root.clone(),
-                    kind: RootTerminalKind::Cancelled,
                     cause: RootTerminalCause::SessionDeleted { intent: intent.id },
                     head_revision: None,
                     at_ms,

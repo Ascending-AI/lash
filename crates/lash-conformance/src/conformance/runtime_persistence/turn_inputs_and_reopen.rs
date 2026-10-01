@@ -763,12 +763,12 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
                 store.as_ref(),
                 &authority,
                 &lease,
+                turn_id,
                 final_commit(
                     head_commit(&store, &SessionId::from("root")).await,
                     &lease,
                     completing_admission(turn_id, &root),
-                )
-                .deferring_interrupted_turn_inputs(turn_id, None),
+                ),
             )
             .await
             .expect("authorize interrupt deferral"),
@@ -919,6 +919,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
                 store.as_ref(),
                 &authority,
                 &lease,
+                turn_id,
                 final_commit(
                     head_commit(&store, &SessionId::from("root")).await,
                     &lease,
@@ -929,8 +930,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
                             .push(admitted_inputs.completion());
                         settlement
                     },
-                )
-                .deferring_interrupted_turn_inputs(turn_id, None),
+                ),
             )
             .await
             .expect("authorize active input deferral"),
@@ -1302,12 +1302,12 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
                 store.as_ref(),
                 &authority,
                 &lease,
+                ended_turn,
                 final_commit(
                     head_commit(&store, &session_id).await,
                     &lease,
                     completing_admission(ended_turn, &root),
-                )
-                .deferring_interrupted_turn_inputs(ended_turn, None),
+                ),
             )
             .await
             .expect("authorize the final-commit deferral"),

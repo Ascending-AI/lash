@@ -16,11 +16,11 @@ impl RuntimeScenarioContext {
         commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
         commit.applied_commands = self.command_completion();
         if let Some(turn_id) = phase.defer_interrupted_turn_id {
-            commit = commit.deferring_interrupted_turn_inputs(TurnId::from(turn_id), None);
             commit = lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 self.store(),
                 &self.turn_control,
                 self.owner_and_lease().1,
+                TurnId::from(turn_id),
                 commit,
             )
             .await

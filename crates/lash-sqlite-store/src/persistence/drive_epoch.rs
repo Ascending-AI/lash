@@ -38,14 +38,12 @@ pub(crate) fn drive_epoch_conn(
         .ok_or_else(|| StoreError::DriveEpochUnavailable {
             session_id: session_id.clone(),
         })?;
-    Ok(StoredDriveEpoch {
-        control_pending: row.4,
-        epoch: u64::try_from(row.0)
+    StoredDriveEpoch::from_stored(
+        u64::try_from(row.0)
             .map_err(|_| stored_data_corrupt("SessionMeta", "drive_epoch must be non-negative"))?,
-        admission: row.1.map(AdmissionId::new),
-        root_start: row.2.map(RootStartNonce::new),
-        closing: row
-            .3
+        row.1,
+        row.2,
+        row.3
             .map(|intent| {
                 u64::try_from(intent).map_err(|_| {
                     stored_data_corrupt("SessionMeta", "closing_intent must be non-negative")
@@ -53,7 +51,8 @@ pub(crate) fn drive_epoch_conn(
             })
             .transpose()?
             .map(lash_core_execution::store::ControlIntentId::from_sequence),
-    })
+        row.4,
+    )
 }
 
 /// Refuse `fence` unless it is the session's current drive fence, read in the

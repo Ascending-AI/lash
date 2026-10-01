@@ -360,20 +360,16 @@ impl CommittedRootUnderAModelChange {
             .drive_epoch(&parts.session_id)
             .await
             .expect("read the drive epoch root A sealed");
+        let Some(crate::store::DriveRaise::Sealed {
+            admission,
+            root_start,
+        }) = sealed.last_raise.as_ref()
+        else {
+            panic!("root A's execution sealed the epoch with its start marker: {sealed:?}");
+        };
         let seal = parts
             .store
-            .seal_drive_epoch(
-                &parts.session_id,
-                sealed
-                    .admission
-                    .as_ref()
-                    .expect("root A's admission raised the epoch"),
-                sealed.epoch,
-                sealed
-                    .root_start
-                    .as_ref()
-                    .expect("root A's execution stored its start marker"),
-            )
+            .seal_drive_epoch(&parts.session_id, admission, sealed.epoch, root_start)
             .await
             .expect("read root A's fence back");
         let crate::store::DriveEpochSeal::Sealed(fence) = seal else {

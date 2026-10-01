@@ -847,7 +847,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
     else {
         panic!("the root had no terminal");
     };
-    assert_eq!(terminal.kind, RootTerminalKind::Failed);
+    assert_eq!(terminal.kind(), RootTerminalKind::Failed);
     assert_eq!(
         terminal.cause,
         RootTerminalCause::Refused {
@@ -997,7 +997,7 @@ pub async fn cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drai
         .await
         .expect("terminal")
         .expect("cancelled");
-    assert_eq!(terminal.kind, RootTerminalKind::Cancelled);
+    assert_eq!(terminal.kind(), RootTerminalKind::Cancelled);
     assert!(
         matches!(terminal.cause, RootTerminalCause::OperatorCancelled { intent: id } if id == intent.id)
     );
@@ -1468,7 +1468,7 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
             .await
             .expect("terminal")
             .expect("cancelled")
-            .kind,
+            .kind(),
         RootTerminalKind::Cancelled
     );
 }

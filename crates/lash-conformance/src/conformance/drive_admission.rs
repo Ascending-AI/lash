@@ -735,10 +735,7 @@ pub async fn one_authorized_drive_per_session(
     );
     let epoch = parts.epoch().await;
     assert_eq!(epoch.epoch, 1, "exactly one drive-epoch transition");
-    assert_eq!(
-        epoch.admission.as_ref().map(|id| id.as_str()),
-        Some("drive-a#0")
-    );
+    assert_eq!(epoch.admission().map(|id| id.as_str()), Some("drive-a#0"));
     assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one root ran");
 }
 
@@ -880,7 +877,7 @@ pub async fn replay_cannot_mint_ownership(
     let epoch = parts.epoch().await;
     assert_eq!(epoch.epoch, 1, "the redrive never raises the epoch again");
     assert_eq!(
-        epoch.admission.as_ref().map(|id| id.as_str()),
+        epoch.admission().map(|id| id.as_str()),
         Some("replay-ownership-drive#0"),
         "the epoch stays sealed by the first admission"
     );
@@ -1001,7 +998,7 @@ pub async fn reset_before_admission_admits_fresh(
     let epoch = parts.epoch().await;
     assert_eq!(epoch.epoch, 1);
     assert_eq!(
-        epoch.admission.as_ref().map(|id| id.as_str()),
+        epoch.admission().map(|id| id.as_str()),
         Some("reset-admission-fresh#0")
     );
     assert_eq!(parts.calls.load(Ordering::SeqCst), 1);

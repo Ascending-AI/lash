@@ -24,25 +24,20 @@ pub async fn recorded_process_admission(
     AdmittedScope::process(record.id.clone())
 }
 
-/// Authorize and settle the completion gate for a direct store-deferral fixture.
-/// This performs the same promise protocol as a real turn, through
+/// Authorize and settle the completion gate of `turn_id` for a direct
+/// store-deferral fixture, and close it with `commit`. This performs the same promise protocol as a real turn, through
 /// `authority`: the backend's effect host, which owns the turn-control
 /// promises.
 pub async fn authorize_completion_deferral_for_test(
     store: &dyn RuntimeStore,
     authority: &crate::TurnCancellationAuthority,
     fence: &crate::store::DriveFence,
-    mut commit: RuntimeCommit,
+    turn_id: impl Into<crate::TurnId>,
+    commit: RuntimeCommit,
 ) -> Result<RuntimeCommit, RuntimeError> {
     let store_error =
         |error: StoreError| RuntimeError::new(RuntimeErrorCode::RuntimeStore, error.to_string());
-    let address = TurnAddress::new(
-        &commit.session_id,
-        commit
-            .interrupted_turn_input_turn_id
-            .as_ref()
-            .expect("fixture defers a turn"),
-    );
+    let address = TurnAddress::new(&commit.session_id, turn_id.into());
     let scope = address.execution_scope();
     let resolver = authority.resolver();
     store
@@ -66,7 +61,6 @@ pub async fn authorize_completion_deferral_for_test(
         TurnCancelIntentSnapshot::Absent,
         "completion fixture has no cancellation intent"
     );
-    assert!(commit.interrupted_turn_input_cancellation.is_none());
     let authorization = control.closure_authorization(
         authority.binding_id(),
         scope,
@@ -79,12 +73,10 @@ pub async fn authorize_completion_deferral_for_test(
         .authorize_turn_cancel_closure(fence, &authorization)
         .await
         .map_err(store_error)?;
-    commit.turn_cancel_closure_settlement = Some(
-        control
-            .settle_authorized(resolver.as_ref(), &authorization, None)
-            .await?,
-    );
-    commit.interrupted_turn_cancel_intent = Some(observed);
+    let settlement = control
+        .settle_authorized(resolver.as_ref(), &authorization, None)
+        .await?;
+    let mut commit = commit.closing_interrupted_turn(settlement, observed);
     commit.drive_fence = Some(Box::new(fence.clone()));
     Ok(commit)
 }

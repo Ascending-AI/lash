@@ -183,7 +183,6 @@ pub(crate) fn open_root_intent_conn(
         &RootTerminal {
             session_id: session.clone(),
             root: request.root.clone(),
-            kind: RootTerminalKind::Cancelled,
             cause,
             head_revision: revision.map(|revision| revision as u64),
             at_ms,

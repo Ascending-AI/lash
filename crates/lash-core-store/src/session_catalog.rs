@@ -35,6 +35,28 @@ impl SessionRelationKind {
     }
 }
 
+/// Where a catalogued session is in its life, with exactly the relation
+/// evidence that stage keeps.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SessionEntry {
+    /// The session accepts work. `relation` is its complete recorded
+    /// relation.
+    Live { relation: SessionRelation },
+    /// The session's close has begun: it refuses new work, and its physical
+    /// delete is still owed. Its metadata is still stored.
+    Closing { relation: SessionRelation },
+    /// The session is deleted. Its tombstone keeps only the coarse relation
+    /// and the immediate parent.
+    Deleted {
+        kind: SessionRelationKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<SessionId>,
+    },
+}
+
 /// Read-only catalog projection for one durable session id.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -46,18 +68,52 @@ pub struct SessionView {
     /// first commit.
     pub last_commit_at_ms: Option<u64>,
     pub head_revision: u64,
-    /// Coarse relation shape retained for filtering and deletion tombstones.
-    pub relation: SessionRelationKind,
-    /// Complete relation from durable session metadata, when that metadata was
-    /// available to this catalog projection.
-    ///
-    /// `None` means the projection had no durable session metadata. Deletion
-    /// tombstones retain only [`Self::relation`] and
-    /// [`Self::parent_session_id`], so they always return `None` here.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub durable_relation: Option<SessionRelation>,
-    pub parent_session_id: Option<SessionId>,
-    pub deleted: bool,
+    pub entry: SessionEntry,
+}
+
+impl SessionView {
+    /// The coarse relation shape, which every stage keeps.
+    #[must_use]
+    pub fn relation_kind(&self) -> SessionRelationKind {
+        match &self.entry {
+            SessionEntry::Live { relation } | SessionEntry::Closing { relation } => {
+                SessionRelationKind::from_relation(relation)
+            }
+            SessionEntry::Deleted { kind, .. } => *kind,
+        }
+    }
+
+    /// The complete recorded relation; `None` for a deletion tombstone,
+    /// which keeps only the coarse shape and the parent.
+    #[must_use]
+    pub fn relation(&self) -> Option<&SessionRelation> {
+        match &self.entry {
+            SessionEntry::Live { relation } | SessionEntry::Closing { relation } => Some(relation),
+            SessionEntry::Deleted { .. } => None,
+        }
+    }
+
+    /// The immediate parent, when the session is a child.
+    #[must_use]
+    pub fn parent_session_id(&self) -> Option<&SessionId> {
+        match &self.entry {
+            SessionEntry::Live { relation } | SessionEntry::Closing { relation } => {
+                match relation {
+                    SessionRelation::Child {
+                        parent_session_id, ..
+                    } => Some(parent_session_id),
+                    SessionRelation::Root | SessionRelation::Fork { .. } => None,
+                }
+            }
+            SessionEntry::Deleted { parent, .. } => parent.as_ref(),
+        }
+    }
+
+    /// Whether the session is deleted.
+    #[must_use]
+    pub fn is_deleted(&self) -> bool {
+        matches!(self.entry, SessionEntry::Deleted { .. })
+    }
 }
 
 /// Conjunctive filters for durable session enumeration.
@@ -82,11 +138,13 @@ pub struct SessionListFilter {
 impl SessionListFilter {
     pub fn matches(&self, view: &SessionView) -> bool {
         self.relation
-            .is_none_or(|relation| relation == view.relation)
-            && self.deleted.is_none_or(|deleted| deleted == view.deleted)
+            .is_none_or(|relation| relation == view.relation_kind())
+            && self
+                .deleted
+                .is_none_or(|deleted| deleted == view.is_deleted())
             && self.caused_by.as_ref().is_none_or(|caused_by| {
                 matches!(
-                    &view.durable_relation,
+                    view.relation(),
                     Some(SessionRelation::Child {
                         caused_by: recorded,
                         ..

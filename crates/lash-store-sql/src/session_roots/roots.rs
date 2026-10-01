@@ -35,9 +35,9 @@ crate::statements! {
              WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
                AND admitted_generation = ?1";
 
-        /// The terminal evidence of root `?2` of session `?1`: all four
+        /// The terminal evidence of root `?2` of session `?1`: all three
         /// columns NULL while the root has none.
-        select_terminal = "SELECT terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms
+        select_terminal = "SELECT terminal_cause_json, terminal_head_revision, terminal_at_ms
              FROM session_roots
              WHERE session_id = ?1 AND root = ?2";
 

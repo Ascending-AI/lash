@@ -409,7 +409,7 @@ pub async fn concurrent_seals_serialize(handles: SessionIngressHandles) {
         .await
         .expect("read the drive epoch");
     assert_eq!(stored.epoch, observed + 1);
-    assert_eq!(stored.admission.as_ref(), Some(winners[0].admission()));
+    assert_eq!(stored.admission(), Some(winners[0].admission()));
 }
 
 /// The drive-epoch seal is a compare-and-set on the session's `session_meta`
@@ -478,7 +478,13 @@ pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIn
         first.epoch(),
         "a lost execution writes nothing"
     );
-    assert_eq!(sealed.root_start, Some(root_start()));
+    assert_eq!(
+        sealed.last_raise,
+        Some(lash_core::store::DriveRaise::Sealed {
+            admission: AdmissionId::new("seal-a"),
+            root_start: root_start(),
+        })
+    );
     assert_eq!(
         seal_at("seal-b", observed).await,
         DriveEpochSeal::Superseded {
@@ -508,5 +514,5 @@ pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIn
         .await
         .expect("read the drive epoch");
     assert_eq!(stored.epoch, second.epoch());
-    assert_eq!(stored.admission, Some(AdmissionId::new("seal-b")));
+    assert_eq!(stored.admission(), Some(&AdmissionId::new("seal-b")));
 }

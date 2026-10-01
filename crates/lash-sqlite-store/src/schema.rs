@@ -345,6 +345,10 @@ CREATE TABLE IF NOT EXISTS session_meta (
     obligation_stall_reason          TEXT,
     obligation_last_error            TEXT,
     obligation_settled_at_ms         INTEGER,
+    -- The drive authority holds exactly the states a raise writes: unraised,
+    -- sealed by an execution (its start marker), or raised by a control verb
+    -- (no marker). A closing session was raised by its close.
+    CONSTRAINT ck_session_meta_drive_authority CHECK ((drive_epoch = 0 AND drive_admission_id IS NULL AND drive_root_start IS NULL AND closing_intent IS NULL) OR (drive_epoch > 0 AND drive_admission_id IS NOT NULL AND (drive_root_start IS NULL OR closing_intent IS NULL))),
     CONSTRAINT ck_session_meta_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),

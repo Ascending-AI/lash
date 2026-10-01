@@ -817,7 +817,7 @@ pub use runtime::{
     RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
     RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeBoundController, ScopeGrant, ScopeId,
     ScopeRef, ScopeStorageError, ScopedEffectController, SegmentHandover, SegmentProgress,
-    SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionCreationHead, SessionId,
+    SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionCreationHead, SessionEntry, SessionId,
     SessionListFilter, SessionRelationKind, SessionScope, SessionStateVersionRefusal,
     SessionStoreCreateRequest, SessionView, SessionWorkEngine, SleepSpec, SlotId, StartCx,
     StartCxError, StartKey, StoreRealization, StoredDataCorruption, ToolAttemptLaunch,

@@ -229,7 +229,7 @@ async fn registered_attach(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_publishes() {
     use lash_core::engine::ScopeCloseSink as _;
-    use lash_core::store::{RootTerminal, RootTerminalCause, RootTerminalKind, TurnCommitId};
+    use lash_core::store::{RootTerminal, RootTerminalCause, TurnCommitId};
 
     let server = lash_restate_test::RestateTestServer::new(
         lash_restate_test::ServerConfig::default().with_seed(0x4025),
@@ -316,7 +316,6 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
         .close_root_scope(&RootTerminal {
             session_id: session.clone(),
             root: root.clone(),
-            kind: RootTerminalKind::Answered,
             cause: RootTerminalCause::Committed {
                 commit: TurnCommitId::new(root.clone(), 1),
                 turn: final_turn.clone(),
@@ -335,7 +334,6 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
         .close_root_scope(&RootTerminal {
             session_id: session.clone(),
             root: lost_root.clone(),
-            kind: RootTerminalKind::Failed,
             cause: RootTerminalCause::SubstrateLost { cancelled_by: None },
             head_revision: None,
             at_ms: 1,

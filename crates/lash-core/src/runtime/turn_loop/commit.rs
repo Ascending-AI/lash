@@ -84,9 +84,7 @@ struct TurnCommitRequest<'commit> {
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
-    interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
-    turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
+    interrupted_turn: Option<crate::store::InterruptedTurnClosure>,
     turn_control_resolver: &'commit dyn crate::AwaitEventResolver,
 }
 
@@ -154,11 +152,9 @@ impl PreparedTurn {
         let TurnCommitRequest {
             session,
             commit_effects,
-            trace_turn_id,
+            trace_turn_id: _,
             recorded_attachment_intent_ids,
-            interrupted_turn_input_cancellation,
-            interrupted_turn_cancel_intent,
-            turn_cancel_closure_settlement,
+            interrupted_turn,
             turn_control_resolver,
         } = request;
         Box::pin(self.turn_pipeline.final_commit(
@@ -167,11 +163,9 @@ impl PreparedTurn {
             commit_effects.ingress_settlement,
             commit_effects.pending_follow_on,
             // Any active-turn input that missed the turn's final
-            // checkpoint must become the next ordinary user turn.
-            Some(trace_turn_id.clone()),
-            interrupted_turn_input_cancellation,
-            interrupted_turn_cancel_intent,
-            turn_cancel_closure_settlement,
+            // checkpoint must become the next ordinary user turn: the
+            // closure names the turn.
+            interrupted_turn,
             Some(turn_control_resolver),
             recorded_attachment_intent_ids,
         ))
@@ -450,20 +444,37 @@ impl LashRuntime {
             }
             _ => None,
         };
-        let turn_cancel_closure_settlement = match turn_cancel_closure_authorization.as_ref() {
-            Some(authorization) => Some(
-                turn_control
-                    .settle_authorized(
-                        turn_control_resolver,
-                        authorization,
-                        honoured_cancel.as_ref(),
-                    )
-                    .await?,
-            ),
-            None => None,
+        let interrupted_turn = match (
+            turn_cancel_closure_authorization.as_ref(),
+            interrupted_turn_cancel_intent,
+        ) {
+            (Some(authorization), Some(observed_intent)) => {
+                Some(crate::store::InterruptedTurnClosure {
+                    settlement: turn_control
+                        .settle_authorized(
+                            turn_control_resolver,
+                            authorization,
+                            honoured_cancel.as_ref(),
+                        )
+                        .await?,
+                    observed_intent,
+                })
+            }
+            // A turn that commits to a store closes its cancellation gate
+            // under its root's drive fence. With no fence no closure was
+            // authorized, and the store has nothing to settle the turn by.
+            (None, Some(_)) => {
+                return Err(runtime_error_from_store_commit(
+                    crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+                        session_id: self.state.session_id.clone(),
+                        turn_id: trace_turn_id.clone(),
+                    },
+                ));
+            }
+            (_, None) => None,
         };
-        let cancellation = match turn_cancel_closure_settlement.as_ref() {
-            Some(settlement) => settlement.effective_cancellation().cloned(),
+        let cancellation = match interrupted_turn.as_ref() {
+            Some(interrupted) => interrupted.cancellation().cloned(),
             None => {
                 turn_control
                     .settle_before_commit(
@@ -655,9 +666,7 @@ impl LashRuntime {
                                 .execution_scope()
                                 .journal_identity()?,
                         ),
-                    interrupted_turn_input_cancellation: cancellation.clone(),
-                    interrupted_turn_cancel_intent,
-                    turn_cancel_closure_settlement,
+                    interrupted_turn,
                     turn_control_resolver,
                 },
                 TurnCommitAdmission {

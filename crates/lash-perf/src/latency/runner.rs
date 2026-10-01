@@ -1113,7 +1113,6 @@ mod tests {
                 terminal: lash::persistence::RootTerminal {
                     session_id: session_id.clone(),
                     root: root.clone(),
-                    kind: lash::persistence::RootTerminalKind::Answered,
                     cause: lash::persistence::RootTerminalCause::Committed {
                         commit: lash::persistence::TurnCommitId::new(root.clone(), 0),
                         turn: root.clone(),

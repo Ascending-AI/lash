@@ -11,10 +11,9 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootEnd, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWriteDecision, RootTurns, UnfinishedRoot, close_admission,
-    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict, stored_intent_kind,
-    stored_intent_state,
+    RootAdmission, RootEnd, RootStore, RootTerminal, RootTerminalCause, RootTerminalWriteDecision,
+    RootTurns, UnfinishedRoot, close_admission, decide_root_terminal_write, refused_run_owns_root,
+    root_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
@@ -89,17 +88,15 @@ pub(crate) async fn root_terminal_conn(
             .await?
             .and_then(|intent| intent.session_deleted_terminal(root)));
     };
-    let kind: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
-    let cause_json: Option<String> = row.try_get(1).map_err(store_sqlx_error)?;
-    let head_revision: Option<i64> = row.try_get(2).map_err(store_sqlx_error)?;
-    let at_ms: Option<i64> = row.try_get(3).map_err(store_sqlx_error)?;
-    let (Some(kind), Some(cause_json), Some(at_ms)) = (kind, cause_json, at_ms) else {
+    let cause_json: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
+    let head_revision: Option<i64> = row.try_get(1).map_err(store_sqlx_error)?;
+    let at_ms: Option<i64> = row.try_get(2).map_err(store_sqlx_error)?;
+    let (Some(cause_json), Some(at_ms)) = (cause_json, at_ms) else {
         return Ok(None);
     };
     RootTerminal::from_stored(
         session_id.clone(),
         root.clone(),
-        &kind,
         &cause_json,
         head_revision
             .map(|revision| u64_from_sql("RootTerminal", "terminal_head_revision", revision))
@@ -395,7 +392,6 @@ pub(crate) async fn end_command_root_tx(
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
-        kind: RootTerminalCause::CommandsApplied.kind(),
         cause: RootTerminalCause::CommandsApplied,
         head_revision: None,
         at_ms,
@@ -468,7 +464,6 @@ async fn write_unanswered_root_end_tx(
     let terminal = RootTerminal {
         session_id: session.clone(),
         root: root.clone(),
-        kind: cause.kind(),
         cause,
         head_revision: None,
         at_ms,
@@ -1027,7 +1022,6 @@ pub(crate) async fn begin_session_close_tx(
                 &RootTerminal {
                     session_id: session_id.clone(),
                     root: root.clone(),
-                    kind: RootTerminalKind::Cancelled,
                     cause: RootTerminalCause::SessionDeleted { intent: intent.id },
                     head_revision: None,
                     at_ms,

@@ -23,7 +23,7 @@ pub const INSERT_COLUMNS: &str =
 /// reached, and nothing else: every causal column is `NULL` because the
 /// metadata row that carried it is gone, which is what the trailing `1` — the
 /// `deleted` flag — tells the decoder.
-pub const CATALOG_UNION_COLUMNS_SQLITE: &str = "session_id, COALESCE(relation_kind, 'root'),
+pub const CATALOG_UNION_COLUMNS_SQLITE: &str = "session_id, relation_kind,
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     created_at_ms, last_commit_at_ms, head_revision, 1";

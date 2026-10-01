@@ -216,7 +216,6 @@ impl RootTerminalCause {
 pub struct RootTerminal {
     pub session_id: SessionId,
     pub root: TurnId,
-    pub kind: RootTerminalKind,
     pub cause: RootTerminalCause,
     /// The head revision of the terminal transaction; `None` when the
     /// transaction moved no head (a settlement, an intent) or the answer comes
@@ -226,6 +225,12 @@ pub struct RootTerminal {
 }
 
 impl RootTerminal {
+    /// The kind this terminal answers: its cause's, never a second fact.
+    #[must_use]
+    pub fn kind(&self) -> RootTerminalKind {
+        self.cause.kind()
+    }
+
     /// The commit that ended the root, when a head commit did.
     #[must_use]
     pub fn commit(&self) -> Option<&TurnCommitId> {
@@ -235,15 +240,12 @@ impl RootTerminal {
         }
     }
 
-    /// Whether `other` is this same terminal: one cause and one kind. The
+    /// Whether `other` is this same terminal: one cause. The
     /// instant and head revision are the writer's, never part of identity,
     /// so a retried writer's rewrite is recognized as the same terminal.
     #[must_use]
     pub fn same_terminal(&self, other: &Self) -> bool {
-        self.session_id == other.session_id
-            && self.root == other.root
-            && self.kind == other.kind
-            && self.cause == other.cause
+        self.session_id == other.session_id && self.root == other.root && self.cause == other.cause
     }
 }
 
@@ -287,7 +289,6 @@ impl RootTerminalWrite {
     ) -> RootTerminal {
         RootTerminal {
             session_id,
-            kind: self.kind(),
             cause: self.cause(),
             root: self.root,
             head_revision: Some(head_revision),
@@ -380,6 +381,8 @@ pub fn refused_run_owns_root(
 }
 
 /// The stored form of a root's terminal: the columns a backend writes.
+/// `kind` is a projection of the cause for SQL to select on; no reader
+/// decodes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredRootTerminal {
     pub kind: &'static str,
@@ -392,7 +395,7 @@ impl RootTerminal {
     /// The columns a backend stores.
     pub fn to_stored(&self) -> Result<StoredRootTerminal, StoreError> {
         Ok(StoredRootTerminal {
-            kind: self.kind.as_str(),
+            kind: self.kind().as_str(),
             cause_json: serde_json::to_string(&self.cause).map_err(|error| {
                 StoreError::RecordEncodingFailed {
                     record_kind: "RootTerminal".to_string(),
@@ -408,7 +411,6 @@ impl RootTerminal {
     pub fn from_stored(
         session_id: SessionId,
         root: TurnId,
-        kind: &str,
         cause_json: &str,
         head_revision: Option<u64>,
         at_ms: u64,
@@ -417,21 +419,11 @@ impl RootTerminal {
             record_kind: "RootTerminal",
             message,
         };
-        let kind = RootTerminalKind::from_code(kind)
-            .ok_or_else(|| corrupt(format!("unknown root terminal kind `{kind}`")))?;
         let cause: RootTerminalCause = serde_json::from_str(cause_json)
             .map_err(|error| corrupt(format!("root terminal cause: {error}")))?;
-        if cause.kind() != kind {
-            return Err(corrupt(format!(
-                "root terminal kind `{}` disagrees with its cause's `{}`",
-                kind.as_str(),
-                cause.kind().as_str()
-            )));
-        }
         Ok(Self {
             session_id,
             root,
-            kind,
             cause,
             head_revision,
             at_ms,
@@ -977,30 +969,24 @@ mod tests {
     }
 
     #[test]
-    fn stored_columns_round_trip_and_refuse_a_kind_that_disagrees_with_its_cause() {
+    fn stored_columns_round_trip_and_the_kind_is_the_causes() {
         let terminal = committed("r", 1, Some(TurnStop::ToolFailure));
-        assert_eq!(terminal.kind, RootTerminalKind::Failed);
+        assert_eq!(terminal.kind(), RootTerminalKind::Failed);
         let stored = terminal.to_stored().expect("encode");
+        assert_eq!(stored.kind, "failed");
         let decoded = RootTerminal::from_stored(
             terminal.session_id.clone(),
             terminal.root.clone(),
-            stored.kind,
             &stored.cause_json,
             stored.head_revision,
             stored.at_ms,
         )
         .expect("decode");
         assert_eq!(decoded, terminal);
+        let journaled = serde_json::to_value(&terminal).expect("journal form");
         assert!(
-            RootTerminal::from_stored(
-                terminal.session_id.clone(),
-                terminal.root.clone(),
-                "answered",
-                &stored.cause_json,
-                None,
-                0,
-            )
-            .is_err()
+            journaled.get("kind").is_none(),
+            "the journaled terminal carries no kind beside its cause: {journaled}"
         );
     }
 

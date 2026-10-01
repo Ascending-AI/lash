@@ -892,10 +892,7 @@ async fn run_durable_contention_worker(
     let observed = store.drive_epoch(&session_id).await?;
     anyhow::ensure!(
         observed.epoch == session_fence.epoch()
-            && observed
-                .admission
-                .as_ref()
-                .is_some_and(|id| id == session_fence.admission()),
+            && observed.admission() == Some(session_fence.admission()),
         "contention worker {worker} did not observe the controller drive epoch"
     );
     counters

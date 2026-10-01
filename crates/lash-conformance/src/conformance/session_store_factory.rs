@@ -16,6 +16,10 @@ use pretty_assertions::assert_eq;
 mod admission;
 mod identity_claims;
 pub use identity_claims::*;
+mod lifecycle_states;
+pub use lifecycle_states::{
+    a_closing_session_lists_as_closing_never_as_live, a_control_raise_answers_no_seal_as_sealed,
+};
 mod owning_process;
 pub use owning_process::session_meta_records_the_process_that_owns_it;
 mod process_successor;

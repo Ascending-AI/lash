@@ -59,10 +59,7 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
         applied_commands: None,
         command_outcomes: Default::default(),
         pending_follow_on: None,
-        interrupted_turn_input_turn_id: None,
-        interrupted_turn_input_cancellation: None,
-        interrupted_turn_cancel_intent: None,
-        turn_cancel_closure_settlement: None,
+        interrupted_turn: None,
         committed_attachment_ids: Vec::new(),
         commit_budget: lash::CommitBudget::bounded(1024 * 1024, 512),
     }

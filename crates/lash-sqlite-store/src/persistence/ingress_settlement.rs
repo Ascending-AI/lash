@@ -23,28 +23,24 @@ pub(super) fn settle_commit_ingress_conn(
             crate::queued_work::settle_open_command_conn(tx, commit, batch_id, now)?;
         }
     }
-    let interrupted = commit.interrupted_turn_input_turn_id.as_ref();
-    let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
-    if let Some(turn_id) = interrupted
-        && let Some(evidence) = commit
-            .turn_cancel_closure_settlement
-            .as_ref()
-            .and_then(lash_core_execution::TurnCancelClosureSettlement::base_cancellation)
+    let closure = commit.interrupted_turn.as_ref();
+    let interrupted = closure.map(lash_core_execution::store::InterruptedTurnClosure::turn_id);
+    let cancellation =
+        closure.and_then(lash_core_execution::store::InterruptedTurnClosure::cancellation);
+    if let Some(closure) = closure
+        && let Some(evidence) = closure.settlement.base_cancellation()
+        && !reconcile_turn_cancel_winner_conn(
+            tx,
+            session_id,
+            closure.turn_id(),
+            &closure.observed_intent,
+            evidence,
+        )?
     {
-        let observed = commit
-            .interrupted_turn_cancel_intent
-            .as_ref()
-            .ok_or_else(|| {
-                StoreError::Backend(
-                    "interrupted turn commit omitted cancellation intent predicate".to_string(),
-                )
-            })?;
-        if !reconcile_turn_cancel_winner_conn(tx, session_id, turn_id, observed, evidence)? {
-            return Err(StoreError::TurnCancelIntentChanged {
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-            });
-        }
+        return Err(StoreError::TurnCancelIntentChanged {
+            session_id: session_id.clone(),
+            turn_id: closure.turn_id().clone(),
+        });
     }
     let mut affected_inputs = Vec::new();
     let mut affected_wakes = Vec::new();

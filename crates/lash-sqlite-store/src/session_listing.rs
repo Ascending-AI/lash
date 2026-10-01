@@ -1,6 +1,6 @@
 //! Session-catalog view listing over the durable-core catalog.
 
-use lash_core_execution::{SessionListFilter, SessionRelationKind, SessionView};
+use lash_core_execution::{SessionEntry, SessionListFilter, SessionRelationKind, SessionView};
 use lash_sansio::SessionId;
 use rusqlite::Connection;
 
@@ -18,26 +18,33 @@ pub(crate) fn list_session_views(
     )?;
     let rows = stmt.query_map([], |row| {
         let stored = crate::session_meta::stored_relation_from_row(row)?;
-        let relation = match stored.relation_kind.as_str() {
-            "root" => SessionRelationKind::Root,
-            "child" => SessionRelationKind::Child,
-            "fork" => SessionRelationKind::Fork,
-            other => {
-                return Err(sqlite_conversion_error(stored_data_corrupt(
-                    "SessionView",
-                    format!("unknown relation_kind `{other}`"),
-                )));
-            }
-        };
-        let parent_session_id = stored.parent_session_id.clone();
         let deleted = row.get::<_, i64>(20)? != 0;
-        let durable_relation = if deleted {
-            None
+        let closing = row.get::<_, i64>(21)? != 0;
+        let entry = if deleted {
+            let kind = match stored.relation_kind.as_str() {
+                "root" => SessionRelationKind::Root,
+                "child" => SessionRelationKind::Child,
+                "fork" => SessionRelationKind::Fork,
+                other => {
+                    return Err(sqlite_conversion_error(stored_data_corrupt(
+                        "SessionView",
+                        format!("unknown relation_kind `{other}`"),
+                    )));
+                }
+            };
+            SessionEntry::Deleted {
+                kind,
+                parent: stored.parent_session_id.clone(),
+            }
         } else {
-            Some(
-                crate::session_meta::decode_catalog_relation(stored, &row.get::<_, String>(21)?)
-                    .map_err(sqlite_conversion_error)?,
-            )
+            let relation =
+                crate::session_meta::decode_catalog_relation(stored, &row.get::<_, String>(22)?)
+                    .map_err(sqlite_conversion_error)?;
+            if closing {
+                SessionEntry::Closing { relation }
+            } else {
+                SessionEntry::Live { relation }
+            }
         };
         Ok(SessionView {
             session_id: SessionId::from(row.get::<_, String>(0)?),
@@ -47,10 +54,7 @@ pub(crate) fn list_session_views(
                 .map(|value| u64_from_sql("SessionView", "last_commit_at_ms", value))
                 .transpose()?,
             head_revision: u64_from_sql("SessionView", "head_revision", row.get(19)?)?,
-            relation,
-            durable_relation,
-            parent_session_id,
-            deleted,
+            entry,
         })
     })?;
     let mut views = Vec::new();

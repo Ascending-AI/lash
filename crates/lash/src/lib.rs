@@ -248,19 +248,20 @@ pub use lash_core::{
     PendingTurnInputSuffixCancelOutcome, ProcessId, QueuedDrainCandidate, QueuedDrainFamily,
     QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig,
     ReasoningRefused, RecordedModel, RegisteredModel, RegistrationError, Resolution,
-    ResolveOutcome, RuntimeModels, RuntimeOwner, SessionCreateRequest, SessionError, SessionId,
-    SessionListFilter, SessionRelationKind, SessionStartPoint, SessionView, ToolCallLimitExceeded,
-    ToolCallLimitScope, TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput,
-    TurnInputApplication, facade_support::GenerationOverlay, facade_support::PluginStack,
-    facade_support::SessionCommand, facade_support::SessionCommandReceipt,
-    facade_support::SessionSpec, facade_support::SpecResolveError,
-    facade_support::TurnActivitySink, facade_support::TurnAddress, facade_support::TurnAttach,
-    facade_support::TurnCancelOutcome, facade_support::TurnCancelReceipt,
-    facade_support::TurnCancelRequest, facade_support::TurnCancellationEvidence,
-    facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
-    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
+    ResolveOutcome, RuntimeModels, RuntimeOwner, SessionCreateRequest, SessionEntry, SessionError,
+    SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint, SessionView,
+    ToolCallLimitExceeded, ToolCallLimitScope, TurnActivity, TurnActivityId, TurnBudget, TurnCause,
+    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId,
+    TurnInput, TurnInputApplication, facade_support::GenerationOverlay,
+    facade_support::PluginStack, facade_support::SessionCommand,
+    facade_support::SessionCommandReceipt, facade_support::SessionSpec,
+    facade_support::SpecResolveError, facade_support::TurnActivitySink,
+    facade_support::TurnAddress, facade_support::TurnAttach, facade_support::TurnCancelOutcome,
+    facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
+    facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
+    facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
+    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
+    facade_support::TurnWorkDriver,
 };
 // A host's head write is a session command it submits, settles and may
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
@@ -320,8 +321,8 @@ pub mod prelude {
         PendingTurnInputCancelOutcome, PluginOperations, PluginStack, RegisteredModel, Result,
         SendBuilder, SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeleteReport,
-        SessionDeletion, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
-        SessionStartPoint, SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity,
+        SessionDeletion, SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind,
+        SessionSpec, SessionStartPoint, SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity,
         TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent,
         TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome,
         TurnOutput, TurnReport, TurnStatus, TurnStop, message_role, message_text,
@@ -624,7 +625,8 @@ pub mod persistence {
     /// of [`RuntimeStore`], implemented by every store a runtime drives,
     /// and the fence it yields, the one authority every drive write presents.
     pub use lash_core::store::{
-        AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, RootStartNonce, StoredDriveEpoch,
+        AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, DriveRaise, RootStartNonce,
+        StoredDriveEpoch,
     };
     /// A root's recorded admission of the turn-lane run it drives and the
     /// execution that runs it, what its checkpoints admit, how a commit
@@ -647,14 +649,15 @@ pub mod persistence {
     };
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
-        HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId, ParkCancelCause,
-        ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReason,
-        ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey,
-        ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
-        RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta,
-        SessionHeadPayload, TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin,
-        TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
-        commit_runtime_state_verified, validate_turn_commit_outcome_code,
+        HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
+        OperationId, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
+        ParkId, ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark,
+        ProcessParkKey, ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt,
+        RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
+        SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, TurnCommitFailureCause,
+        TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite,
+        UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
+        validate_turn_commit_outcome_code,
     };
     /// A logical root's durable terminal evidence and the store segment that
     /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the

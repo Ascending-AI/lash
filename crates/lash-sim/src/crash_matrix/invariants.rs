@@ -596,7 +596,7 @@ async fn check_inputs(world: &CrashWorld, expected: &Expected, violations: &mut 
                     violations.push(format!(
                         "input `{root}` of `{}` committed {asked} time(s) and was answered {answered} time(s); exactly once each is required (terminal: {:?}; transcript: {:?})",
                         input.session,
-                        terminal.as_ref().map(|terminal| (&terminal.kind, &terminal.cause)),
+                        terminal.as_ref().map(|terminal| (terminal.kind(), &terminal.cause)),
                         messages
                             .iter()
                             .map(|(role, text)| format!("{role}: {}", text.chars().take(2000).collect::<String>()))

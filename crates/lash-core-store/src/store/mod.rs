@@ -106,7 +106,7 @@ pub use control_intent::{
     stored_intent_kind, stored_intent_state,
 };
 pub use drive_fence::{
-    AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
+    AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence, DriveRaise,
     InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, close_admission,
     current_drive_fence, decide_drive_epoch_seal, require_current_drive_fence,
 };
@@ -176,12 +176,13 @@ pub use root::{
     root_binding_conflict,
 };
 pub use runtime_commit::{
-    AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
-    RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
-    RuntimeTurnCommitStamp, SemanticBoundaryOperation, TurnCommitFailureCause, TurnCommitOutcome,
-    decode_runtime_commit_receipt, decode_runtime_commit_receipt_for_fleet,
-    ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,
-    frames_left_by_commit, validate_turn_commit_outcome_code,
+    AppendRequestIdentity, FrameTransition, InterruptedTurnClosure,
+    RUNTIME_COMMIT_RECEIPT_RECORD_KIND, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit,
+    RuntimeCommitReceipt, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
+    TurnCommitFailureCause, TurnCommitOutcome, decode_runtime_commit_receipt,
+    decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
+    ensure_supported_receipt_version_for_fleet, frames_left_by_commit,
+    validate_turn_commit_outcome_code,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -606,10 +607,7 @@ impl RuntimeCommit {
             command_outcomes,
             // Carried unchanged from the head; the store refuses a change.
             pending_follow_on: _,
-            interrupted_turn_input_turn_id,
-            interrupted_turn_input_cancellation,
-            interrupted_turn_cancel_intent,
-            turn_cancel_closure_settlement,
+            interrupted_turn,
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
@@ -617,10 +615,7 @@ impl RuntimeCommit {
             ingress.is_none()
                 && applied_commands.is_none()
                 && command_outcomes.is_empty()
-                && interrupted_turn_input_turn_id.is_none()
-                && interrupted_turn_input_cancellation.is_none()
-                && interrupted_turn_cancel_intent.is_none()
-                && turn_cancel_closure_settlement.is_none()
+                && interrupted_turn.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && outcome.is_none()
@@ -780,10 +775,7 @@ impl RuntimeCommit {
             applied_commands: None,
             command_outcomes: Default::default(),
             pending_follow_on: state.pending_follow_on.as_deref().cloned(),
-            interrupted_turn_input_turn_id: None,
-            interrupted_turn_input_cancellation: None,
-            interrupted_turn_cancel_intent: None,
-            turn_cancel_closure_settlement: None,
+            interrupted_turn: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         })
@@ -822,18 +814,20 @@ impl RuntimeCommit {
         self
     }
 
-    /// Marks one interrupted turn so store implementors atomically settle its
-    /// undelivered active-turn inputs. `cancellation` is the exact evidence
-    /// returned by the authoritative keyed gate; absence explicitly selects
-    /// ordinary non-cancellation re-deferral.
-    pub fn deferring_interrupted_turn_inputs(
+    /// Closes one interrupted turn's cancellation gate with this commit, so
+    /// store implementors atomically settle the turn's undelivered
+    /// active-turn inputs. The turn and its cancellation evidence are the
+    /// settlement's; `observed_intent` is the cancel-intent snapshot the
+    /// backend compares before it publishes.
+    pub fn closing_interrupted_turn(
         mut self,
-        turn_id: impl Into<TurnId>,
-        cancellation: Option<crate::TurnCancellationEvidence>,
+        settlement: crate::TurnCancelClosureSettlement,
+        observed_intent: crate::TurnCancelIntentSnapshot,
     ) -> Self {
-        self.interrupted_turn_input_turn_id = Some(turn_id.into());
-        self.interrupted_turn_input_cancellation = cancellation;
-        self.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
+        self.interrupted_turn = Some(InterruptedTurnClosure {
+            settlement,
+            observed_intent,
+        });
         self
     }
 

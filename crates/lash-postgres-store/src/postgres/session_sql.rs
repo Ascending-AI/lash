@@ -134,8 +134,10 @@ lash_store_sql::statements! {
                     SELECT 1 FROM deleted_sessions WHERE session_id = ?1
                 )";
 
-        /// Every session this database knows, live and deleted, with the
-        /// observer-intent rows of each.
+        /// Every session this database knows, live, closing and deleted, with
+        /// the observer-intent rows of each. `closing` is the live row's
+        /// `closing_intent`, so a session whose close has begun never lists
+        /// as live.
         select_catalog = "WITH catalog AS (
              SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
                     meta.caused_by_kind,
@@ -146,18 +148,19 @@ lash_store_sql::statements! {
                     meta.caused_by_subscription_incarnation,
                     meta.caused_by_subscription_revision, meta.caused_by_node_id,
                     meta.source_session_id, meta.source_node_id,
-                    COALESCE(meta.created_at_ms, 0) AS created_at_ms,
+                    meta.created_at_ms,
                     meta.last_commit_at_ms,
                     COALESCE(session.head_revision, 0) AS head_revision,
-                    FALSE AS deleted
+                    FALSE AS deleted,
+                    meta.closing_intent IS NOT NULL AS closing
              FROM session_meta AS meta
              LEFT JOIN sessions AS session ON session.session_id = meta.session_id
              UNION ALL
-             SELECT session_id, COALESCE(relation_kind, 'root'),
+             SELECT session_id, relation_kind,
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    COALESCE(created_at_ms, 0), last_commit_at_ms,
-                    COALESCE(head_revision, 0), TRUE
+                    created_at_ms, last_commit_at_ms,
+                    head_revision, TRUE, FALSE
              FROM deleted_sessions
          )
          SELECT catalog.*,

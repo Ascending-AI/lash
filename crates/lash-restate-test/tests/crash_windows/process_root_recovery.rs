@@ -424,7 +424,7 @@ async fn process_root_law(storage: Storage, live: bool) {
         .expect("read the child root's terminal")
         .expect("the child root has its terminal");
     assert_eq!(
-        terminal.kind,
+        terminal.kind(),
         lash_core::store::RootTerminalKind::Answered,
         "the child root answers with its committed turn: {terminal:?}"
     );
@@ -540,7 +540,7 @@ async fn ahead_root_law(storage: Storage, live: bool) {
         .expect("read the ahead root's terminal")
         .expect("the root admitted ahead has its terminal");
     assert_eq!(
-        terminal.kind,
+        terminal.kind(),
         lash_core::store::RootTerminalKind::Answered,
         "the root admitted ahead answers with its committed turn: {terminal:?}"
     );
