@@ -490,6 +490,16 @@ jobs:
           python3 scripts/test_buck2_event_digest.py
           python3 scripts/test_buck2_diagnostics.py
           python3 scripts/test_resolve_buck2_target.py
+          python3 tools/buck2/test_cargo_bin_env.py
+          python3 tools/buck2/test_clippy_policy.py
+          python3 tools/buck2/tests/test_bootstrap_lock.py
+          python3 tools/buck2/tests/test_driver.py
+          python3 tools/buck2/tests/test_external_runner.py
+          python3 tools/buck2/tests/test_invocation.py
+          python3 tools/buck2/tests/test_selection_planner.py
+          python3 tools/buck2/tests/test_test_inputs.py
+          python3 tools/buck2/tests/test_timeout_wrapper.py
+          python3 tools/buck2/tests/test_ui_fixtures.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/check_retired_terms.py
           python3 scripts/test_check_retired_terms.py

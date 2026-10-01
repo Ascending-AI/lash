@@ -267,6 +267,30 @@ def shell_int_constant(script: str, name: str) -> int:
     return int(match.group(1))
 
 
+# Buck2 tooling keeps production modules whose names start with `test_` beside
+# its self-tests. Each is named here, so a new `tools/buck2/test_*.py` is a
+# self-test CI must run unless it is deliberately added to this set.
+BUCK2_TEST_NAMED_TOOLS = frozenset(
+    {
+        "tools/buck2/test_runner.py",
+        "tools/buck2/test_selection.py",
+        "tools/buck2/test_shard.py",
+        "tools/buck2/test_timeout.py",
+    }
+)
+SELF_TEST_DIRECTORIES = ("scripts", "tools/buck2", "tools/buck2/tests")
+
+
+def discovered_self_tests() -> list[str]:
+    """Every Python self-test, as the repository-relative path CI must run."""
+    return sorted(
+        path.relative_to(ROOT).as_posix()
+        for directory in SELF_TEST_DIRECTORIES
+        for path in (ROOT / directory).glob("test_*.py")
+        if path.relative_to(ROOT).as_posix() not in BUCK2_TEST_NAMED_TOOLS
+    )
+
+
 def workflow_job_block(workflow: str, job_id: str) -> str:
     marker = f"  {job_id}:\n"
     start = workflow.index(marker)
@@ -1515,19 +1539,40 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # happened to the judged-runbook matrix test: the parity claim rested on
         # a gate CI did not execute. Discovering the files makes forgetting one
         # a red test rather than a silent hole.
+        # The Buck2 tooling suites are held to the same rule: they went unrun
+        # after the migration, and `test_clippy_policy.py` carried stale counts
+        # until someone ran it by hand.
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        discovered = sorted(
-            path.name for path in (ROOT / "scripts").glob("test_*.py")
-        )
+        discovered = discovered_self_tests()
+        for directory in SELF_TEST_DIRECTORIES:
+            with self.subTest(directory=directory):
+                self.assertTrue(
+                    any(
+                        pathlib.PurePosixPath(path).parent.as_posix() == directory
+                        for path in discovered
+                    ),
+                    f"the self-test discovery found nothing in {directory}",
+                )
         self.assertGreater(len(discovered), 5, "the self-test discovery found nothing")
         missing = [
-            name for name in discovered if f"python3 scripts/{name}" not in workflow
+            path
+            for path in discovered
+            if not re.search(rf"python3 {re.escape(path)}(?!\S)", workflow)
         ]
         self.assertEqual(
             missing,
             [],
-            f"these script self-tests exist but CI never runs them: {missing}",
+            f"these self-tests exist but CI never runs them: {missing}",
         )
+
+    def test_test_named_buck2_tools_are_not_self_tests(self) -> None:
+        # The exemption is for production modules only. A stale entry, or a
+        # self-test parked here, would reopen the hole the discovery closes.
+        for relative in sorted(BUCK2_TEST_NAMED_TOOLS):
+            with self.subTest(tool=relative):
+                path = ROOT / relative
+                self.assertTrue(path.is_file(), f"{relative} no longer exists")
+                self.assertNotIn("unittest", path.read_text(encoding="utf-8"))
 
     def test_push_gate_runs_the_gates_whose_self_tests_it_runs(self) -> None:
         push_gate = PUSH_GATE.read_text(encoding="utf-8")
@@ -3537,11 +3582,23 @@ derive_mutation_jobs() {{
         # test above proves CI runs every one, this proves they all live in the
         # job that took them.
         repo_gates = workflow_job_block(workflow, "repo-gates")
-        discovered = sorted(path.name for path in (ROOT / "scripts").glob("test_*.py"))
+        discovered = discovered_self_tests()
         self.assertGreater(len(discovered), 5, "the self-test discovery found nothing")
-        for name in discovered:
-            with self.subTest(self_test=name):
-                self.assertIn(f"python3 scripts/{name}", repo_gates)
+        for path in discovered:
+            with self.subTest(self_test=path):
+                self.assertTrue(
+                    re.search(rf"python3 {re.escape(path)}(?!\S)", repo_gates),
+                    f"{path} does not run in the repo-gates job",
+                )
+
+        # The Buck2 tooling suites read the pinned toolchain and Cargo, so each
+        # runs after the step that provisions both; before it, the compiler
+        # fixture probes have no rustc to drive.
+        provisioned = repo_gates.index("      - name: Provision pinned Buck2 tools")
+        for path in discovered:
+            if path.startswith("tools/buck2/"):
+                with self.subTest(self_test=path):
+                    self.assertLess(provisioned, repo_gates.find(f"python3 {path}"))
 
         # The `dependency-boundary` leg reads the resolved graph and compiles
         # nothing, so it moved to the Python-speed gates rather than onto the

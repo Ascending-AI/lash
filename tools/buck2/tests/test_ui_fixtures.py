@@ -65,7 +65,8 @@ class NormalizationTests(unittest.TestCase):
                 ui.overlay_sources(stage, unsafe, source)
 
 
-@unittest.skipUnless(RUSTC.is_file(), 'Prepare the repository-pinned Rust toolchain to run real compiler fixture probes')
+# CI provisions the toolchain before this suite, so there a missing compiler fails the probes instead of skipping them.
+@unittest.skipUnless(RUSTC.is_file() or os.environ.get('GITHUB_ACTIONS') == 'true', 'Prepare the repository-pinned Rust toolchain to run real compiler fixture probes')
 class CompilerFixtureTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
