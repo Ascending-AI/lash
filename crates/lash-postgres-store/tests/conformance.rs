@@ -1727,6 +1727,26 @@ lash_conformance::process_trigger_retention_tests!({
     })
 });
 
+lash_conformance::trigger_occurrence_tombstone_horizon_tests!({
+    let Some((database_fixture, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres trigger-occurrence tombstone horizon law: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    (
+        database_fixture,
+        move |clock: Arc<dyn lash_core_execution::Clock>| {
+            let storage = Arc::clone(&storage);
+            async move {
+                reset(storage.pool()).await;
+                Arc::new(storage.trigger_store().with_clock(clock)) as Arc<dyn TriggerStore>
+            }
+        },
+    )
+});
+
 lash_conformance::store_contract_state_machine_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(

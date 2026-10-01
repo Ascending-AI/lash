@@ -982,6 +982,27 @@ macro_rules! process_trigger_retention_tests {
     };
 }
 
+/// Register the trigger-occurrence tombstone horizon law. The fixture yields
+/// a guard and a constructor from a clock to a trigger store on that clock.
+#[macro_export]
+macro_rules! trigger_occurrence_tombstone_horizon_tests {
+    ($fixture:block) => {
+        $crate::trigger_occurrence_tombstone_horizon_tests!(@catalogue $fixture; [
+            (trigger_occurrence_tombstone_outlives_redelivery_horizon, "trigger-occurrence-tombstone-horizon"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, make) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(make).await;
+            }
+        )*
+    };
+}
+
 /// Register the store-contract state-machine law.
 #[macro_export]
 macro_rules! store_contract_state_machine_tests {

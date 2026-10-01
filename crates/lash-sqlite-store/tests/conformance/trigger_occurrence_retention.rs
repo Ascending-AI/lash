@@ -69,3 +69,15 @@ lash_conformance::process_trigger_retention_tests!({
         }
     })
 });
+
+lash_conformance::trigger_occurrence_tombstone_horizon_tests!({
+    let retained: Retained<TestBackend> = Retained::default();
+    ((), move |clock: Arc<dyn lash_core_execution::Clock>| {
+        let retained = retained.clone();
+        async move {
+            let backend = TestBackend::open_with_clock(SUBSTRATE, clock).await;
+            retained.keep(&backend);
+            backend.trigger_store() as Arc<dyn TriggerStore>
+        }
+    })
+});

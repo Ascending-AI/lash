@@ -12,6 +12,7 @@
 //! reached through an `ATTACH`ed name; this one does not.
 
 use super::*;
+use lash_core_execution::trigger_occurrence_tombstone_compaction_bound as compaction_bound;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_store_sql::trigger::deliveries::DeliveryStatements;
@@ -1311,6 +1312,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         &self,
         cutoff_epoch_ms: u64,
     ) -> lash_core_execution::TriggerOccurrenceReclamationResult {
+        let compact_before_ms = compaction_bound(cutoff_epoch_ms, self.clock.timestamp_ms());
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         // The scope read stays a single autocommit statement; each candidate's
         // delete is its own gated write transaction, so a mid-loop failure
@@ -1400,15 +1402,13 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                 report.reclaimed_occurrence_count += deleted;
             }
         }
-        // After the deletes, so a pass whose cutoff is past this instant
-        // leaves no tombstone of its own behind.
         report.compacted_tombstone_count = self
             .conn
             .write(move |tx| {
                 crate::conn::cached_execute(
                     tx,
                     trigger_sql().tombstone.compact.sql(),
-                    params![cutoff_epoch_ms],
+                    params![i64::try_from(compact_before_ms).unwrap_or(i64::MAX)],
                 )
             })
             .await

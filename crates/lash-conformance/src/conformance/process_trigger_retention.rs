@@ -115,7 +115,9 @@ where
 
 /// A redelivered emission on a host that journals nothing never writes a
 /// reclaimed occurrence or delivery back (FIG-4513): matched, zero-match and
-/// audit occurrences, each reclaimed by its own retention path.
+/// audit occurrences, each reclaimed by its own retention path. A reclaim
+/// pass at any cutoff inside the redelivery horizon leaves the refusal
+/// standing (FIG-4573).
 pub async fn trigger_occurrence_redelivery_after_reclaim<F, Fut>(make: F)
 where
     F: Fn() -> Fut,
@@ -125,6 +127,17 @@ where
     redelivery::a_redelivered_zero_match_emission_writes_no_reclaimed_occurrence_back(make().await)
         .await;
     redelivery::a_redelivered_audit_emission_writes_no_pruned_occurrence_back(make().await).await;
+}
+
+/// A reclaimed occurrence's tombstone outlives its redelivery horizon
+/// whatever cutoff the reclaim pass names, `u64::MAX` included (FIG-4573).
+/// `make` opens a trigger store on the clock it is given.
+pub async fn trigger_occurrence_tombstone_outlives_redelivery_horizon<F, Fut>(make: F)
+where
+    F: Fn(Arc<dyn crate::Clock>) -> Fut,
+    Fut: Future<Output = Arc<dyn TriggerStore>>,
+{
+    redelivery::a_tombstone_outlives_the_redelivery_horizon_whatever_the_cutoff(make).await;
 }
 
 /// A reserved Engine target with a non-object payload cannot start. Its

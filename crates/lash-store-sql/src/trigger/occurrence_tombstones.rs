@@ -4,7 +4,7 @@
 //!
 //! The trigger store owns the row. It is written in the transaction that
 //! deletes its occurrence, and the host's occurrence reclaim pass compacts it
-//! once it is older than that pass's cutoff.
+//! once it is older than that pass's cutoff and than the redelivery horizon.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "trigger_occurrence_tombstones";
@@ -21,7 +21,8 @@ crate::statements! {
              FROM trigger_occurrence_tombstones
              WHERE occurrence_id = ?1";
 
-        /// Compact every tombstone written before cutoff `?1`.
+        /// Compact every tombstone written before `?1`, the pass's
+        /// compaction bound.
         compact = "DELETE FROM trigger_occurrence_tombstones
              WHERE reclaimed_at_ms < ?1";
     }

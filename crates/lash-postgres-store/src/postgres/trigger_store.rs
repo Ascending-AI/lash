@@ -1066,6 +1066,7 @@ impl TriggerStore for PostgresTriggerStore {
         cutoff_epoch_ms: u64,
     ) -> lash_core_execution::TriggerOccurrenceReclamationResult {
         let sql = trigger_sql();
+        let requested_cutoff_epoch_ms = cutoff_epoch_ms;
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         let rows = sqlx::query(sql.occurrence_postgres.select_reclamation_scope.sql())
             .bind(cutoff_epoch_ms)
@@ -1117,13 +1118,20 @@ impl TriggerStore for PostgresTriggerStore {
                 report.reclaimed_occurrence_count += deleted;
             }
         }
-        // After the deletes, so a pass whose cutoff is past this instant
-        // leaves no tombstone of its own behind.
+        // No cutoff reaches a tombstone inside the redelivery horizon, the
+        // ones this pass wrote included.
+        let compact_before_ms = i64::try_from(
+            lash_core_execution::trigger_occurrence_tombstone_compaction_bound(
+                requested_cutoff_epoch_ms,
+                self.clock.timestamp_ms(),
+            ),
+        )
+        .unwrap_or(i64::MAX);
         report.compacted_tombstone_count =
             crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
                 Box::pin(async move {
                     sqlx::query(sql.tombstone.compact.sql())
-                        .bind(cutoff_epoch_ms)
+                        .bind(compact_before_ms)
                         .execute(tx.as_mut())
                         .await
                         .map_err(crate::store_sqlx_error)

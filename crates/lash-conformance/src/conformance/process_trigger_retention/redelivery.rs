@@ -6,6 +6,9 @@
 //! no row under the idempotency key. The trigger store answers from the
 //! tombstone the reclaim left: it refuses the ingest as reclaimed and writes
 //! nothing, so the emission reserves and starts nothing.
+//!
+//! The tombstone outlives every redelivery (FIG-4573): no reclaim cutoff
+//! compacts it inside `TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS`.
 
 use super::*;
 use pretty_assertions::assert_eq;
@@ -152,6 +155,27 @@ async fn assert_redelivery_writes_nothing(
     );
 }
 
+/// A reclaim pass at the widest cutoff a host can name, `u64::MAX`, run inside
+/// the redelivery horizon: it compacts no tombstone.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn assert_the_widest_cutoff_compacts_nothing(triggers: &Arc<dyn TriggerStore>, case: &str) {
+    let pass = triggers
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("run the reclaim pass");
+    assert_eq!(
+        (
+            pass.reclaimed_occurrence_count,
+            pass.compacted_tombstone_count
+        ),
+        (0, 0),
+        "{case}: a pass inside the redelivery horizon compacted a tombstone"
+    );
+}
+
 /// A matched emission whose process was pruned, and whose occurrence and
 /// delivery retention then reclaimed.
 #[expect(
@@ -244,12 +268,14 @@ pub(super) async fn a_redelivered_emission_writes_no_reclaimed_delivery_back(
     );
 
     assert_redelivery_writes_nothing(&handles, &request, "matched").await;
-    // The guard is idempotent: every further redelivery answers the same.
+    // The guard is idempotent: every further redelivery answers the same,
+    // and no cutoff the host's reclaim pass names takes it away.
+    assert_the_widest_cutoff_compacts_nothing(&handles.triggers, "matched").await;
     assert_redelivery_writes_nothing(&handles, &request, "matched, again").await;
 }
 
 /// An emission no subscription matched, reclaimed by the host's occurrence
-/// reclaim pass. The pass's cutoff is also the tombstone's horizon.
+/// reclaim pass. The pass's cutoff does not shorten the tombstone's life.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -288,29 +314,39 @@ pub(super) async fn a_redelivered_zero_match_emission_writes_no_reclaimed_occurr
 
     assert_redelivery_writes_nothing(&handles, &request, "zero-match").await;
 
-    // A pass whose cutoff is past the tombstone compacts it: the host has
-    // named the horizon past which it expects no redelivery.
-    let compaction = handles
+    // A later pass whose cutoff is past the tombstone, and the same cutoff
+    // on the pass that reclaims, leave the guard standing.
+    assert_the_widest_cutoff_compacts_nothing(&handles.triggers, "zero-match").await;
+    assert_redelivery_writes_nothing(&handles, &request, "zero-match, after a pass").await;
+
+    let widest = crate::TriggerOccurrenceRequest::new(
+        SOURCE_TYPE,
+        "redelivery-zero-match-source",
+        serde_json::json!({ "button": "Blue" }),
+        "redelivery-zero-match-widest-cutoff-occurrence",
+    );
+    deliver(&handles, &widest)
+        .await
+        .expect("the first delivery emits");
+    let pass = handles
         .triggers
         .reclaim_trigger_occurrences(u64::MAX)
         .await
-        .expect("compact the tombstone");
+        .expect("reclaim at the widest cutoff");
     assert_eq!(
         (
-            compaction.reclaimed_occurrence_count,
-            compaction.compacted_tombstone_count
+            pass.reclaimed_occurrence_count,
+            pass.compacted_tombstone_count
         ),
-        (0, 1),
-        "the later pass compacted the tombstone"
+        (1, 0),
+        "the widest cutoff reclaimed the occurrence and kept every tombstone"
     );
     assert_eq!(
-        crate::store::MaintenanceReport::sweep(&compaction),
+        crate::store::MaintenanceReport::sweep(&pass),
         crate::store::MaintenanceSweep::Swept
     );
-    deliver(&handles, &request)
-        .await
-        .expect("an emission past the horizon records a new occurrence");
-    assert_eq!(held(&handles).await.occurrences.len(), 1);
+    assert_redelivery_writes_nothing(&handles, &widest, "zero-match, widest cutoff").await;
+    assert_redelivery_writes_nothing(&handles, &request, "zero-match, both tombstones").await;
 }
 
 /// A non-fired audit occurrence the host pruned.
@@ -350,4 +386,109 @@ pub(super) async fn a_redelivered_audit_emission_writes_no_pruned_occurrence_bac
     assert!(held(&handles).await.occurrences.is_empty());
 
     assert_redelivery_writes_nothing(&handles, &request, "audit").await;
+    assert_the_widest_cutoff_compacts_nothing(&handles.triggers, "audit").await;
+    assert_redelivery_writes_nothing(&handles, &request, "audit, after a pass").await;
+}
+
+/// A tombstone lasts the redelivery horizon whatever cutoff the reclaim pass
+/// names, and a cutoff can only keep it longer. `make` opens a trigger store
+/// on the clock it is given.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn a_tombstone_outlives_the_redelivery_horizon_whatever_the_cutoff<F, Fut>(make: F)
+where
+    F: Fn(Arc<dyn crate::Clock>) -> Fut,
+    Fut: Future<Output = Arc<dyn TriggerStore>>,
+{
+    const RECLAIMED_AT_MS: u64 = 4_000_000_000_000;
+    let clock = Arc::new(crate::testing::TestClock::new(RECLAIMED_AT_MS));
+    let triggers = make(Arc::clone(&clock) as Arc<dyn crate::Clock>).await;
+    let request = crate::TriggerOccurrenceRequest::new(
+        SOURCE_TYPE,
+        "redelivery-horizon-source",
+        serde_json::json!({ "button": "Blue" }),
+        "redelivery-horizon-occurrence",
+    );
+    let passes = |cutoff_epoch_ms: u64| {
+        let triggers = Arc::clone(&triggers);
+        async move {
+            let pass = triggers
+                .reclaim_trigger_occurrences(cutoff_epoch_ms)
+                .await
+                .expect("run the reclaim pass");
+            (
+                pass.reclaimed_occurrence_count,
+                pass.compacted_tombstone_count,
+            )
+        }
+    };
+    let assert_refused = |case: &'static str| {
+        let triggers = Arc::clone(&triggers);
+        let request = request.clone();
+        async move {
+            match triggers.ingest_occurrence(request).await {
+                Err(error) => assert!(
+                    crate::is_trigger_occurrence_reclaimed(&error),
+                    "{case}: the redelivery is refused as reclaimed, got {error:?}"
+                ),
+                Ok(receipt) => panic!("{case}: the redelivery was ingested again: {receipt:?}"),
+            }
+            assert!(
+                triggers
+                    .list_occurrences(crate::TriggerOccurrenceFilter::default())
+                    .await
+                    .expect("list occurrences")
+                    .is_empty(),
+                "{case}: the redelivery wrote the occurrence back"
+            );
+        }
+    };
+
+    triggers
+        .ingest_occurrence(request.clone())
+        .await
+        .expect("the first delivery records the occurrence");
+    assert_eq!(
+        passes(u64::MAX).await,
+        (1, 0),
+        "the pass that reclaims keeps the tombstone it writes"
+    );
+    assert_refused("at the reclaim").await;
+
+    // The horizon's last instant: the tombstone is exactly as old as the
+    // horizon, and the widest cutoff still leaves it.
+    clock.advance(crate::TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS);
+    assert_eq!(passes(u64::MAX).await, (0, 0), "inside the horizon");
+    assert_refused("at the horizon's last instant").await;
+
+    // Past the horizon a cutoff still defers: one at the tombstone's own
+    // instant keeps it.
+    clock.advance(1);
+    assert_eq!(
+        passes(RECLAIMED_AT_MS).await,
+        (0, 0),
+        "a cutoff keeps a tombstone longer than the horizon"
+    );
+    assert_refused("past the horizon, under an earlier cutoff").await;
+
+    // Past both, the pass compacts it, and the identity is a new emission.
+    assert_eq!(
+        passes(u64::MAX).await,
+        (0, 1),
+        "past the horizon and the cutoff"
+    );
+    triggers
+        .ingest_occurrence(request)
+        .await
+        .expect("an emission past the horizon records a new occurrence");
+    assert_eq!(
+        triggers
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list occurrences")
+            .len(),
+        1
+    );
 }

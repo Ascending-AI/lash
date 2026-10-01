@@ -1782,9 +1782,9 @@ pub struct TriggerOccurrenceReclamationReport {
     /// emptiness.
     pub reinspection_deferred_count: usize,
     /// Tombstones of reclaimed occurrences this pass compacted: those written
-    /// before the cutoff (FIG-4513). An ingest that presents a compacted
-    /// identity records a new occurrence, so the cutoff is also the horizon
-    /// past which the host expects no redelivery.
+    /// before the cutoff and older than
+    /// [`crate::TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS`] (FIG-4513, FIG-4573). An
+    /// ingest that presents a compacted identity records a new occurrence.
     #[serde(default)]
     pub compacted_tombstone_count: usize,
 }
@@ -1899,8 +1899,8 @@ pub trait TriggerStore: Send + Sync {
     /// tombstone writes nothing and refuses with
     /// [`trigger_occurrence_reclaimed`](crate::trigger_occurrence_reclaimed):
     /// it is a redelivery of an emission that already ran, on a host with no
-    /// journal to answer it from. The tombstone lasts until
-    /// [`Self::reclaim_trigger_occurrences`] compacts it.
+    /// journal to answer it from. The tombstone lasts its redelivery horizon,
+    /// and then until [`Self::reclaim_trigger_occurrences`] compacts it.
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
@@ -1988,9 +1988,9 @@ pub trait TriggerStore: Send + Sync {
     /// before deletion; later failure returns the partial report accumulated.
     ///
     /// The pass then compacts every reclaimed occurrence's tombstone written
-    /// before the cutoff, whichever delete wrote it. The cutoff is therefore
-    /// also the redelivery horizon: an ingest that presents an identity past
-    /// it records a new occurrence.
+    /// before [`crate::trigger_occurrence_tombstone_compaction_bound`], whichever
+    /// delete wrote it: no cutoff compacts one a redelivery can still present.
+    /// An ingest that presents a compacted identity records a new occurrence.
     async fn reclaim_trigger_occurrences(
         &self,
         cutoff_epoch_ms: u64,
@@ -2017,5 +2017,6 @@ pub trait TriggerStore: Send + Sync {
     -> Result<usize, PluginError>;
 }
 
+pub(crate) mod redelivery_horizon;
 mod target_admission;
 pub use target_admission::admit_trigger_registration_target;
