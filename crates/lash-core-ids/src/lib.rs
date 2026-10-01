@@ -20,3 +20,31 @@ pub mod test_clock;
 pub mod test_watchdog;
 #[cfg(feature = "testing")]
 pub mod trace_capture;
+
+/// A plugin's declared, nonzero state and config format version.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct FormatVersion(std::num::NonZeroU32);
+
+impl FormatVersion {
+    pub const ONE: Self = Self(std::num::NonZeroU32::MIN);
+
+    pub const fn new(value: u32) -> Option<Self> {
+        match std::num::NonZeroU32::new(value) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl std::fmt::Display for FormatVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
