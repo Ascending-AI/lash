@@ -1704,6 +1704,8 @@ class FeatureLaneGraph:
         self.test_args: dict[str, list[str]] = {}
         self.clippy: set[str] = set()
         self.activations: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+        self.normal_activations: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+        self.packages_by_id = {package["id"]: package for package in metadata["packages"]}
         self._workspace_edges: dict[str, set[str]] = {}
         self._closures: dict[str, set[str]] = {}
         self._dev_closures: dict[str, set[str]] = {}
@@ -1747,12 +1749,22 @@ class FeatureLaneGraph:
         self.chunks.setdefault(package_name, []).append((name, text))
 
     def variant_deps_argument(
-        self, owner: str, resolution: dict[str, list[str]], indent: int = 4
+        self,
+        owner: str,
+        resolution: dict[str, list[str]],
+        indent: int = 4,
+        unit_test: bool = False,
     ) -> str:
-        """The first-party label swap for one resolution, as Starlark."""
+        """The first-party label swap for one resolution, as Starlark.
+
+        A package's unit tests link the package's own library when it
+        dev-depends on itself (`lash-internal-core` does, to arm `testing`),
+        and Cargo builds that library at the resolution the tests run in. Every
+        other target of the package names its library outright.
+        """
         mapping = {}
         for name, features in resolution.items():
-            if name == owner or self.library_of(name) is None:
+            if (name == owner and not unit_test) or self.library_of(name) is None:
                 continue
             label = self.library_label(name, resolution)
             ordinary = f"//{self.dirs[name]}:{self.primary[name]}"
@@ -1780,6 +1792,56 @@ class FeatureLaneGraph:
             self.activations.setdefault(key, set()).update(
                 resolved.activated.get(name, set())
             )
+            normal = resolved.normal.get(name, set())
+            # Variant labels are keyed by feature sets, so two commands that
+            # agree on a package's features must agree on its edges.
+            if self.normal_activations.setdefault(key, normal) != normal:
+                raise ValueError(
+                    f"{name}: features {sorted(features)} activate different "
+                    "dependencies in different lane commands"
+                )
+
+    def pruned_deps_argument(
+        self, package_name: str, features: list[str], with_dev: bool, indent: int = 4
+    ) -> str:
+        """The workspace edges this resolution does not activate, as Starlark.
+
+        `PACKAGE_DEPS` holds the workspace resolution, where most optional
+        dependencies are on. A variant that left one in would link a second,
+        unloaded copy of its subgraph at workspace features, and rustc would
+        resolve a path Cargo rejects for want of a `#[cfg(feature = ...)]`.
+        """
+        package = self.by_name[package_name]
+        activated = self.normal_activations[(package_name, tuple(features))]
+        pruned = []
+        for edge in self.resolve_nodes[package["id"]]["deps"]:
+            kinds = {entry["kind"] for entry in edge["dep_kinds"]}
+            if None not in kinds or (with_dev and "dev" in kinds):
+                continue
+            extern = edge["name"].replace("-", "_")
+            target = self.packages_by_id[edge["pkg"]]["name"]
+            declared = [
+                dependency
+                for dependency in package["dependencies"]
+                if dependency["kind"] is None and dependency["name"] == target
+            ]
+            renamed = [
+                dependency
+                for dependency in declared
+                if (dependency.get("rename") or "").replace("-", "_") == extern
+            ]
+            aliases = {
+                feature_variants.dependency_alias(dependency)
+                for dependency in renamed
+                or [d for d in declared if d.get("rename") is None]
+            }
+            if not aliases:
+                raise ValueError(f"{package_name}: no manifest dependency declares {extern}")
+            if not aliases & activated:
+                pruned.append(extern)
+        if not pruned:
+            return ""
+        return f"{' ' * indent}pruned_deps = {string_list(sorted(pruned))},\n"
 
     def extra_deps_argument(
         self,
@@ -1789,7 +1851,10 @@ class FeatureLaneGraph:
         with_dev: bool = True,
         indent: int = 4,
     ) -> str:
-        activated = self.activations.get((package_name, tuple(features)), set())
+        # A dev-dependency activates its alias for the tests alone; a library
+        # or binary links only what a normal declaration turned on.
+        activations = self.activations if with_dev else self.normal_activations
+        activated = activations.get((package_name, tuple(features)), set())
         missing = sorted(activated - self.workspace_edges(package_name, with_dev))
         mapping = {}
         for alias in missing:
@@ -2022,6 +2087,7 @@ class FeatureLaneGraph:
             f"    package_name = {quote(package_name)},\n"
             f"    tags = {string_list(list(FEATURE_VARIANT_TAGS))},\n"
             + self.extra_deps_argument(package_name, features, resolution, with_dev=False)
+            + self.pruned_deps_argument(package_name, features, with_dev=False)
             + self.variant_deps_argument(package_name, resolution)
             + f"    version = {quote(package['version'])},\n"
             ")\n\n",
@@ -2110,7 +2176,8 @@ class FeatureLaneGraph:
                 f"    rustc_env = {json.dumps(rustc_env, sort_keys=True)},\n"
                 f"    tags = {string_list(tags)},\n"
                 + self.extra_deps_argument(package_name, features, resolution, with_dev=kind in ('example', 'bench'))
-            + self.variant_deps_argument(package_name, resolution)
+                + self.pruned_deps_argument(package_name, features, with_dev=kind in ('example', 'bench'))
+                + self.variant_deps_argument(package_name, resolution)
                 + f"    version = {quote(package['version'])},\n"
                 ")\n\n",
             )
@@ -2157,7 +2224,8 @@ class FeatureLaneGraph:
                 )
                 + f"    tags = {string_list(tags)},\n"
                 + self.extra_deps_argument(package_name, features, resolution)
-            + self.variant_deps_argument(package_name, resolution)
+                + self.pruned_deps_argument(package_name, features, with_dev=True)
+                + self.variant_deps_argument(package_name, resolution, unit_test=True)
                 + f"    version = {quote(package['version'])},\n"
                 ")\n\n",
                 runnable=runnable,
@@ -2200,7 +2268,8 @@ class FeatureLaneGraph:
                 )
                 + f"    tags = {string_list(tags)},\n"
                 + self.extra_deps_argument(package_name, features, resolution)
-            + self.variant_deps_argument(package_name, resolution)
+                + self.pruned_deps_argument(package_name, features, with_dev=True)
+                + self.variant_deps_argument(package_name, resolution)
                 + f"    version = {quote(package['version'])},\n"
                 ")\n\n",
                 runnable=runnable,
@@ -2247,6 +2316,7 @@ class FeatureLaneGraph:
             )
             + f"    tags = {string_list(tags)},\n"
             + self.extra_deps_argument(package_name, features, resolution)
+            + self.pruned_deps_argument(package_name, features, with_dev=True)
             + self.variant_deps_argument(package_name, resolution)
             + f"    version = {quote(package['version'])},\n"
             ")\n\n",

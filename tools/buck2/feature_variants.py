@@ -21,9 +21,8 @@ actually exhibits, each of which is asserted by `--check` rather than assumed:
   by some feature, so no package acquires an *implicit* optional-dependency
   feature whose name shadows a dependency.
 * Feature unification is resolver v2: a feature enabled through a
-  build-dependency edge does not unify with the normal edge, and the two
-  first-party build-dependency edges in the workspace are resolved in their own
-  context.
+  build-dependency edge does not unify with the normal edge. No first-party
+  package is a build-dependency, so there is no second context to resolve.
 
 Third-party crates are deliberately NOT re-resolved; see the limitation
 recorded in `docs/agents/hermetic-build.md`.
@@ -70,6 +69,10 @@ class Resolution:
     # Dependency aliases activated per package, so `dep?/feature` can be
     # answered without re-walking.
     activated: dict[str, set[str]] = field(default_factory=dict)
+    # The subset activated through a normal declaration: the edges a library
+    # or binary compile links. A dev-dependency activates the same alias for
+    # the root's tests only.
+    normal: dict[str, set[str]] = field(default_factory=dict)
 
     def sorted_features(self) -> dict[str, list[str]]:
         return {name: sorted(values) for name, values in sorted(self.features.items())}
@@ -108,6 +111,8 @@ class _Resolver:
         alias = dependency_alias(dependency)
         target = dependency["name"]
         self.resolution.activated.setdefault(owner, set()).add(alias)
+        if dependency["kind"] is None:
+            self.resolution.normal.setdefault(owner, set()).add(alias)
         if not self.workspace.is_member(target):
             return
         self.activate_package(target)

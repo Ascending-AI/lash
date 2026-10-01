@@ -151,6 +151,9 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "tracing_subscriber",
+    ],
     version = "0.0.0-dev",
 )
 
@@ -200,6 +203,9 @@ lash_rust_feature_library(
     tags = [
         "feature-lane",
         "manual",
+    ],
+    pruned_deps = [
+        "tracing_subscriber",
     ],
     variant_deps = {"//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
     version = "0.0.0-dev",
@@ -276,6 +282,9 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "tracing_subscriber",
+    ],
     version = "0.0.0-dev",
 )
 
@@ -299,6 +308,9 @@ lash_rust_feature_library(
     tags = [
         "feature-lane",
         "manual",
+    ],
+    pruned_deps = [
+        "tracing_subscriber",
     ],
     variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_a41bb545", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930"},
     version = "0.0.0-dev",
@@ -325,6 +337,9 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "tracing_subscriber",
+    ],
     variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3a135246", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_93e49f58", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_4585dde7", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_5b221c5d", "//crates/lash-http-transport:lash-http-transport": "//crates/lash-http-transport:lash-http-transport__fv_8af4df28", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_32f43af7", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ca9352be", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_49e398d7", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_59f21eb6", "//crates/lashlang:lashlang": "//crates/lashlang:lashlang__fv_841620de"},
     version = "0.0.0-dev",
 )
@@ -350,6 +365,9 @@ lash_rust_feature_library(
     tags = [
         "feature-lane",
         "manual",
+    ],
+    pruned_deps = [
+        "tracing_subscriber",
     ],
     variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_c335ed3e", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e62031c0", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c9fcc2be", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
     version = "0.0.0-dev",
@@ -403,6 +421,9 @@ lash_rust_feature_library(
     tags = [
         "feature-lane",
         "manual",
+    ],
+    pruned_deps = [
+        "tracing_subscriber",
     ],
     variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_82b1ba00", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_941b2643", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_92695417"},
     version = "0.0.0-dev",
@@ -480,7 +501,10 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    pruned_deps = [
+        "tracing_subscriber",
+    ],
+    variant_deps = {"//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_76ece385", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
     version = "0.0.0-dev",
 )
 
@@ -504,6 +528,10 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "tracing_subscriber",
+    ],
+    variant_deps = {"//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_89e3fb36"},
     version = "0.0.0-dev",
 )
 
@@ -529,5 +557,6 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
+    variant_deps = {"//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_f2f58683"},
     version = "0.0.0-dev",
 )

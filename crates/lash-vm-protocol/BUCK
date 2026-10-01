@@ -223,6 +223,6 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_fa269834"},
     version = "0.0.0-dev",
 )

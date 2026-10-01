@@ -144,6 +144,9 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "jsonschema",
+    ],
     variant_deps = {"//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_8ada4082"},
     version = "0.0.0-dev",
 )
@@ -194,6 +197,9 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "jsonschema",
+    ],
     version = "0.0.0-dev",
 )
 
@@ -214,6 +220,9 @@ lash_rust_feature_library(
     tags = [
         "feature-lane",
         "manual",
+    ],
+    pruned_deps = [
+        "jsonschema",
     ],
     version = "0.0.0-dev",
 )
@@ -241,6 +250,10 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "jsonschema",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_adbdc017"},
     version = "0.0.0-dev",
 )
 
@@ -265,5 +278,9 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
+    pruned_deps = [
+        "jsonschema",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_c9515550"},
     version = "0.0.0-dev",
 )

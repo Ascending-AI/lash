@@ -1004,6 +1004,180 @@ def check_documentation_targets_are_not_tests() -> None:
         assert "[lib]" not in text or "doctest = false" in text, manifest
 
 
+def check_feature_lane_dependency_edges() -> None:
+    """A feature-lane variant links what Cargo activates for it, and no more.
+
+    The variant macros start from the workspace resolution's `PACKAGE_DEPS`,
+    which has every optional dependency the workspace turns on. Rebuilt here
+    from the generated BUCK files the way `_variant_named_deps` builds them,
+    each variant's edges must satisfy what Cargo's resolver guarantees:
+
+    * no edge to an optional dependency the variant's features leave off --
+      rustc would accept a missing `#[cfg(feature = ...)]` gate Cargo rejects;
+    * an edge to the variant's own package (a self dev-dependency) names the
+      library at the variant's features, not the workspace's;
+    * one label per first-party package in the closure, so no unloaded second
+      copy of a dependency subgraph rides along at workspace features.
+
+    The activated set is read from each Cargo.toml, not from the generator.
+    """
+    package_deps = bzl_value((HERE / "deps.bzl").read_text(encoding="utf-8"), "PACKAGE_DEPS")
+    rules_text = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
+    assert "for extern in pruned_deps:\n        result.pop(extern)" in rules_text, (
+        "the variant macros no longer prune the way this contract rebuilds them"
+    )
+    inventory = load_json("target-inventory.json")
+    ordinary, variant_labels = labels(inventory)
+    variant_rules = (
+        "lash_rust_feature_library", "lash_rust_feature_binary", "lash_rust_feature_test",
+    )
+    calls = {}
+    for directory in sorted({label[2:].split(":", 1)[0] for label in ordinary | variant_labels}):
+        tree = ast.parse((ROOT / directory / "BUCK").read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in ("lash_rust_library", *variant_rules)):
+                continue
+            args = {}
+            for keyword in node.value.keywords:
+                try:
+                    args[keyword.arg] = ast.literal_eval(keyword.value)
+                except ValueError:
+                    pass
+            calls[f"//{directory}:{args['name']}"] = (node.value.func.id, args)
+    assert variant_labels <= set(calls) | ordinary, sorted(variant_labels - set(calls))[:3]
+
+    def named_deps(label: str) -> dict[str, str]:
+        rule, args = calls[label]
+        groups = package_deps[args["package_name"]]
+        result = dict(groups["normal"])
+        if rule == "lash_rust_library":
+            return result
+        if rule == "lash_rust_feature_test" or args.get("include_dev_deps", False):
+            result.update(groups["dev"])
+        for extern in args.get("pruned_deps", []):
+            result.pop(extern)
+        swaps = args.get("variant_deps", {})
+        result = {extern: swaps.get(target, target) for extern, target in result.items()}
+        for target, extern in args.get("extra_deps", {}).items():
+            result[extern] = target
+        if args.get("library"):
+            result[args["library_crate_name"]] = args["library"]
+        return result
+
+    libraries = {
+        label: args["package_name"]
+        for label, (rule, args) in calls.items()
+        if rule in ("lash_rust_library", "lash_rust_feature_library")
+    }
+    closures: dict[str, frozenset[str]] = {}
+
+    def closure(label: str) -> frozenset[str]:
+        if label not in closures:
+            reached = set()
+            for target in named_deps(label).values():
+                if target in libraries:
+                    reached.add(target)
+                    reached |= closure(target)
+            closures[label] = frozenset(reached)
+        return closures[label]
+
+    manifests = {}
+    requested: dict[str, set[str]] = {}
+    with (ROOT / "scripts/feature-coverage.toml").open("rb") as handle:
+        for lane in tomllib.load(handle)["lane"]:
+            for argv in lane["commands"]:
+                package = argv[argv.index("-p") + 1]
+                for index, token in enumerate(argv):
+                    if token == "--features":
+                        requested.setdefault(package, set()).update(
+                            value.split("/", 1)[0].removesuffix("?")
+                            for value in argv[index + 1].split(",") if "/" in value
+                        )
+
+    unactivated, foreign_self, duplicated, optional_edges = [], [], [], 0
+    for label in sorted(variant_labels & set(calls)):
+        rule, args = calls[label]
+        package = args["package_name"]
+        if package not in manifests:
+            with (ROOT / args["manifest_dir"] / "Cargo.toml").open("rb") as handle:
+                manifests[package] = tomllib.load(handle)
+        manifest = manifests[package]
+        optional = {
+            alias for alias, value in manifest.get("dependencies", {}).items()
+            if isinstance(value, dict) and value.get("optional", False)
+        }
+        # `--features dep/feature` would switch an optional dependency on with
+        # no feature of the package recording it; no lane does, and the
+        # manifest-only derivation below is exact only while that holds.
+        assert not optional & requested.get(package, set()), (
+            f"{package}: a lane requests a feature of an optional dependency directly"
+        )
+        declared = manifest.get("features", {})
+        activated = set()
+        for feature in args["crate_features"]:
+            for value in declared.get(feature, [f"dep:{feature}"]):
+                if value.startswith("dep:"):
+                    activated.add(value[4:])
+                elif "/" in value and not value.split("/", 1)[0].endswith("?"):
+                    activated.add(value.split("/", 1)[0])
+        with_dev = rule == "lash_rust_feature_test" or args.get("include_dev_deps", False)
+        allowed = activated | (set(manifest.get("dev-dependencies", {})) if with_dev else set())
+        deps = named_deps(label)
+        optional_edges += len(optional)
+        for alias in sorted(optional - allowed):
+            if alias.replace("-", "_") in deps:
+                unactivated.append(f"{label} -> {alias}")
+        own = [
+            target for target in deps.values()
+            if libraries.get(target) == package and target != label
+        ]
+        for target in own:
+            if calls[target][1]["crate_features"] != args["crate_features"]:
+                foreign_self.append(f"{label} -> {target}")
+        reached = set(own) | ({label} if label in libraries else set())
+        for target in deps.values():
+            if target in libraries:
+                reached |= {target} | closure(target)
+        copies: dict[str, set[str]] = {}
+        for target in reached:
+            copies.setdefault(libraries[target], set()).add(target)
+        for name, targets in sorted(copies.items()):
+            if len(targets) > 1:
+                duplicated.append(f"{label}: {name} as {sorted(targets)}")
+    assert optional_edges, "no variant of a package with optional dependencies was checked"
+    failures = []
+    for title, found in (
+        ("link an optional dependency their features leave off", unactivated),
+        ("link their own package at other features", foreign_self),
+        ("link two copies of one first-party package", duplicated),
+    ):
+        if found:
+            variants = {entry.split(" ", 1)[0].rstrip(":") for entry in found}
+            failures.append(f"{len(variants)} feature-lane variants {title}, e.g. {found[0]}")
+    assert not failures, "; ".join(failures)
+
+
+def check_no_first_party_build_dependency() -> None:
+    """No first-party package is a build-dependency of another.
+
+    Ordinary targets take their features from `cargo metadata`'s resolve
+    nodes, which report one unified feature set per package. Resolver 2
+    resolves a build-dependency separately from the normal edge, so a
+    first-party build-dependency would compile at features the generator
+    cannot see.
+    """
+    package_deps = bzl_value((HERE / "deps.bzl").read_text(encoding="utf-8"), "PACKAGE_DEPS")
+    first_party = sorted(
+        f"{package} -> {target}"
+        for package, groups in package_deps.items()
+        for target in groups["build"].values()
+        if not target.startswith("//third-party/")
+    )
+    assert not first_party, f"first-party build-dependency edges: {first_party}"
+
+
 def main() -> int:
     checks = [
         check_inventory,
@@ -1024,6 +1198,8 @@ def main() -> int:
         check_schema_source_inputs,
         check_feature_lane_executable_selection,
         check_documentation_targets_are_not_tests,
+        check_feature_lane_dependency_edges,
+        check_no_first_party_build_dependency,
     ]
     for check in checks:
         check()

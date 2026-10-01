@@ -83,8 +83,13 @@ def _named_deps(package_name, include_dev = False, build = False):
         result.update(groups["dev"])
     return result
 
-def _variant_named_deps(package_name, include_dev, variant_deps, extra_deps, library, library_crate_name):
+def _variant_named_deps(package_name, include_dev, pruned_deps, variant_deps, extra_deps, library, library_crate_name):
     result = _named_deps(package_name, include_dev = include_dev)
+
+    # PACKAGE_DEPS is the workspace resolution; a variant's own resolution
+    # leaves some of its optional dependencies off.
+    for extern in pruned_deps:
+        result.pop(extern)
     for extern, label in result.items():
         result[extern] = variant_deps.get(label, label)
     for label, extern in extra_deps.items():
@@ -461,6 +466,7 @@ def lash_rust_feature_library(
         test_srcs = [],
         compile_data_patterns = [],
         extra_compile_data = [],
+        pruned_deps = [],
         variant_deps = {},
         extra_deps = {},
         tags = []):
@@ -485,7 +491,7 @@ def lash_rust_feature_library(
         edition = "2024",
         env = env,
         features = crate_features,
-        named_deps = _variant_named_deps(package_name, False, variant_deps, extra_deps, None, None),
+        named_deps = _variant_named_deps(package_name, False, pruned_deps, variant_deps, extra_deps, None, None),
         resources = _resources(package_compile_data, extra_compile_data),
         rustc_flags = flags,
         labels = tags,
@@ -497,6 +503,7 @@ def lash_rust_feature_binary(
         name,
         package_name,
         include_dev_deps = False,
+        pruned_deps = [],
         variant_deps = {},
         extra_deps = {},
         library = None,
@@ -504,7 +511,7 @@ def lash_rust_feature_binary(
         **kwargs):
     # Keep the public signature stable; ordinary binary emission is reused
     # after replacing the generated dependency table for this call.
-    deps = _variant_named_deps(package_name, include_dev_deps, variant_deps, extra_deps, library, library_crate_name)
+    deps = _variant_named_deps(package_name, include_dev_deps, pruned_deps, variant_deps, extra_deps, library, library_crate_name)
     _feature_binary(name, package_name, deps, **kwargs)
 
 def _feature_binary(name, package_name, named_deps, **kwargs):
@@ -547,12 +554,13 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
 def lash_rust_feature_test(
         name,
         package_name,
+        pruned_deps = [],
         variant_deps = {},
         extra_deps = {},
         library = None,
         library_crate_name = None,
         **kwargs):
-    deps = _variant_named_deps(package_name, True, variant_deps, extra_deps, library, library_crate_name)
+    deps = _variant_named_deps(package_name, True, pruned_deps, variant_deps, extra_deps, library, library_crate_name)
     _rust_test(
         name,
         kwargs.pop("crate_name"),
