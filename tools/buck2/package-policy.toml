@@ -80,6 +80,13 @@ kinds = ["test"]
 targets = ["process_crash_replay"]
 shards = 4
 
+# The Restate unit suite is the largest single libtest binary: about 104 s
+# quiet over 1431 cases, it timed out under contention at 939/1431.
+[[rule]]
+packages = ["lash-internal-restate"]
+kinds = ["unit-test"]
+shards = 4
+
 [[rule]]
 packages = ["lash-runtime"]
 kinds = ["test"]
@@ -109,12 +116,15 @@ timeout = "long"
 # recovery interval on virtual time until the end-state invariants hold. The
 # whole binary runs minutes, not seconds, so it stays out of the developer
 # loop; the Buck2 tail runs it on every full-profile dispatch of main.
+# Measured p50 138 s and p95 178 s whole, contention pushes it past its
+# timeout, so its cases split across four balanced shards.
 [[rule]]
 packages = ["lash-sim"]
 kinds = ["test"]
 targets = ["crash_point_matrix"]
 tags = ["dev-deferred"]
 reason = "the crash-point matrix restarts a deployment per cell and seed and ticks recovery on virtual time; minutes per run, too slow for the developer loop; the Buck2 tail runs it on main's full-profile dispatch"
+shards = 4
 
 # The chaos soak (FIG-3873): its smoke mode runs two seeded epochs of
 # randomized workload under kills, lease loss and rolling deploys on the

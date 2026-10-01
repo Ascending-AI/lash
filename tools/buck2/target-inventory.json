@@ -28107,7 +28107,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash-restate:lash-restate__unit_test__fv_10158c7a",
-      "package": "lash-internal-restate"
+      "package": "lash-internal-restate",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash-restate:lash-restate__unit_test__fv_10158c7a",
@@ -28118,7 +28119,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash-restate:lash-restate__unit_test__fv_10158c7a",
-      "package": "lash-internal-restate"
+      "package": "lash-internal-restate",
+      "shard_count": 4
     },
     {
       "build_label": "//crates/lash-rlm-types:lash-rlm-types[static]",
@@ -48726,6 +48728,7 @@
           "clippy_label": "//crates/lash-restate:lash-restate__unit_test[clippy.txt]",
           "kind": "unit-test",
           "label": "//crates/lash-restate:lash-restate__unit_test",
+          "shard_count": 4,
           "tags": []
         }
       ],
@@ -48973,6 +48976,7 @@
           "clippy_label": "//crates/lash-sim:crash_point_matrix__test[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-sim:crash_point_matrix__test",
+          "shard_count": 4,
           "tags": [
             "dev-deferred"
           ]
