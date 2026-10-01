@@ -51,12 +51,30 @@ A `build` pattern that matches none passes to Buck2 unchanged. `kiln analyze`
 accepts labels and patterns as its dependency universe.
 
 Use the owning target while editing. `python3 scripts/dev-test.py --dry-run`
-prints the diff, labels, revisions and commands. `--dependents` includes reverse
-dependencies within the developer partition. Complete batches are substituted
+prints the diff, labels, revisions and commands. Complete batches are substituted
 once; individual members, manual service targets and deferred tests are not
 silently added by package wildcards. Shared build inputs and unknown tooling
 widen selection. A docs-only diff does not run Rust tests. Known Python test
 edits run the exact repository-gate command CI uses.
+
+The pre-land gate is one command, run in the fork:
+
+```sh
+kiln gate lash <fork> -- python3 scripts/dev-test.py --dependents
+```
+
+It diffs the merge base with `origin/main` against the commits, the working
+tree and untracked files together. A Buck2 `rdeps` query over the touched
+packages selects every dev-suite and `dev-deferred` test that depends on them;
+a shared input, a package manifest or a failed query selects `//:dev_tests` and
+every `dev-deferred` test instead. The tests run through `kiln test` on the
+pool at the default `--jobs`, never serially, and cached verdicts bound the
+cost, so there is no sampling. Every planned command runs, also after one
+fails. The closing lines give the target count and name
+every `FAIL`, `TIMEOUT` and `INFRA_FAILURE`, then the affected tests the gate
+never runs (`manual` service and Cargo-owned labels, `pr-deferred` suites). The
+exit code is non-zero for any of the first three and for a build, script or
+infrastructure error.
 
 The planner refuses live PostgreSQL/S3 settings. It writes a plan and receipt
 under Git's `lash-validation/` directory and serializes requests within a fork.

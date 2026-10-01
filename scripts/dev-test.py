@@ -182,34 +182,54 @@ def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[st
     return list(scope.packages), scope.broad, scope.facade, commands
 
 
+def reverse_dependencies(packages: list[str]) -> set[str] | None:
+    """Every test that depends on a touched package, or None if Buck2 cannot say."""
+    # Restrict the query universe to first-party packages so generated and
+    # third-party cells cannot widen the selection.
+    expression = 'kind("test", rdeps(set(//crates/... //examples/... //runbooks/...), set(' + " ".join(p + ":" for p in packages) + ')))'
+    bootstrap = subprocess.run(
+        [sys.executable, "tools/buck2/bootstrap.py"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    client = bootstrap.stdout.strip()
+    # A configured query against the daemon and configuration `kiln test`
+    # uses. `uquery` follows every `select` branch, including the prelude's
+    # `toolchains//:cxx_no_default_deps`, which this graph does not define.
+    result = subprocess.run(
+        [client, "--isolation-dir", os.environ.get("BUCK_ISOLATION_DIR", "kiln"),
+         "cquery", "-c", "kiln.execution_mode=remote", expression]
+        if bootstrap.returncode == 0 and client else ["false"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        print(result.stderr, file=sys.stderr)
+        print("dev-test: the reverse-dependency query failed; selecting the whole suite", file=sys.stderr)
+        return None
+    # A configured label prints as `root//package:name (configuration)`.
+    return {root_cell_label(line.split()[0]) for line in result.stdout.splitlines() if line.strip()}
+
+
 def plan(base: str, dependents: bool) -> dict:
     identity = input_id(base)
     paths = changed_files(base)
     packages, broad, facade, commands = select(paths, script_gates())
     allowed, batches = ci_plan.dev_test_inventory(ROOT)
     members = {label for label in allowed if label.split(":")[0] in packages}
-    if dependents and packages and not broad:
-        # Restrict the query universe to first-party packages so generated and
-        # third-party cells cannot widen the selection.
-        expression = 'kind("test", rdeps(set(//crates/... //examples/... //runbooks/...), set(' + " ".join(p + ":" for p in packages) + ')))'
-        bootstrap = subprocess.run(
-            [sys.executable, "tools/buck2/bootstrap.py"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        client = bootstrap.stdout.strip()
-        result = subprocess.run(
-            [client, "uquery", expression] if bootstrap.returncode == 0 and client else ["false"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode:
-            print(result.stderr, file=sys.stderr)
-            broad = True
-        else:
-            members = {root_cell_label(label) for label in result.stdout.split()} & allowed
+    deferred: list[str] = []
+    skipped: list[str] = []
+    if dependents and (packages or broad):
+        query = None if broad else reverse_dependencies(packages)
+        broad = query is None
+        # `--dependents` is the pre-land gate: besides the dev-suite members
+        # it runs the dev-deferred tests the change can reach, which nothing
+        # else runs before main does, and names the tests it leaves out.
+        selected, deferred, skipped = ci_plan.dependent_test_labels(query, ROOT)
+        if not broad:
+            members = selected
     # A change under a package's directory also runs that package's
     # `dev-deferred` labels: the tail leg is merge-group-only in CI, so a
     # change to a deferred test's inputs (#2109's corpus expectations file)
@@ -217,7 +237,7 @@ def plan(base: str, dependents: bool) -> dict:
     # manifest widens the selection but is still a deferred test's input.
     # The label assembly is ci_plan.affected_buck2_labels: the same selection
     # the pull-request leg of `buck2-tests` runs in CI.
-    tail = ci_plan.pr_tail_labels(paths, ROOT)
+    tail = sorted({*ci_plan.pr_tail_labels(paths, ROOT), *deferred})
     scope = ci_plan.DevTestScope(tuple(sorted(packages)), broad, facade, False, ())
     package_builds = ci_plan.package_build_labels(set(packages), ROOT)
     labels, builds = ci_plan.affected_buck2_labels(
@@ -235,6 +255,7 @@ def plan(base: str, dependents: bool) -> dict:
         "changed_files": paths,
         "selection": "suite" if broad else "dependents" if dependents else "packages",
         "commands": commands,
+        "skipped": skipped,
         "remaining": ["Required CI gates; this is focused local validation, not full CI"],
     }
     result["id"] = hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest()
@@ -357,6 +378,57 @@ def failure_summary(command: list[str], code: int, log_path: Path, report_path: 
     return "\n".join(lines[:SUMMARY_LINES])
 
 
+def test_statuses(report_path: Path) -> dict[str, dict]:
+    """Each Buck2 label's result in one `kiln test` report."""
+    try:
+        results = json.loads(report_path.read_text(encoding="utf-8")).get("results", {})
+    except (OSError, ValueError):
+        return {}
+    return {
+        label.removeprefix("root"): result
+        for label, result in results.items() if isinstance(result, dict)
+    }
+
+
+def gate_summary(planned: dict, ran: list[tuple[list[str], int, Path]], seconds: float) -> tuple[bool, list[str]]:
+    """Whether every command passed, and the closing lines that say so.
+
+    The lines carry the test target count and name every target that did not
+    pass with its status (FAIL, TIMEOUT, INFRA_FAILURE). A command that fails
+    without a failing target is a build or infrastructure error. Nothing is
+    truncated: this is what a lane quotes as its gate result.
+    """
+    results: dict[str, dict] = {}
+    for command, _code, report_path in ran:
+        if command[:2] == ["kiln", "test"]:
+            results.update(test_statuses(report_path))
+    failed = sorted(
+        (label, str(result.get("status"))) for label, result in results.items()
+        if result.get("status") not in {"PASS", "SUCCESS"}
+    )
+    errors = [(command, code) for command, code, _report in ran if code]
+    not_run = planned["commands"][len(ran):]
+    lines = []
+    if failed:
+        lines.append(f"dev-test: FAIL: {len(failed)} of {len(results)} test targets did not pass ({seconds:.0f}s)")
+        lines += [f"  {status} {label}" for label, status in failed]
+    for command, code in errors:
+        if not failed or command[:2] != ["kiln", "test"]:
+            lines.append(f"dev-test: ERROR: `{shlex.join(command[:3])}{' ...' if len(command) > 3 else ''}` exit {code} "
+                         "without a failing test target (build, script or infrastructure error)")
+    if not_run:
+        lines.append("dev-test: NOT RUN: " + "; ".join(shlex.join(command[:3]) for command in not_run))
+    passed = not failed and not errors and not not_run
+    if passed:
+        cached = sum(1 for result in results.values() if result.get("cache"))
+        lines.append(f"dev-test: PASS: {len(results)} test targets ({cached} from cache), "
+                     f"{len(ran)} commands, {seconds:.0f}s")
+    if planned.get("skipped"):
+        lines.append(f"dev-test: SKIPPED {len(planned['skipped'])} affected tests this gate never runs "
+                     "(service-backed, Cargo-owned or trunk-only): " + " ".join(planned["skipped"]))
+    return passed, lines
+
+
 def run(planned: dict, verbose: bool) -> int:
     directory = Path(git("rev-parse", "--path-format=absolute", "--git-path", "lash-validation").decode().strip())
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -377,6 +449,7 @@ def run(planned: dict, verbose: bool) -> int:
         save(directory / "plan.json", planned)
         print(f"dev-test: checkout/config snapshot {planned['inputs'][:12]}, {planned['selection']}", flush=True)
         process = None
+        ran: list[tuple[list[str], int, Path]] = []
         try:
             code = 0
             for index, command in enumerate(planned["commands"]):
@@ -385,6 +458,9 @@ def run(planned: dict, verbose: bool) -> int:
                 report_path = directory / f"test-report-{index}.json"
                 output_dir = directory / f"test-results-{index}"
                 executed = list(command)
+                # A command that dies before reporting must not be read
+                # through the previous run's report.
+                report_path.unlink(missing_ok=True)
                 if executed[:2] == ["kiln", "test"]:
                     executed[2:2] = [
                         "--test-report", str(report_path),
@@ -399,11 +475,15 @@ def run(planned: dict, verbose: bool) -> int:
                         process = subprocess.Popen(
                             executed, cwd=ROOT, start_new_session=True,
                             stdout=sink, stderr=subprocess.STDOUT)
-                code = process.wait()
-                if code:
+                status = process.wait()
+                ran.append((command, status, report_path))
+                if status:
                     if not verbose:
-                        print(failure_summary(command, code, log_path, report_path))
-                    break
+                        print(failure_summary(command, status, log_path, report_path))
+                    # Keep going: one gate run names every failure, and a
+                    # failed script proof does not hide the Rust verdicts.
+                    code = code or status
+                    continue
                 if not verbose:
                     print(f"dev-test: exit 0, output {log_path}", flush=True)
         except KeyboardInterrupt:
@@ -418,6 +498,11 @@ def run(planned: dict, verbose: bool) -> int:
         except OSError as error:
             print(f"dev-test: {error}", file=sys.stderr)
             code = 2
+        passed, summary = gate_summary(planned, ran, (time.time_ns() - started) / 1e9)
+        print("\n".join(summary), flush=True)
+        if not passed and code == 0:
+            # A report with a target that did not pass is never a green gate.
+            code = 1
         unchanged = input_id(planned["base"]) == planned["inputs"]
         if not unchanged:
             print("dev-test: checkout/config snapshot changed during validation; result is stale", file=sys.stderr)
@@ -426,6 +511,7 @@ def run(planned: dict, verbose: bool) -> int:
             "plan": planned, "started_ns": started, "finished_ns": time.time_ns(),
             "exit_code": max(code, 0) if code >= 0 else 128 - code,
             "inputs_unchanged": unchanged,
+            "summary": summary,
         }
         save(receipt_path, receipt)
         print(f"dev-test: receipt {receipt_path}")

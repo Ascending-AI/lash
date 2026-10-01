@@ -1167,6 +1167,73 @@ class PrTailLabelTests(unittest.TestCase):
         )
 
 
+class DependentTestLabelTests(unittest.TestCase):
+    """dev-test's `--dependents` runs what a reverse-dependency query reaches.
+
+    FIG-4558 changed five crates and broke 20 `lash-restate` unit tests it
+    never ran: a lane's own packages are not the tests its change can break.
+    """
+
+    def test_a_query_splits_into_members_deferred_and_named_skips(self) -> None:
+        members, deferred, skipped = ci_plan.dependent_test_labels({
+            "//crates/lash-restate:lash-restate__unit_test",
+            "//crates/lash-sim:lash-sim__unit_test",
+            "//crates/lash-postgres-store:conformance__test",
+            "//crates/lash-regress:unicodesets__test",
+            # A feature variant and a helper target are not inventory tests.
+            "//crates/lash:artifact_referrers_evidence__test__fv_26f56f02",
+            "//crates/lash-restate:lash-restate__unit_test__rust_test",
+        })
+        self.assertEqual({"//crates/lash-restate:lash-restate__unit_test"}, members)
+        self.assertEqual(["//crates/lash-sim:lash-sim__unit_test"], deferred)
+        self.assertEqual(
+            [
+                "//crates/lash-postgres-store:conformance__test",
+                "//crates/lash-regress:unicodesets__test",
+            ],
+            skipped,
+        )
+
+    def test_an_unbounded_diff_reaches_every_inventory_test_exactly_once(self) -> None:
+        inventory = json.loads((ROOT / ci_plan.TARGET_INVENTORY).read_text())
+        members, deferred, skipped = ci_plan.dependent_test_labels(None)
+        self.assertEqual(set(inventory["workspace_dev_test_targets"]), members)
+        self.assertEqual(ci_plan._all_dev_deferred_labels(), deferred)
+        tags = {
+            target["label"]: target.get("tags", [])
+            for package in inventory["packages"]
+            for target in package["targets"]
+            if target.get("label")
+        }
+        self.assertTrue(skipped)
+        for label in skipped:
+            self.assertTrue(
+                {"manual", "pr-deferred"} & set(tags[label])
+                or label.startswith("//examples/"),
+                label,
+            )
+        self.assertEqual(
+            set(inventory["workspace_test_targets"]),
+            members | set(deferred) | set(skipped),
+        )
+
+    def test_deferred_dependents_ride_the_shared_label_assembly(self) -> None:
+        members, deferred, _skipped = ci_plan.dependent_test_labels({
+            "//crates/lash-restate:lash-restate__unit_test",
+            "//crates/lash-sim:lash-sim__unit_test",
+        })
+        scope = ci_plan.DevTestScope(("//crates/lash-core-store",), False, False, False, ())
+        builds = ci_plan.package_build_labels({"//crates/lash-core-store"})
+        labels, _builds = ci_plan.affected_buck2_labels(scope, members, deferred, {}, builds)
+        self.assertEqual(
+            [
+                "//crates/lash-restate:lash-restate__unit_test",
+                "//crates/lash-sim:lash-sim__unit_test",
+            ],
+            labels,
+        )
+
+
 class LawTickLaneTests(unittest.TestCase):
     def test_no_law_constructs_fresh_deployment_lanes(self) -> None:
         import check_law_tick_lanes

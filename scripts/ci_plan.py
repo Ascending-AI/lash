@@ -1623,6 +1623,37 @@ def dev_test_inventory(root: Path | None = None) -> tuple[set[str], dict[str, li
     return members, batches
 
 
+def dependent_test_labels(
+    query: set[str] | frozenset[str] | None, root: Path | None = None
+) -> tuple[set[str], list[str], list[str]]:
+    """Split a reverse-dependency query into (dev members, deferred, skipped).
+
+    `query` is every label a Buck2 `rdeps` query returned for the touched
+    packages, or None for a diff that can move any target. The pre-land gate
+    runs what the diff can break without a service: the dev-suite members and
+    the `dev-deferred` labels among them, which no other pre-land step runs.
+    The rest of the inventory's executable tests among them are returned by
+    name so the caller reports them: `manual` labels need a service or a
+    Cargo recipe, and a `pr-deferred` suite is trunk work. Labels outside the
+    inventory (feature variants, helper targets) are not tests of their own.
+    """
+
+    base = root if root is not None else REPO_ROOT
+    inventory = json.loads((base / TARGET_INVENTORY).read_text(encoding="utf-8"))
+    tests = {
+        target["label"]
+        for package in inventory["packages"]
+        for target in package["targets"]
+        if target.get("label") and target.get("kind") in EXECUTABLE_TEST_KINDS
+    }
+    selected = tests if query is None else tests & set(query)
+    members = selected & set(inventory["workspace_dev_test_targets"])
+    deferred = selected & set(
+        _all_dev_deferred_labels(str(root) if root is not None else None)
+    )
+    return members, sorted(deferred), sorted(selected - members - deferred)
+
+
 def package_build_labels(
     packages: set[str] | frozenset[str], root: Path | None = None
 ) -> dict[str, tuple[str, ...]]:
@@ -1670,7 +1701,8 @@ def affected_buck2_labels(
     it locally and the pull-request leg of `buck2-tests` runs it in CI.
     `members` is the dev-inventory labels the caller selected (the touched
     packages', or a reverse-dependency query's); `tail` is the touched
-    packages' `dev-deferred` labels (`pr_tail_labels`) -- merge groups are the
+    packages' `dev-deferred` labels (`pr_tail_labels`), plus the reverse
+    dependencies' under dev-test's `--dependents` -- merge groups are the
     only events that run the tail job, so a pull request runs them itself, and
     the rule holds on a broad plan too: a package manifest widens the
     selection but is still a deferred test's input (#2109's corpus

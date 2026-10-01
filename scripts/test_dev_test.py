@@ -266,10 +266,119 @@ class DevTestTests(unittest.TestCase):
         query.chmod(0o755)
         result = self.invoke("--dependents", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["commands"], [
+        planned = json.loads(result.stdout)
+        # The whole suite, and every deferred test the gate can run.
+        self.assertEqual(planned["commands"], [
             ["kiln", "build", "//:schema_checks"],
-            ["kiln", "test", "//:dev_tests"],
+            ["kiln", "test", "//:dev_tests", "//crates/slow:slow__test"],
         ])
+        self.assertEqual(planned["selection"], "suite")
+        self.assertIn("reverse-dependency query failed", result.stderr)
+
+    def test_dependents_run_deferred_reverse_dependencies_and_name_the_rest(self):
+        query = self.bin / "buck2"
+        query.write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" > .git/query-args\n"
+            "printf '%s\\n' 'root//crates/example:first (cfg:linux#0123)' "
+            "'root//crates/dependent:dependent__test (cfg:linux#0123)' "
+            "'root//crates/slow:slow__test (cfg:linux#0123)' "
+            "'root//crates/slow:service__test (cfg:linux#0123)' "
+            "'root//crates/slow:trunk__test (cfg:linux#0123)' "
+            "'root//examples/sample:leaf__test (cfg:linux#0123)' "
+            "'root//crates/slow:slow__test__fv_0a1b2c3d (cfg:linux#0123)'\n")
+        query.chmod(0o755)
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//crates/dependent:dependent__test",
+             "//crates/example:first", "//crates/slow:slow__test"],
+        ])
+        self.assertEqual(planned["skipped"], [
+            "//crates/slow:service__test",
+            "//crates/slow:trunk__test",
+            "//examples/sample:leaf__test",
+        ])
+        # The configured query runs in the daemon `kiln test` uses.
+        arguments = (self.root / ".git/query-args").read_text()
+        self.assertTrue(arguments.startswith("--isolation-dir kiln cquery "), arguments)
+        result = self.invoke("--dependents")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("dev-test: SKIPPED 3 affected tests", result.stdout)
+        self.assertIn("//crates/slow:service__test //crates/slow:trunk__test", result.stdout)
+        # Without `--dependents` nothing was queried, so nothing is named.
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["skipped"], [])
+
+    def report(self, statuses):
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        report = Path(outside.name) / "test-report.json"
+        report.write_text(json.dumps({"schema": 1, "results": {
+            "root" + label: {"status": status, "outputs": {}, "cache": cache}
+            for label, (status, cache) in statuses.items()
+        }}))
+        self.env["TEST_REPORT_FILE"] = str(report)
+
+    def test_summary_counts_the_targets_of_a_passing_gate(self):
+        self.report({
+            "//crates/example:first": ("PASS", True),
+            "//crates/example:second": ("PASS", False),
+        })
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("dev-test: PASS: 2 test targets (1 from cache), 2 commands", result.stdout)
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertIn("dev-test: PASS: 2 test targets", receipt["summary"][0])
+
+    def test_summary_names_every_fail_and_timeout(self):
+        statuses = {f"//crates/example:t{index:02}": ("FAIL", False) for index in range(20)}
+        statuses["//crates/example:hung"] = ("TIMEOUT", False)
+        statuses["//crates/example:lost"] = ("INFRA_FAILURE", False)
+        statuses["//crates/example:fine"] = ("PASS", True)
+        self.report(statuses)
+        self.env["TEST_EXIT"] = "32"
+        result = self.invoke()
+        self.assertEqual(result.returncode, 32)
+        self.assertIn("dev-test: FAIL: 22 of 23 test targets did not pass", result.stdout)
+        for index in range(20):
+            self.assertIn(f"  FAIL //crates/example:t{index:02}\n", result.stdout)
+        self.assertIn("  TIMEOUT //crates/example:hung\n", result.stdout)
+        self.assertIn("  INFRA_FAILURE //crates/example:lost\n", result.stdout)
+        self.assertNotIn("dev-test: PASS", result.stdout)
+
+    def test_a_failing_report_is_never_a_green_gate(self):
+        self.report({"//crates/example:first": ("TIMEOUT", False)})
+        result = self.invoke()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("  TIMEOUT //crates/example:first", result.stdout)
+
+    def test_a_failure_without_a_failing_target_is_an_error_not_a_stale_verdict(self):
+        self.report({"//crates/example:first": ("FAIL", False)})
+        self.env["TEST_EXIT"] = "32"
+        self.assertEqual(self.invoke().returncode, 32)
+        # The next run dies before it reports: the earlier report must not
+        # be read as this run's verdict.
+        executor = self.bin / "kiln"
+        executor.write_text("#!/bin/sh\n[ \"$1\" = test ] && exit 3\nexit 0\n")
+        result = self.invoke()
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("dev-test: ERROR: `kiln test", result.stdout)
+        self.assertIn("exit 3 without a failing test target", result.stdout)
+        self.assertNotIn("dev-test: FAIL", result.stdout)
+        self.assertNotIn("dev-test: PASS", result.stdout)
+
+    def test_a_failed_command_does_not_hide_the_later_verdicts(self):
+        self.report({"//crates/example:first": ("FAIL", False)})
+        executor = self.bin / "kiln"
+        executor.write_text(
+            "#!/bin/sh\n[ \"$1\" = build ] && exit 4\n"
+            "cp \"$TEST_REPORT_FILE\" \"$3\"\nexit 32\n")
+        result = self.invoke()
+        # The first failure is the exit code; the test verdict is still named.
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("dev-test: ERROR: `kiln build //:schema_checks` exit 4", result.stdout)
+        self.assertIn("dev-test: FAIL: 1 of 1 test targets did not pass", result.stdout)
+        self.assertIn("  FAIL //crates/example:first", result.stdout)
+        self.assertNotIn("NOT RUN", result.stdout)
 
     def test_waiting_callers_recheck_buck2_inputs_instead_of_reusing_receipts(self):
         self.env["TEST_EXIT"] = "7"
