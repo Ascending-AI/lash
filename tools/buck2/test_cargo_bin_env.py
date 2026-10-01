@@ -25,10 +25,14 @@ class CargoBinEnvTests(unittest.TestCase):
         for features in ([], ["rlm"], ["testing"], ["rlm", "testing", "restate", "sqlite"]):
             with self.subTest(features=features):
                 graph = generator.FeatureLaneGraph(metadata, {}, {})
-                resolution = feature_variants.resolve_request(
+                resolved = feature_variants.resolve_request(
                     graph.workspace, "lash-runtime", default_features=False,
                     requested=features, with_dev=True,
-                ).sorted_features()
+                )
+                resolution = resolved.sorted_features()
+                # `FeatureLaneGraph.build` records each command's activations
+                # before it emits the command's targets.
+                graph.record_activations(resolved)
                 target = next(target for target in graph.by_name["lash-runtime"]["targets"]
                               if target["name"] == "seam_proof_dialect")
                 label = graph.emit_target("lash-runtime", resolution, target, "test", True, [])

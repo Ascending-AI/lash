@@ -27,14 +27,14 @@ class JudgedBuildGeometryTests(unittest.TestCase):
             "clippy_policy.bzl",
             "host_transition.bzl",
             "lash_rust.bzl",
-            "prelude_overlay.py",
             "profile.bzl",
             "third_party.bzl",
-            "driver.py",
-            "invocation.py",
-            "service_policy.py",
         ):
             shutil.copy2(ROOT / "tools/buck2" / name, self.root / "tools/buck2" / name)
+        # The gate imports `driver.py`, which imports its sibling modules, so
+        # the fixture carries every Python module of the directory.
+        for module in sorted((ROOT / "tools/buck2").glob("*.py")):
+            shutil.copy2(module, self.root / "tools/buck2" / module.name)
         (self.root / "tools/buck2/toolchains").mkdir()
         shutil.copy2(
             ROOT / "tools/buck2/toolchains/rust.bzl",
