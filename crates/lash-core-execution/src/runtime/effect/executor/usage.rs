@@ -93,6 +93,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// [`project_usage_settlement`](crate::project_usage_settlement) once it
     /// is recorded. An admission fault is the attempt's, never the effect's:
     /// the engine ends the attempt retryably and journals nothing.
+    ///
+    /// The body is raced against its run's attempt fault (FIG-4632): a call
+    /// of the run that latches one ends the attempt there, and the body is
+    /// dropped instead of running on. Nothing will journal that run, so the
+    /// usage of the calls it dispatched before the fault is projected here.
     pub async fn execute_recording_usage(
         self,
         envelope: RuntimeEffectEnvelope,
@@ -104,25 +109,58 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 outcome: Err(refusal),
                 usage: None,
                 admission_fault: None,
+                attempt_fault: None,
             };
         }
-        let usage_run = self
-            .usage_accounting()
+        let binding = self.usage_accounting();
+        let usage_run = binding
+            .as_ref()
             .and_then(|binding| binding.begin(&envelope));
+        let effect = crate::UsageEffectKey::for_effect(envelope.invocation.address());
         // Boxed: the body's future is the executor's largest, and every
         // engine path awaits this one inside its own journaling future.
-        let outcome = Box::pin(self.run_body(envelope, usage_run.clone())).await;
-        match usage_run {
-            None => crate::RecordedEffectExecution {
-                outcome,
+        let body = Box::pin(self.run_body(envelope, usage_run.clone()));
+        let (Some(usage_run), Some(binding)) = (usage_run, binding) else {
+            return crate::RecordedEffectExecution {
+                outcome: body.await,
                 usage: None,
                 admission_fault: None,
-            },
-            Some(usage_run) => crate::RecordedEffectExecution {
+                attempt_fault: None,
+            };
+        };
+        let outcome = tokio::select! {
+            biased;
+            fault = usage_run.attempt_faulted() => Err(fault),
+            outcome = body => outcome,
+        };
+        let admission_fault = usage_run.admission_fault();
+        let attempt_fault = usage_run.attempt_fault();
+        let usage = usage_run.finish();
+        let Some(fault) = attempt_fault else {
+            return crate::RecordedEffectExecution {
                 outcome,
-                admission_fault: usage_run.admission_fault(),
-                usage: usage_run.finish(),
-            },
+                usage,
+                admission_fault,
+                attempt_fault: None,
+            };
+        };
+        if let Some(usage) = &usage {
+            // A projection the store refuses leaves the run's admitted row
+            // open, which its execution's end resolves as an explicit unknown
+            // liability; the attempt ends with its fault either way.
+            let _ = crate::project_unrecorded_usage(
+                binding.store.as_ref(),
+                usage,
+                &effect,
+                binding.clock.timestamp_ms(),
+            )
+            .await;
+        }
+        crate::RecordedEffectExecution {
+            outcome: Err(fault.clone()),
+            usage: None,
+            admission_fault,
+            attempt_fault: Some(fault),
         }
     }
 
@@ -131,10 +169,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// own, so its provider call is a call of the attempt's run (ADR 0125).
     /// `None` refuses the call before dispatch.
     ///
-    /// A recorded model this worker cannot bind is latched on that run
+    /// A recorded model this worker cannot bind ends the enclosing attempt
     /// (FIG-4404): the body journals nothing of its own that could stay
-    /// unsealed, so the enclosing attempt ends with the fault and records
-    /// nothing, whatever its tool makes of the error returned here.
+    /// unsealed, so the fault is latched on that run and this call never
+    /// returns. The run's executor drops the attempt's body here
+    /// ([`Self::execute_recording_usage`]), so the tool is handed no error it
+    /// could swallow and runs no further (FIG-4632).
     pub async fn execute_within_run(
         self,
         envelope: RuntimeEffectEnvelope,
@@ -148,7 +188,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             && fault.code == crate::RuntimeErrorCode::ModelUnavailable
             && fault.is_attempt_fault()
         {
-            usage_run.fault_before_dispatch(fault.attempt_failure_text());
+            usage_run.fault_attempt(fault.clone());
+            return std::future::pending().await;
         }
         outcome
     }
@@ -167,7 +208,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             outcome,
             usage,
             admission_fault,
+            attempt_fault,
         } = Box::pin(self.execute_recording_usage(envelope)).await;
+        // The attempt's own fault stays typed: the controller's caller
+        // retries on it as an engine would.
+        if let Some(fault) = attempt_fault {
+            return Err(fault);
+        }
         if let Some(fault) = admission_fault {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::UsageAdmissionFault,

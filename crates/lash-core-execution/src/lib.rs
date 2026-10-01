@@ -120,7 +120,7 @@ pub mod triggers;
 pub mod usage_accounting;
 pub use usage_accounting::{
     EffectUsage, Projected, RecordedEffectExecution, UsageAccountingBinding, UsageCall, UsageRun,
-    UsageRunError, is_spending_effect, project_usage_settlement,
+    UsageRunError, is_spending_effect, project_unrecorded_usage, project_usage_settlement,
 };
 
 pub mod facade_support {

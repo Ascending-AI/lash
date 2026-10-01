@@ -245,8 +245,9 @@ where
     /// the run's usage beside its outcome. Right after the entry — fresh or
     /// replayed, before the outcome reaches the drive — the controller
     /// journals the run's one-way settle send to the owner's accounting
-    /// continuation (ADR 0125). An admission fault ends the attempt
-    /// retryably and journals nothing, whatever `engine_faults` says.
+    /// continuation (ADR 0125). An admission fault, or a fault that ended the
+    /// attempt inside its body, ends the attempt retryably and journals
+    /// nothing, whatever `engine_faults` says.
     pub(super) async fn record_journaled_run<'run>(
         &'run self,
         invocation: &RuntimeEffectInvocation,
@@ -273,6 +274,7 @@ where
                     outcome: live.reached().await,
                     usage: None,
                     admission_fault: None,
+                    attempt_fault: None,
                 };
             }
             execute_restate_journaled_effect(envelope, local_executor).await
@@ -304,9 +306,13 @@ where
                         outcome,
                         usage,
                         admission_fault,
+                        attempt_fault,
                     } = body.await;
                     if let Some(fault) = admission_fault {
                         return Err(fault);
+                    }
+                    if let Some(fault) = attempt_fault {
+                        return Err(fault.attempt_failure_text());
                     }
                     match outcome {
                         Err(fault)

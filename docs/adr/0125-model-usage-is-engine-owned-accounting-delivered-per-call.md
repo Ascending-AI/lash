@@ -180,6 +180,18 @@ calls `settle_usage` in one transaction and, on a conflict, marks the runs
 An engine that journals nothing (the local and test controllers) projects the
 settlement directly when the body returns.
 
+A run whose attempt ends with a fault after one of its calls was sealed is
+never journaled: a tool attempt whose later direct completion cannot bind its
+recorded model (ADR 0030) ends there, and the engine retries it under a new
+run. Its sealed facts are known, so they are not left to become an unknown
+liability. The executor projects them when the attempt ends, on every engine,
+under the key of the effect and the run (`UsageEffectKey::for_unrecorded_run`),
+and then resolves the run's admitted row, which carries no fact under the
+effect's own key. The facts of the run the effect is later recorded with keep
+the effect's key, so I2 and I3 hold: the two runs' facts never share an
+identity. If the store refuses the projection the admitted row stays `open`
+and is resolved `unknown` like any other run nothing settled (FIG-4632).
+
 ### Why delivery survives every ending
 
 - The settle is a detached send journaled before the drive sees the outcome.

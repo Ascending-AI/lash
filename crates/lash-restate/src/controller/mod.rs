@@ -1560,6 +1560,7 @@ async fn execute_restate_journaled_effect(
                 outcome,
                 usage: None,
                 admission_fault: None,
+                attempt_fault: None,
             }
         }
         command => {

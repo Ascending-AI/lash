@@ -22,10 +22,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::provider::{DispatchAdmission, DispatchRefused, ProviderDispatch};
 use crate::{
-    AttemptFactOutcome, AttemptUsageOutcome, Clock, LlmCallRecord, RunAccounting, RuntimeOwner,
-    StoreError, UsageAccountingStore, UsageAdmissionError, UsageAppendError, UsageAttemptFact,
-    UsageEffectKey, UsageFactConflict, UsageRunAdmission, UsageRunId, UsageSettleReceipt,
-    UsageSettlement,
+    AttemptFactOutcome, AttemptUsageOutcome, Clock, LlmCallRecord, RunAccounting,
+    RuntimeEffectControllerError, RuntimeOwner, StoreError, UsageAccountingStore,
+    UsageAdmissionError, UsageAppendError, UsageAttemptFact, UsageEffectKey, UsageFactConflict,
+    UsageRunAdmission, UsageRunId, UsageSettleReceipt, UsageSettlement,
 };
 
 /// One execution of a spending effect's body.
@@ -47,6 +47,9 @@ struct UsageRunInner {
     /// Serializes dispatch admission and retains a permanent refusal or fault.
     admission: tokio::sync::Mutex<RunAdmission>,
     progress: Mutex<RunProgress>,
+    /// Tripped when a call of the run latches the attempt's fault: the body
+    /// is raced against it, so the attempt ends where the fault was met.
+    attempt_ended: tokio_util::sync::CancellationToken,
 }
 
 #[derive(Clone)]
@@ -65,6 +68,7 @@ struct RunProgress {
     facts: Vec<UsageAttemptFact>,
     admitted: bool,
     admission_fault: Option<String>,
+    attempt_fault: Option<RuntimeEffectControllerError>,
 }
 
 #[derive(Default)]
@@ -103,6 +107,7 @@ impl UsageRun {
                 clock,
                 admission: tokio::sync::Mutex::new(RunAdmission::Pending),
                 progress: Mutex::new(RunProgress::default()),
+                attempt_ended: tokio_util::sync::CancellationToken::new(),
             }),
         }
     }
@@ -152,25 +157,44 @@ impl UsageRun {
         })
     }
 
-    /// A fault met before this run's effect could dispatch: a store fault
-    /// met by admission, or a recorded model this worker could not bind
-    /// ([`Self::fault_before_dispatch`]). The controller ends the attempt
-    /// retryably and journals nothing: a fault is never a recorded outcome.
+    /// A store fault met by this run's admission: nothing in the run
+    /// dispatched. The controller ends the attempt retryably and journals
+    /// nothing: a fault is never a recorded outcome.
     pub fn admission_fault(&self) -> Option<String> {
         self.inner.progress.lock_recover().admission_fault.clone()
     }
 
-    /// Latch a fault a call of this run met before it dispatched (FIG-4404):
-    /// the recorded model of a direct completion inside this run's effect
-    /// could not be bound on this worker. The effect's body may settle on
-    /// anything afterwards; its attempt still ends with this fault and
-    /// journals nothing. The first fault is kept.
-    pub fn fault_before_dispatch(&self, message: impl Into<String>) {
+    /// The typed fault that ended this run's attempt ([`Self::fault_attempt`]).
+    /// Calls of the run may have dispatched before it, so the run's usage is
+    /// still delivered; the attempt is failed with this error and journals
+    /// nothing.
+    pub fn attempt_fault(&self) -> Option<RuntimeEffectControllerError> {
+        self.inner.progress.lock_recover().attempt_fault.clone()
+    }
+
+    /// End this run's attempt with `fault` (FIG-4404, FIG-4632): the recorded
+    /// model of a direct completion inside this run's effect could not be
+    /// bound on this worker. The body is dropped where it stands
+    /// ([`Self::attempt_faulted`]); it is not run past the fault. The first
+    /// fault is kept.
+    pub fn fault_attempt(&self, fault: RuntimeEffectControllerError) {
         self.inner
             .progress
             .lock_recover()
-            .admission_fault
-            .get_or_insert_with(|| message.into());
+            .attempt_fault
+            .get_or_insert(fault);
+        self.inner.attempt_ended.cancel();
+    }
+
+    /// Resolves with the attempt's fault once a call of this run latched one.
+    /// The executor races the run's body against it.
+    pub async fn attempt_faulted(&self) -> RuntimeEffectControllerError {
+        loop {
+            self.inner.attempt_ended.cancelled().await;
+            if let Some(fault) = self.attempt_fault() {
+                return fault;
+            }
+        }
     }
 
     /// What the recorded entry carries beside the outcome. `None` iff no call
@@ -400,6 +424,32 @@ impl EffectUsage {
         }
     }
 
+    /// The settlements of a run that dispatched and was never journaled: its
+    /// attempt ended with a fault after a call of it was sealed (FIG-4632).
+    /// The first lands the facts under the run's own key
+    /// ([`UsageEffectKey::for_unrecorded_run`]), where the facts of the run
+    /// the effect is later recorded with cannot conflict with them. The
+    /// second resolves the run's admitted row, which carries no fact under
+    /// the effect's key.
+    pub fn unrecorded_settlements(&self, effect: &UsageEffectKey) -> [UsageSettlement; 2] {
+        [
+            UsageSettlement {
+                owner: self.owner.clone(),
+                effect: UsageEffectKey::for_unrecorded_run(effect, &self.run),
+                run: self.run.clone(),
+                facts: self.facts.clone(),
+                accounting: RunAccounting::Complete,
+            },
+            UsageSettlement {
+                owner: self.owner.clone(),
+                effect: effect.clone(),
+                run: self.run.clone(),
+                facts: Vec::new(),
+                accounting: self.accounting.clone(),
+            },
+        ]
+    }
+
     /// The stamp without the facts, for a record whose facts cannot be
     /// journaled: the run resolves `unknown(facts_unjournalable)` instead of
     /// staying open or losing its identity.
@@ -450,6 +500,24 @@ pub async fn project_usage_settlement(
             "a usage settlement answered a correction refusal: {error}"
         ))),
     }
+}
+
+/// Project the usage of a run whose attempt ended with a fault, so nothing
+/// journals it (FIG-4632): the facts of the calls it dispatched before the
+/// fault land, and its admitted row is resolved
+/// ([`EffectUsage::unrecorded_settlements`]). The facts land first: a fault
+/// between the two leaves the row open, an explicit liability, and never a
+/// resolved row without its facts.
+pub async fn project_unrecorded_usage(
+    store: &dyn UsageAccountingStore,
+    usage: &EffectUsage,
+    effect: &UsageEffectKey,
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    for settlement in usage.unrecorded_settlements(effect) {
+        project_usage_settlement(store, &settlement, now_ms).await?;
+    }
+    Ok(())
 }
 
 /// Where a spending body's usage is admitted and settled: the ledger store
@@ -508,6 +576,11 @@ pub struct RecordedEffectExecution {
     /// A store fault met by the run's admission: the engine ends the attempt
     /// retryably and journals nothing.
     pub admission_fault: Option<String>,
+    /// The typed fault that ended the attempt inside its body
+    /// ([`UsageRun::fault_attempt`]). The engine fails the attempt with it
+    /// and journals nothing; the usage of the calls dispatched before it is
+    /// already projected, so `usage` is `None`.
+    pub attempt_fault: Option<crate::RuntimeEffectControllerError>,
 }
 
 #[cfg(test)]
@@ -776,6 +849,60 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// FIG-4632: a fault that ends the attempt is kept typed, apart from the
+    /// admission fault that says nothing dispatched, and the facts sealed
+    /// before it are settled under the run's own key, never the effect's.
+    #[tokio::test]
+    async fn an_attempt_fault_stays_typed_and_keeps_the_usage_sealed_before_it() {
+        let run = run(Arc::new(AdmissionStore::default()));
+        let sealed = run
+            .call(owner(), "turn", key(), "model")
+            .expect("a call slot");
+        dispatch(&sealed, 1).await.expect("admitted");
+        sealed.record(&record(vec![attempt(
+            1,
+            AttemptOutcome::Completed,
+            AttemptUsageOutcome::Reported,
+            Some(5),
+        )]));
+        let unbound = |name: &str| {
+            RuntimeEffectControllerError::model_unavailable(
+                &crate::provider::ModelUnavailable::new(
+                    crate::ModelKey::new(name),
+                    crate::provider::ModelUnavailableReason::UnknownKey,
+                ),
+            )
+        };
+        assert!(run.attempt_fault().is_none());
+        run.fault_attempt(unbound("first@host"));
+        run.fault_attempt(unbound("second@host"));
+        let fault = run.attempt_faulted().await;
+        assert_eq!(fault.code, crate::RuntimeErrorCode::ModelUnavailable);
+        assert_eq!(
+            fault.model_key(),
+            Some(&crate::ModelKey::new("first@host")),
+            "the first fault is kept, with its typed cause"
+        );
+        assert!(fault.is_attempt_fault());
+        assert!(
+            run.admission_fault().is_none(),
+            "an attempt fault does not say that nothing dispatched"
+        );
+        let effect = run.effect().clone();
+        let usage = run.finish().expect("the sealed call keeps its usage");
+        let [facts, row] = usage.unrecorded_settlements(&effect);
+        assert_eq!(
+            facts.effect,
+            UsageEffectKey::for_unrecorded_run(&effect, &usage.run)
+        );
+        assert_ne!(facts.effect, effect);
+        assert_eq!(facts.facts, usage.facts);
+        assert_eq!(facts.facts.len(), 1);
+        assert_eq!((row.effect, row.run), (effect, usage.run.clone()));
+        assert!(row.facts.is_empty());
+        assert_eq!(row.accounting, RunAccounting::Complete);
     }
 
     /// An admitted attempt the record does not describe was dispatched and

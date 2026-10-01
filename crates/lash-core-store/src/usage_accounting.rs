@@ -13,6 +13,14 @@ impl UsageEffectKey {
     pub fn for_effect(address: &lash_sansio::EffectAddress) -> Self {
         Self(address.graph_key())
     }
+    /// The key the facts of `run` are settled under when `run` is a run of
+    /// `effect` that dispatched and was never journaled (FIG-4632): the effect
+    /// and the run. A fact's identity names its effect and not its run, so
+    /// under the effect's own key these facts would collide with the facts
+    /// of the run the effect is later recorded with.
+    pub fn for_unrecorded_run(effect: &Self, run: &UsageRunId) -> Self {
+        Self(format!("{}#{}", effect.0, run.as_str()))
+    }
     pub fn as_str(&self) -> &str {
         &self.0
     }

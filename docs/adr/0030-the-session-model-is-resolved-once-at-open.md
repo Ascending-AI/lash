@@ -91,8 +91,12 @@ A bind the deployment refuses is the attempt's fault. It is never the call's
 recorded result: the step stays unsealed, the engine retries it, and after
 its attempts it parks the work with reason `EngineRetryExhausted` carrying the
 model key typed. A direct completion inside a tool attempt ends that attempt
-the same way, whatever the tool makes of the error. A deployment that serves
-the key again lets a resume proceed (FIG-4404).
+the same way, and ends it at the fault: the completion hands its tool no
+error, and the tool's body is dropped where it awaited the completion, so no
+retry repeats what the tool would have done with the failure. The usage of
+completions the attempt dispatched before the fault is still settled
+(ADR 0125, FIG-4632). A deployment that serves the key again lets a resume
+proceed (FIG-4404).
 
 Input admission does not select a model. Child-session execution and direct
 LLM requests have explicit model selection at their own boundaries. An input

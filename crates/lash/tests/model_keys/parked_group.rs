@@ -143,7 +143,9 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
 
     // The key remains unavailable: the operator resumes the child, which
     // exhausts a new retry loop over the same invocation and journal.
-    let failed_attempts = settled.lock().expect("settled attempts").len();
+    // The attempts are the engine's count: a bind fault ends an attempt
+    // before its tool settles on anything (FIG-4632).
+    let failed_attempts = parked.attempts;
     core.parked_work()
         .redrive(&work, park.park_id)
         .await
@@ -158,7 +160,7 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
                 .find(|view| {
                     view.id == parked.id
                         && view.status == "paused"
-                        && settled.lock().expect("settled attempts").len() > failed_attempts
+                        && view.attempts > failed_attempts
                 })
             {
                 break view;
