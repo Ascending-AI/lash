@@ -55,6 +55,8 @@ tokio-util = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+lashlang = { workspace = true, features = ["testing"] }
+lash-typescript = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "net", "io-util"] }

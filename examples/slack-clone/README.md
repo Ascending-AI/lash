@@ -155,21 +155,21 @@ The bot registers `lash-plugin-mcp` when it builds its `LashCore`. The plugin
 spawns the bundled `slack-clone-mcp-server` over stdio and imports its tools into
 the same catalog as `list_channels` and `channel_history`:
 
-- `mcp__slack_clone__list_channels_summa_rh4rihhfjzyyeqdepzyupgqslu` returns channel ids, names, topics,
+- `mcp__slack_clone__list_channels_summary` returns channel ids, names, topics,
   and member counts.
-- `mcp__slack_clone__workspace_stats_u3ennkotxfvh4jq5ssxx3osxla` returns aggregate channel and active-member
+- `mcp__slack_clone__workspace_stats` returns aggregate channel and active-member
   counts. The explicit `active_members` field excludes deleted users; channel
   summaries expose the platform's workspace-wide `num_members` value instead.
-- `mcp__slack_clone__sample_summary_jsravcec3hbi6h74ol3czagt3i` sends `sampling/createMessage` back to the
+- `mcp__slack_clone__sample_summary` sends `sampling/createMessage` back to the
   bot, whose host-owned handler runs its configured provider through
   `DirectLlmClient` and returns the sampled summary to the still-open tool call.
-- `mcp__slack_clone__elicit_confirmation_43iv5ippbzi6gmt6qpg5o4qley` sends a typed form elicitation; this
+- `mcp__slack_clone__elicit_confirmation` sends a typed form elicitation; this
   example's host policy checks the requesting server, prompt, and schema, then
   builds `{ "answer": "yes" }` from the requested string property.
-- `mcp__slack_clone__elicit_via_url_ejcpavacnltc6fxpb3qci66emq` sends URL elicitation and then
+- `mcp__slack_clone__elicit_via_url` sends URL elicitation and then
   `notifications/elicitation/complete`; the host checks the URL policy and logs
   the matching elicitation id when completion arrives.
-- `mcp__slack_clone__list_host_roots_pxgy6luaf6ydj2bcftrvqdcnwm` sends `roots/list` and returns the static
+- `mcp__slack_clone__list_host_roots` sends `roots/list` and returns the static
   workspace root supplied by the bot host.
 
 The server uses the official `rmcp` server-side SDK. Its results are not fixtures:
@@ -195,12 +195,21 @@ not in the session usage ledger or `TurnReport` usage.
 [deterministic full-host companion](../../runbooks/slack-clone-deterministic/runbook.md)
 for the exact four-tool, four-layer CI contract.
 
-`lash-plugin-mcp` imports each tool as a bounded
-`mcp__<server>__<tool>_<identity-digest>` name. The digest is derived from the
-complete raw server/tool identity, so normalized native names remain distinct
-and surviving names do not depend on catalog order. If two identities ever
-produce the same final name, Lash rejects the catalog update instead of
-shadowing either implementation.
+`lash-plugin-mcp` imports tools as `mcp__<server>__<tool>` with bare code
+paths such as `slack_clone.list_channels_summary`. Server prefixes remain
+lowercase. Tool cleanup preserves ASCII case and replaces each invalid
+character with `_`. Names fit within 64 bytes. Every member of a cleanup or
+truncation collision receives `__` and eight base32 characters of its own
+durable-id digest. Names depend on the server's current catalog, never its
+order. Adding or removing a colliding sibling can rename both operations;
+durable ids still dispatch the raw tool. A true 40-bit digest collision keeps
+the typed configuration refusal. Dialects own addressability refusals.
+
+This is an in-place cutover at the 1.0 stored-format reset, with no aliases or
+compatibility reader. Recorded cells retain their definitions and replay
+completed results. Calls needing a renamed live operation park with
+`LashlangCellBindingDrift`; existing process artifacts requiring the old
+operation fail admission with `ProcessHostEnvironmentIncompatible`.
 
 The stdio child is demonstration wiring, not a deployment prescription — a real
 deployment more often reaches a separately operated endpoint over
@@ -296,23 +305,23 @@ then calls `notify_roots_changed`, so connected servers re-read `roots/list`.
 The five tools exist to make host-side policy observable rather than to be
 useful:
 
-- `mcp__workspace_http__workspace_badge_kczjjxpbmhykdl67ll7vfkvwre` returns a binary blob resource. This
+- `mcp__workspace_http__workspace_badge` returns a binary blob resource. This
   server stores binary content as an attachment, so the blob is
   persisted through the host's attachment store and reaches the model as an
   attachment reference; the same call against a server configured without that
   opt-in stays inline in the tool result.
-- `mcp__workspace_http__roots_change_rep_wchegdiaayjju5jsonqjjbsg2i` counts the roots-changed
+- `mcp__workspace_http__roots_change_report` counts the roots-changed
   notifications the server received and reports the roots it re-read, which is
   what makes `notify_roots_changed` observable from the server's side.
-- `mcp__workspace_http__elicit_unknown_p_skda3cedcwuhyp6ls55b2c46eq` asks a question the host has no
+- `mcp__workspace_http__elicit_unknown_prompt` asks a question the host has no
   standing answer for, using a field name the host *does* answer elsewhere. The
   host declines: its answer book is keyed by prompt and field together, because
   elicitation is a consent primitive and consent keyed by field name alone is
   blind consent.
-- `mcp__workspace_http__elicit_pick_coun_7j4ifqzu7n4uvhnrnfgz3trvha` asks for a form field the host's
+- `mcp__workspace_http__elicit_pick_count` asks for a form field the host's
   answer book cannot satisfy; the host declines instead of sending content that
   fails the server's schema (`McpElicitationValidationError` is what catches it).
-- `mcp__workspace_http__stall_mrxpomjkc64knfbvnm7rx7qm4i` never answers, so the host's configured
+- `mcp__workspace_http__stall` never answers, so the host's configured
   `with_timeouts(...)` is what ends the call. The host keeps the **default**
   timeout-disconnect policy, which treats an idle timeout as a question rather
   than a verdict: it probes the peer, and because this server is alive and

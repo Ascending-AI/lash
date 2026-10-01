@@ -60,21 +60,33 @@ pub const MCP_PATH: &str = "/mcp";
 /// The MCP server name the bot attaches this server under.
 pub const SERVER_NAME: &str = "workspace_http";
 
+// Resolve against the complete native catalog so collision groups agree with import.
+static TOOL_NAMES: LazyLock<std::collections::BTreeMap<String, String>> = LazyLock::new(|| {
+    lash_plugin_mcp::mcp_tool_names(
+        SERVER_NAME,
+        &[
+            "workspace_badge",
+            "roots_change_report",
+            "elicit_pick_count",
+            "elicit_unknown_prompt",
+            "stall",
+        ],
+    )
+});
 /// MCP name of the binary-content tool once the bot has attached the server.
 pub static WORKSPACE_BADGE_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "workspace_badge"));
+    LazyLock::new(|| TOOL_NAMES["workspace_badge"].clone());
 /// MCP name of the roots-notification report tool.
 pub static ROOTS_CHANGE_REPORT_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "roots_change_report"));
+    LazyLock::new(|| TOOL_NAMES["roots_change_report"].clone());
 /// MCP name of the unsatisfiable-form elicitation tool.
 pub static ELICIT_PICK_COUNT_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_pick_count"));
+    LazyLock::new(|| TOOL_NAMES["elicit_pick_count"].clone());
 /// MCP name of the tool that asks a question the host's answer book has not read.
 pub static ELICIT_UNKNOWN_PROMPT_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_unknown_prompt"));
+    LazyLock::new(|| TOOL_NAMES["elicit_unknown_prompt"].clone());
 /// MCP name of the tool that never answers.
-pub static STALL_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "stall"));
+pub static STALL_TOOL: LazyLock<String> = LazyLock::new(|| TOOL_NAMES["stall"].clone());
 
 /// Exact bytes `workspace_badge` returns, before base64 encoding.
 pub const BADGE_BYTES: &[u8] = b"slack-clone workspace badge v1\x00\x01\x02\x03";

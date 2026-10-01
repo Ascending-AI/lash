@@ -29,8 +29,10 @@ use slack_clone::{mcp_http_server, mcp_server};
 use tokio::sync::Notify;
 
 const TEST_TOKEN: &str = "mcp-integration-test-token";
-static WORKSPACE_INLINE_BADGE_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name("workspace_inline", "workspace_badge"));
+static WORKSPACE_INLINE_BADGE_TOOL: LazyLock<String> = LazyLock::new(|| {
+    lash_plugin_mcp::mcp_tool_names("workspace_inline", &["workspace_badge"])["workspace_badge"]
+        .clone()
+});
 
 #[derive(Clone)]
 struct FakeApiState {

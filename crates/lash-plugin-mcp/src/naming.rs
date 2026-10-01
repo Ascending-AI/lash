@@ -1,11 +1,10 @@
-//! MCP tool naming and identity helpers. Model-facing names are bounded,
-//! readable projections of the durable raw server/tool identity.
+//! MCP names are a bounded projection of a server's current catalog.
+//! Dispatch identity always uses the unchanged, length-framed raw names.
 
 use lash_tool_support::ToolBinding;
+use std::collections::{BTreeMap, BTreeSet};
 
-/// Build an unambiguous durable id from the configured server name and the
-/// native tool name. Byte-length framing keeps arbitrary delimiters in either
-/// component from aliasing another server/tool pair.
+/// Byte-length framing keeps delimiters in either component unambiguous.
 pub(crate) fn durable_tool_id(server_name: &str, native_tool_name: &str) -> String {
     format!(
         "mcp:{}:{server_name}/{}:{native_tool_name}",
@@ -15,15 +14,13 @@ pub(crate) fn durable_tool_id(server_name: &str, native_tool_name: &str) -> Stri
 }
 
 const MODEL_NAME_LIMIT: usize = 64;
-const DIGEST_BYTES: usize = 16;
-const DIGEST_BASE32_LEN: usize = 26;
-const MODEL_NAME_FIXED_LEN: usize = "mcp__".len() + "__".len() + "_".len() + DIGEST_BASE32_LEN;
-const READABLE_BUDGET: usize = MODEL_NAME_LIMIT - MODEL_NAME_FIXED_LEN;
+const MODEL_PREFIX_LEN: usize = "mcp__".len() + "__".len();
+const DIGEST_BYTES: usize = 5;
+const COLLISION_SUFFIX_LEN: usize = "__".len() + 8;
+const SERVER_LIMIT: usize = MODEL_NAME_LIMIT - MODEL_PREFIX_LEN - COLLISION_SUFFIX_LEN - 1;
 
-/// Normalise a server name or raw MCP tool name to lowercase ASCII
-/// alphanumeric and underscore. Collapses runs of non-alphanumeric characters
-/// into a single `_`, trims trailing underscores, and falls back to `"tool"`
-/// if the input has no usable characters.
+/// Normalize a configured server prefix to lowercase ASCII, collapsing
+/// separators and trimming edge underscores. Empty prefixes become `tool`.
 pub fn normalize_identifier(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut last_underscore = false;
@@ -49,32 +46,41 @@ pub fn normalize_identifier(raw: &str) -> String {
     }
 }
 
+pub(crate) fn server_prefix(raw: &str) -> String {
+    let mut prefix = normalize_identifier(raw);
+    prefix.truncate(SERVER_LIMIT);
+    prefix
+}
+
+fn clean_tool_name(raw: &str) -> String {
+    let mut cleaned = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if cleaned.is_empty() {
+        cleaned.push_str("tool");
+    }
+    if cleaned.starts_with(|ch: char| ch.is_ascii_digit()) {
+        cleaned.insert(0, '_');
+    }
+    cleaned
+}
+
 fn identity_digest(tool_id: &str) -> [u8; DIGEST_BYTES] {
     let mut digest = [0; DIGEST_BYTES];
     digest.copy_from_slice(&blake3::hash(tool_id.as_bytes()).as_bytes()[..DIGEST_BYTES]);
     digest
 }
 
-fn truncate_readable_components<'a>(server: &'a str, tool: &'a str) -> (&'a str, &'a str) {
-    if server.len() + tool.len() <= READABLE_BUDGET {
-        return (server, tool);
-    }
-
-    let half = READABLE_BUDGET / 2;
-    let mut server_len = server.len().min(half);
-    let mut tool_len = tool.len().min(half);
-    let spare = READABLE_BUDGET - server_len - tool_len;
-    if server.len() > server_len {
-        server_len += spare.min(server.len() - server_len);
-    } else {
-        tool_len += spare.min(tool.len() - tool_len);
-    }
-    (&server[..server_len], &tool[..tool_len])
-}
-
 fn digest_base32(digest: [u8; DIGEST_BYTES]) -> String {
     const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
-    let mut encoded = String::with_capacity(DIGEST_BASE32_LEN);
+    let mut encoded = String::with_capacity(8);
     let mut buffer = 0_u32;
     let mut bits = 0_u8;
     for byte in digest {
@@ -85,40 +91,78 @@ fn digest_base32(digest: [u8; DIGEST_BYTES]) -> String {
             encoded.push(ALPHABET[((buffer >> bits) & 0x1f) as usize] as char);
         }
     }
-    if bits > 0 {
-        encoded.push(ALPHABET[((buffer << (5 - bits)) & 0x1f) as usize] as char);
-    }
-    debug_assert_eq!(encoded.len(), DIGEST_BASE32_LEN);
     encoded
 }
 
-/// The always-present 128-bit suffix hashes the complete durable tool id. The
-/// readable server/tool prefix is ASCII-normalized and truncated so the final
-/// name never exceeds 64 bytes. No catalog membership or ordering participates
-/// in the result.
-pub fn build_prefixed_name(server_name: &str, original_tool_name: &str) -> (String, ToolBinding) {
-    let tool_id = durable_tool_id(server_name, original_tool_name);
-    build_prefixed_name_with_digest(server_name, original_tool_name, identity_digest(&tool_id))
+/// Assign bare cleaned names, preserving ASCII tool case. Every member of a
+/// cleanup or truncation collision receives `__` and the first eight base32
+/// characters of its durable-id digest. A bare name colliding with a generated
+/// name joins the hashed group. Catalog order never decides a winner.
+///
+/// Refresh may rename operations; durable ids and recorded definitions retain
+/// dispatch authority. No aliases or persistent allocation table are created.
+/// A true 40-bit digest collision under the same truncated operation is the
+/// sole tool-name collision that still receives the pool's typed config refusal.
+/// Static server-prefix collisions remain a configuration refusal.
+pub fn build_catalog_names(
+    server_name: &str,
+    names: &[&str],
+) -> BTreeMap<String, (String, ToolBinding)> {
+    build_catalog_names_with_digest(server_name, names, identity_digest)
 }
 
-pub(crate) fn build_prefixed_name_with_digest(
+pub(crate) fn build_catalog_names_with_digest(
     server_name: &str,
-    original_tool_name: &str,
-    digest: [u8; DIGEST_BYTES],
-) -> (String, ToolBinding) {
-    let server = normalize_identifier(server_name);
-    let tool = normalize_identifier(original_tool_name);
-    let (server, tool) = truncate_readable_components(&server, &tool);
-    let operation = format!("{tool}_{}", digest_base32(digest));
-    let prefixed = format!("mcp__{server}__{operation}");
-    debug_assert!(prefixed.len() <= MODEL_NAME_LIMIT);
-    let lashlang_binding = ToolBinding::new([server], operation);
-    (prefixed, lashlang_binding)
+    names: &[&str],
+    digest: impl Fn(&str) -> [u8; DIGEST_BYTES],
+) -> BTreeMap<String, (String, ToolBinding)> {
+    let server = server_prefix(server_name);
+    let budget = MODEL_NAME_LIMIT - MODEL_PREFIX_LEN - server.len();
+    let cleaned = names
+        .iter()
+        .map(|raw| ((*raw).to_owned(), clean_tool_name(raw)))
+        .collect::<BTreeMap<_, _>>();
+    let mut hashed = BTreeSet::new();
+    loop {
+        let names = cleaned
+            .iter()
+            .map(|(raw, tool)| {
+                let operation = if hashed.contains(raw) {
+                    let suffix = digest_base32(digest(&durable_tool_id(server_name, raw)));
+                    format!(
+                        "{}__{suffix}",
+                        &tool[..tool.len().min(budget - COLLISION_SUFFIX_LEN)]
+                    )
+                } else {
+                    tool[..tool.len().min(budget)].to_owned()
+                };
+                let name = format!("mcp__{server}__{operation}");
+                (
+                    raw.clone(),
+                    (name, ToolBinding::new([server.as_str()], operation)),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut groups = BTreeMap::<&str, Vec<&String>>::new();
+        for (raw, (name, _)) in &names {
+            groups.entry(name).or_default().push(raw);
+        }
+        let mut changed = false;
+        for group in groups.values().filter(|group| group.len() > 1) {
+            for raw in group {
+                changed |= hashed.insert((*raw).clone());
+            }
+        }
+        if !changed {
+            return names;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn durable_tool_id_length_frames_raw_server_and_native_names() {
@@ -130,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_identifier_lowercases_and_dedups_underscores() {
+    fn server_prefix_keeps_its_lowercase_normalization() {
         assert_eq!(
             normalize_identifier("Spotify-Search Songs"),
             "spotify_search_songs"
@@ -140,68 +184,141 @@ mod tests {
     }
 
     #[test]
-    fn build_prefixed_name_is_identity_stable_and_has_no_raw_alias() {
-        let (name, meta) = build_prefixed_name("appworld", "spotify-search-songs");
-        assert!(name.starts_with("mcp__appworld__spotify_"), "{name}");
-        assert!(name.len() <= 64, "{name}");
-        assert!(
-            name.rsplit_once('_')
-                .is_some_and(|(_, suffix)| suffix.len() == DIGEST_BASE32_LEN
-                    && suffix
-                        .bytes()
-                        .all(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte))),
-            "{name}"
-        );
-        assert_eq!(meta.module_path, vec!["appworld".to_string()]);
-        assert_eq!(
-            meta.operation.as_deref(),
-            name.rsplit_once("__").map(|(_, operation)| operation)
-        );
-        assert!(meta.aliases.is_empty());
-    }
-
-    #[test]
-    fn build_prefixed_name_matches_independent_blake3_base32_vector() {
-        // Independently calculated with Python's blake3 package and
-        // base64.b32encode over the first 16 digest bytes.
-        let (name, _) = build_prefixed_name("docs", "search-docs");
-        assert_eq!(name, "mcp__docs__search_docs_6rlrgooy6v2wymnh6or7j4q5ve");
-    }
-
-    #[test]
-    fn build_prefixed_name_does_not_depend_on_catalog_neighbors() {
-        let (alone_name, alone_binding) = build_prefixed_name("directory", "get_user");
-        let _neighbor = build_prefixed_name("directory", "get-user");
-        let (neighbor_name, neighbor_binding) = build_prefixed_name("directory", "get_user");
-
-        assert_eq!(alone_name, neighbor_name);
-        assert_eq!(alone_binding.operation, neighbor_binding.operation);
-    }
-
-    #[test]
-    fn build_prefixed_name_bounds_ascii_and_unicode_inputs() {
-        for (server, tool) in [
-            ("a".repeat(15), "b".repeat(15)),
-            ("a".repeat(15), "b".repeat(16)),
-            ("服務器".repeat(40), "🔎 documents".repeat(40)),
-        ] {
-            let (name, _) = build_prefixed_name(&server, &tool);
-            assert!(name.is_ascii(), "{name}");
-            assert!(name.len() <= MODEL_NAME_LIMIT, "{}: {name}", name.len());
+    fn lone_tools_use_bare_cleaned_names_and_no_aliases() {
+        for raw in ["search_docs", "search-docs"] {
+            let names = build_catalog_names("Docs", &[raw]);
+            let (name, binding) = &names[raw];
+            assert_eq!(name, "mcp__docs__search_docs");
+            assert_eq!(binding.module_path, ["docs"]);
+            assert_eq!(binding.operation.as_deref(), Some("search_docs"));
+            assert!(binding.aliases.is_empty());
         }
-
-        let (boundary_64, _) = build_prefixed_name(&"a".repeat(15), &"b".repeat(15));
-        let (would_be_65, _) = build_prefixed_name(&"a".repeat(15), &"b".repeat(16));
-        assert_eq!(boundary_64.len(), 64);
-        assert_eq!(would_be_65.len(), 64);
-        assert_ne!(boundary_64, would_be_65);
     }
 
     #[test]
-    fn forced_digest_collision_produces_the_same_final_name() {
-        let digest = [7; DIGEST_BYTES];
-        let (hyphenated, _) = build_prefixed_name_with_digest("directory", "get-user", digest);
-        let (underscored, _) = build_prefixed_name_with_digest("directory", "get_user", digest);
-        assert_eq!(hyphenated, underscored);
+    fn cleanup_preserves_case_and_maps_each_unaddressable_character() {
+        for (raw, cleaned) in [
+            ("getUser", "getUser"),
+            ("a-. b", "a___b"),
+            ("文🔎", "__"),
+            ("1lookup", "_1lookup"),
+            ("", "tool"),
+            ("_end_", "_end_"),
+        ] {
+            let names = build_catalog_names("docs", &[raw]);
+            assert_eq!(names[raw].0, format!("mcp__docs__{cleaned}"));
+        }
+    }
+
+    #[test]
+    fn collision_suffixes_match_independent_blake3_base32_vectors() {
+        let names = build_catalog_names("docs", &["search-docs", "search_docs"]);
+        // Python blake3 and base64.b32encode over the durable id, computed separately.
+        assert_eq!(names["search-docs"].0, "mcp__docs__search_docs__6rlrgooy");
+        assert_eq!(names["search_docs"].0, "mcp__docs__search_docs__ac5edv22");
+        assert_ne!(names["search-docs"].0, names["search_docs"].0);
+    }
+
+    #[test]
+    fn collision_members_rename_symmetrically_and_return_to_bare_on_removal() {
+        let alone = build_catalog_names("directory", &["get_user", "unrelated"]);
+        let pair = build_catalog_names("directory", &["get_user", "get-user", "unrelated"]);
+        let reversed = build_catalog_names("directory", &["unrelated", "get-user", "get_user"]);
+        assert_eq!(alone["get_user"].0, "mcp__directory__get_user");
+        for raw in ["get_user", "get-user"] {
+            assert!(pair[raw].0.starts_with("mcp__directory__get_user__"));
+            assert_eq!(pair[raw].0.len(), "mcp__directory__get_user__".len() + 8);
+            assert_eq!(pair[raw].0, reversed[raw].0);
+        }
+        assert_ne!(pair["get_user"].0, pair["get-user"].0);
+        assert_eq!(alone["unrelated"].0, pair["unrelated"].0);
+        assert_eq!(
+            build_catalog_names("directory", &["get_user"])["get_user"].0,
+            alone["get_user"].0
+        );
+    }
+
+    #[test]
+    fn names_are_bounded_ascii_including_truncation_collisions() {
+        let fits = "a".repeat(53);
+        let longer = format!("{fits}b");
+        assert_eq!(build_catalog_names("docs", &[&fits])[&fits].0.len(), 64);
+        assert_eq!(
+            build_catalog_names("docs", &[&longer])[&longer].0,
+            format!("mcp__docs__{fits}")
+        );
+        let collided = build_catalog_names("docs", &[&fits, &longer]);
+        assert_ne!(collided[&fits].0, collided[&longer].0);
+        for (name, binding) in collided.values() {
+            assert_eq!(name.len(), 64);
+            assert_eq!(binding.operation.as_ref().expect("operation").len(), 53);
+            assert_eq!(name.rsplit_once("__").expect("suffix").1.len(), 8);
+        }
+        for server in ["s".repeat(200), "服務器".repeat(40)] {
+            for tool in ["🔎 documents".repeat(40), "a".repeat(200)] {
+                let names = build_catalog_names(&server, &[&tool]);
+                assert!(names[&tool].0.is_ascii());
+                assert!(names[&tool].0.len() <= 64);
+            }
+        }
+    }
+
+    #[test]
+    fn generated_suffix_collision_hashes_the_bare_occupant_too() {
+        let names = build_catalog_names(
+            "docs",
+            &["search-docs", "search_docs", "search_docs__6rlrgooy"],
+        );
+        assert_eq!(
+            names
+                .values()
+                .map(|entry| &entry.0)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            3
+        );
+        assert_eq!(names["search-docs"].0, "mcp__docs__search_docs__6rlrgooy");
+        assert_ne!(
+            names["search_docs__6rlrgooy"].0,
+            "mcp__docs__search_docs__6rlrgooy"
+        );
+    }
+
+    #[test]
+    fn random_catalogs_have_unique_order_independent_names() {
+        let mut rng = fastrand::Rng::with_seed(4552);
+        let alphabet = ['a', 'A', '1', '_', '-', '.', ' ', '文'];
+        for _ in 0..256 {
+            let mut raw = BTreeSet::from([
+                "control".to_string(),
+                "get_user".to_string(),
+                "get-user".to_string(),
+            ]);
+            for _ in 0..rng.usize(1..40) {
+                raw.insert(
+                    (0..rng.usize(0..100))
+                        .map(|_| alphabet[rng.usize(..alphabet.len())])
+                        .collect::<String>(),
+                );
+            }
+            let mut raw = raw.iter().map(String::as_str).collect::<Vec<_>>();
+            let names = build_catalog_names("docs", &raw);
+            rng.shuffle(&mut raw);
+            let reordered = build_catalog_names("docs", &raw);
+            assert_eq!(names["control"].0, "mcp__docs__control");
+            assert_eq!(
+                names.len(),
+                names
+                    .values()
+                    .map(|entry| &entry.0)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+            );
+            for (raw, (name, binding)) in names {
+                assert_eq!(name, reordered[&raw].0);
+                assert_eq!(binding.operation, reordered[&raw].1.operation);
+                assert!(name.is_ascii() && name.len() <= 64);
+            }
+        }
     }
 }

@@ -199,7 +199,7 @@ for line in sys.stdin:
 "#;
 
 fn depth_tool_name() -> String {
-    crate::naming::build_prefixed_name("depth", "exercise-client-depth").0
+    crate::mcp_tool_names("depth", &["exercise-client-depth"])["exercise-client-depth"].clone()
 }
 
 struct SamplingHost {

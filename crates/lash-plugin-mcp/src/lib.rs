@@ -62,9 +62,18 @@ pub use rmcp::model::{
     SamplingMessage, SamplingMessageContent, UrlElicitationCapability,
 };
 
-/// The result is stable for that raw server/tool identity.
-pub fn mcp_tool_name(server_name: &str, native_tool_name: &str) -> String {
-    naming::build_prefixed_name(server_name, native_tool_name).0
+/// Model-facing names keyed by raw native tool name for one server's current
+/// catalog. Cleanup preserves tool case; all members of a cleanup or length
+/// collision receive an eight-character durable-id suffix. Refresh can rename
+/// tools without changing their durable ids.
+pub fn mcp_tool_names(
+    server_name: &str,
+    native_tool_names: &[&str],
+) -> std::collections::BTreeMap<String, String> {
+    naming::build_catalog_names(server_name, native_tool_names)
+        .into_iter()
+        .map(|(raw, (name, _))| (raw, name))
+        .collect()
 }
 
 #[cfg(test)]

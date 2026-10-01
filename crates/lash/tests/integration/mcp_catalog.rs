@@ -300,7 +300,7 @@ async fn witness(store: Store, native: bool) {
     );
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&calls);
-    let name = lash::mcp::mcp_tool_name("catalog", "storm");
+    let name = lash::mcp::mcp_tool_names("catalog", &["storm"])["storm"].clone();
     let provider = lash_core::testing::TestProvider::builder()
         .complete(move |_| {
             let part = match observed.fetch_add(1, Ordering::SeqCst) {

@@ -412,6 +412,8 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_typescript": "//crates/lash-typescript:lash-typescript",
+            "lashlang": "//crates/lashlang:lashlang",
             "tempfile": "//third-party/rust:p0390",
             "tokio": "//third-party/rust:p0399",
             "tracing_subscriber": "//third-party/rust:p0418"

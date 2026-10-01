@@ -154,7 +154,7 @@ async fn mcp_error_keeps_its_classification_and_message() {
 }
 
 fn mcp_name(server: &str, native_tool: &str) -> String {
-    naming::build_prefixed_name(server, native_tool).0
+    crate::mcp_tool_names(server, &[native_tool])[native_tool].clone()
 }
 
 /// Drive a provider through the single `execute` seam by resolving its
@@ -197,6 +197,13 @@ async fn execute_with_manifest<P: ToolProvider>(
     }
 }
 
+fn forced_publication_name() -> (String, lash_tool_support::ToolBinding) {
+    (
+        "mcp__forced__collision".to_string(),
+        lash_tool_support::ToolBinding::new(["forced"], "collision"),
+    )
+}
+
 fn advertised_tool(name: &str) -> rmcp::model::Tool {
     serde_json::from_value(json!({
         "name": name,
@@ -207,11 +214,13 @@ fn advertised_tool(name: &str) -> rmcp::model::Tool {
 
 #[test]
 fn import_refuses_a_forced_final_name_collision_without_overwriting() {
+    let names =
+        naming::build_catalog_names_with_digest("directory", &["get-user", "get_user"], |_| [7; 5]);
     let result = import_tools_with_name_builder(
         "directory",
         vec![advertised_tool("get-user"), advertised_tool("get_user")],
         None,
-        |server, tool| naming::build_prefixed_name_with_digest(server, tool, [7; 16]),
+        |_, tool| names[tool].clone(),
     );
     let error = match result {
         Ok(_) => panic!("colliding final names must be refused"),
@@ -247,7 +256,7 @@ async fn publication_refuses_a_forced_cross_server_collision_atomically() {
             server,
             vec![advertised_tool("abcdefghijklmnop")],
             None,
-            |server, tool| naming::build_prefixed_name_with_digest(server, tool, [9; 16]),
+            |_, _| forced_publication_name(),
         )
         .expect("one-tool catalog")
     };
@@ -285,8 +294,8 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     let pool = Arc::new(McpConnectionPool::empty());
     let server_name = "abcdefghijklmno-one";
     let forced_catalog = |server: &str, tool: &str| {
-        import_tools_with_name_builder(server, vec![advertised_tool(tool)], None, |server, tool| {
-            naming::build_prefixed_name_with_digest(server, tool, [9; 16])
+        import_tools_with_name_builder(server, vec![advertised_tool(tool)], None, |_, _| {
+            forced_publication_name()
         })
         .expect("one-tool forced catalog")
     };
@@ -379,7 +388,7 @@ async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations(
             server,
             vec![advertised_tool("abcdefghijklmnop")],
             None,
-            |server, tool| naming::build_prefixed_name_with_digest(server, tool, [9; 16]),
+            |_, _| forced_publication_name(),
         )
         .expect("one-tool catalog")
     };
@@ -946,14 +955,14 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
     let initial = pool.advertised_tools();
     let dropped_manifest = initial
         .iter()
-        .find(|definition| definition.name() == mcp_name("directory", "get-user"))
+        .find(|definition| definition.manifest.id.as_str() == "mcp:9:directory/8:get-user")
         .expect("hyphenated tool has its identity-derived name")
         .manifest
         .clone();
     let dropped_id = dropped_manifest.id.clone();
     let survivor_id = initial
         .iter()
-        .find(|definition| definition.name() == mcp_name("directory", "get_user"))
+        .find(|definition| definition.manifest.id.as_str() == "mcp:9:directory/8:get_user")
         .expect("underscore tool has its distinct identity-derived name")
         .manifest
         .id
@@ -1088,6 +1097,7 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     let initial = pool.advertised_tools();
     assert_eq!(initial.len(), 1);
     let stable_name = mcp_name("directory", "get_user");
+    assert_eq!(initial[0].name(), "mcp__directory__get_user");
     assert_eq!(initial[0].name(), stable_name);
     let saved_id = initial[0].manifest.id.clone();
     let resolved = Arc::new(policy_tests::ActorPauseHook::default());
@@ -1110,9 +1120,9 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
         loop {
             let refreshed = pool.advertised_tools();
             if refreshed.len() == usize::from(retain_original) + 1
-                && refreshed
-                    .iter()
-                    .any(|definition| definition.name() == mcp_name("directory", "get-user"))
+                && refreshed.iter().any(|definition| {
+                    definition.manifest.id.as_str() == "mcp:9:directory/8:get-user"
+                })
             {
                 break;
             }
@@ -1121,24 +1131,31 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     })
     .await
     .expect("tools/list_changed installs the refreshed catalog");
-    let refreshed_original = pool
-        .advertised_tools()
-        .into_iter()
-        .find(|definition| definition.name() == stable_name);
+    let refreshed = pool.advertised_tools();
+    let refreshed_original = refreshed
+        .iter()
+        .find(|definition| definition.manifest.id == saved_id);
     if retain_original {
-        assert_eq!(
-            refreshed_original
-                .expect("surviving tool keeps its model-facing name")
-                .manifest
-                .id,
-            saved_id,
-            "stable name must retain the saved native identity"
+        let renamed = refreshed_original.expect("surviving raw tool stays imported");
+        assert_ne!(
+            renamed.name(),
+            stable_name,
+            "collision renames both members"
+        );
+        assert!(renamed.name().starts_with("mcp__directory__get_user__"));
+        assert!(
+            refreshed
+                .iter()
+                .all(|definition| definition.name() != stable_name)
         );
     } else {
-        assert!(
-            refreshed_original.is_none(),
-            "the accepted raw target must no longer be discoverable by its model name"
+        assert!(refreshed_original.is_none());
+        assert_eq!(
+            refreshed[0].name(),
+            stable_name,
+            "the new raw tool inherits the bare path"
         );
+        assert_ne!(refreshed[0].manifest.id, saved_id);
     }
 
     resolved.release.notify_one();
@@ -1391,8 +1408,9 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
     }
 
     fn expected_operation(native_tool_name: &str) -> String {
-        naming::build_prefixed_name("directory", native_tool_name)
+        naming::build_catalog_names("directory", &["get-user", "get_user"])[native_tool_name]
             .1
+            .clone()
             .operation
             .expect("MCP tools have a Lashlang operation")
     }

@@ -207,7 +207,9 @@ async fn http_catalog_storm_coalesces_wire_notifications_and_keeps_control_live(
         .expect("control barrier during HTTP storm");
     assert_eq!(fixture.state.calls.load(Ordering::SeqCst), 2);
     fixture.state.release.notify_one();
-    while pool.advertised_tools()[0].name() != naming::build_prefixed_name("http", "work-3").0 {
+    while pool.advertised_tools()[0].name()
+        != crate::mcp_tool_names("http", &["work-3"])["work-3"].clone()
+    {
         tokio::task::yield_now().await;
     }
     entry
@@ -252,7 +254,9 @@ async fn http_valid_catalog_refresh_installs_once() {
         .expect("connected HTTP entry");
     let entry = pool.entries.read_recover()["http"].clone();
     entry.request_tool_refresh(entry.service_snapshot().expect("HTTP service").generation);
-    while pool.advertised_tools()[0].name() != naming::build_prefixed_name("http", "work-2").0 {
+    while pool.advertised_tools()[0].name()
+        != crate::mcp_tool_names("http", &["work-2"])["work-2"].clone()
+    {
         tokio::task::yield_now().await;
     }
     entry.establish().await.expect("publication barrier");
@@ -276,7 +280,9 @@ async fn http_server_instructions_follow_catalog_refresh_and_reconnect() {
         let entry = pool.entries.read_recover()["http"].clone();
         let generation = entry.service_snapshot().expect("HTTP service").generation;
         entry.request_tool_refresh(generation);
-        while pool.advertised_tools()[0].name() != naming::build_prefixed_name("http", "work-2").0 {
+        while pool.advertised_tools()[0].name()
+            != crate::mcp_tool_names("http", &["work-2"])["work-2"]
+        {
             tokio::task::yield_now().await;
         }
         observed.push(instructions());

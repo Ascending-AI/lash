@@ -22,24 +22,38 @@ pub const SERVER_NAME: &str = "slack_clone";
 pub const API_BASE_URL_ENV: &str = "SLACK_CLONE_MCP_API_BASE_URL";
 /// Environment variable carrying the bot token used for read-only API calls.
 pub const BOT_TOKEN_ENV: &str = "SLACK_CLONE_MCP_BOT_TOKEN";
+// Resolve against the complete native catalog so collision groups agree with import.
+static TOOL_NAMES: LazyLock<std::collections::BTreeMap<String, String>> = LazyLock::new(|| {
+    lash_plugin_mcp::mcp_tool_names(
+        SERVER_NAME,
+        &[
+            "list_channels_summary",
+            "workspace_stats",
+            "sample_summary",
+            "elicit_confirmation",
+            "elicit_via_url",
+            "list_host_roots",
+        ],
+    )
+});
 /// MCP name imported by the bot for the channel-summary tool.
 pub static LIST_CHANNELS_SUMMARY_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "list_channels_summary"));
+    LazyLock::new(|| TOOL_NAMES["list_channels_summary"].clone());
 /// MCP name imported by the bot for the workspace-statistics tool.
 pub static WORKSPACE_STATS_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "workspace_stats"));
+    LazyLock::new(|| TOOL_NAMES["workspace_stats"].clone());
 /// MCP name imported by the bot for provider-backed sampling.
 pub static SAMPLE_SUMMARY_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "sample_summary"));
+    LazyLock::new(|| TOOL_NAMES["sample_summary"].clone());
 /// MCP name imported by the bot for form elicitation.
 pub static ELICIT_CONFIRMATION_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_confirmation"));
+    LazyLock::new(|| TOOL_NAMES["elicit_confirmation"].clone());
 /// MCP name imported by the bot for URL elicitation and completion.
 pub static URL_ELICITATION_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_via_url"));
+    LazyLock::new(|| TOOL_NAMES["elicit_via_url"].clone());
 /// MCP name imported by the bot for roots listing.
 pub static LIST_HOST_ROOTS_TOOL: LazyLock<String> =
-    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "list_host_roots"));
+    LazyLock::new(|| TOOL_NAMES["list_host_roots"].clone());
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]

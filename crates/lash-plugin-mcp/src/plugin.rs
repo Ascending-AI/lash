@@ -460,7 +460,7 @@ mod tests {
 
         let defs = factory.pool().advertised_tools();
         assert_eq!(defs.len(), 1, "expected one imported tool, got {defs:?}");
-        let expected_name = crate::mcp_tool_name("docs", "search-docs");
+        let expected_name = crate::mcp_tool_names("docs", &["search-docs"])["search-docs"].clone();
         assert_eq!(defs[0].name(), expected_name);
         assert_eq!(defs[0].manifest.id.as_str(), "mcp:4:docs/11:search-docs");
         // The binding is always written: the manifest key is lash's internal
@@ -477,10 +477,7 @@ mod tests {
         );
         assert_eq!(
             recorded.get("operation"),
-            expected_name
-                .rsplit_once("__")
-                .map(|(_, operation)| serde_json::json!(operation))
-                .as_ref(),
+            Some(&serde_json::json!("search_docs")),
             "{recorded:?}"
         );
         assert!(recorded.get("aliases").is_none(), "{recorded:?}");

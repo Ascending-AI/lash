@@ -22,7 +22,7 @@ use super::*;
 mod scripted;
 
 fn mcp_name(server: &str, native_tool: &str) -> String {
-    crate::naming::build_prefixed_name(server, native_tool).0
+    crate::mcp_tool_names(server, &[native_tool])[native_tool].clone()
 }
 
 pub(super) struct ActorPauseHook {

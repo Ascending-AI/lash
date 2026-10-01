@@ -181,8 +181,9 @@ struct McpEntry {
     active_pid: Arc<AtomicU32>,
     /// Cached, prefixed tool definitions for this server, refreshed on every
     /// successful (re)connect and kept across a disconnect so the tool
-    /// surface stays stable. Keys are the bounded, identity-suffixed model
-    /// names (`mcp__<server>__<tool>_<digest>`).
+    /// surface stays stable during an outage. Keys are bounded bare model names
+    /// (`mcp__<server>__<tool>`) with symmetric eight-character identity
+    /// suffixes on cleanup/truncation collision groups.
     imported_tools: RwLock<BTreeMap<String, ImportedTool>>,
     last_error: RwLock<Option<McpServerFault>>,
     shutting_down: Arc<AtomicBool>,
@@ -540,7 +541,8 @@ impl McpConnectionPool {
     }
 
     /// All advertised tools across every server, with bounded
-    /// `mcp__<server>__<tool>_<digest>` names. Cheap — these are precomputed
+    /// `mcp__<server>__<tool>` names. Cleanup/truncation collision groups use
+    /// `<tool>__<8-character-id-digest>` for every member. These are precomputed
     /// `ToolDefinition` clones.
     /// Includes tools of currently disconnected servers (last successful
     /// discovery) so the tool catalog stays stable across an outage.
@@ -918,7 +920,7 @@ fn validate_unique_server_prefixes<'a>(
 ) -> Result<(), McpError> {
     let mut prefixes = BTreeMap::<String, &'a str>::new();
     for server_name in server_names {
-        let prefix = naming::normalize_identifier(server_name);
+        let prefix = naming::server_prefix(server_name);
         if let Some(existing_server) = prefixes.insert(prefix.clone(), server_name) {
             return Err(McpError::Config(prefix_collision_message(
                 existing_server,
@@ -934,12 +936,12 @@ fn conflicting_server_prefix<'a>(
     existing_server_names: impl IntoIterator<Item = &'a str>,
     incoming_server: &str,
 ) -> Option<(&'a str, String)> {
-    let incoming_prefix = naming::normalize_identifier(incoming_server);
+    let incoming_prefix = naming::server_prefix(incoming_server);
     existing_server_names
         .into_iter()
         .find(|existing_server| {
             *existing_server != incoming_server
-                && naming::normalize_identifier(existing_server) == incoming_prefix
+                && naming::server_prefix(existing_server) == incoming_prefix
         })
         .map(|existing_server| (existing_server, incoming_prefix))
 }
@@ -1349,12 +1351,14 @@ fn import_tools(
     tools: Vec<rmcp::model::Tool>,
     instructions: Option<String>,
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
-    import_tools_with_name_builder(
-        server_name,
-        tools,
-        instructions,
-        naming::build_prefixed_name,
-    )
+    let raw_names = tools
+        .iter()
+        .map(|tool| tool.name.as_ref())
+        .collect::<Vec<_>>();
+    let names = naming::build_catalog_names(server_name, &raw_names);
+    import_tools_with_name_builder(server_name, tools, instructions, |_, raw| {
+        names[raw].clone()
+    })
 }
 
 fn import_tools_with_name_builder(
@@ -1694,3 +1698,8 @@ mod tests;
 #[cfg(test)]
 #[path = "catalog_peer_tests.rs"]
 mod catalog_peer_tests;
+
+#[cfg(test)]
+#[cfg(feature = "lashlang")]
+#[path = "naming_cell_tests.rs"]
+mod naming_cell_tests;
