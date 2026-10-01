@@ -874,7 +874,7 @@ impl LashRuntime {
         // deliver it now (ADR 0109 §3). The drive applies the command at its
         // next boundary, before any turn input (ADR 0101 §4).
         self.ingress_relay()
-            .deliver_admitted(enqueued.batch_id.as_str())
+            .deliver_admitted(&session_id, enqueued.batch_id.as_str())
             .await;
         Ok(AcceptedSessionCommand::Queued(
             crate::runtime::SessionCommandSettlementHandle {

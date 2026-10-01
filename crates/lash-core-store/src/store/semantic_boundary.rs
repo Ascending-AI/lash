@@ -102,7 +102,6 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         frame_transition: _,       // a store instruction derived from the graph
         config,
         execution_config, // the root's view: the identity's config when present
-        current_frame_node_id: _, // derived from the graph leaf
         graph,
         graph_base_leaf_node_id: _, // resident head fact, not request content
         checkpoint: _,              // rebuilt baseline, not the request

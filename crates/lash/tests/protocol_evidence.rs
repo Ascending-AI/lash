@@ -1270,48 +1270,36 @@ fn drain_area_witnesses() {
     fn meth_0382<T: lash::plugins::CodeExecutorPlugin>(_: &T) {
         let _ = T::restore_execution_state;
     }
-    // W0383: lash::plugins::ExecutionStateComponentSnapshot [enum]
-    type_witness::<lash::plugins::ExecutionStateComponentSnapshot>();
-    // W0384: lash::plugins::ExecutionStateComponentSnapshot::Changed [variant]
-    variant_witness(|value: &lash::plugins::ExecutionStateComponentSnapshot| {
-        matches!(
-            value,
-            lash::plugins::ExecutionStateComponentSnapshot::Changed(..)
-        )
+    // W0383: lash::plugins::LeafChange [enum]
+    type_witness::<lash::plugins::LeafChange>();
+    // W0384: lash::plugins::LeafChange::Changed [variant]
+    variant_witness(|value: &lash::plugins::LeafChange| {
+        matches!(value, lash::plugins::LeafChange::Changed(..))
     });
-    // W0385: lash::plugins::ExecutionStateComponentSnapshot::Changed::0 [field]
-    field_witness(|value: &lash::plugins::ExecutionStateComponentSnapshot| {
-        if let lash::plugins::ExecutionStateComponentSnapshot::Changed(f0) = value {
+    // W0385: lash::plugins::LeafChange::Changed::0 [field]
+    field_witness(|value: &lash::plugins::LeafChange| {
+        if let lash::plugins::LeafChange::Changed(f0) = value {
             let _ = f0;
         }
     });
-    // W0386: lash::plugins::ExecutionStateComponentSnapshot::Unchanged [variant]
-    variant_witness(|value: &lash::plugins::ExecutionStateComponentSnapshot| {
-        matches!(
-            value,
-            lash::plugins::ExecutionStateComponentSnapshot::Unchanged
-        )
+    // W0386: lash::plugins::LeafChange::Unchanged [variant]
+    variant_witness(|value: &lash::plugins::LeafChange| {
+        matches!(value, lash::plugins::LeafChange::Unchanged)
     });
-    // W0387: lash::plugins::ExecutionStateSnapshot [struct]
-    type_witness::<lash::plugins::ExecutionStateSnapshot>();
-    // W0388: lash::plugins::ExecutionStateSnapshot::root [field]
-    field_witness(|value: &lash::plugins::ExecutionStateSnapshot| {
-        let _ = &value.root;
+    // W0387: lash::plugins::ExecutionStateCapture [enum]
+    type_witness::<lash::plugins::ExecutionStateCapture>();
+    variant_witness(|value: &lash::plugins::ExecutionStateCapture| {
+        matches!(value, lash::plugins::ExecutionStateCapture::Clear)
     });
-    // W0389: lash::plugins::ExecutionStateSnapshot::components [field]
-    field_witness(|value: &lash::plugins::ExecutionStateSnapshot| {
-        let _ = &value.components;
+    field_witness(|value: &lash::plugins::ExecutionStateCapture| {
+        if let lash::plugins::ExecutionStateCapture::Replace { root, leaves } = value {
+            let _ = (root, leaves);
+        }
     });
-    // W0390: lash::plugins::ExecutionStateSnapshot::from_root [function]
-    let _ = lash::plugins::ExecutionStateSnapshot::from_root;
-    // W0391: lash::plugins::ExecutionStateSnapshot::changed_component [function]
-    let _: fn(&mut lash::plugins::ExecutionStateSnapshot, String, std::sync::Arc<[u8]>) =
-        lash::plugins::ExecutionStateSnapshot::changed_component;
-    // W0392: lash::plugins::ExecutionStateSnapshot::unchanged_component [function]
-    let _: fn(&mut lash::plugins::ExecutionStateSnapshot, String) =
-        lash::plugins::ExecutionStateSnapshot::unchanged_component;
-    // W0393: lash::plugins::ExecutionStateSnapshot::from_hydrated [function]
-    let _ = lash::plugins::ExecutionStateSnapshot::from_hydrated;
+    type_witness::<lash::plugins::ExecutionLeafName>();
+    type_witness::<lash::plugins::InvalidExecutionLeafName>();
+    type_witness::<lash::plugins::CheckpointComponentKey>();
+    let _ = lash::plugins::ExecutionStateCapture::from_hydrated;
     // W0394: lash::plugins::ProtocolDriverPlugin [trait]
     fn trait_witness_0394<T: lash::plugins::ProtocolDriverPlugin>() {}
     // W0395: lash::plugins::ProtocolDriverPlugin::build_preamble [function]

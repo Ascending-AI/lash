@@ -234,7 +234,11 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
     let answer = handle.outcome().await.expect("answer");
     assert_eq!(answer.status(), lash::TurnStatus::Answered);
     let root = answer.root().cloned().expect("answered root");
-    let scope_close = lash_core::store::scope_close_obligation_id(&SESSION.into(), &root);
+    let scope_close = lash_core::store::ObligationKey::ScopeClose {
+        session_id: SESSION.into(),
+        root: root.clone(),
+    }
+    .id();
     if pinned {
         // The previous answer is durable. A subsequent turn's exact closure
         // authorization legitimately pins the same session until its commit.
@@ -596,7 +600,11 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
         answer.lock().expect("answer").take(),
         Some(Ok(lash::SessionDeletion::Closing(_)))
     ));
-    let id = lash_core::store::scope_close_obligation_id(&session, &root);
+    let id = lash_core::store::ObligationKey::ScopeClose {
+        session_id: session.clone(),
+        root: root.clone(),
+    }
+    .id();
     let ledger = world
         .backend
         .lash_backend()

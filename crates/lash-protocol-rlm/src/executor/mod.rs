@@ -387,7 +387,7 @@ impl RlmCheckpointPerfFixture {
 
     pub async fn capture(
         &mut self,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
         self.state
             .snapshot_execution_state(lash_core::FleetFormat::current())
             .await

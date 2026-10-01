@@ -393,7 +393,6 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         commit.graph = GraphAppend::Extend {
             nodes: vec![node.clone()],
         };
-        commit.current_frame_node_id = Some(frame_node_id);
         commit
     };
 
@@ -480,7 +479,6 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     first_commit.graph = GraphAppend::Extend {
         nodes: vec![node.clone()],
     };
-    first_commit.current_frame_node_id = Some(frame_node_id);
     first
         .commit_runtime_state(first_commit)
         .await

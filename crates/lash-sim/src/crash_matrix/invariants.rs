@@ -23,9 +23,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use lash_core::store::{
-    HistoryAnchor, HistoryBudget, ObligationKind, ObligationState, scope_close_obligation_id,
-};
+use lash_core::store::{HistoryAnchor, HistoryBudget, ObligationKind, ObligationState};
 use lash_core::{ProcessId, ScopeId, SessionId, SessionLookup, TurnId};
 
 use super::world::CrashWorld;
@@ -303,7 +301,11 @@ impl ObligationProbe for IngressObligationProbe {
                 &input.session,
                 input.root.as_str(),
             );
-            let id = lash_core::store::ingress_obligation::ingress_obligation_id(item.as_str());
+            let id = lash_core::store::ObligationKey::Ingress {
+                session_id: input.session.clone(),
+                item_id: (item.as_str()).to_string(),
+            }
+            .id();
             match ledger
                 .state(&id)
                 .await
@@ -417,7 +419,10 @@ impl ObligationProbe for ProcessStartProbe {
             .iter()
             .filter(|record| !record.input.is_externally_owned())
         {
-            let id = lash_core::store::process_start_obligation_id(&record.id);
+            let id = lash_core::store::ObligationKey::ProcessStart {
+                process_id: record.id.clone(),
+            }
+            .id();
             let standing = ledger
                 .standing(&id)
                 .await
@@ -689,7 +694,11 @@ async fn check_scopes(world: &CrashWorld, expected: &Expected, violations: &mut 
         {
             match factory.root_terminal(session_id, turn_id).await {
                 Ok(Some(_)) => {
-                    let id = scope_close_obligation_id(session_id, turn_id);
+                    let id = lash_core::store::ObligationKey::ScopeClose {
+                        session_id: session_id.clone(),
+                        root: turn_id.clone(),
+                    }
+                    .id();
                     match scope_closes.state(&id).await {
                         Ok(Some(ObligationState::Delivered | ObligationState::Stalled)) => {}
                         // A deleted session's rows are gone with their

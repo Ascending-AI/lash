@@ -1,5 +1,5 @@
 use super::{RuntimeCommit, RuntimeTurnCommitStamp, StoreError};
-use crate::{FrameNodeId, NodeId, SessionId};
+use crate::{NodeId, SessionId};
 
 /// Rows a store decoded since it opened, by kind (ADR 0112 §14): what the
 /// residency conformance cases compare before and after a read.
@@ -62,14 +62,6 @@ pub trait StoreTestSupport: Send + Sync {
     async fn delete_session_head_for_testing(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), StoreError>;
-
-    /// Rewrite only the head's `current_frame_node_id` pointer of
-    /// `session_id`, leaving its leaf as it is.
-    async fn set_head_current_frame_for_testing(
-        &self,
-        session_id: &SessionId,
-        frame: Option<FrameNodeId>,
     ) -> Result<(), StoreError>;
 
     /// Point `session_id`'s `fork_lineage` row for the owner of

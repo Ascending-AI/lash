@@ -342,8 +342,6 @@ pub struct SessionHeadPayload {
     #[serde(default = "default_root_session_id")]
     pub session_id: SessionId,
     pub config: crate::PersistedSessionConfig,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_frame_node_id: Option<crate::FrameNodeId>,
     /// Whether the commit that published this head presented a drive fence:
     /// a root's own commit or the command lane's, never a lane-less host
     /// write (FIG-4201). A root resumed on a fresh journal reads it to tell a
@@ -355,7 +353,7 @@ pub struct SessionHeadPayload {
 /// Fully assembled session-head metadata returned by a store.
 ///
 /// This type is intentionally not serializable. Store implementations decode a
-/// [`SessionHeadPayload`] and must supply the three column-owned values through
+/// [`SessionHeadPayload`] and must supply column-owned values and the leaf-derived frame through
 /// [`Self::assemble`].
 ///
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
@@ -366,6 +364,7 @@ pub struct SessionHeadMeta {
     pub session_id: SessionId,
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
+    /// Derived from the head leaf row when loading metadata.
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub checkpoint_ref: Option<BlobRef>,
     pub leaf_node_id: Option<crate::NodeId>,
@@ -442,6 +441,7 @@ impl SessionHeadMeta {
         head_revision: u64,
         checkpoint_ref: Option<BlobRef>,
         leaf_node_id: Option<crate::NodeId>,
+        current_frame_node_id: Option<crate::FrameNodeId>,
     ) -> Result<Self, StoreError> {
         if payload.session_id != *session_id {
             return Err(StoreError::StoredDataCorrupt {
@@ -458,7 +458,7 @@ impl SessionHeadMeta {
             session_id: session_id.clone(),
             head_revision,
             config: payload.config,
-            current_frame_node_id: payload.current_frame_node_id,
+            current_frame_node_id,
             checkpoint_ref,
             leaf_node_id,
             pending_follow_on: None,
@@ -472,7 +472,6 @@ impl SessionHeadMeta {
             schema_version: self.schema_version,
             session_id: self.session_id.clone(),
             config: self.config.clone(),
-            current_frame_node_id: self.current_frame_node_id.clone(),
             published_by_drive: self.published_by_drive,
         }
     }
@@ -578,7 +577,6 @@ impl RuntimeCommit {
             frame_transition,
             config: _,
             execution_config: _,
-            current_frame_node_id: _,
             graph: _,
             graph_base_leaf_node_id: _,
             checkpoint: _,
@@ -728,7 +726,6 @@ impl RuntimeCommit {
         commit_budget: CommitBudget,
         fleet_format: FleetFormat,
     ) -> Result<Self, StoreError> {
-        let current_frame_node_id = graph.derive_current_frame_node_id(&state.session_graph);
         let config = persisted_session_config_from_state(state);
         let execution_config = state
             .authority
@@ -747,7 +744,6 @@ impl RuntimeCommit {
             frame_transition: None,
             config,
             execution_config,
-            current_frame_node_id,
             graph,
             graph_base_leaf_node_id: state.session_graph.leaf_node_id.clone(),
             checkpoint: build_checkpoint_from_persisted_state(state, fleet_format)?,
@@ -773,7 +769,6 @@ impl RuntimeCommit {
     ) -> Result<(Self, Vec<(crate::NodeId, crate::NodeId)>), StoreError> {
         let session_id = self.session_id.clone();
         let node_id_mapping = self.graph.derive_node_ids(&session_id, &operation)?;
-        remap_optional_node_id(&mut self.current_frame_node_id, &node_id_mapping);
         self.turn_commit = RuntimeTurnCommitStamp::new(operation);
         Ok((self, node_id_mapping))
     }
@@ -925,7 +920,6 @@ impl Default for SessionHeadPayload {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            current_frame_node_id: None,
             published_by_drive: false,
         }
     }

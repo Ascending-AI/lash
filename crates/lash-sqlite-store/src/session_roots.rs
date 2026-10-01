@@ -13,8 +13,8 @@ use lash_core_execution::store::{
     ControlIntentState, EnginePark, IntentObligation, IntentSettle, ObligationKey, ObligationState,
     ParkCancelCause, ParkEventKind, RootAdmission, RootEnd, RootStore, RootTerminal,
     RootTerminalCause, RootTerminalWriteDecision, RootTurns, UnfinishedRoot, close_admission,
-    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict,
-    scope_close_obligation_id, stored_intent_kind, stored_intent_state,
+    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict, stored_intent_kind,
+    stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
@@ -167,13 +167,12 @@ pub(crate) fn write_root_terminal_conn(
     }
     // A terminal root owes its scope close (ADR 0109 §3): the terminal
     // transaction arms the row's obligation, due at the terminal instant.
-    crate::obligation_ledger::arm_obligation_id_tx(
+    crate::obligation_ledger::arm_obligation_tx(
         tx,
         &ObligationKey::ScopeClose {
             session_id: terminal.session_id.clone(),
             root: terminal.root.clone(),
         },
-        &scope_close_obligation_id(&terminal.session_id, &terminal.root),
         columns.at_ms,
     )?;
     release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms)

@@ -1141,9 +1141,7 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    use lash_core::store::{
-        ObligationKind, ObligationState, ingress_obligation::ingress_obligation_id,
-    };
+    use lash_core::store::{ObligationKey, ObligationKind, ObligationState};
     let turn_id = TurnId::from(format!("{prefix}-held-for-its-acceptor"));
     let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("answered by the acceptor's drive");
@@ -1159,7 +1157,11 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
     let [input_id] = accepted.as_slice() else {
         panic!("the acceptance left its one row open: {accepted:?}");
     };
-    let obligation = ingress_obligation_id(input_id.as_str());
+    let obligation = ObligationKey::Ingress {
+        session_id: SessionId::from(SESSION_ID),
+        item_id: input_id.as_str().to_string(),
+    }
+    .id();
 
     let ingress = backend.obligation_ledger(ObligationKind::Ingress);
     let ttl_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;

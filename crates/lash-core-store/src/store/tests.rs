@@ -1,18 +1,4 @@
 use super::*;
-use crate::facade_support::AgentFrameReasonFacadeOps;
-
-fn test_message(id: &str) -> crate::Message {
-    crate::Message {
-        id: id.to_string(),
-        role: crate::MessageRole::User,
-        parts: crate::shared_parts(vec![crate::Part::text(
-            format!("{id}.p0"),
-            "test message".to_string(),
-            None,
-        )]),
-        origin: None,
-    }
-}
 
 /// The settled cancellation closure of `turn` in `session`, as its promise
 /// owner would return it with `cancellation` as the gate's evidence.
@@ -56,26 +42,6 @@ pub(super) fn settled_closure_for_test(
         cancellation.clone(),
         cancellation,
     )
-}
-
-fn state_with_persisted_initial_frame(session_id: &str) -> crate::RuntimeSessionState {
-    let mut state = crate::RuntimeSessionState {
-        session_id: SessionId::from(session_id),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-    };
-    state.ensure_agent_frame_initialized();
-    state.mark_node_ids_persisted(
-        state
-            .session_graph
-            .nodes
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect::<Vec<_>>(),
-    );
-    state
 }
 
 fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
@@ -297,91 +263,6 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
 }
 
 #[test]
-fn commit_frame_derivation_reads_resident_parent_for_temporary_append_nodes() {
-    let mut state = state_with_persisted_initial_frame("temporary-frame-derivation");
-    let current_frame_node_id = state
-        .current_frame_node_id
-        .clone()
-        .expect("initial frame node id");
-    let temporary_node_id = state
-        .session_graph
-        .append_message(test_message("temporary"));
-    assert!(temporary_node_id.starts_with("draft-node/v3/"));
-    let graph = state.pending_graph_commit();
-    assert_eq!(graph.nodes()[0].node_id, temporary_node_id);
-    assert!(state.session_graph.find_node(&temporary_node_id).is_some());
-
-    let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        &state,
-        graph,
-        OperationId::turn(&state.session_id, "turn-1", "final"),
-    )
-    .expect("derive frame from resident parent");
-
-    assert_eq!(commit.current_frame_node_id, Some(current_frame_node_id));
-}
-
-#[test]
-fn commit_frame_derivation_reads_resident_parent_for_derived_append_nodes() {
-    let mut state = state_with_persisted_initial_frame("derived-frame-derivation");
-    let current_frame_node_id = state
-        .current_frame_node_id
-        .clone()
-        .expect("initial frame node id");
-    let temporary_node_id = state.session_graph.append_message(test_message("derived"));
-    let operation = OperationId::turn(&state.session_id, "turn-1", "final");
-    let mut graph = state.pending_graph_commit();
-    graph
-        .derive_node_ids(&state.session_id, &operation)
-        .expect("derive final append ids");
-    assert_ne!(graph.nodes()[0].node_id, temporary_node_id);
-    assert!(state.session_graph.find_node(&temporary_node_id).is_some());
-    assert!(
-        state
-            .session_graph
-            .find_node(&graph.nodes()[0].node_id)
-            .is_none()
-    );
-
-    let commit =
-        RuntimeCommit::persisted_state_with_graph_commit_and_operation(&state, graph, operation)
-            .expect("derive frame from resident parent");
-
-    assert_eq!(commit.current_frame_node_id, Some(current_frame_node_id));
-}
-
-#[test]
-fn commit_frame_derivation_uses_last_frame_boundary_inside_append() {
-    let mut state = state_with_persisted_initial_frame("appended-frame-derivation");
-    state
-        .session_graph
-        .append_message(test_message("before-boundary"));
-    let frame_key = crate::FrameKey::from_caller_material("second-frame")
-        .expect("non-empty frame key material");
-    let appended_frame_node_id =
-        crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
-    assert!(state.session_graph.append_frame_open_with_id_at(
-        appended_frame_node_id.clone(),
-        frame_key,
-        crate::AgentFrameReason::continue_as(),
-        crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
-        "2026-09-12T00:00:00Z".to_string(),
-    ));
-    state
-        .session_graph
-        .append_message(test_message("after-boundary"));
-
-    let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        &state,
-        state.pending_graph_commit(),
-        OperationId::turn(&state.session_id, "turn-1", "final"),
-    )
-    .expect("derive appended frame boundary");
-
-    assert_eq!(commit.current_frame_node_id, Some(appended_frame_node_id));
-}
-
-#[test]
 fn with_operation_returns_the_append_id_mapping() {
     let commit = intent_fixture();
     let nodes = commit.graph.nodes();
@@ -456,15 +337,29 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the opt-in test generator writes the corpus in the supplied workspace"
+)]
 fn intent_hash_golden_vector() {
     // Checkpoint manifest v3, explicit ambient tool access, and the config
     // revision are pinned in intent bytes.
     // FIG-3542: the frame-handoff batch list left the intent; a pending
     // follow-on enters it only when the commit leaves one on the head.
     // FIG-4236: the usage deltas left the intent (ADR 0125).
+    let hash = intent_fixture().turn_commit_hash().expect("golden intent");
+    if std::env::var_os("UPDATE_RUNTIME_COMMIT_INTENT_GOLDEN").is_some() {
+        let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
+        std::fs::write(
+            std::path::PathBuf::from(root)
+                .join("crates/lash-core-store/src/store/testdata/runtime_commit_intent.hex"),
+            format!("{hash}\n"),
+        )
+        .expect("write intent golden");
+    }
     assert_eq!(
-        intent_fixture().turn_commit_hash().expect("golden intent"),
-        "42359869259802ce545652b639d3f87403e233ae4bcd76bb4d05e4cbb941605c"
+        hash,
+        include_str!("testdata/runtime_commit_intent.hex").trim()
     );
 }
 
@@ -473,7 +368,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "42359869259802ce545652b639d3f87403e233ae4bcd76bb4d05e4cbb941605c",
+        include_str!("testdata/runtime_commit_intent.hex").trim(),
         "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
@@ -519,7 +414,7 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "42359869259802ce545652b639d3f87403e233ae4bcd76bb4d05e4cbb941605c"
+        include_str!("testdata/runtime_commit_intent.hex").trim()
     );
 
     let mut with_evidence = baseline;
@@ -553,10 +448,10 @@ fn session_head_meta_takes_its_identity_from_the_row_key() {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            current_frame_node_id: None,
             published_by_drive: false,
         },
         7,
+        None,
         None,
         None,
     )
@@ -580,10 +475,10 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            current_frame_node_id: None,
             published_by_drive: false,
         },
         7,
+        None,
         None,
         None,
     )
@@ -611,9 +506,15 @@ fn session_head_meta_refuses_a_head_json_missing_its_session_id() {
     }))
     .expect("a head payload without a session id still decodes");
 
-    let error =
-        SessionHeadMeta::assemble(&SessionId::from("keyed-session"), payload, 0, None, None)
-            .expect_err("an absent head session id must not be invented as `root`");
+    let error = SessionHeadMeta::assemble(
+        &SessionId::from("keyed-session"),
+        payload,
+        0,
+        None,
+        None,
+        None,
+    )
+    .expect_err("an absent head session id must not be invented as `root`");
 
     assert!(
         matches!(&error, StoreError::StoredDataCorrupt { record_kind, .. } if *record_kind == "SessionHeadMeta"),
@@ -622,60 +523,32 @@ fn session_head_meta_refuses_a_head_json_missing_its_session_id() {
 }
 
 #[test]
-fn session_head_payload_bytes_match_the_legacy_meta_format() {
-    #[allow(dead_code)]
-    #[derive(serde::Serialize)]
-    struct LegacySessionHeadMeta {
-        schema_version: u32,
-        #[serde(default = "super::default_root_session_id")]
-        session_id: SessionId,
-        #[serde(skip)]
-        head_revision: u64,
-        config: crate::PersistedSessionConfig,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        current_frame_node_id: Option<String>,
-        #[serde(skip)]
-        checkpoint_ref: Option<BlobRef>,
-        #[serde(skip)]
-        leaf_node_id: Option<String>,
-    }
-
-    let legacy = LegacySessionHeadMeta {
-        schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-        session_id: SessionId::from("column-owned-head"),
-        head_revision: 41,
-        config: crate::PersistedSessionConfig::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ),
-        current_frame_node_id: None,
-        checkpoint_ref: Some(BlobRef("checkpoint".to_string())),
-        leaf_node_id: Some("leaf".to_string()),
-    };
-    let assembled = SessionHeadMeta::assemble(
+fn session_head_payload_excludes_the_leaf_derived_frame() {
+    let meta = SessionHeadMeta::assemble(
         &SessionId::from("column-owned-head"),
         SessionHeadPayload {
-            schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: SessionId::from("column-owned-head"),
-            config: crate::PersistedSessionConfig::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ),
-            current_frame_node_id: None,
-            published_by_drive: false,
+            ..Default::default()
         },
         41,
         Some(BlobRef("checkpoint".to_string())),
         Some("leaf".into()),
+        Some(crate::FrameNodeId::new("frame").expect("frame id")),
     )
-    .expect("the pinned payload is keyed on its own session");
-    let before = serde_json::to_vec(&legacy).expect("serialize legacy session head metadata");
-    let after = serde_json::to_vec(&assembled.payload()).expect("serialize session head payload");
-
-    assert_eq!(
-        after, before,
-        "the head_json payload must remain byte-identical"
-    );
+    .expect("assemble the leaf's derived frame");
+    assert_eq!(meta.current_frame_node_id.as_deref(), Some("frame"));
+    let payload = serde_json::to_value(meta.payload()).expect("serialize head");
+    for column in [
+        "current_frame_node_id",
+        "leaf_node_id",
+        "checkpoint_ref",
+        "head_revision",
+    ] {
+        assert!(
+            payload.get(column).is_none(),
+            "{column} is not head payload"
+        );
+    }
 }
 
 #[test]

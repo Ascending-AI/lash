@@ -716,7 +716,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                     .expect("read settled render options command"),
                 lash_core::runtime::SessionCommandSettlement::Applied {
                     outcome: lash_core::runtime::SessionCommandOutcome::ConfigTransaction {
-                        outcome: lash_core::ConfigTransactionOutcome::Applied { .. },
+                        outcome: lash_core::ConfigTransactionOutcome::Applied { .. }
                     },
                     ..
                 }

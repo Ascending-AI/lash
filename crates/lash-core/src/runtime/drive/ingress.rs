@@ -25,7 +25,7 @@ use super::relay::{
     deliver_claimed, deliver_now,
 };
 pub use crate::engine::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
-use crate::store::ingress_obligation::ingress_obligation_id;
+
 use crate::store::{ObligationId, ObligationKey, ObligationKind, ObligationLedger};
 use crate::{Clock, SessionWorkEngine, StoreError};
 
@@ -86,11 +86,16 @@ impl IngressRelay {
     /// A store failure.
     pub async fn stalled(
         &self,
+        session_id: &crate::SessionId,
         item_id: &str,
     ) -> Result<Option<crate::store::StalledObligation>, StoreError> {
         crate::store::ingress_obligation::stalled_obligation(
             self.ledger.as_ref(),
-            &ingress_obligation_id(item_id),
+            &crate::store::ObligationKey::Ingress {
+                session_id: session_id.clone(),
+                item_id: item_id.to_string(),
+            }
+            .id(),
         )
         .await
     }
@@ -108,12 +113,19 @@ impl IngressRelay {
     /// A store failure.
     pub async fn current_ask(
         &self,
+        session_id: &crate::SessionId,
         item_id: &str,
     ) -> Result<Option<crate::engine::DriveRequestId>, StoreError> {
         use crate::store::ObligationState;
         Ok(self
             .ledger
-            .standing(&ingress_obligation_id(item_id))
+            .standing(
+                &crate::store::ObligationKey::Ingress {
+                    session_id: session_id.clone(),
+                    item_id: item_id.to_string(),
+                }
+                .id(),
+            )
             .await?
             .filter(|standing| {
                 standing.attempts > 0
@@ -157,8 +169,12 @@ impl IngressRelay {
     /// that admission committed (ADR 0109 §1.8: attempted before the
     /// producer's call returns). An ask that fails is left to the relay: the
     /// admission stands, and the row stays due.
-    pub async fn deliver_admitted(&self, item_id: &str) {
-        let id = ingress_obligation_id(item_id);
+    pub async fn deliver_admitted(&self, session_id: &crate::SessionId, item_id: &str) {
+        let id = crate::store::ObligationKey::Ingress {
+            session_id: session_id.clone(),
+            item_id: item_id.to_string(),
+        }
+        .id();
         match deliver_now(self, &id, self.clock.as_ref()).await {
             Ok(
                 RelayVerdict::Requested

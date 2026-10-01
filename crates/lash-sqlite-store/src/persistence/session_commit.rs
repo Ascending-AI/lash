@@ -109,7 +109,7 @@ fn end_frames_tx(
             tx,
             &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), gate.cloned()),
             now_ms,
-            "core",
+            crate::obligation_ledger::CleanupStorage::DurableCore,
         )?;
     }
     Ok(())

@@ -112,22 +112,22 @@ pub(crate) enum RlmSnapshotError {
     )]
     MissingLeaf {
         logical_key: String,
-        component: String,
+        component: lash_core::plugin::ExecutionLeafName,
     },
     #[error(
         "RLM snapshot logical key `{logical_key}` references leaf component `{component}` whose content address is `{actual_component}`"
     )]
     LeafHashMismatch {
         logical_key: String,
-        component: String,
-        actual_component: String,
+        component: lash_core::plugin::ExecutionLeafName,
+        actual_component: lash_core::plugin::ExecutionLeafName,
     },
     #[error(
         "RLM snapshot root/leaf set is inconsistent; missing={missing:?}, unexpected={unexpected:?}"
     )]
     LeafSetMismatch {
-        missing: Vec<String>,
-        unexpected: Vec<String>,
+        missing: Vec<lash_core::plugin::ExecutionLeafName>,
+        unexpected: Vec<lash_core::plugin::ExecutionLeafName>,
     },
     #[error("RLM canonical Lashlang snapshot is invalid: {0}")]
     Lashlang(#[from] lashlang::SnapshotDecodeError),

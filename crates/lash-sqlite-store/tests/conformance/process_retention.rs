@@ -165,10 +165,17 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
             },
         )
         .expect("read cleanup obligation after reopen");
-    assert!(obligation_id.starts_with("registry:"));
     assert_eq!(state, "due");
     let referrer = lash_core_execution::ArtifactReferrer::decode(&kind, &referrer_id)
         .expect("decode process referrer");
+    assert_eq!(
+        obligation_id,
+        lash_core_execution::store::ObligationKey::ArtifactCleanup {
+            referrer: referrer.clone(),
+        }
+        .id()
+        .as_str()
+    );
     assert_eq!(
         referrer,
         lash_core_execution::ArtifactReferrer::ProcessRecord(registered.id)

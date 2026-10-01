@@ -1793,20 +1793,28 @@ pub async fn a_parked_session_is_asked_to_drive_only_through_its_ingress_obligat
         Arc::clone(&work) as Arc<dyn crate::SessionWorkEngine>,
         Arc::clone(&f.parts.host.clock),
     );
-    let id = ingress_obligation::ingress_obligation_id(behind.as_str());
+    let id = lash_core::store::ObligationKey::Ingress {
+        session_id: f.parts.session_id.clone(),
+        item_id: (behind.as_str()).to_string(),
+    }
+    .id();
     assert_eq!(
         ledger.state(&id).await.expect("armed state"),
         Some(ObligationState::Due),
         "the input's acceptance armed its obligation"
     );
-    relay.deliver_admitted(behind.as_str()).await;
+    relay
+        .deliver_admitted(&f.parts.session_id, behind.as_str())
+        .await;
     assert_eq!(scheduled(&work), 1, "the obligation asks for the drive");
     assert_eq!(
         ledger.state(&id).await.expect("requested state"),
         Some(ObligationState::Claimed),
         "an accepted ask is not a delivery: the drive's admission settles it"
     );
-    relay.deliver_admitted(behind.as_str()).await;
+    relay
+        .deliver_admitted(&f.parts.session_id, behind.as_str())
+        .await;
     let cancel = f.verb(RootVerb::Cancel).await.expect("cancel");
     // The engine half ran and was acknowledged under the verb's claim; the
     // drive ask after it was lost with the process, so the claim lapses

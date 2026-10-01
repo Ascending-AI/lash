@@ -219,8 +219,13 @@ impl SqliteStore {
                     }));
                 }
                 if let Some(cleanup) = claim.guard_cleanup() {
-                    crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")
-                        .map_err(sqlite_conversion_error)?;
+                    crate::obligation_ledger::arm_cleanup_tx(
+                        tx,
+                        &cleanup,
+                        now_ms,
+                        crate::obligation_ledger::CleanupStorage::DurableCore,
+                    )
+                    .map_err(sqlite_conversion_error)?;
                 }
                 let blob_ref = Self::insert_artifact_blob_conn(
                     tx,
@@ -284,7 +289,7 @@ impl SqliteStore {
                 return Err(artifact_failure(ArtifactStoreError::ArtifactMissing { artifact_ref }));
             }
             if let Some(cleanup) = claim.guard_cleanup() {
-                crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")
+                crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, crate::obligation_ledger::CleanupStorage::DurableCore)
                     .map_err(sqlite_conversion_error)?;
             }
             crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
@@ -511,7 +516,7 @@ impl SqliteStore {
                     }
                 }
                 if let Some(cleanup) = claim.guard_cleanup() {
-                    crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")
+                    crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, crate::obligation_ledger::CleanupStorage::DurableCore)
                         .map_err(sqlite_conversion_error)?;
                 }
                 for (namespace, artifact_ref) in manifest

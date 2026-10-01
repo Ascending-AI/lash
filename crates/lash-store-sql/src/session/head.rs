@@ -33,9 +33,11 @@ crate::statements! {
     pub struct SessionHeadStatements @ "session_head" {
 
         /// The published head of `?1`.
-        select_meta = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref,
-                    pending_follow_on_json
-             FROM session_head WHERE session_id = ?1";
+        select_meta = "SELECT head.head_json, head.head_revision, head.leaf_node_id, head.checkpoint_ref,
+                    head.pending_follow_on_json, leaf.frame_node_id
+             FROM session_head AS head LEFT JOIN graph_nodes AS leaf
+                 ON leaf.node_id = head.leaf_node_id
+             WHERE head.session_id = ?1";
 
 
         /// Clear the follow-on owed by `?1`, without moving its head revision.

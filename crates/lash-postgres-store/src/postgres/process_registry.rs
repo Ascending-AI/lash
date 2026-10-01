@@ -430,12 +430,11 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             ));
         }
         if !record.input.is_externally_owned() {
-            crate::obligation_ledger::arm_obligation_id_tx(
+            crate::obligation_ledger::arm_obligation_tx(
                 &mut tx,
                 &lash_core_execution::store::ObligationKey::ProcessStart {
                     process_id: record.id.clone(),
                 },
-                &lash_core_execution::store::process_start_obligation_id(&record.id),
                 crate::obligation_ledger::DUE_AT_ONCE_MS,
             )
             .await

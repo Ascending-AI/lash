@@ -78,8 +78,6 @@ impl Default for RuntimeCheckpointComponents {
 }
 
 impl RuntimeCheckpointComponents {
-    const EXECUTION_STATE_LEAF_PREFIX: &'static str = "execution_state/";
-
     pub(crate) fn complete_empty() -> Self {
         Self {
             completeness: CheckpointComponentCompleteness::Complete,
@@ -181,8 +179,8 @@ impl RuntimeCheckpointComponents {
                     message: format!("manifest projection lost component `{key}`"),
                 }
             })?;
-            let body = match key.as_str() {
-                crate::store::TOOL_STATE_CHECKPOINT_COMPONENT => {
+            let body = match crate::plugin::CheckpointComponentKey::parse(key) {
+                crate::plugin::CheckpointComponentKey::ToolState => {
                     let snapshot = checkpoint
                         .decode_component_for_fleet::<crate::ToolState>(key, fleet_format)?
                         .ok_or_else(|| crate::StoreError::StoredDataCorrupt {
@@ -195,7 +193,7 @@ impl RuntimeCheckpointComponents {
                         generation,
                     }
                 }
-                crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT => {
+                crate::plugin::CheckpointComponentKey::PluginState => {
                     let snapshot = checkpoint
                         .decode_component_for_fleet::<crate::PluginState>(key, fleet_format)?
                         .expect("present plugin-state component");
@@ -204,7 +202,7 @@ impl RuntimeCheckpointComponents {
                         snapshot: Some(snapshot),
                     }
                 }
-                crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT => {
+                crate::plugin::CheckpointComponentKey::ExecutionState => {
                     ResidentCheckpointComponentBody::ExecutionState(
                         checkpoint.checked_component_body_for_fleet(key, fleet_format)?,
                     )
@@ -373,8 +371,12 @@ impl RuntimeCheckpointComponents {
 
     fn set_execution_state_snapshot(&mut self, snapshot: Option<std::sync::Arc<[u8]>>) {
         self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
-        self.entries
-            .retain(|key, _| !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
+        self.entries.retain(|key, _| {
+            !matches!(
+                crate::plugin::CheckpointComponentKey::parse(key),
+                crate::plugin::CheckpointComponentKey::ExecutionLeaf(_)
+            )
+        });
         self.set_execution_state_root(snapshot);
     }
 
@@ -401,41 +403,31 @@ impl RuntimeCheckpointComponents {
     /// invariants: the same snapshot breaks them on every attempt.
     fn execution_state_invariant(message: impl Into<String>) -> crate::StoreError {
         crate::StoreError::StoredDataCorrupt {
-            record_kind: "ExecutionStateSnapshot",
+            record_kind: "ExecutionStateCapture",
             message: message.into(),
         }
     }
 
     fn set_execution_state_components(
         &mut self,
-        snapshot: crate::plugin::ExecutionStateSnapshot,
+        snapshot: crate::plugin::ExecutionStateCapture,
     ) -> Result<(), crate::StoreError> {
-        if snapshot.root.is_none() && !snapshot.components.is_empty() {
-            return Err(Self::execution_state_invariant(
-                "an absent execution-state root cannot retain leaf components",
-            ));
-        }
-        self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
+        let crate::plugin::ExecutionStateCapture::Replace { root, leaves } = snapshot else {
+            self.set_execution_state_snapshot(None);
+            return Ok(());
+        };
         let mut replacement_entries = std::collections::BTreeMap::new();
-        for (key, component) in &snapshot.components {
-            if !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX) {
-                return Err(Self::execution_state_invariant(format!(
-                    "execution-state leaf component `{key}` is outside the `{}` namespace",
-                    Self::EXECUTION_STATE_LEAF_PREFIX
-                )));
-            }
+        for (key, component) in &leaves {
             let replacement = match component {
-                crate::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
-                    ResidentCheckpointComponent::Changed {
-                        descriptor: self
-                            .entries
-                            .get(key)
-                            .and_then(|entry| entry.descriptor().cloned()),
-                        body: PendingCheckpointComponentBody::Opaque(std::sync::Arc::clone(body)),
-                    }
-                }
-                crate::plugin::ExecutionStateComponentSnapshot::Unchanged => {
-                    let Some(existing) = self.entries.get(key) else {
+                crate::plugin::LeafChange::Changed(body) => ResidentCheckpointComponent::Changed {
+                    descriptor: self
+                        .entries
+                        .get(key.as_str())
+                        .and_then(|entry| entry.descriptor().cloned()),
+                    body: PendingCheckpointComponentBody::Opaque(std::sync::Arc::clone(body)),
+                },
+                crate::plugin::LeafChange::Unchanged => {
+                    let Some(existing) = self.entries.get(key.as_str()) else {
                         return Err(Self::execution_state_invariant(format!(
                             "execution-state leaf component `{key}` was marked unchanged without resident state"
                         )));
@@ -461,20 +453,25 @@ impl RuntimeCheckpointComponents {
                     }
                 }
             };
-            replacement_entries.insert(key.clone(), replacement);
+            replacement_entries.insert(key.to_string(), replacement);
         }
 
-        self.entries
-            .retain(|key, _| !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
+        self.entries.retain(|key, _| {
+            !matches!(
+                crate::plugin::CheckpointComponentKey::parse(key),
+                crate::plugin::CheckpointComponentKey::ExecutionLeaf(_)
+            )
+        });
         self.entries.extend(replacement_entries);
-        self.set_execution_state_root(snapshot.root);
+        self.set_execution_state_root(Some(root));
+        self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
         Ok(())
     }
 
     /// Whether the next commit can reference the execution-state leaf `key`
     /// as unchanged: the resident set holds its durable ref or its pending body.
-    fn holds_execution_state_leaf(&self, key: &str) -> bool {
-        self.entries.get(key).is_some_and(|entry| {
+    fn holds_execution_state_leaf(&self, key: &crate::plugin::ExecutionLeafName) -> bool {
+        self.entries.get(key.as_str()).is_some_and(|entry| {
             matches!(
                 entry,
                 ResidentCheckpointComponent::Unchanged { .. }
@@ -516,10 +513,12 @@ impl RuntimeCheckpointComponents {
                 }
                 return Ok(None);
             }
-            let has_leaves = self
-                .entries
-                .keys()
-                .any(|key| key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
+            let has_leaves = self.entries.keys().any(|key| {
+                matches!(
+                    crate::plugin::CheckpointComponentKey::parse(key),
+                    crate::plugin::CheckpointComponentKey::ExecutionLeaf(_)
+                )
+            });
             if has_leaves {
                 return Err(crate::StoreError::StoredDataCorrupt {
                     record_kind: "RuntimeCheckpointComponents",
@@ -530,16 +529,18 @@ impl RuntimeCheckpointComponents {
         };
         let mut components = std::collections::BTreeMap::new();
         for (key, component) in &self.entries {
-            if !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX) {
+            let crate::plugin::CheckpointComponentKey::ExecutionLeaf(leaf) =
+                crate::plugin::CheckpointComponentKey::parse(key)
+            else {
                 continue;
-            }
+            };
             let Some(body) = component.opaque_body() else {
                 return Err(crate::StoreError::StoredDataCorrupt {
                     record_kind: "RuntimeCheckpointComponents",
                     message: format!("execution-state leaf component `{key}` was not hydrated"),
                 });
             };
-            components.insert(key.clone(), body);
+            components.insert(leaf, body);
         }
         Ok(Some(crate::plugin::HydratedExecutionState {
             root,
@@ -1037,7 +1038,7 @@ impl RuntimeSessionState {
     /// `lash_core::testing::stage_execution_state_components`.
     pub fn set_execution_state_components(
         &mut self,
-        snapshot: crate::plugin::ExecutionStateSnapshot,
+        snapshot: crate::plugin::ExecutionStateCapture,
     ) -> Result<(), crate::StoreError> {
         self.checkpoint_components
             .set_execution_state_components(snapshot)
@@ -1056,15 +1057,22 @@ impl RuntimeSessionState {
         &mut self,
         restored: crate::plugin::HydratedExecutionState,
     ) -> Result<(), crate::StoreError> {
-        let mut snapshot = crate::plugin::ExecutionStateSnapshot::from_root(Some(restored.root));
-        for (key, body) in restored.components {
-            if self.checkpoint_components.holds_execution_state_leaf(&key) {
-                snapshot.unchanged_component(key);
-            } else {
-                snapshot.changed_component(key, body);
-            }
-        }
-        self.set_execution_state_components(snapshot)
+        let leaves = restored
+            .components
+            .into_iter()
+            .map(|(key, body)| {
+                let change = if self.checkpoint_components.holds_execution_state_leaf(&key) {
+                    crate::LeafChange::Unchanged
+                } else {
+                    crate::LeafChange::Changed(body)
+                };
+                (key, change)
+            })
+            .collect();
+        self.set_execution_state_components(crate::ExecutionStateCapture::Replace {
+            root: restored.root,
+            leaves,
+        })
     }
 
     /// Exposes execution state snapshot to protocol and process-engine implementors while

@@ -1,0 +1,5 @@
+error[E0574]: expected struct, variant or union type, found enum `Capture`
+ --> tests/ui/execution_capture_cannot_have_leaves_without_a_root.rs:5:13
+  |
+5 |     let _ = Capture {
+  |             ^^^^^^^ not a struct, variant or union type

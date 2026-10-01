@@ -1149,11 +1149,8 @@ pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
         .expect("seed the live head");
     let old_leaf = state.session_graph.leaf_node_id.clone();
     state.apply_persisted_commit_result(first);
-    let mut move_attempt =
+    let move_attempt =
         RuntimeCommit::persisted_state_with_graph_commit(&state, crate::GraphAppend::PreserveHead);
-    move_attempt.current_frame_node_id = old_leaf.clone().map(|frame_node_id| {
-        crate::FrameNodeId::new(frame_node_id).expect("test frame identity is non-empty")
-    });
     store
         .commit_runtime_state(move_attempt)
         .await

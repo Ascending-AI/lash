@@ -53,7 +53,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             (
                 "leaf".to_string(),
                 PersistedValue::Leaf {
-                    component: "sha256:test".to_string(),
+                    component: ExecutionLeafName::new("blake3/test"),
                 },
             ),
         ]),
@@ -77,7 +77,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         &[
             serialized_fields(&PersistedValue::Inline { body: vec![1] }),
             serialized_fields(&PersistedValue::Leaf {
-                component: "sha256:test".to_string(),
+                component: ExecutionLeafName::new("blake3/test"),
             }),
         ],
     );
@@ -207,22 +207,21 @@ fn json_value_end(bytes: &[u8], start: usize) -> usize {
 }
 
 fn hydrate(
-    snapshot: lash_core::plugin::ExecutionStateSnapshot,
+    snapshot: lash_core::plugin::ExecutionStateCapture,
 ) -> lash_core::plugin::HydratedExecutionState {
-    let components = snapshot
-        .components
+    let lash_core::plugin::ExecutionStateCapture::Replace { root, leaves } = snapshot else {
+        panic!("expected replacement capture");
+    };
+    let components = leaves
         .into_iter()
         .map(|(key, component)| match component {
-            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => (key, body),
-            lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+            lash_core::plugin::LeafChange::Changed(body) => (key, body),
+            lash_core::plugin::LeafChange::Unchanged => {
                 panic!("fresh test snapshot unexpectedly reused `{key}`")
             }
         })
         .collect();
-    lash_core::plugin::HydratedExecutionState {
-        root: snapshot.root.expect("snapshot root"),
-        components,
-    }
+    lash_core::plugin::HydratedExecutionState { root, components }
 }
 
 #[tokio::test]
@@ -267,16 +266,11 @@ async fn large_scalar_edit_commits_changed_state_not_retained_session() {
         .expect("retained canonical state")
         .len();
     let changed_bytes = measure_snapshot(&changed).checkpoint_bytes;
-    let initial_leaves = initial.components.len();
+    let initial_leaves = initial.leaves().len();
     let changed_bodies = changed
-        .components
+        .leaves()
         .values()
-        .filter(|component| {
-            matches!(
-                component,
-                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
-            )
-        })
+        .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
         .count();
     println!(
         "FIG1257_LARGE_SCALAR retained_bytes={retained_bytes} changed_commit_bytes={changed_bytes} initial_leaves={initial_leaves} changed_bodies={changed_bodies}"
@@ -735,10 +729,9 @@ fn version_26_root_encodes_to_golden_bytes() {
     assert_eq!(decoded.version, RLM_SNAPSHOT_VERSION);
     assert_eq!(
         root_leaf_keys(&decoded),
-        [
-            "execution_state/blake3/cf77824c2c121f00f13bec419bad0ddf7fe90df9170e72019d98c725ade9f65a"
-                .to_string(),
-        ]
+        [ExecutionLeafName::new(
+            "blake3/cf77824c2c121f00f13bec419bad0ddf7fe90df9170e72019d98c725ade9f65a"
+        ),]
         .into_iter()
         .collect()
     );
@@ -968,7 +961,7 @@ async fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference
 fn resolving_an_absent_leaf_is_a_typed_missing_leaf_rejection() {
     let state = lash_core::plugin::HydratedExecutionState::default();
 
-    let error = resolve_leaf(&state, "kept", "execution_state/blake3/absent")
+    let error = resolve_leaf(&state, "kept", &ExecutionLeafName::new("blake3/absent"))
         .expect_err("an absent leaf must not resolve");
 
     assert!(matches!(
@@ -976,7 +969,7 @@ fn resolving_an_absent_leaf_is_a_typed_missing_leaf_rejection() {
         RlmSnapshotError::MissingLeaf {
             logical_key,
             component,
-        } if logical_key == "kept" && component == "execution_state/blake3/absent"
+        } if logical_key == "kept" && component == &ExecutionLeafName::new("blake3/absent")
     ));
 }
 
@@ -997,20 +990,24 @@ async fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
         .snapshot_execution_state(lash_core::FleetFormat::current())
         .await
         .expect("first capture");
-    assert!(first.components.values().any(|component| matches!(
-        component,
-        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
-    )));
+    assert!(
+        first
+            .leaves()
+            .values()
+            .any(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
+    );
 
     state.abort_execution_state_capture();
     let retry = state
         .snapshot_execution_state(lash_core::FleetFormat::current())
         .await
         .expect("retry capture");
-    assert!(retry.components.values().any(|component| matches!(
-        component,
-        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
-    )));
+    assert!(
+        retry
+            .leaves()
+            .values()
+            .any(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
+    );
 }
 
 use std::sync::Arc;
@@ -1182,9 +1179,13 @@ async fn the_dialect_pins_snapshot_engine_id() {
         .snapshot_execution_state(lash_core::FleetFormat::current())
         .await
         .expect("snapshot the session");
-    let root: RlmSnapshotRoot =
-        rmp_serde::from_slice(snapshot.root.as_deref().expect("fresh snapshot has a root"))
-            .expect("decode snapshot root");
+    let root: RlmSnapshotRoot = rmp_serde::from_slice(
+        snapshot
+            .root()
+            .map(AsRef::as_ref)
+            .expect("fresh snapshot has a root"),
+    )
+    .expect("decode snapshot root");
     assert_eq!(root.engine, "typescript");
 }
 

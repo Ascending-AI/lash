@@ -310,16 +310,6 @@ impl RuntimeCommitPlanner {
         {
             return Err(StoreError::MissingFrameOpenAncestor { leaf_node_id });
         }
-        if self.commit.current_frame_node_id.as_deref() != derived_frame_node_id.as_deref() {
-            return Err(StoreError::CurrentFrameNodeMismatch {
-                claimed: self
-                    .commit
-                    .current_frame_node_id
-                    .clone()
-                    .map(crate::FrameNodeId::into_inner),
-                derived: derived_frame_node_id.map(crate::NodeId::into_inner),
-            });
-        }
         self.commit.validate_ingress_settlement()?;
         if let Some(commands) = self.commit.applied_commands.as_ref()
             && commands.session_id != self.commit.session_id

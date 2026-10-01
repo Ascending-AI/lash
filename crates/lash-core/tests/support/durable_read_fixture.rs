@@ -106,7 +106,6 @@ pub const SESSION_ID: &str = "durable-read-fixture";
 pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
-pub const FIXTURE_PARENT_END_OBLIGATION_ID: &str = "parent_end:00000000000040008000000000000887";
 
 /// Fixed stand-in for the await-event signing secret each store mints from
 /// system randomness when it first creates its schema.

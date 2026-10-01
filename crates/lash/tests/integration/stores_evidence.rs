@@ -194,16 +194,6 @@ pub(crate) fn store_area_test_support_witnesses() {
             ),
         );
     }
-    // FIG-2105-TEST-WITNESS-0077: lash::persistence::StoreTestSupport::set_head_current_frame_for_testing [function]
-    fn method_witness_0077<T: lash::persistence::StoreTestSupport>(value: &T) {
-        std::mem::drop(
-            lash::persistence::StoreTestSupport::set_head_current_frame_for_testing(
-                value,
-                &SessionId::from("session"),
-                None,
-            ),
-        );
-    }
     // FIG-2105-TEST-WITNESS-0078: lash::persistence::DecodedRowCounts [struct]
     type_witness::<lash::persistence::DecodedRowCounts>();
     // FIG-2105-TEST-WITNESS-0079: lash::persistence::DecodedRowCounts::graph_node_bodies [field]

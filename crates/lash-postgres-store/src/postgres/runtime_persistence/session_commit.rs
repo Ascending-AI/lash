@@ -682,10 +682,10 @@ impl PostgresStore {
                     ),
                     session_id: commit.session_id.clone(),
                     config: commit.config.clone(),
-                    current_frame_node_id: None,
                     published_by_drive: false,
                 },
                 0,
+                None,
                 None,
                 None,
             )?;

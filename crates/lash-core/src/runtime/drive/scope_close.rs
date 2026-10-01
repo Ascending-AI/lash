@@ -3,7 +3,7 @@
 //!
 //! The terminal transaction arms the root's `session_roots` row with a
 //! `ScopeClose` obligation derived from `(session, root)`
-//! ([`scope_close_obligation_id`]). The producer's own call path delivers it
+//! ([`ObligationKey::id`]). The producer's own call path delivers it
 //! at once through [`deliver_now`] — the drive's recorded `CloseRootScope`
 //! step, a released root's control-intent engine half, or a settlement that
 //! ran with no drive to record one — and the reconcile tick's due pass
@@ -19,10 +19,7 @@
 use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
-use crate::store::{
-    ObligationKey, ObligationKind, ObligationLedger, RootTerminal, StoreError,
-    scope_close_obligation_id,
-};
+use crate::store::{ObligationKey, ObligationKind, ObligationLedger, RootTerminal, StoreError};
 use crate::{Clock, DeploymentStore};
 
 use super::relay::{
@@ -146,7 +143,11 @@ pub async fn deliver_scope_close(
     terminal: &RootTerminal,
     clock: &dyn Clock,
 ) -> Result<ScopeCloseAttempt, StoreError> {
-    let id = scope_close_obligation_id(&terminal.session_id, &terminal.root);
+    let id = crate::store::ObligationKey::ScopeClose {
+        session_id: terminal.session_id.clone(),
+        root: terminal.root.clone(),
+    }
+    .id();
     match deliver_now(relay, &id, clock).await? {
         RelayVerdict::Delivered | RelayVerdict::ClaimLost => Ok(ScopeCloseAttempt::Delivered),
         // Asked, and still owed until its consumer settles it.

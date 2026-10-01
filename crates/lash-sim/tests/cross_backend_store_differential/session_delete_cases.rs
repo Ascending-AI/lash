@@ -171,9 +171,13 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
             if session == own { "own" } else { "other" },
             armed.is_some()
         ));
-        scope_closes.push(
-            armed.unwrap_or_else(|| lash_core::store::scope_close_obligation_id(session, &root)),
-        );
+        scope_closes.push(armed.unwrap_or_else(|| {
+            lash_core::store::ObligationKey::ScopeClose {
+                session_id: session.clone(),
+                root: root.clone(),
+            }
+            .id()
+        }));
     }
     let plans = [
         ScopeId::session(own.clone()),

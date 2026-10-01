@@ -234,7 +234,7 @@ impl RlmRuntimeState {
     pub(crate) async fn snapshot_execution_state(
         &self,
         fleet_format: lash_core::FleetFormat,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
         self.execution
             .lock()
             .await
@@ -398,7 +398,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     async fn snapshot_execution_state(
         &self,
         ctx: ProtocolSessionContext<'_>,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
         self.state
             .snapshot_execution_state(ctx.fleet_format())
             .await

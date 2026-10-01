@@ -239,7 +239,6 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: SessionId::from("retention-cold-reopen"),
         config,
-        current_frame_node_id: None,
         published_by_drive: false,
     };
 

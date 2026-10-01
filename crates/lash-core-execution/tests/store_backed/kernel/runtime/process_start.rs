@@ -10,7 +10,7 @@ mod tests {
 
     use crate::runtime::drive::relay::{RelayVerdict, relay_due};
     use crate::runtime::process_start::ProcessStartRelay;
-    use crate::store::{ObligationKind, ObligationState, StallReason, process_start_obligation_id};
+    use crate::store::{ObligationKind, ObligationState, StallReason};
     use crate::testing::TestClock;
     use crate::{
         ClockWallTime as _, PluginError, ProcessRecord, ProcessRegistry, ProcessWorkSubstrate,
@@ -130,7 +130,10 @@ mod tests {
             .await
             .expect("register the process")
             .id;
-        let obligation = process_start_obligation_id(&process_id);
+        let obligation = crate::store::ObligationKey::ProcessStart {
+            process_id: process_id.clone(),
+        }
+        .id();
 
         // The producer's own-commit attempt fails retryably and settles the
         // failure onto the row rather than returning it.
@@ -258,7 +261,12 @@ mod tests {
         assert_eq!(port.deliveries.load(Ordering::SeqCst), 1);
         assert_eq!(
             ledger
-                .state(&process_start_obligation_id(&process_id))
+                .state(
+                    &crate::store::ObligationKey::ProcessStart {
+                        process_id: process_id.clone()
+                    }
+                    .id()
+                )
                 .await
                 .expect("read the obligation"),
             Some(ObligationState::Delivered),

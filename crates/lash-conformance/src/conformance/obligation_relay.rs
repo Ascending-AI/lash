@@ -342,6 +342,18 @@ pub async fn registered_processes_are_claimed_through_every_obligation_page(
 pub async fn arming_takes_only_an_idle_row(fixture: ObligationLawFixture) {
     let ledger = ledger_of(&fixture);
     let (key, id) = armed_session(&fixture, ledger.as_ref(), "arm", T0).await;
+    let ObligationKey::SessionDelete { session_id } = &key else {
+        unreachable!()
+    };
+    assert_eq!(
+        id.as_str(),
+        format!(
+            "session_delete:{}:{}",
+            session_id.as_str().len(),
+            session_id.as_str()
+        ),
+        "generic arming uses the typed key's stable identity"
+    );
     assert_eq!(
         ledger.state(&id).await.expect("read the armed state"),
         Some(ObligationState::Due)
@@ -1016,8 +1028,6 @@ pub async fn immediate_delivery_takes_only_a_due_obligation(fixture: ObligationL
 pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
     fixture: ObligationLawFixture,
 ) {
-    use lash_core::store::ingress_obligation::ingress_obligation_id;
-
     let session_id = SessionId::from(format!("{}-ingress-withdrawal", fixture.prefix));
     let store = crate::conformance::law_session_store(fixture.stores.as_ref(), &session_id).await;
     let ingress = fixture.stores.obligation_ledger(ObligationKind::Ingress);
@@ -1045,7 +1055,11 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
     let stalled = enqueue("stalled").await;
     let claim = |input: &crate::InputId| {
         let ingress = Arc::clone(&ingress);
-        let id = ingress_obligation_id(input.as_str());
+        let id = lash_core::store::ObligationKey::Ingress {
+            session_id: session_id.clone(),
+            item_id: (input.as_str()).to_string(),
+        }
+        .id();
         async move {
             ingress
                 .claim(&id, &ClaimToken::mint(), now, 3_600_000)
@@ -1059,7 +1073,11 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
     assert_eq!(
         ingress
             .settle(
-                &ingress_obligation_id(stalled.as_str()),
+                &lash_core::store::ObligationKey::Ingress {
+                    session_id: session_id.clone(),
+                    item_id: (stalled.as_str()).to_string()
+                }
+                .id(),
                 &stall.token,
                 ObligationSettlement::Stall {
                     reason: StallReason::Refused,
@@ -1081,7 +1099,13 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
     ] {
         assert_eq!(
             ingress
-                .state(&ingress_obligation_id(input.as_str()))
+                .state(
+                    &lash_core::store::ObligationKey::Ingress {
+                        session_id: session_id.clone(),
+                        item_id: (input.as_str()).to_string()
+                    }
+                    .id()
+                )
                 .await
                 .expect("read the obligation"),
             Some(expected),
@@ -1126,7 +1150,11 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
     }
 
     for input in [&due, &claimed, &stalled] {
-        let id = ingress_obligation_id(input.as_str());
+        let id = lash_core::store::ObligationKey::Ingress {
+            session_id: session_id.clone(),
+            item_id: (input.as_str()).to_string(),
+        }
+        .id();
         assert_eq!(
             ingress.state(&id).await.expect("read the obligation"),
             Some(ObligationState::Delivered),
@@ -1144,7 +1172,11 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
     assert_eq!(
         ingress
             .settle(
-                &ingress_obligation_id(claimed.as_str()),
+                &lash_core::store::ObligationKey::Ingress {
+                    session_id: session_id.clone(),
+                    item_id: (claimed.as_str()).to_string()
+                }
+                .id(),
                 &claimed_claim.token,
                 ObligationSettlement::Delivered,
                 now,

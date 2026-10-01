@@ -310,28 +310,37 @@ pub async fn admission_delivers_every_row_it_binds(
     stores: Arc<dyn crate::StoreSet>,
     _runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    use lash_core::store::{
-        ObligationKind, ObligationSettlement, ObligationState, StallReason,
-        ingress_obligation::ingress_obligation_id,
-    };
+    use lash_core::store::{ObligationKind, ObligationSettlement, ObligationState, StallReason};
     let parts = DriveParts::new(prefix, "admission-delivers", &effect_host, &stores, 8).await;
     let ingress = stores.obligation_ledger(ObligationKind::Ingress);
     let now = stores.clock().timestamp_ms();
     let state = |item: String| {
         let ingress = Arc::clone(&ingress);
+        let session_id = parts.session_id.clone();
         async move {
             ingress
-                .state(&ingress_obligation_id(&item))
+                .state(
+                    &lash_core::store::ObligationKey::Ingress {
+                        session_id: session_id.clone(),
+                        item_id: item.to_string(),
+                    }
+                    .id(),
+                )
                 .await
                 .expect("read the obligation")
         }
     };
     let claim = |item: String| {
         let ingress = Arc::clone(&ingress);
+        let session_id = parts.session_id.clone();
         async move {
             ingress
                 .claim(
-                    &ingress_obligation_id(&item),
+                    &lash_core::store::ObligationKey::Ingress {
+                        session_id: session_id.clone(),
+                        item_id: item.to_string(),
+                    }
+                    .id(),
                     &crate::store::ClaimToken::mint(),
                     now,
                     3_600_000,
@@ -350,7 +359,11 @@ pub async fn admission_delivers_every_row_it_binds(
     let stall = claim(stalled.to_string()).await;
     ingress
         .settle(
-            &ingress_obligation_id(stalled.as_str()),
+            &lash_core::store::ObligationKey::Ingress {
+                session_id: parts.session_id.clone(),
+                item_id: (stalled.as_str()).to_string(),
+            }
+            .id(),
             &stall.token,
             ObligationSettlement::Stall {
                 reason: StallReason::Refused,
@@ -763,8 +776,13 @@ pub async fn one_drive_admits_many_items(
     let second = parts.enqueue("second", None).await;
     let third = parts.enqueue("third", None).await;
     let ingress = stores.obligation_ledger(lash_core::store::ObligationKind::Ingress);
-    let obligations = [&first, &second, &third]
-        .map(|input| lash_core::store::ingress_obligation::ingress_obligation_id(input.as_str()));
+    let obligations = [&first, &second, &third].map(|input| {
+        lash_core::store::ObligationKey::Ingress {
+            session_id: parts.session_id.clone(),
+            item_id: (input.as_str()).to_string(),
+        }
+        .id()
+    });
     for id in &obligations {
         assert_eq!(
             ingress.state(id).await.expect("the armed state"),

@@ -83,7 +83,7 @@ impl ObligationLedger for PausedAskLedger {
         &self,
         id: &ObligationId,
     ) -> std::result::Result<Option<ObligationStanding>, lash_core::StoreError> {
-        let pause = self.armed.load(Ordering::SeqCst) && id.as_str().starts_with("ingress:qwb:");
+        let pause = self.armed.load(Ordering::SeqCst);
         if pause {
             self.entered.notify_one();
             self.release.notified().await;

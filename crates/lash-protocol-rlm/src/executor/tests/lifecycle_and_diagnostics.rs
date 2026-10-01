@@ -1303,16 +1303,18 @@ pub(super) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 }
 
 pub(super) fn hydrate_snapshot(
-    snapshot: lash_core::plugin::ExecutionStateSnapshot,
+    snapshot: lash_core::plugin::ExecutionStateCapture,
 ) -> lash_core::plugin::HydratedExecutionState {
+    let lash_core::plugin::ExecutionStateCapture::Replace { root, leaves } = snapshot else {
+        panic!("expected replacement capture");
+    };
     lash_core::plugin::HydratedExecutionState {
-        root: snapshot.root.expect("snapshot root"),
-        components: snapshot
-            .components
+        root,
+        components: leaves
             .into_iter()
             .map(|(key, component)| match component {
-                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => (key, body),
-                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                lash_core::plugin::LeafChange::Changed(body) => (key, body),
+                lash_core::plugin::LeafChange::Unchanged => {
                     panic!("fresh test snapshot unexpectedly reused `{key}`")
                 }
             })
@@ -1321,17 +1323,19 @@ pub(super) fn hydrate_snapshot(
 }
 
 pub(super) fn hydrate_snapshot_against(
-    snapshot: lash_core::plugin::ExecutionStateSnapshot,
+    snapshot: lash_core::plugin::ExecutionStateCapture,
     prior: &lash_core::plugin::HydratedExecutionState,
 ) -> lash_core::plugin::HydratedExecutionState {
+    let lash_core::plugin::ExecutionStateCapture::Replace { root, leaves } = snapshot else {
+        panic!("expected replacement capture");
+    };
     lash_core::plugin::HydratedExecutionState {
-        root: snapshot.root.expect("snapshot root"),
-        components: snapshot
-            .components
+        root,
+        components: leaves
             .into_iter()
             .map(|(key, component)| match component {
-                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => (key, body),
-                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                lash_core::plugin::LeafChange::Changed(body) => (key, body),
+                lash_core::plugin::LeafChange::Unchanged => {
                     let body = prior
                         .components
                         .get(&key)

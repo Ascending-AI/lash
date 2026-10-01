@@ -307,18 +307,6 @@ fn window(
         {
             return Err(StoreError::TurnBaseNotRetained { revision });
         }
-        if !admitted
-            && meta.current_frame_node_id.as_ref().map(|id| id.as_str())
-                != Some(last.frame.as_str())
-        {
-            return Err(StoreError::CurrentFrameNodeMismatch {
-                claimed: meta
-                    .current_frame_node_id
-                    .as_ref()
-                    .map(|id| id.as_str().to_owned()),
-                derived: Some(last.frame),
-            });
-        }
         let frame = match visible_header(conn, session, &last.frame)?.filter(|h| !h.tombstoned) {
             Some(frame) => frame,
             None if admitted => return Err(StoreError::TurnBaseNotRetained { revision }),

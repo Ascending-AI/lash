@@ -54,6 +54,11 @@ Evidence: `crates/lash-store-sql/src/obligation.rs:15`,
 metric and drain-status keys. `ObligationKey` names the owning row of each
 kind, including the artifact referrer for cleanup.
 
+Every arm path obtains its id from `ObligationKey::id()`: the kind label
+followed by byte-length-prefixed key parts in key order. Delimiters and Unicode
+in a session, root or other key cannot alias another row. Re-arming the same
+row retains this identity; claim tokens remain separate fencing identities.
+
 Unknown stored vocabulary returns `StoreError::Incompatible` with
 `UnknownVocabulary`. A key that cannot decode remains addressable by its
 obligation id and is returned as an undecodable claimed row.

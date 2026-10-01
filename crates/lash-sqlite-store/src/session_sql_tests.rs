@@ -21,7 +21,7 @@ fn every_session_core_statement_renders_unqualified() {
         sql.head
             .select_meta
             .sql()
-            .contains("FROM session_head WHERE session_id = ?1"),
+            .contains("FROM session_head AS head LEFT JOIN graph_nodes AS leaf"),
         "the head read addresses `session_head` unqualified: {}",
         sql.head.select_meta.sql()
     );

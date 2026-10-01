@@ -305,7 +305,7 @@ pub fn measure_runtime_commit_budget(
 /// `RuntimeSessionState`'s public surface.
 pub fn stage_execution_state_components(
     state: &mut RuntimeSessionState,
-    snapshot: crate::plugin::ExecutionStateSnapshot,
+    snapshot: crate::plugin::ExecutionStateCapture,
 ) -> Result<(), crate::StoreError> {
     state.set_execution_state_components(snapshot)
 }

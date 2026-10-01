@@ -336,7 +336,7 @@ pub(super) async fn fork_at_in_catalog(
                 lash_core_execution::FrameEnvironmentId::new(source_session_id.clone(), frame_node_id.clone()),
             );
             let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-                lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id),
+                lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id.clone()),
             );
             let source_frame_ended = crate::artifact_store::artifact_fenced_tx(tx, &source_frame)
                 .map_err(sqlite_error)?;
@@ -346,7 +346,7 @@ pub(super) async fn fork_at_in_catalog(
                 )?.ok_or_else(|| stored_data_corrupt("fork checkpoint", "the retained checkpoint is missing"))?;
                 checkpoint.components.retain(|key, _| {
                     key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                        && !key.starts_with("execution_state/")
+                        && !matches!(lash_core_execution::plugin::CheckpointComponentKey::parse(key), lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_))
                 });
                 checkpoint_ref = SqliteStore::put_checkpoint_conn(tx, &checkpoint, blob_profile, fleet_format)?
                     .checkpoint_ref.as_str().to_owned();
@@ -436,22 +436,12 @@ pub(super) async fn fork_at_in_catalog(
                     ),
                     session_id: request.session_id.clone(),
                     config,
-                    current_frame_node_id: Some({
-                        #[expect(
-                            clippy::expect_used,
-                            reason = "the target is a transparent newtype over `String`, so decoding a JSON string into it cannot fail"
-                        )]
-                        let node_id = serde_json::from_value(serde_json::Value::String(
-                            current_frame_node_id,
-                        ))
-                        .expect("a persisted frame node id is a transparent string");
-                        node_id
-                    }),
                     published_by_drive: false,
                 },
                 0,
                 Some(checkpoint_ref.clone().into()),
                 Some(request.node_id.clone()),
+                Some(frame_node_id.clone()),
             )?;
             crate::conn::cached_execute(tx,
                 session_sql().head_sqlite.insert_fork.sql(),

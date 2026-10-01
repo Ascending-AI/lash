@@ -150,38 +150,6 @@ impl StoreTestSupport for PostgresStore {
         Ok(())
     }
 
-    async fn set_head_current_frame_for_testing(
-        &self,
-        session_id: &SessionId,
-        frame: Option<lash_core_execution::FrameNodeId>,
-    ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        let mut head: serde_json::Value = sqlx::query_scalar::<_, String>(
-            crate::session_sql::session_sql()
-                .head_postgres
-                .select_head_json_for_update
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)
-        .and_then(|json| {
-            serde_json::from_str(&json).map_err(|error| StoreError::Backend(error.to_string()))
-        })?;
-        head["current_frame_node_id"] =
-            serde_json::to_value(frame).map_err(|error| StoreError::Backend(error.to_string()))?;
-        sqlx::query(crate::session_sql::session_sql().head.set_head_json.sql())
-            .bind(session_id.as_str())
-            .bind(
-                serde_json::to_string(&head)
-                    .map_err(|error| StoreError::Backend(error.to_string()))?,
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)
-    }
     async fn rewrite_session_tool_access_for_testing(
         &self,
         session_id: &SessionId,

@@ -10,7 +10,7 @@ use super::RuntimeSessionState;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum ExecutionStateUpdate {
     Clean,
-    Replace(crate::plugin::ExecutionStateSnapshot),
+    Replace(crate::plugin::ExecutionStateCapture),
     /// The execution state is wiped. On a committed frame switch `carries`
     /// names the artifacts the switch hands to the successor frame
     /// (ADR 0113 §3.1); every other clear carries none.
@@ -202,12 +202,13 @@ pub(super) async fn capture_execution_state_update(
             session.fleet_format(),
         ))
         .await?;
-    Ok(if snapshot.root.is_some() {
-        ExecutionStateUpdate::Replace(snapshot)
-    } else {
-        ExecutionStateUpdate::Clear {
-            carries: SeedCarries::none(),
+    Ok(match snapshot {
+        capture @ crate::plugin::ExecutionStateCapture::Replace { .. } => {
+            ExecutionStateUpdate::Replace(capture)
         }
+        crate::plugin::ExecutionStateCapture::Clear => ExecutionStateUpdate::Clear {
+            carries: SeedCarries::none(),
+        },
     })
 }
 

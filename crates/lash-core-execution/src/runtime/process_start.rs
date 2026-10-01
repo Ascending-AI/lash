@@ -7,7 +7,6 @@ use crate::runtime::drive::relay::{
 };
 use crate::store::{
     ClaimToken, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
-    process_start_obligation_id,
 };
 use crate::{Clock, PluginError, ProcessRegistry, ProcessWorkSubstrate};
 
@@ -59,7 +58,10 @@ impl ProcessStartRelay {
     ) -> Result<super::drive::relay::RelayVerdict, crate::StoreError> {
         deliver_now(
             self,
-            &process_start_obligation_id(process_id),
+            &crate::store::ObligationKey::ProcessStart {
+                process_id: process_id.clone(),
+            }
+            .id(),
             self.clock.as_ref(),
         )
         .await
@@ -85,7 +87,10 @@ impl ProcessStartRelay {
         process_id: &crate::ProcessId,
         claimant: &str,
     ) -> Result<Option<ClaimToken>, crate::StoreError> {
-        let id = process_start_obligation_id(process_id);
+        let id = crate::store::ObligationKey::ProcessStart {
+            process_id: process_id.clone(),
+        }
+        .id();
         let claimed = self
             .ledger
             .claim(
@@ -113,7 +118,10 @@ impl ProcessStartRelay {
     ) -> Result<crate::store::SettleOutcome, crate::StoreError> {
         self.ledger
             .settle(
-                &process_start_obligation_id(process_id),
+                &crate::store::ObligationKey::ProcessStart {
+                    process_id: process_id.clone(),
+                }
+                .id(),
                 &token,
                 settlement,
                 self.clock.timestamp_ms(),

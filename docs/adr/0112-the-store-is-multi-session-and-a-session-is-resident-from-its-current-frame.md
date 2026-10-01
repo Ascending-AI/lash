@@ -90,8 +90,8 @@ Evidence: `crates/lash-core-store/src/store/mod.rs` and
 A foreign request refuses as `ForeignSessionRequest`. History errors include
 `SessionNotFound`, `SessionDeleted`, `InvalidWindowAnchor`,
 `HistoryAnchorUnavailable`, `HistoryNodeTooLarge`, `CursorForeignSession`
-and `HistoryCursorLineageChanged`. A head pointer disagreeing with its
-leaf's frame refuses as `CurrentFrameNodeMismatch`.
+and `HistoryCursorLineageChanged`. The current frame is derived from the
+head leaf row; neither the head payload nor a commit claims a second pointer.
 
 An invalid window never silently becomes a smaller valid window. Its
 anchor, parent-edge or stored-data violation remains a typed error.
@@ -165,7 +165,7 @@ Evidence: `crates/lash-sqlite-store/src/lib.rs:195`,
 `WindowSelector::Current` selects the live head. `Admitted(base)` selects
 the recorded admission's leaf, checkpoint and revision, and carries no
 pending follow-on. The selected leaf's stored `frame_node_id` identifies
-the window base. Under `Current`, the head's frame pointer must match it.
+the window base and, under `Current`, the session's current frame.
 An admitted leaf must also remain reachable from the session head.
 
 The window spans the base's `FrameOpen` through the selected leaf. SQL

@@ -5,7 +5,8 @@
 //! `Session` / `LashRuntime` internals.
 
 pub use lash_core_store::execution_state::{
-    ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
+    CheckpointComponentKey, ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState,
+    InvalidExecutionLeafName, LeafChange, PluginOptions,
 };
 
 use crate::SessionId;
@@ -278,8 +279,8 @@ pub trait CodeExecutorPlugin: Send + Sync {
     async fn snapshot_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<ExecutionStateSnapshot, crate::SessionError> {
-        Ok(ExecutionStateSnapshot::default())
+    ) -> Result<ExecutionStateCapture, crate::SessionError> {
+        Ok(ExecutionStateCapture::default())
     }
 
     /// The artifacts a `continue_as` carries into the successor frame

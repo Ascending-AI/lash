@@ -256,7 +256,7 @@ pub enum StoreError {
     )]
     CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
     #[error(
-        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_referrer_bytes}, pending follow-on: {follow_on_bytes}, agent frame: {agent_frame_bytes}, durable turn result: {turn_result_bytes})"
+        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_referrer_bytes}, pending follow-on: {follow_on_bytes}, durable turn result: {turn_result_bytes})"
     )]
     CommitByteBudgetExceeded {
         session_config_bytes: usize,
@@ -264,7 +264,6 @@ pub enum StoreError {
         checkpoint_bytes: usize,
         attachment_referrer_bytes: usize,
         follow_on_bytes: usize,
-        agent_frame_bytes: usize,
         turn_result_bytes: usize,
         total_bytes: usize,
         max_bytes: usize,
@@ -616,22 +615,6 @@ pub enum StoreError {
         "session leaf `{leaf_node_id}` has no FrameOpen ancestor; every root graph must begin with a frame"
     )]
     MissingFrameOpenAncestor { leaf_node_id: NodeId },
-    /// A commit's claimed current frame disagrees with its graph-derived frame.
-    ///
-    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
-    /// return this typed corruption fence after deriving the nearest live
-    /// `FrameOpen` ancestor from the post-commit graph. A window read
-    /// returns it too when the head's frame pointer disagrees with the
-    /// frame its leaf row points at (ADR 0112 §5).
-    #[error(
-        "runtime commit current frame {claimed:?} does not match nearest FrameOpen ancestor {derived:?}"
-    )]
-    CurrentFrameNodeMismatch {
-        /// Frame node id supplied by the runtime commit.
-        claimed: Option<String>,
-        /// Nearest `FrameOpen` node id derived by the store.
-        derived: Option<String>,
-    },
     /// A commit's ingress settlement named a row its root did not admit:
     /// the row is open, bound to another root, or gone (FIG-3927). Nothing
     /// was written; a row is only ever answered by the root that admitted
@@ -1085,7 +1068,6 @@ impl StoreError {
             | Self::ForkSessionAlreadyExists { .. }
             | Self::InvalidGraphParent { .. }
             | Self::MissingFrameOpenAncestor { .. }
-            | Self::CurrentFrameNodeMismatch { .. }
             | Self::IngressTurnAddressUnknown { .. }
             | Self::IngressRowNotAdmitted { .. }
             | Self::IngressSettlementDuplicate { .. }
@@ -1205,7 +1187,6 @@ impl StoreError {
             Self::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
             Self::InvalidGraphParent { .. } => "InvalidGraphParent",
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
-            Self::CurrentFrameNodeMismatch { .. } => "CurrentFrameNodeMismatch",
             Self::IngressTurnAddressUnknown { .. } => "IngressTurnAddressUnknown",
             Self::IngressRowNotAdmitted { .. } => "IngressRowNotAdmitted",
             Self::IngressSettlementDuplicate { .. } => "IngressSettlementDuplicate",

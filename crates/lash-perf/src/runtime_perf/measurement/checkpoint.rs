@@ -185,7 +185,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 measure_runtime_perf_async_phase("checkpoint_state.initial_capture", async {
                     fixture.capture().await.map_err(anyhow::Error::from)
                 }).await?;
-            if initial_snapshot.root.is_none() {
+            if initial_snapshot.root().is_none() {
                 anyhow::bail!("checkpoint-state fixture omitted its root");
             }
             let initial_component_count =
@@ -239,16 +239,15 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             }).await?;
         phase_profile.insert(phase.0, phase.1);
         fixture.acknowledge_capture();
-        if snapshot.root.is_none() {
+        if snapshot.root().is_none() {
             anyhow::bail!("incremental checkpoint capture omitted its root");
         }
-        last_changed_components = snapshot
-            .components
+        last_changed_components = snapshot.leaves()
             .values()
             .filter(|component| {
                 matches!(
                     component,
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                    lash_core::plugin::LeafChange::Changed(_)
                 )
             })
             .count() as u64;
@@ -356,16 +355,14 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
 }
 
 fn changed_execution_state_components(
-    snapshot: &lash_core::plugin::ExecutionStateSnapshot,
-) -> anyhow::Result<BTreeMap<String, Arc<[u8]>>> {
+    snapshot: &lash_core::plugin::ExecutionStateCapture,
+) -> anyhow::Result<BTreeMap<lash_core::plugin::ExecutionLeafName, Arc<[u8]>>> {
     snapshot
-        .components
+        .leaves()
         .iter()
         .map(|(key, component)| match component {
-            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
-                Ok((key.clone(), body.clone()))
-            }
-            lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+            lash_core::plugin::LeafChange::Changed(body) => Ok((key.clone(), body.clone())),
+            lash_core::plugin::LeafChange::Unchanged => {
                 anyhow::bail!("initial checkpoint-state component `{key}` was unchanged")
             }
         })
@@ -381,14 +378,14 @@ fn execution_state_from_checkpoint(
         .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted execution-state root"))?;
     let mut components = BTreeMap::new();
     for key in checkpoint.components.keys() {
-        if !key.starts_with("execution_state/") {
+        let Some(leaf) = lash_core::plugin::ExecutionLeafName::parse(key) else {
             continue;
-        }
+        };
         let body = checkpoint
             .component(key)
             .and_then(lash_core::HydratedCheckpointComponent::body_arc)
             .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted body for `{key}`"))?;
-        components.insert(key.clone(), body);
+        components.insert(leaf, body);
     }
     Ok(lash_core::plugin::HydratedExecutionState { root, components })
 }

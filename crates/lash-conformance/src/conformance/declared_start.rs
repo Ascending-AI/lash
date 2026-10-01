@@ -1740,7 +1740,12 @@ pub async fn declared_start_cancel_at_the_claim_answer_delivers_the_start(tier: 
     let start = tier
         .stores
         .obligation_ledger(crate::store::ObligationKind::ProcessStart)
-        .standing(&crate::store::process_start_obligation_id(&child.id))
+        .standing(
+            &lash_core::store::ObligationKey::ProcessStart {
+                process_id: child.id.clone(),
+            }
+            .id(),
+        )
         .await
         .expect("read the child's start obligation")
         .expect("registration armed the child's start obligation");

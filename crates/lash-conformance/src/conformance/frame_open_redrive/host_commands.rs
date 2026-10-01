@@ -338,7 +338,7 @@ async fn append_note(
         .map_err(|error| crate::plugin::PluginOperationFailure::new(error.to_string()))?;
     Ok(serde_json::json!({
         "text": text,
-        "appended": matches!(outcome, crate::AppendSessionNodesOutcome::Appended { .. }),
+        "appended": matches!(outcome, crate::AppendSessionNodesOutcome::Appended { .. })
     }))
 }
 
@@ -1447,7 +1447,7 @@ pub async fn command_cancellation_before_admission_withdraws_it(
         matches!(
             law.command_outcome(&admitted).await,
             Some(crate::SessionCommandOutcome::PluginOperation {
-                outcome: crate::PluginOperationCommandOutcome::Completed { .. },
+                outcome: crate::PluginOperationCommandOutcome::Completed { .. }
             })
         ),
         "the admitted command settles completed"

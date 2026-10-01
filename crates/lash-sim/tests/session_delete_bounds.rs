@@ -200,10 +200,11 @@ impl Deployment {
         self.double
             .settle_session_drive(&SessionId::from(session))
             .await;
-        let id = lash_core::store::scope_close_obligation_id(
-            &SessionId::from(session),
-            &TurnId::from(root),
-        );
+        let id = lash_core::store::ObligationKey::ScopeClose {
+            session_id: SessionId::from(session),
+            root: TurnId::from(root),
+        }
+        .id();
         assert_eq!(
             self.backend
                 .obligation_ledger(ObligationKind::ScopeClose)

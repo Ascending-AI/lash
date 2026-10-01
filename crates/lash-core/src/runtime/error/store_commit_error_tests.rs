@@ -33,7 +33,6 @@ fn commit_budget_errors_preserve_the_budget_kind_and_limits() {
         checkpoint_bytes: 150_000,
         attachment_referrer_bytes: 1,
         follow_on_bytes: 0,
-        agent_frame_bytes: 0,
         turn_result_bytes: 0,
         total_bytes: 1_050_001,
         max_bytes: 1_048_576,

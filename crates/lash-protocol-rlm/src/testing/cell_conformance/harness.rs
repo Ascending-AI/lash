@@ -94,7 +94,7 @@ pub(crate) struct Session {
     history: Vec<String>,
     /// The leaf bodies a host has been handed, by component key: what a
     /// rehydrating worker reads an unchanged leaf back from.
-    stored_leaves: BTreeMap<String, Arc<[u8]>>,
+    stored_leaves: BTreeMap<lash_core::plugin::ExecutionLeafName, Arc<[u8]>>,
     /// The host's read-only projected bindings, re-supplied to every cell.
     /// They belong to the host, so they outlive every restart.
     host_bindings: RlmProjectedBindings,
@@ -258,14 +258,17 @@ impl Session {
             )
             .expect("capture the RLM execution state");
         self.state.acknowledge_execution_state_capture();
+        let lash_core::plugin::ExecutionStateCapture::Replace { root, leaves } = snapshot else {
+            panic!("expected replacement capture");
+        };
         let mut components = BTreeMap::new();
-        for (key, component) in snapshot.components {
+        for (key, component) in leaves {
             let body = match component {
-                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                lash_core::plugin::LeafChange::Changed(body) => {
                     self.stored_leaves.insert(key.clone(), Arc::clone(&body));
                     body
                 }
-                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                lash_core::plugin::LeafChange::Unchanged => {
                     self.stored_leaves.get(&key).cloned().unwrap_or_else(|| {
                         panic!("an unchanged leaf `{key}` the host never stored")
                     })
@@ -273,10 +276,7 @@ impl Session {
             };
             components.insert(key, body);
         }
-        let hydrated = lash_core::plugin::HydratedExecutionState {
-            root: snapshot.root.expect("a capture carries its root"),
-            components,
-        };
+        let hydrated = lash_core::plugin::HydratedExecutionState { root, components };
         let mut restored =
             RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, self.workers.clone());
         self.runtime

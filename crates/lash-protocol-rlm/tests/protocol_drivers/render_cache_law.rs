@@ -454,7 +454,7 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     .expect("read settled render options command"),
                 lash_core::runtime::SessionCommandSettlement::Applied {
                     outcome: lash_core::runtime::SessionCommandOutcome::ConfigTransaction {
-                        outcome: lash_core::ConfigTransactionOutcome::Applied { .. },
+                        outcome: lash_core::ConfigTransactionOutcome::Applied { .. }
                     },
                     ..
                 }

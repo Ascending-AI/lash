@@ -811,9 +811,9 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        CheckpointApplication, CodeExecutionOutcome, CodeExecutorPlugin,
-        ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState,
-        PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
+        CheckpointApplication, CheckpointComponentKey, CodeExecutionOutcome, CodeExecutorPlugin,
+        ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName,
+        LeafChange, PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
         PluginSessionRequest, PluginState, PrepareTurnRequest, ProtocolBeforeLlmCallContext,
         ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
         ProtocolSessionRestoreView, SessionAuthorityContext, SystemPromptContext,

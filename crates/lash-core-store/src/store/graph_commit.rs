@@ -1,5 +1,4 @@
 use super::{GraphAppend, OperationId, StoreError, derive_history_node_id};
-use crate::facade_support::SessionGraphFacadeOps;
 use crate::{NodeId, SessionId};
 
 impl GraphAppend {
@@ -33,38 +32,6 @@ impl GraphAppend {
 
     pub fn appended_nodes(&self) -> impl Iterator<Item = &crate::SessionNodeRecord> {
         self.nodes().iter()
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "`FrameNodeId::new` rejects only the empty string, and both identities here are read back out of a graph, where a node id is never empty"
-    )]
-    pub(crate) fn derive_current_frame_node_id(
-        &self,
-        resident_graph: &crate::SessionGraph,
-    ) -> Option<crate::FrameNodeId> {
-        if let Some(frame_node) = self
-            .nodes()
-            .iter()
-            .rev()
-            .find(|node| matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }))
-        {
-            return Some(
-                crate::FrameNodeId::new(frame_node.node_id.as_str())
-                    .expect("derived graph node identities are non-empty"),
-            );
-        }
-
-        let resident_parent_node_id = self.nodes().first().map_or_else(
-            || resident_graph.leaf_node_id.as_deref(),
-            |first| first.parent_node_id.as_deref(),
-        );
-        resident_graph
-            .nearest_frame_node_id(resident_parent_node_id)
-            .map(|frame_node_id| {
-                crate::FrameNodeId::new(frame_node_id.as_str())
-                    .expect("resident graph node identities are non-empty")
-            })
     }
 
     pub fn validate_append_topology(&self) -> Result<(), StoreError> {

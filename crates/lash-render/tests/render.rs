@@ -140,7 +140,7 @@ fn final_cut_uses_unicode_scalars_and_reports_the_shown_range() {
         vec![ShownRange::Text {
             block: 0,
             chars: 0..2,
-            lines: 0..1,
+            lines: 0..1
         }]
     );
 }

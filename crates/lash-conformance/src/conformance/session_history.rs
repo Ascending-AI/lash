@@ -338,7 +338,6 @@ where
         "gen0-parent",
         "base-no-parent",
         "bad-size",
-        "head-pointer",
     ] {
         let store = make(case).await;
         let mut state = state(&format!("history-corrupt-{case}"));
@@ -396,14 +395,6 @@ where
                     .corrupt_graph_row_for_testing(&ids[1], GraphRowCorruption::SetBodyBytes(1))
                     .await
             }
-            "head-pointer" => {
-                store
-                    .set_head_current_frame_for_testing(
-                        &state.session_id,
-                        Some(FrameNodeId::new(ids[0].clone()).expect("node id")),
-                    )
-                    .await
-            }
             _ => unreachable!(),
         }
         .expect("inject one corrupt row");
@@ -412,7 +403,6 @@ where
             .await
             .expect_err("corrupt window must fail");
         match case {
-            "head-pointer" => assert!(matches!(error, StoreError::CurrentFrameNodeMismatch { .. })),
             "base-not-frame" | "foreign-pointer" | "gen0-parent" | "base-no-parent" => {
                 assert!(matches!(
                     error,

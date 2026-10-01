@@ -239,18 +239,6 @@ async fn install_fixed_catalog_identity(storage: &PostgresStorage) {
 
 async fn normalize_fixture_rows(storage: &PostgresStorage) {
     let pinned = sqlx::query(
-        "UPDATE lash_parent_end_plans SET obligation_id = $1 WHERE parent_kind = 'process'",
-    )
-    .bind(fixture::FIXTURE_PARENT_END_OBLIGATION_ID)
-    .execute(storage.pool())
-    .await
-    .expect("pin the fixture parent-end obligation id");
-    assert_eq!(
-        pinned.rows_affected(),
-        1,
-        "the fixture seeds one parent-end obligation"
-    );
-    let pinned = sqlx::query(
         "UPDATE lash_process_events
          SET event_json = jsonb_set(event_json::jsonb, '{occurred_at}', to_jsonb($1::bigint))::text
          WHERE event_type = 'process.first_started'",

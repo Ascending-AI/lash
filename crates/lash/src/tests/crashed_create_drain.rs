@@ -410,7 +410,7 @@ async fn an_append_drained_after_a_crashed_create_is_committed_once(
         matches!(
             &drained.outcome,
             lash_core_store::queued_work_vocabulary::SessionCommandOutcome::AppendSessionNodes {
-                outcome: lash_core::AppendSessionNodesOutcome::Appended { node_ids, .. },
+                outcome: lash_core::AppendSessionNodesOutcome::Appended { node_ids, .. }
             } if node_ids.len() == 1
         ),
         "the append settles appended: {:?}",

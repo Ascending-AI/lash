@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use lash_core::engine::ScopeCloseSink as _;
-use lash_core::store::{ObligationKind, ObligationState, scope_close_obligation_id};
+use lash_core::store::{ObligationKind, ObligationState};
 use lash_core::{ProcessId, ScopeId, SessionId, TurnId};
 use lash_restate_test::{CrashPoint as EngineCut, CrashRule, TURN_DRIVER_SERVICE};
 
@@ -98,7 +98,11 @@ async fn claim_scope_close_before_restart(
     root: &str,
 ) -> Result<(), String> {
     world.kill().await;
-    let id = scope_close_obligation_id(session, &TurnId::from(root));
+    let id = lash_core::store::ObligationKey::ScopeClose {
+        session_id: session.clone(),
+        root: TurnId::from(root),
+    }
+    .id();
     let ledger = world
         .backend()
         .obligation_ledger(ObligationKind::ScopeClose);
@@ -249,7 +253,11 @@ pub(super) async fn obligation_at_restart(
     seed: u64,
 ) -> Result<ObligationState, String> {
     let session = session_name(Seam::ScopeClose, seed);
-    let id = scope_close_obligation_id(&session, &TurnId::from("in-0"));
+    let id = lash_core::store::ObligationKey::ScopeClose {
+        session_id: session.clone(),
+        root: TurnId::from("in-0"),
+    }
+    .id();
     world
         .backend()
         .obligation_ledger(ObligationKind::ScopeClose)

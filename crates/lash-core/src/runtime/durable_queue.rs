@@ -85,7 +85,7 @@ impl DurableSessionOps {
         &self,
         item_id: &str,
     ) -> Result<Option<crate::store::StalledObligation>, crate::StoreError> {
-        self.ingress.stalled(item_id).await
+        self.ingress.stalled(&self.session_id, item_id).await
     }
 
     /// The drive the relay's current claim of item `item_id` asked for, while
@@ -98,7 +98,7 @@ impl DurableSessionOps {
         &self,
         item_id: &str,
     ) -> Result<Option<crate::engine::DriveRequestId>, crate::StoreError> {
-        self.ingress.current_ask(item_id).await
+        self.ingress.current_ask(&self.session_id, item_id).await
     }
 
     /// A failed head read proves no revision. Invalidate replay continuity
@@ -449,7 +449,9 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
         }
         crate::TurnInputAdmission::Enqueued(rows) => {
             for row in &rows {
-                ingress_relay.deliver_admitted(row.input_id.as_str()).await;
+                ingress_relay
+                    .deliver_admitted(&row.session_id, row.input_id.as_str())
+                    .await;
             }
             (rows, None)
         }

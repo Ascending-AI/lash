@@ -190,12 +190,20 @@ pub(crate) fn try_load_session_head_meta_from_conn(
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             },
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((head_json, head_revision, leaf_node_id, checkpoint_ref, pending_follow_on)) = row
+    let Some((
+        head_json,
+        head_revision,
+        leaf_node_id,
+        checkpoint_ref,
+        pending_follow_on,
+        current_frame_node_id,
+    )) = row
     else {
         return Ok(None);
     };
@@ -214,6 +222,17 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             fleet,
         )
         .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
+    if let Some(leaf) = &leaf_node_id
+        && current_frame_node_id.is_none()
+    {
+        return Err(StoreError::MissingFrameOpenAncestor {
+            leaf_node_id: leaf.clone().into(),
+        });
+    }
+    let current_frame_node_id = current_frame_node_id
+        .map(lash_core_execution::FrameNodeId::new)
+        .transpose()
+        .map_err(|error| stored_data_corrupt("SessionGraph", error))?;
     Ok(Some(
         SessionHeadMeta::assemble(
             session_id,
@@ -226,6 +245,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             })?,
             checkpoint_ref.map(Into::into),
             leaf_node_id.map(lash_core_execution::NodeId::from),
+            current_frame_node_id,
         )?
         .with_pending_follow_on(pending_follow_on),
     ))

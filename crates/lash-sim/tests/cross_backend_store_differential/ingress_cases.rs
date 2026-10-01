@@ -11,7 +11,7 @@
 use std::num::NonZeroUsize;
 
 use lash_core::StoreSet;
-use lash_core::store::ingress_obligation::ingress_obligation_id;
+
 use lash_core::store::{
     ObligationId, ObligationKey, ObligationKind, ObligationSettlement, StallReason,
 };
@@ -87,7 +87,16 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     let items = [("a", first), ("b", second), ("c", batch)];
     let ids: BTreeMap<&str, ObligationId> = items
         .iter()
-        .map(|(alias, item)| (*alias, ingress_obligation_id(item)))
+        .map(|(alias, item)| {
+            (
+                *alias,
+                lash_core::store::ObligationKey::Ingress {
+                    session_id: session_id.clone(),
+                    item_id: item.to_string(),
+                }
+                .id(),
+            )
+        })
         .collect();
     let alias_of = |id: &ObligationId| {
         ids.iter()

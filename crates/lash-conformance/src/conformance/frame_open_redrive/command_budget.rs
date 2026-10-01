@@ -288,7 +288,7 @@ pub async fn raising_the_budget_settles_a_stranded_command(
         matches!(
             completion.command_outcomes.get(&stranded),
             Some(crate::SessionCommandOutcome::AppendSessionNodes {
-                outcome: crate::AppendSessionNodesOutcome::Appended { .. },
+                outcome: crate::AppendSessionNodesOutcome::Appended { .. }
             })
         ),
         "the recovered append lands: {:?}",

@@ -316,8 +316,6 @@ pub trait SessionHistoryStore: Send + Sync {
     /// leaf, with the head and checkpoint of the same snapshot.
     ///
     /// - The frame is the `frame_node_id` column of the selected leaf row.
-    ///   Under `Current` the head's `current_frame_node_id` must equal it, or
-    ///   the read fails [`StoreError::CurrentFrameNodeMismatch`].
     /// - `Admitted(base)` reads `base.leaf` and `base.checkpoint`, reports
     ///   `head_revision = base.revision` and no pending follow-on, and never
     ///   answers `None`: a base the store no longer holds is

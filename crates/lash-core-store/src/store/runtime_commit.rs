@@ -173,7 +173,6 @@ pub struct RuntimeCommit {
     /// input to the identity, never stored: `None` when the two agree.
     #[serde(skip)]
     pub execution_config: Option<Box<crate::PersistedSessionConfig>>,
-    pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub graph: GraphAppend,
     /// Resident leaf observed when this commit was built. For
     /// `GraphAppend::PreserveHead` this is the effective committed leaf bound

@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_core::SessionError;
+use lash_core::plugin::ExecutionLeafName;
 use lashlang::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
     SnapshotDecodeError, Value as FlowValue, validate_canonical_messagepack_structure,
@@ -40,7 +41,7 @@ enum PersistedValue {
         body: Vec<u8>,
     },
     Leaf {
-        component: String,
+        component: ExecutionLeafName,
     },
 }
 
@@ -285,8 +286,8 @@ fn body_prefers_leaf(encoded_len: usize) -> bool {
 
 fn persist_value_body(
     body: Vec<u8>,
-    prior_leaf_keys: &BTreeSet<String>,
-    changed_leaves: &mut BTreeMap<String, Arc<[u8]>>,
+    prior_leaf_keys: &BTreeSet<ExecutionLeafName>,
+    changed_leaves: &mut BTreeMap<ExecutionLeafName, Arc<[u8]>>,
 ) -> PersistedValue {
     if body_prefers_leaf(body.len()) {
         let component = leaf_component_key(&body);
@@ -299,19 +300,19 @@ fn persist_value_body(
     }
 }
 
-fn leaf_component_key(body: &[u8]) -> String {
-    format!(
-        "execution_state/blake3/{}",
+fn leaf_component_key(body: &[u8]) -> ExecutionLeafName {
+    ExecutionLeafName::new(format!(
+        "blake3/{}",
         lash_sansio::core_support::blake3_domain_hash_hex(
             LASH_RLM_EXECUTION_STATE_LEAF_DOMAIN_VERSION,
             body,
         )
-    )
+    ))
 }
 
 #[cfg(test)]
 pub(super) fn measure_snapshot(
-    snapshot: &lash_core::plugin::ExecutionStateSnapshot,
+    snapshot: &lash_core::plugin::ExecutionStateCapture,
 ) -> lash_core::testing::RuntimeCommitBudgetMeasurement {
     let state = lash_core::RuntimeSessionState {
         session_id: lash_sansio::SessionId::from("fig-1257-snapshot-budget"),
@@ -324,17 +325,18 @@ pub(super) fn measure_snapshot(
     commit.checkpoint.components.insert(
         "execution_state".to_string(),
         lash_core::HydratedCheckpointComponent::changed(
-            snapshot.root.clone().expect("snapshot root"),
+            snapshot.root().expect("snapshot root").clone(),
         ),
     );
-    for (key, component) in &snapshot.components {
+    for (key, component) in snapshot.leaves() {
         let component = match component {
-            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+            lash_core::plugin::LeafChange::Changed(body) => {
                 lash_core::HydratedCheckpointComponent::changed(body.clone())
             }
-            lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+            lash_core::plugin::LeafChange::Unchanged => {
                 let hash = key
-                    .strip_prefix("execution_state/blake3/")
+                    .name()
+                    .strip_prefix("blake3/")
                     .expect("RLM leaf component key");
                 lash_core::HydratedCheckpointComponent::unchanged(
                     &lash_core::CheckpointComponentDescriptor {
@@ -344,7 +346,10 @@ pub(super) fn measure_snapshot(
                 )
             }
         };
-        commit.checkpoint.components.insert(key.clone(), component);
+        commit
+            .checkpoint
+            .components
+            .insert(key.to_string(), component);
     }
     lash_core::testing::measure_runtime_commit_budget(&commit)
         .expect("measure RLM runtime commit budget")
@@ -353,7 +358,7 @@ pub(super) fn measure_snapshot(
 fn resolve_leaf<'a>(
     state: &'a lash_core::plugin::HydratedExecutionState,
     logical_key: &str,
-    component: &str,
+    component: &ExecutionLeafName,
 ) -> Result<&'a [u8], RlmSnapshotError> {
     let body = state
         .components
@@ -361,24 +366,24 @@ fn resolve_leaf<'a>(
         .map(Arc::as_ref)
         .ok_or_else(|| RlmSnapshotError::MissingLeaf {
             logical_key: logical_key.to_string(),
-            component: component.to_string(),
+            component: component.clone(),
         })?;
     let actual_component = leaf_component_key(body);
-    if actual_component != component {
+    if &actual_component != component {
         return Err(RlmSnapshotError::LeafHashMismatch {
             logical_key: logical_key.to_string(),
-            component: component.to_string(),
+            component: component.clone(),
             actual_component,
         });
     }
     Ok(body)
 }
 
-fn root_leaf_keys(root: &RlmSnapshotRoot) -> BTreeSet<String> {
+fn root_leaf_keys(root: &RlmSnapshotRoot) -> BTreeSet<ExecutionLeafName> {
     leaf_keys_for_values(&root.globals)
 }
 
-fn leaf_keys_for_values(values: &BTreeMap<String, PersistedValue>) -> BTreeSet<String> {
+fn leaf_keys_for_values(values: &BTreeMap<String, PersistedValue>) -> BTreeSet<ExecutionLeafName> {
     values
         .values()
         .filter_map(|global| match global {
@@ -421,10 +426,10 @@ enum CaptureMode {
 
 /// A capture that has been built but not yet installed as the pending capture.
 struct PreparedCapture {
-    snapshot: lash_core::plugin::ExecutionStateSnapshot,
+    snapshot: lash_core::plugin::ExecutionStateCapture,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_baseline: BTreeMap<String, String>,
-    leaf_keys: BTreeSet<String>,
+    leaf_keys: BTreeSet<ExecutionLeafName>,
     #[cfg(test)]
     encoded_globals: usize,
 }
@@ -433,7 +438,7 @@ struct PreparedCapture {
 struct CaptureRollback {
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_baseline: BTreeMap<String, String>,
-    persisted_leaf_keys: BTreeSet<String>,
+    persisted_leaf_keys: BTreeSet<ExecutionLeafName>,
 }
 
 /// The live state and capture bookkeeping that one foreground cell may mutate.
@@ -446,10 +451,10 @@ pub(super) struct RlmExecutionCheckpoint {
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_baseline: BTreeMap<String, String>,
-    persisted_leaf_keys: BTreeSet<String>,
+    persisted_leaf_keys: BTreeSet<ExecutionLeafName>,
     capture_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
-    pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
+    pending_snapshot: Option<lash_core::plugin::ExecutionStateCapture>,
     #[cfg(test)]
     encoded_globals_in_last_snapshot: usize,
 }
@@ -479,13 +484,13 @@ pub struct RlmExecutionState {
     /// installs both, and a rollback or checkpoint restore rewinds both.
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_baseline: BTreeMap<String, String>,
-    persisted_leaf_keys: BTreeSet<String>,
+    persisted_leaf_keys: BTreeSet<ExecutionLeafName>,
     /// Whether anything may have changed since the last installed capture: a
     /// cell ran, a patch or prune committed, the root's own records moved.
     /// Which fragments changed is the durable diff's question, not this flag's.
     capture_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
-    pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
+    pending_snapshot: Option<lash_core::plugin::ExecutionStateCapture>,
     active_execution_checkpoint: Option<RlmExecutionCheckpoint>,
     execution_response_returned: bool,
     #[cfg(test)]
@@ -651,7 +656,7 @@ impl RlmExecutionState {
     pub async fn snapshot_execution_state(
         &mut self,
         fleet_format: lash_core::FleetFormat,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
         if !self.capture_dirty
             && let Some(snapshot) = &self.pending_snapshot
         {
@@ -692,26 +697,26 @@ impl RlmExecutionState {
         let prepared = self
             .build_capture(CaptureMode::Complete, fleet_format)
             .await?;
+        let lash_core::plugin::ExecutionStateCapture::Replace { root, leaves } = prepared.snapshot
+        else {
+            return Err(SessionError::Protocol(
+                "RLM root was not encoded".to_string(),
+            ));
+        };
         let mut components = BTreeMap::new();
-        for (key, component) in prepared.snapshot.components {
+        for (key, component) in leaves {
             match component {
-                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                lash_core::plugin::LeafChange::Changed(body) => {
                     components.insert(key, body);
                 }
-                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                lash_core::plugin::LeafChange::Unchanged => {
                     return Err(SessionError::Protocol(format!(
                         "complete RLM execution state referenced leaf `{key}` without its body"
                     )));
                 }
             }
         }
-        Ok(lash_core::plugin::HydratedExecutionState {
-            root: prepared
-                .snapshot
-                .root
-                .ok_or_else(|| SessionError::Protocol("RLM root was not encoded".to_string()))?,
-            components,
-        })
+        Ok(lash_core::plugin::HydratedExecutionState { root, components })
     }
 
     async fn build_capture(
@@ -764,7 +769,7 @@ impl RlmExecutionState {
         } else {
             self.pending_snapshot
                 .as_ref()
-                .map(|snapshot| snapshot.components.keys().cloned().collect())
+                .map(|snapshot| snapshot.leaves().keys().cloned().collect())
                 .unwrap_or_else(|| self.persisted_leaf_keys.clone())
         };
         let mut changed_leaves = if complete {
@@ -773,12 +778,12 @@ impl RlmExecutionState {
             self.pending_snapshot
                 .as_ref()
                 .into_iter()
-                .flat_map(|snapshot| &snapshot.components)
+                .flat_map(|snapshot| snapshot.leaves())
                 .filter_map(|(key, component)| match component {
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                    lash_core::plugin::LeafChange::Changed(body) => {
                         Some((key.clone(), body.clone()))
                     }
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => None,
+                    lash_core::plugin::LeafChange::Unchanged => None,
                 })
                 .collect::<BTreeMap<_, _>>()
         };
@@ -818,15 +823,20 @@ impl RlmExecutionState {
         })?;
 
         let leaf_keys = root_leaf_keys(&root);
-        let mut snapshot =
-            lash_core::plugin::ExecutionStateSnapshot::from_root(Some(encoded.into()));
-        for key in &leaf_keys {
-            if let Some(body) = changed_leaves.remove(key) {
-                snapshot.changed_component(key.clone(), body);
-            } else {
-                snapshot.unchanged_component(key.clone());
-            }
-        }
+        let leaves = leaf_keys
+            .iter()
+            .map(|key| {
+                let change = match changed_leaves.remove(key) {
+                    Some(body) => lash_core::plugin::LeafChange::Changed(body),
+                    None => lash_core::plugin::LeafChange::Unchanged,
+                };
+                (key.clone(), change)
+            })
+            .collect();
+        let snapshot = lash_core::plugin::ExecutionStateCapture::Replace {
+            root: encoded.into(),
+            leaves,
+        };
         Ok(PreparedCapture {
             snapshot,
             persisted_globals: next_globals,
@@ -843,7 +853,7 @@ impl RlmExecutionState {
     fn install_capture(
         &mut self,
         prepared: PreparedCapture,
-    ) -> lash_core::plugin::ExecutionStateSnapshot {
+    ) -> lash_core::plugin::ExecutionStateCapture {
         let PreparedCapture {
             snapshot,
             persisted_globals,

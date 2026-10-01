@@ -210,7 +210,13 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
         crate::MaxToolCalls::new(1024),
     ));
     state.session_id = SessionId::from("execution-state-replace-then-clear".to_string());
-    state.set_execution_state_snapshot(Some(b"initial-execution-state".to_vec().into()));
+    lash_core::testing::stage_execution_state_components(
+        &mut state,
+        lash_core::plugin::ExecutionStateCapture::replace(
+            b"initial-execution-state".to_vec().into(),
+        ),
+    )
+    .expect("stage initial capture");
 
     let initial = commit_runtime_state_for_test(
         &store,
@@ -221,7 +227,13 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     .expect("commit initial execution state");
     state.apply_persisted_commit_result(initial);
 
-    state.set_execution_state_snapshot(Some(b"replacement-execution-state".to_vec().into()));
+    lash_core::testing::stage_execution_state_components(
+        &mut state,
+        lash_core::plugin::ExecutionStateCapture::replace(
+            b"replacement-execution-state".to_vec().into(),
+        ),
+    )
+    .expect("stage replacement capture");
     let replacement = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&state),
@@ -237,7 +249,11 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     );
     state.apply_persisted_commit_result(replacement);
 
-    state.set_execution_state_snapshot(None);
+    lash_core::testing::stage_execution_state_components(
+        &mut state,
+        lash_core::plugin::ExecutionStateCapture::Clear,
+    )
+    .expect("stage clear capture");
     let cleared = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&state),
@@ -401,35 +417,6 @@ pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimeSt
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
-    const BYTE_LIMIT: usize = 2_048;
-    let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
-    commit
-        .validate_budget()
-        .expect("the commit without an agent frame must fit");
-    commit.current_frame_node_id = Some(
-        crate::FrameNodeId::new("f".repeat(BYTE_LIMIT * 2))
-            .expect("test frame identity is non-empty"),
-    );
-
-    let error = store
-        .commit_runtime_state(commit)
-        .await
-        .expect_err("agent frame bytes alone must trip the commit budget");
-    assert!(matches!(
-        error,
-        StoreError::CommitByteBudgetExceeded {
-            agent_frame_bytes,
-            max_bytes: BYTE_LIMIT,
-            ..
-        } if agent_frame_bytes > BYTE_LIMIT
-    ));
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
@@ -529,10 +516,7 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     let old_leaf = state.session_graph.leaf_node_id.clone().expect("seed leaf");
 
     let same_leaf_commit = RuntimeCommit::persisted_state_for_test(&state);
-    let seed_frame_node_id = same_leaf_commit
-        .current_frame_node_id
-        .clone()
-        .expect("seed frame");
+    let seed_frame_node_id = state.current_frame_node_id.clone().expect("seed frame");
     let same_leaf_planner = crate::store::RuntimeCommitPlanner::prepare(
         same_leaf_commit.clone(),
         lash_core::FleetFormat::current(),

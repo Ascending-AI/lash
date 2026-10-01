@@ -174,7 +174,6 @@ fn realistic_commit(
         &state,
         CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::Unbounded),
     );
-    commit.current_frame_node_id = Some(frame_node_id);
     commit.config = PersistedSessionConfig::from(&state.policy);
     commit.graph = GraphAppend::Extend { nodes };
     for index in 0..SMALL_CHECKPOINT_COMPONENTS {
@@ -322,7 +321,6 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
             checkpoint_bytes,
             attachment_referrer_bytes,
             follow_on_bytes,
-            agent_frame_bytes,
             turn_result_bytes,
             total_bytes,
             max_bytes,
@@ -331,7 +329,6 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
             && checkpoint_bytes == expected.checkpoint_bytes
             && attachment_referrer_bytes == expected.attachment_referrer_bytes
             && follow_on_bytes == expected.follow_on_bytes
-            && agent_frame_bytes == expected.agent_frame_bytes
             && turn_result_bytes == expected.turn_result_bytes
             && total_bytes == expected.total_bytes
             && max_bytes == RuntimeCommit::MAX_COMMIT_BUDGET_BYTES

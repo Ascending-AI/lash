@@ -1,8 +1,12 @@
 //! Commit-bytes pins for turn shapes a controller double drives: a code cell,
 //! a cancel observed after the model call, and an after-step cancel honoured
 //! at the step boundary. Captured before commit content moved onto the
-//! driver's recorded state (FIG-3672 P6); a difference is a durable-format
-//! change, not a new pin.
+//! driver's recorded state (FIG-3672 P6). During the pre-1.0 version freeze,
+//! shapes change in place and pins are regenerated.
+//!
+//! FIG-4666 removes the frame claim. `scripts/regenerate-runtime-commit-pins.py`
+//! verifies that restoring that field reproduces every previous digest before
+//! updating the pins; all other committed bytes retain their checks.
 //!
 //! Re-pinned once for a change of value and not of shape (FIG-3600): drive
 //! admission mints a turn's root from its durable input, so a direct turn's
@@ -107,7 +111,7 @@ async fn code_execution_turn_commits_the_pinned_bytes() {
     assert_commit_pins(
         "code execution",
         &commits,
-        &["74dddb003782087dc350ea933127fd08b588c28affd816e6bec3b88a256da057"],
+        &["b6b8fd27f97e364a684760c2d37753f64650ea056a22e49a4272fc10ea4c0b68"],
     );
 }
 
@@ -130,7 +134,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["a28ad37e72b7a65dd903df47dc8f37050b48ce80c445eac1b10c60403a26a04e"],
+        &["f647dd629e46fb03bf6443c7cc1ae27c0b0282b856d91a24960ca9944d7a4eda"],
     );
 }
 
@@ -154,6 +158,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["bcfe7b9c19d488e7f8e64a57148f894713084ce394a947c942d01b25863cf3ab"],
+        &["c3da9a659a531ed6938550ff81458018fc2f050e06e630ed19cff4587d414c2a"],
     );
 }

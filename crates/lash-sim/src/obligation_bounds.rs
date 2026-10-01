@@ -244,10 +244,13 @@ impl World {
     async fn root_scope_close(&self) -> Option<ObligationState> {
         self.stores
             .obligation_ledger(ObligationKind::ScopeClose)
-            .state(&lash_core::store::scope_close_obligation_id(
-                &self.session,
-                &TurnId::from("open-root"),
-            ))
+            .state(
+                &lash_core::store::ObligationKey::ScopeClose {
+                    session_id: self.session.clone(),
+                    root: TurnId::from("open-root"),
+                }
+                .id(),
+            )
             .await
             .expect("obligation state")
     }

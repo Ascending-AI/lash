@@ -24,6 +24,12 @@ typed component error when a required ref cannot be resolved. Root and changed
 leaves commit in the same transaction. A backend does not replace the keyed
 contract with one opaque execution-state body.
 
+A protocol captures `ExecutionStateCapture::Clear` or `Replace { root, leaves }`.
+A replacement requires its root and keys leaves by `ExecutionLeafName`.
+`CheckpointComponentKey` interprets stored manifest keys; the core leaf name
+owns the execution-state namespace spelling. Manifests and RLM root leaf
+references retain their existing string encodings.
+
 ### Runtime roots and heap fragments
 
 The RLM root contains the engine ID, a durable state header, globals, deferred

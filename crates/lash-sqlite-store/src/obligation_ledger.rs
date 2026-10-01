@@ -204,9 +204,8 @@ impl SqliteObligationLedger {
 
 /// Arm `key`'s row as a fresh obligation due at `now_ms` inside a producer's
 /// own transaction: the helper a slice's producer calls on its transaction.
-/// An ingress row's id is derived from its item (`crate::ingress_obligation`);
-/// every other kind's is minted. `None` when the row is missing or already
-/// carries an obligation.
+/// Every kind uses its typed key's id. `None` when the row is missing or
+/// already carries an obligation.
 pub(crate) fn arm_obligation_tx(
     conn: &rusqlite::Connection,
     key: &ObligationKey,
@@ -215,20 +214,7 @@ pub(crate) fn arm_obligation_tx(
     if key.kind() == ObligationKind::Ingress {
         return crate::ingress_obligation::arm_ingress_tx(conn, key, now_ms);
     }
-    arm_obligation_id_tx(conn, key, &ObligationId::mint(key.kind()), now_ms)
-}
-
-/// [`arm_obligation_tx`] with the id the row's own transaction derived (ADR
-/// 0109 §1.1): a producer that must name its obligation afterwards — the
-/// terminal write naming its scope close — arms the id it derived rather
-/// than a minted one.
-pub(crate) fn arm_obligation_id_tx(
-    conn: &rusqlite::Connection,
-    key: &ObligationKey,
-    id: &ObligationId,
-    now_ms: u64,
-) -> Result<Option<ObligationId>, StoreError> {
-    arm_table_tx(conn, obligation_sql(key.kind()), key, id.clone(), now_ms)
+    arm_table_tx(conn, obligation_sql(key.kind()), key, now_ms)
 }
 
 /// [`SqliteObligationLedger::claim`] inside a transaction the caller already
@@ -266,9 +252,9 @@ pub(crate) fn arm_table_tx(
     conn: &rusqlite::Connection,
     sql: ObligationSql<'static>,
     key: &ObligationKey,
-    id: ObligationId,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
+    let id = key.id();
     let mut values = key_values(key);
     values.push(Value::Text(id.as_str().to_owned()));
     values.push(Value::Integer(sql_i64("obligation due instant", now_ms)?));
@@ -576,11 +562,17 @@ impl ObligationLedger for SqliteObligationLedger {
 
 /// Arm a cleanup beside the end fact or first guarded edge. The caller owns
 /// the write transaction, so a competing end cannot interleave this decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CleanupStorage {
+    DurableCore,
+    ProcessRegistry,
+}
+
 pub(crate) fn arm_cleanup_tx(
     tx: &rusqlite::Connection,
     cleanup: &ArtifactCleanup,
     now_ms: u64,
-    prefix: &str,
+    storage: CleanupStorage,
 ) -> Result<ObligationId, StoreError> {
     use rusqlite::{OptionalExtension, params};
     let kind = cleanup.referrer().kind().as_str();
@@ -609,10 +601,10 @@ pub(crate) fn arm_cleanup_tx(
             ArtifactCleanup::from_json(body, &stored)
         })
         .transpose()?;
-    let id = row.as_ref().map_or_else(
-        || ObligationId::new(format!("{prefix}:{}", uuid::Uuid::new_v4().simple())),
-        |row| ObligationId::new(row.0.clone()),
-    );
+    let id = ObligationKey::ArtifactCleanup {
+        referrer: cleanup.referrer(),
+    }
+    .id();
     let body = cleanup
         .to_json()
         .map_err(|error| StoreError::Backend(error.to_string()))?;
@@ -634,7 +626,7 @@ pub(crate) fn arm_cleanup_tx(
         }
         CleanupUpsert::Keep => {}
     }
-    if prefix == "core" && cleanup.is_ended() {
+    if storage == CleanupStorage::DurableCore && cleanup.is_ended() {
         crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer(), now_ms)
             .map_err(sqlite_error)?;
     }
@@ -642,7 +634,7 @@ pub(crate) fn arm_cleanup_tx(
 }
 
 /// The durable-core and process-registry cleanup tables form one ledger. IDs
-/// carry their database prefix, so a claimed row is always settled in place.
+/// are derived from referrers; each operation checks the owning ledgers.
 #[derive(Clone)]
 pub(crate) struct SqliteArtifactCleanupLedger {
     core: SqliteObligationLedger,
@@ -656,19 +648,6 @@ impl SqliteArtifactCleanupLedger {
             core: SqliteObligationLedger::new(ObligationKind::ArtifactCleanup, core),
             registry: SqliteObligationLedger::new(ObligationKind::ArtifactCleanup, registry),
             registry_first: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    fn for_id(&self, id: &ObligationId) -> Result<&SqliteObligationLedger, StoreError> {
-        if id.as_str().starts_with("core:") {
-            Ok(&self.core)
-        } else if id.as_str().starts_with("registry:") {
-            Ok(&self.registry)
-        } else {
-            Err(stored_data_corrupt(
-                "artifact cleanup obligation id",
-                id.as_str(),
-            ))
         }
     }
 }
@@ -724,9 +703,10 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
-        self.for_id(id)?
-            .claim(id, token, now_ms, claim_ttl_ms)
-            .await
+        if let Some(claimed) = self.core.claim(id, token, now_ms, claim_ttl_ms).await? {
+            return Ok(Some(claimed));
+        }
+        self.registry.claim(id, token, now_ms, claim_ttl_ms).await
     }
 
     async fn settle(
@@ -736,11 +716,22 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
         settlement: ObligationSettlement,
         now_ms: u64,
     ) -> Result<SettleOutcome, StoreError> {
-        self.for_id(id)?.settle(id, token, settlement, now_ms).await
+        if self
+            .core
+            .settle(id, token, settlement.clone(), now_ms)
+            .await?
+            == SettleOutcome::Applied
+        {
+            return Ok(SettleOutcome::Applied);
+        }
+        self.registry.settle(id, token, settlement, now_ms).await
     }
 
     async fn rearm(&self, id: &ObligationId, now_ms: u64) -> Result<bool, StoreError> {
-        self.for_id(id)?.rearm(id, now_ms).await
+        if self.core.rearm(id, now_ms).await? {
+            return Ok(true);
+        }
+        self.registry.rearm(id, now_ms).await
     }
 
     async fn list_stalled(
@@ -760,7 +751,10 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
     }
 
     async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
-        self.for_id(id)?.standing(id).await
+        if let Some(standing) = self.core.standing(id).await? {
+            return Ok(Some(standing));
+        }
+        self.registry.standing(id).await
     }
 }
 
@@ -775,7 +769,8 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
         self.core
             .conn
             .write(move |tx| {
-                arm_cleanup_tx(tx, &cleanup, now_ms, "core").map_err(sqlite_conversion_error)
+                arm_cleanup_tx(tx, &cleanup, now_ms, CleanupStorage::DurableCore)
+                    .map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)
@@ -817,17 +812,27 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
 
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {
         use rusqlite::OptionalExtension;
-        let conn = self.for_id(id)?.conn.clone();
-        let id = id.as_str().to_owned();
-        let row: Option<(String, String, String)> = conn
-            .call(move |conn| {
-                conn.query_row(CLEANUPS.select_by_id.sql(), rusqlite::params![id], |row| {
-                    Ok((row.get(2)?, row.get(3)?, row.get(4)?))
+        let mut row = None;
+        for ledger in [&self.core, &self.registry] {
+            let id = id.as_str().to_owned();
+            row = ledger
+                .conn
+                .call(move |conn| {
+                    conn.query_row(CLEANUPS.select_by_id.sql(), rusqlite::params![id], |row| {
+                        Ok((
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    })
+                    .optional()
                 })
-                .optional()
-            })
-            .await
-            .map_err(sqlite_error)?;
+                .await
+                .map_err(sqlite_error)?;
+            if row.is_some() {
+                break;
+            }
+        }
         // A referrer kind a newer build wrote is refused
         // `Incompatible(UnknownVocabulary)`, never read as corrupt or absent.
         row.map(|(kind, id, body)| {
@@ -1067,7 +1072,13 @@ mod artifact_cleanup_tests {
             .arm_cleanup(&fresh_ended, 240)
             .await
             .expect("the fresh arm commits");
-        assert!(fresh_id.as_str().starts_with("core:"));
+        assert_eq!(
+            fresh_id,
+            ObligationKey::ArtifactCleanup {
+                referrer: fresh_referrer.clone(),
+            }
+            .id()
+        );
         assert!(fenced(&core, &fresh_referrer).await);
     }
 
@@ -1086,13 +1097,17 @@ mod artifact_cleanup_tests {
             };
             journal
         }));
-        let first = arm_cleanup_tx(&conn, &guard, 100, "core").expect("arm guard");
-        let again = arm_cleanup_tx(&conn, &guard, 101, "core").expect("repeat guard");
+        let first =
+            arm_cleanup_tx(&conn, &guard, 100, CleanupStorage::DurableCore).expect("arm guard");
+        let again =
+            arm_cleanup_tx(&conn, &guard, 101, CleanupStorage::DurableCore).expect("repeat guard");
         assert_eq!(first, again);
         let ended = ArtifactCleanup::ended(referrer.clone(), Vec::new(), None);
-        let replaced = arm_cleanup_tx(&conn, &ended, 102, "core").expect("replace guard");
+        let replaced =
+            arm_cleanup_tx(&conn, &ended, 102, CleanupStorage::DurableCore).expect("replace guard");
         assert_eq!(first, replaced);
-        arm_cleanup_tx(&conn, &guard, 103, "core").expect("guard cannot replace end");
+        arm_cleanup_tx(&conn, &guard, 103, CleanupStorage::DurableCore)
+            .expect("guard cannot replace end");
         let (body, state, due): (String, String, i64) = conn.query_row(
             "SELECT cleanup_json, obligation_state, obligation_due_at_ms FROM artifact_cleanup_obligations",
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),

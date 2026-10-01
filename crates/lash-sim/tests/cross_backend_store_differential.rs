@@ -694,15 +694,11 @@ fn materialize_graph(session_id: &SessionId, spec: &GraphSpec) -> GraphAppend {
     GraphAppend::Extend { nodes }
 }
 
-// A commit is genuinely this many independent parts; bundling them into a
-// params struct here would only move the same fields behind another name.
-#[allow(clippy::too_many_arguments)]
 fn runtime_commit(
     session_id: &SessionId,
     expected_head_revision: u64,
     graph: &GraphSpec,
     turn_commit: Option<TurnCommitSpec>,
-    current_frame_node_id: Option<lash_core::FrameNodeId>,
     checkpoint: HydratedSessionCheckpoint,
     committed_attachment_ids: Vec<AttachmentId>,
 ) -> RuntimeCommit {
@@ -716,17 +712,6 @@ fn runtime_commit(
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.expected_head_revision = expected_head_revision;
     commit.graph = materialize_graph(session_id, graph);
-    commit.current_frame_node_id = commit
-        .graph
-        .appended_nodes()
-        .filter_map(|node| match &node.payload {
-            SessionNodePayload::FrameOpen { frame_key, .. } => Some(
-                lash_core::facade_support::frame_node_id(session_id, frame_key.as_str()),
-            ),
-            _ => None,
-        })
-        .last()
-        .or(current_frame_node_id);
     if let Some(turn_commit) = turn_commit {
         commit.turn_commit = RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
             session_id,
@@ -1215,7 +1200,6 @@ impl BackendRunner {
                 expected_head_revision,
                 &graph,
                 None,
-                self.current_frame_node_id.clone(),
                 HydratedSessionCheckpoint::default(),
                 Vec::new(),
             ),
@@ -1250,12 +1234,23 @@ impl BackendRunner {
 
     /// Drive `commit` through the store and, on success, thread the runner's
     /// frame/leaf tracking and checkpoint expectations forward.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: generated frame-open node ids are non-empty"
+    )]
     async fn commit_and_track(
         &mut self,
         commit: RuntimeCommit,
         checkpoint: CheckpointSpec,
     ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
-        let next_frame_node_id = commit.current_frame_node_id.clone();
+        let next_frame_node_id = commit
+            .graph
+            .nodes()
+            .iter()
+            .rev()
+            .find(|node| node.frame_open().is_some())
+            .map(|node| lash_core::FrameNodeId::new(node.node_id.clone()).expect("frame id"))
+            .or_else(|| self.current_frame_node_id.clone());
         let result = self.store().commit_runtime_state(commit).await;
         match result {
             Ok(result) => {
@@ -1309,7 +1304,6 @@ impl BackendRunner {
                     *expected_head_revision,
                     graph,
                     *turn_commit,
-                    self.current_frame_node_id.clone(),
                     checkpoint_from_spec(*checkpoint, self.checkpoint_component_refs.as_ref()),
                     (*adopt_attachment)
                         .then(differential_attachment_id)
@@ -1336,7 +1330,6 @@ impl BackendRunner {
                     *expected_head_revision,
                     &append(Vec::new(), None),
                     None,
-                    self.current_frame_node_id.clone(),
                     HydratedSessionCheckpoint::default(),
                     Vec::new(),
                 );
@@ -1349,7 +1342,6 @@ impl BackendRunner {
                         )
                     })
                     .unwrap_or_default();
-                commit.current_frame_node_id = frame;
                 commit.graph_base_leaf_node_id = leaf;
                 commit.turn_commit =
                     RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
@@ -1360,8 +1352,7 @@ impl BackendRunner {
                 commit.pending_follow_on =
                     owed_turn_id.map(|owed_turn_id| lash_core::store::PendingFollowOn {
                         follow_on_turn_id: lash_core::TurnId::from(owed_turn_id),
-                        frame_id: commit
-                            .current_frame_node_id
+                        frame_id: frame
                             .clone()
                             .expect("a pending follow-on owes the head's current frame"),
                         task: "fig-2841 follow-on task".to_string(),

@@ -14,7 +14,7 @@ use lash_core::engine::{
 use lash_core::runtime::drive::relay::{ObligationRelay, RelayPolicy};
 use lash_core::runtime::drive::{IngressRelay, ReconcileParts, reconcile_once};
 use lash_core::runtime::recovery_lease::RecoveryDuties;
-use lash_core::store::ingress_obligation::ingress_obligation_id;
+
 use lash_core::store::{ObligationKind, ObligationLedger, ObligationState, StallReason};
 use lash_core::{
     InputId, RuntimeStore, SessionCatalogStore as _, SessionDriver, SessionId, SessionStore,
@@ -219,7 +219,13 @@ impl World {
 
     async fn state(&self, input: &InputId) -> Option<ObligationState> {
         self.ledger
-            .state(&ingress_obligation_id(input.as_str()))
+            .state(
+                &lash_core::store::ObligationKey::Ingress {
+                    session_id: self.session.clone(),
+                    item_id: (input.as_str()).to_string(),
+                }
+                .id(),
+            )
             .await
             .expect("obligation state")
     }

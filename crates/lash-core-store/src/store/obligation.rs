@@ -183,6 +183,38 @@ pub enum ObligationKey {
 }
 
 impl ObligationKey {
+    /// The stable id of this owning row. Each key part is byte-length-prefixed,
+    /// so delimiters and Unicode cannot make distinct keys collide.
+    #[must_use]
+    pub fn id(&self) -> ObligationId {
+        let parts = match self {
+            Self::ControlIntent { intent_id } => vec![intent_id.sequence().to_string()],
+            Self::Ingress { .. }
+            | Self::ScopeClose { .. }
+            | Self::ParentEnd { .. }
+            | Self::SessionDelete { .. }
+            | Self::TriggerDelivery { .. }
+            | Self::ProcessStart { .. }
+            | Self::ProcessTerminal { .. }
+            | Self::ArtifactCleanup { .. } => self
+                .columns()
+                .into_iter()
+                .map(|column| match column {
+                    KeyColumn::Text(text) => text,
+                    KeyColumn::Integer(integer) => integer.to_string(),
+                })
+                .collect(),
+        };
+        let mut id = self.kind().label().to_owned();
+        for part in parts {
+            id.push(':');
+            id.push_str(&part.len().to_string());
+            id.push(':');
+            id.push_str(&part);
+        }
+        ObligationId::new(id)
+    }
+
     /// Decode a row whose kind label came from storage. A foreign kind leaves
     /// the row addressable by its obligation id but cannot be delivered here.
     pub fn decode_label(
@@ -355,7 +387,7 @@ fn next_integer(
     }
 }
 
-/// The stable id of one armed obligation, minted when the row is armed.
+/// The stable id of one obligation, derived from its owning typed key.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -369,16 +401,6 @@ impl ObligationId {
         Self(text.into())
     }
 
-    /// A fresh id for an obligation of `kind`.
-    #[must_use]
-    pub fn mint(kind: ObligationKind) -> Self {
-        Self(format!(
-            "{}:{}",
-            kind.label(),
-            uuid::Uuid::new_v4().simple()
-        ))
-    }
-
     /// The id as stored.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -390,26 +412,6 @@ impl std::fmt::Display for ObligationId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.0)
     }
-}
-
-/// The obligation created by a process registration. A caller may attempt
-/// delivery immediately after its registration transaction commits.
-#[must_use]
-pub fn process_start_obligation_id(process_id: &ProcessId) -> ObligationId {
-    ObligationId::new(format!("process_start:{}", process_id.as_str()))
-}
-
-/// The derived id of a terminal root's scope-close obligation (ADR 0109
-/// §3): stable per `(session, root)` — the terminal transaction arms it, and
-/// the close's own delivery names the same id to claim it.
-#[must_use]
-pub fn scope_close_obligation_id(session_id: &SessionId, root: &TurnId) -> ObligationId {
-    ObligationId::new(format!(
-        "{}:{}:{}",
-        ObligationKind::ScopeClose.label(),
-        session_id.as_str(),
-        root.as_str()
-    ))
 }
 
 /// The token one claim stamps; every settling write compares it.

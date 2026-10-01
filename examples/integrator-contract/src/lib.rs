@@ -172,7 +172,7 @@ impl CodeExecutorPlugin for Integrator {
     async fn snapshot_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<ExecutionStateSnapshot, SessionError> {
+    ) -> Result<ExecutionStateCapture, SessionError> {
         unreachable!("external signature witness")
     }
     async fn frame_switch_carries(

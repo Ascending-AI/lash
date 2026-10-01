@@ -1076,9 +1076,11 @@ fn claim_due_ingress_conn(
     let sql = crate::ingress_obligation::turn_input_sql();
     let mut claims = Vec::with_capacity(rows.len());
     for row in rows {
-        let id = lash_core_execution::store::ingress_obligation::ingress_obligation_id(
-            row.input_id.as_str(),
-        );
+        let id = lash_core_execution::store::ObligationKey::Ingress {
+            session_id: row.session_id.clone(),
+            item_id: row.input_id.as_str().to_string(),
+        }
+        .id();
         if let Some(claimed) = crate::obligation_ledger::claim_obligation_tx(
             tx,
             sql,

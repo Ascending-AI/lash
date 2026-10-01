@@ -141,9 +141,11 @@ lash_store_sql::statements! {
     pub(crate) struct SessionHeadPostgresStatements @ "session_head" {
 
         /// The published head of `?1`, row-locked.
-        select_meta_for_update = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref,
-                pending_follow_on_json
-         FROM session_head WHERE session_id = ?1 FOR UPDATE";
+        select_meta_for_update = "SELECT head.head_json, head.head_revision, head.leaf_node_id, head.checkpoint_ref,
+                head.pending_follow_on_json, leaf.frame_node_id
+         FROM session_head AS head LEFT JOIN graph_nodes AS leaf
+             ON leaf.node_id = head.leaf_node_id
+         WHERE head.session_id = ?1 FOR UPDATE OF head";
 
         /// The follow-on `?1`'s head owes (ADR 0101 §3), row-locked: every
         /// claim reads it inside its transaction, and the lock orders the read

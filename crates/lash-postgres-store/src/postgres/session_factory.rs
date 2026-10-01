@@ -679,7 +679,10 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             ),
         );
         let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-            lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id),
+            lash_core_execution::FrameEnvironmentId::new(
+                request.session_id.clone(),
+                frame_node_id.clone(),
+            ),
         );
         let mut frame_locks = [source_frame.clone(), fork_frame.clone()];
         frame_locks.sort_by_key(|referrer| {
@@ -717,7 +720,10 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             })?;
             checkpoint.components.retain(|key, _| {
                 key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                    && !key.starts_with("execution_state/")
+                    && !matches!(
+                        lash_core_execution::plugin::CheckpointComponentKey::parse(key),
+                        lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_)
+                    )
             });
             checkpoint_ref =
                 crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
@@ -788,21 +794,12 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 ),
                 session_id: request.session_id.clone(),
                 config,
-                current_frame_node_id: Some({
-                    #[expect(
-                        clippy::expect_used,
-                        reason = "the target is a transparent newtype over `String`, so decoding a JSON string into it cannot fail"
-                    )]
-                    let node_id =
-                        serde_json::from_value(serde_json::Value::String(current_frame_node_id))
-                            .expect("a persisted frame node id is a transparent string");
-                    node_id
-                }),
                 published_by_drive: false,
             },
             0,
             Some(checkpoint_ref.clone().into()),
             Some(request.node_id.clone()),
+            Some(frame_node_id.clone()),
         )?;
         sqlx::query(session_sql().head_postgres.insert_fork.sql())
             .bind(request.session_id.as_str())

@@ -1131,7 +1131,7 @@ async fn final_commit_updates_persisted_graph_count() {
             returned_state: returned_state.clone(),
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Replace(
-                crate::plugin::ExecutionStateSnapshot::from_root(Some(b"runtime".to_vec().into())),
+                crate::plugin::ExecutionStateCapture::replace(b"runtime".to_vec().into()),
             ),
             agent_frame_switch_materializes: false,
             store: Some(&store),

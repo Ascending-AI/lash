@@ -33,11 +33,11 @@ fn write_root(fleet: FleetFormat) -> Vec<u8> {
             .await
             .expect("snapshot a fresh state");
         assert!(
-            snapshot.components.is_empty(),
+            snapshot.leaves().is_empty(),
             "a fresh state's root carries every value inline"
         );
         snapshot
-            .root
+            .root()
             .expect("a fresh state snapshots a root")
             .to_vec()
     })
@@ -60,7 +60,7 @@ fn read_root(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
             .snapshot_execution_state(FleetFormat::current())
             .await
             .map_err(|error| error.to_string())?;
-        Ok(format!("{:?}", again.root))
+        Ok(format!("{:?}", again.root()))
     })
 }
 

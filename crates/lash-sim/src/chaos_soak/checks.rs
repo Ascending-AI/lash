@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use lash_core::store::{ObligationKind, ObligationState, scope_close_obligation_id};
+use lash_core::store::{ObligationKind, ObligationState};
 use lash_core::{ScopeId, SessionId, SessionLookup, TurnId};
 
 use super::driver::{Admission, Ledger, Retired};
@@ -289,7 +289,11 @@ fn roots_closed(ledger: &Ledger, live: &[SessionId]) -> CustomCheck {
                 let turn = TurnId::from(root.as_str());
                 match factory.root_terminal(&session, &turn).await {
                     Ok(Some(_)) => {
-                        let id = scope_close_obligation_id(&session, &turn);
+                        let id = lash_core::store::ObligationKey::ScopeClose {
+                            session_id: session.clone(),
+                            root: turn.clone(),
+                        }
+                        .id();
                         match ledger.state(&id).await {
                             Ok(Some(ObligationState::Delivered | ObligationState::Stalled)) => {}
                             Ok(state) => violations.push(format!(

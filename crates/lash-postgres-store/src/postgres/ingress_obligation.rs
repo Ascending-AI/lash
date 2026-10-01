@@ -2,7 +2,7 @@
 //! table's and the queued-batch table's obligation ledgers, composed.
 //!
 //! Admission arms the row it inserts inside its own transaction, under the
-//! id [`ingress_obligation_id`] derives from the row, so the producer
+//! id [`ObligationKey::id`] derives from the row, so the producer
 //! attempts delivery right after its commit.
 
 use std::num::NonZeroUsize;
@@ -10,7 +10,7 @@ use std::sync::{Arc, LazyLock};
 
 use lash_core_execution::SessionId;
 use lash_core_execution::store::ingress_obligation::{
-    DueObligationPeek, IngressLedger, IngressTable, ingress_obligation_id,
+    DueObligationPeek, IngressLedger, IngressTable,
 };
 use lash_core_execution::store::{ObligationId, ObligationKey, ObligationKind, ObligationLedger};
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
@@ -67,11 +67,16 @@ pub(crate) async fn arm_turn_input_tx(
 /// stalled is left as it stands.
 pub(crate) async fn claim_turn_input_tx(
     conn: &mut sqlx::PgConnection,
+    session_id: &SessionId,
     input_id: &str,
     until_ms: u64,
 ) -> Result<(), StoreError> {
+    let key = ObligationKey::Ingress {
+        session_id: session_id.clone(),
+        item_id: input_id.to_string(),
+    };
     sqlx::query(turn_input_sql().0.claim.sql())
-        .bind(ingress_obligation_id(input_id).as_str())
+        .bind(key.id().as_str())
         .bind(lash_core_execution::store::ClaimToken::mint().as_str())
         .bind(i64::try_from(until_ms).unwrap_or(i64::MAX))
         .execute(conn)
@@ -123,7 +128,7 @@ async fn arm_tx(
         session_id: session_id.clone(),
         item_id: item_id.to_owned(),
     };
-    arm_table_tx(conn, sql, &key, ingress_obligation_id(item_id), now_ms).await
+    arm_table_tx(conn, sql, &key, now_ms).await
 }
 
 /// One table's due read, through its `obligation_peek_due` statement.

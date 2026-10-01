@@ -102,7 +102,7 @@ pub(super) enum RlmPersistedValueProbe {
         body: Vec<u8>,
     },
     Leaf {
-        component: String,
+        component: lash_core::plugin::ExecutionLeafName,
     },
 }
 

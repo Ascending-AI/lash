@@ -64,7 +64,7 @@ use crate::engine::{
 use crate::store::{
     ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState, DeliveryError,
     IntentApplication, IntentSettle, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    StoreError, scope_close_obligation_id,
+    StoreError,
 };
 use crate::{Clock, DeploymentStore, SessionWorkEngine};
 
@@ -390,7 +390,11 @@ async fn close_session_engine_half(
     // failure is reported, never fatal (ADR 0109 §3). The session's own
     // scope close below carries no obligation of this kind.
     for root in roots {
-        let id = scope_close_obligation_id(&intent.session_id, root);
+        let id = crate::store::ObligationKey::ScopeClose {
+            session_id: intent.session_id.clone(),
+            root: root.clone(),
+        }
+        .id();
         if let Err(error) = deliver_now(scope_close, &id, clock).await {
             tracing::warn!(
                 session_id = intent.session_id.as_str(),

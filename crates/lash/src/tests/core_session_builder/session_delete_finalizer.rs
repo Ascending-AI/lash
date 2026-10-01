@@ -64,7 +64,11 @@ async fn closing_fixture_under(
     // The handle answered at the root's final commit; its close step runs
     // after (FIG-3979).
     settle_session_drive(&core, SESSION).await;
-    let scope_close = lash_core::store::scope_close_obligation_id(&SESSION.into(), &ROOT.into());
+    let scope_close = lash_core::store::ObligationKey::ScopeClose {
+        session_id: SESSION.into(),
+        root: ROOT.into(),
+    }
+    .id();
     assert_eq!(
         core.backend
             .obligation_ledger(ObligationKind::ScopeClose)

@@ -142,7 +142,10 @@ pub(super) async fn start_delivery_refuses_externally_owned_rows() {
         let failure = lash_core::runtime::drive::relay::ObligationRelay::deliver(
             &relay,
             lash_core::runtime::drive::relay::ObligationDelivery {
-                id: &lash_core::store::process_start_obligation_id(id),
+                id: &lash_core::store::ObligationKey::ProcessStart {
+                    process_id: id.clone(),
+                }
+                .id(),
                 key: &lash_core::store::ObligationKey::ProcessStart {
                     process_id: id.clone(),
                 },

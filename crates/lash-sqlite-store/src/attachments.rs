@@ -135,7 +135,12 @@ pub(crate) fn acquire_attachment_refs_conn(
         insert_edge(tx, referrer, id)?;
     }
     if let Some(cleanup) = claim.guard_cleanup() {
-        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now, "core")?;
+        crate::obligation_ledger::arm_cleanup_tx(
+            tx,
+            &cleanup,
+            now,
+            crate::obligation_ledger::CleanupStorage::DurableCore,
+        )?;
     }
     Ok(())
 }
@@ -792,7 +797,12 @@ impl AttachmentReferrers for SqliteStore {
                     }
                     insert_edge(tx, referrer, &write.attachment_id)?;
                     if let Some(cleanup) = write.claim.guard_cleanup() {
-                        crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now, "core")?;
+                        crate::obligation_ledger::arm_cleanup_tx(
+                            tx,
+                            &cleanup,
+                            now,
+                            crate::obligation_ledger::CleanupStorage::DurableCore,
+                        )?;
                     }
                     Ok(lash_core_execution::AttachmentWriteFence::Granted(
                         lash_core_execution::AttachmentWritePermit::new(token),

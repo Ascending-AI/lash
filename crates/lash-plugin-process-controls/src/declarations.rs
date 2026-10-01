@@ -106,7 +106,7 @@ pub fn process_signal_tool_definition() -> ToolDefinition {
             "properties": {
                 "handle": {
                     "x-lash": { "kind": "process_unknown" },
-                    "description": "Process handle to signal, as returned by `processes.list(...)`.",
+                    "description": "Process handle to signal, as returned by `processes.list(...)`."
                 },
                 "name": {
                     "type": "string",

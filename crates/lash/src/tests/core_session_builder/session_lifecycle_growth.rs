@@ -33,7 +33,8 @@ impl lash_core::store::RuntimeStoreDecorator for GrowthFactory {
                 .components
                 .iter()
                 .filter(|(key, component)| {
-                    key.starts_with("execution_state/") && component.blob_ref().is_none()
+                    crate::plugins::ExecutionLeafName::parse(key).is_some()
+                        && component.blob_ref().is_none()
                 })
                 .map(|(key, _)| key.clone())
                 .collect(),

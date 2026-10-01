@@ -110,7 +110,10 @@ impl ArtifactCleanupLedger for Ledger {
         cleanup: &ArtifactCleanup,
         _now_ms: u64,
     ) -> Result<ObligationId, StoreError> {
-        let id = ObligationId::new(format!("core:{}", cleanup.referrer().canonical_id()));
+        let id = ObligationKey::ArtifactCleanup {
+            referrer: cleanup.referrer(),
+        }
+        .id();
         self.rows
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -489,10 +492,10 @@ fn harness() -> Harness {
 
 impl Harness {
     fn arm(&self, cleanup: ArtifactCleanup) -> (ObligationId, ObligationKey) {
-        let id = ObligationId::new(format!("core:{}", cleanup.referrer().canonical_id()));
         let key = ObligationKey::ArtifactCleanup {
             referrer: cleanup.referrer(),
         };
+        let id = key.id();
         self.ledger
             .rows
             .lock()

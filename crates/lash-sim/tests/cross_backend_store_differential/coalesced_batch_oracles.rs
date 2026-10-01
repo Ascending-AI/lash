@@ -322,7 +322,6 @@ async fn end_oracle_root(
             revision,
             &append(Vec::new(), None),
             None,
-            None,
             HydratedSessionCheckpoint::default(),
             Vec::new(),
         ),

@@ -645,12 +645,9 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
             .expect("initial snapshot");
         assert_eq!(
             initial
-                .components
+                .leaves()
                 .values()
-                .filter(|component| matches!(
-                    component,
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
-                ))
+                .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
                 .count(),
             12
         );
@@ -672,24 +669,14 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
             .await
             .expect("changed snapshot");
         let changed_bodies = changed
-            .components
+            .leaves()
             .values()
-            .filter(|component| {
-                matches!(
-                    component,
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
-                )
-            })
+            .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
             .count();
         let unchanged_refs = changed
-            .components
+            .leaves()
             .values()
-            .filter(|component| {
-                matches!(
-                    component,
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged
-                )
-            })
+            .filter(|component| matches!(component, lash_core::plugin::LeafChange::Unchanged))
             .count();
         assert_eq!(
             changed_bodies, 1,
@@ -733,17 +720,15 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
             .await
             .expect("final capture after later assignment");
         assert_ne!(
-            final_snapshot.root, progress_snapshot.root,
+            final_snapshot.root(),
+            progress_snapshot.root(),
             "the final capture must supersede the pending progress capture"
         );
         assert_eq!(
             final_snapshot
-                .components
+                .leaves()
                 .values()
-                .filter(|component| matches!(
-                    component,
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
-                ))
+                .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
                 .count(),
             1,
             "the post-progress value leaf must still carry its uncommitted body"
@@ -832,15 +817,12 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             .snapshot_execution_state(lash_core::FleetFormat::current())
             .await
             .expect("final A capture");
-        assert_ne!(final_a.root, progress_b.root);
+        assert_ne!(final_a.root(), progress_b.root());
         assert_eq!(
             final_a
-                .components
+                .leaves()
                 .values()
-                .filter(|component| matches!(
-                    component,
-                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
-                ))
+                .filter(|component| matches!(component, lash_core::plugin::LeafChange::Changed(_)))
                 .count(),
             1,
             "A was evicted by the staged B root, so final A must resend its body"
@@ -931,11 +913,11 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             );
             assert_eq!(
                 snapshot
-                    .components
+                    .leaves()
                     .values()
                     .filter(|component| matches!(
                         component,
-                        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                        lash_core::plugin::LeafChange::Changed(_)
                     ))
                     .count(),
                 1,
@@ -1075,11 +1057,11 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             );
             assert_eq!(
                 snapshot
-                    .components
+                    .leaves()
                     .values()
                     .filter(|component| matches!(
                         component,
-                        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                        lash_core::plugin::LeafChange::Changed(_)
                     ))
                     .count(),
                 1,
@@ -1117,7 +1099,7 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
             .snapshot_execution_state(lash_core::FleetFormat::current())
             .await
             .expect("initial snapshot");
-        assert_eq!(initial.components.len(), 0);
+        assert_eq!(initial.leaves().len(), 0);
         state.acknowledge_execution_state_capture();
 
         state = execute_test_code(
@@ -1135,10 +1117,10 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
         let commit_bytes = state::measure_snapshot(&changed).checkpoint_bytes;
         println!(
             "FIG1195_SHORT_BINDING_FLOOR commit_bytes={commit_bytes} leaves={}",
-            changed.components.len()
+            changed.leaves().len()
         );
         assert!(
-            changed.components.is_empty(),
+            changed.leaves().is_empty(),
             "a changed short binding must not mint a leaf"
         );
         // The property under test is the assertion above: no leaf is minted,

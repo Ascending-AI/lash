@@ -739,7 +739,7 @@ impl DialectSession {
     pub(crate) async fn snapshot_execution_state(
         &mut self,
         fleet_format: lash_core::FleetFormat,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
         self.state.snapshot_execution_state(fleet_format).await
     }
 

@@ -480,9 +480,13 @@ async fn scope_close_state(
     root: &TurnId,
 ) -> Option<lash_core::store::ObligationState> {
     scope_close_ledger(stores)
-        .state(&lash_core::store::scope_close_obligation_id(
-            session_id, root,
-        ))
+        .state(
+            &lash_core::store::ObligationKey::ScopeClose {
+                session_id: session_id.clone(),
+                root: root.clone(),
+            }
+            .id(),
+        )
         .await
         .expect("read the root's scope-close obligation")
 }

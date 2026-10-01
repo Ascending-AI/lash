@@ -109,10 +109,10 @@ impl lash_core::plugin::CodeExecutorPlugin for CountingExecutionProtocol {
     async fn snapshot_execution_state(
         &self,
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, crate::SessionError> {
-        Ok(lash_core::plugin::ExecutionStateSnapshot::from_root(Some(
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, crate::SessionError> {
+        Ok(lash_core::plugin::ExecutionStateCapture::replace(
             Self::root(self.restored.load(Ordering::SeqCst) + 1),
-        )))
+        ))
     }
 
     async fn hydrated_execution_state(

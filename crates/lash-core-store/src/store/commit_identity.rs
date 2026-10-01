@@ -1247,7 +1247,6 @@ fn failure_evidence_is_empty(evidence: &&[crate::TurnFailureEvidence]) -> bool {
 struct RuntimeCommitIntent<'a> {
     session_id: &'a SessionId,
     config: &'a crate::PersistedSessionConfig,
-    current_frame_node_id: Option<&'a str>,
     graph: GraphCommitIntent<'a>,
     checkpoint: CheckpointIntent<'a>,
     #[serde(skip_serializing_if = "failure_evidence_is_empty")]
@@ -1297,7 +1296,6 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
         Self {
             session_id: &commit.session_id,
             config: commit.execution_config.as_deref().unwrap_or(&commit.config),
-            current_frame_node_id: commit.current_frame_node_id.as_deref(),
             graph,
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             failure_evidence: &commit.failure_evidence,

@@ -265,15 +265,15 @@ impl lash_core::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
     async fn snapshot_execution_state(
         &self,
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, lash_core::SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, lash_core::SessionError> {
         if self.fail_capture.load(Ordering::SeqCst) {
             return Err(lash_core::SessionError::Protocol(
                 "injected dirty execution-state capture failure".to_string(),
             ));
         }
-        Ok(lash_core::plugin::ExecutionStateSnapshot::from_root(Some(
+        Ok(lash_core::plugin::ExecutionStateCapture::replace(
             self.snapshot.lock_recover().clone().into(),
-        )))
+        ))
     }
 
     async fn probe_execution_state_capture(

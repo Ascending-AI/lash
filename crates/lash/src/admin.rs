@@ -204,7 +204,7 @@ impl SessionAdmin {
     ) -> Result<lash_core::runtime::SessionCommandSettlement> {
         let request = self
             .ingress
-            .current_ask(receipt.batch_id.as_str())
+            .current_ask(&receipt.session_id, receipt.batch_id.as_str())
             .await
             .map_err(|source| {
                 EmbedError::Session(SessionError::Store {

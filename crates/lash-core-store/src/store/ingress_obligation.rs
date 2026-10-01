@@ -18,14 +18,6 @@ use super::obligation::{
     ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StalledObligation,
 };
 
-/// The obligation id an ingress row with item id `item_id` is armed under:
-/// `ingress:{item_id}`. Item ids — a turn input's `ti:` id, a batch's `qwb:`
-/// id — are unique across the store, so the id is too.
-#[must_use]
-pub fn ingress_obligation_id(item_id: &str) -> ObligationId {
-    ObligationId::new(format!("ingress:{item_id}"))
-}
-
 /// The due instants and ids of one table's oldest due obligations, read
 /// without claiming them: what the ingress ledger merges across its tables.
 #[async_trait::async_trait]
@@ -220,16 +212,5 @@ pub async fn stalled_obligation(
             }
             _ => return Ok(None),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_ingress_obligation_is_named_after_its_row() {
-        assert_eq!(ingress_obligation_id("ti:abc").as_str(), "ingress:ti:abc");
-        assert_eq!(ingress_obligation_id("qwb:def").as_str(), "ingress:qwb:def");
     }
 }

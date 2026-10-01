@@ -653,6 +653,26 @@ fn decode_session_head_meta_row(
     let Some(row) = row else {
         return Ok(None);
     };
+    let current_frame_node_id = row
+        .try_get::<Option<String>, _>(5)
+        .map_err(store_sqlx_error)?;
+    let leaf = row
+        .try_get::<Option<String>, _>(2)
+        .map_err(store_sqlx_error)?;
+    if let Some(leaf) = leaf
+        && current_frame_node_id.is_none()
+    {
+        return Err(StoreError::MissingFrameOpenAncestor {
+            leaf_node_id: leaf.into(),
+        });
+    }
+    let current_frame_node_id = current_frame_node_id
+        .map(lash_core_execution::FrameNodeId::new)
+        .transpose()
+        .map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph",
+            message: error.to_string(),
+        })?;
     let head_json: String = row.get(0);
     let head_revision: i64 = row.get(1);
     let leaf_node_id: Option<String> = row.get(2);
@@ -679,6 +699,7 @@ fn decode_session_head_meta_row(
             u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
             checkpoint_ref.map(Into::into),
             leaf_node_id.map(lash_core_execution::NodeId::from),
+            current_frame_node_id,
         )?
         .with_pending_follow_on(pending_follow_on),
     ))

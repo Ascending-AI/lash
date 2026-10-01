@@ -328,6 +328,17 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
         clock.timestamp_ms(),
     )
     .await;
+    let scope_close_ledger = stores.obligation_ledger(ObligationKind::ScopeClose);
+    let held_close = scope_close_ledger
+        .claim(
+            &scope_close,
+            &crate::store::ClaimToken::mint(),
+            clock.timestamp_ms(),
+            300_000,
+        )
+        .await
+        .expect("hold the scope close through the close's immediate delivery")
+        .expect("the scope close is due");
     let admin = administration(host, &stores, CloseSink::new(Arc::clone(&factory), 0));
     close(&admin, &id, runner.as_ref()).await;
     let delete = stores
@@ -338,7 +349,8 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
         .expect("the acknowledgement armed the delete");
 
     let relay = SessionDeleteRelay::new(admin);
-    let first = deliver_now(&relay, &delete.id, clock.as_ref())
+    let now = clock.timestamp_ms();
+    let first = deliver_now(&relay, &delete.id, &TestClock::new(now))
         .await
         .expect("attempt the delete");
     assert!(
@@ -350,21 +362,23 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
         "nothing was deleted"
     );
     let page = NonZeroUsize::new(8).expect("non-zero page");
-    let now = clock.timestamp_ms();
     let before_backoff = relay_due(&relay, &lash_core::testing::TestClock::new(now), page)
         .await
         .expect("relay pass");
     assert_eq!(before_backoff.claimed, 0, "the retry waits out its backoff");
 
-    settle_by_hand(
-        stores
-            .obligation_ledger(ObligationKind::ScopeClose)
-            .as_ref(),
-        &scope_close,
-        ObligationSettlement::Delivered,
-        now,
-    )
-    .await;
+    assert_eq!(
+        scope_close_ledger
+            .settle(
+                &scope_close,
+                &held_close.token,
+                ObligationSettlement::Delivered,
+                now,
+            )
+            .await
+            .expect("finish the held scope close"),
+        crate::store::SettleOutcome::Applied,
+    );
     let pass = relay_due(
         &relay,
         &lash_core::testing::TestClock::new(now + 2_000),

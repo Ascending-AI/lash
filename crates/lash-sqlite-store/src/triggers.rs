@@ -12,16 +12,13 @@
 //! reached through an `ATTACH`ed name; this one does not.
 
 use super::*;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
-use lash_store_sql::trigger::deliveries::DeliveryStatements;
-use lash_store_sql::trigger::mutation_receipts::MutationReceiptStatements;
-use lash_store_sql::trigger::occurrence_tombstones::OccurrenceTombstoneStatements;
-use lash_store_sql::trigger::occurrences::{
-    ListShape as OccurrenceListShape, OccurrenceStatements,
-};
-use lash_store_sql::trigger::subscriptions::{
-    ListShape as SubscriptionListShape, SubscriptionStatements,
+use lash_sansio::{ProcessId, SessionId};
+use lash_store_sql::trigger::{
+    deliveries::DeliveryStatements,
+    mutation_receipts::MutationReceiptStatements,
+    occurrence_tombstones::OccurrenceTombstoneStatements,
+    occurrences::{ListShape as OccurrenceListShape, OccurrenceStatements},
+    subscriptions::{ListShape as SubscriptionListShape, SubscriptionStatements},
 };
 use std::sync::LazyLock;
 
@@ -1453,9 +1450,11 @@ fn reserve_sqlite_deliveries(
                 sql_revision,
                 lash_core_execution::facade_support::encode_trigger_row(&subscription)?,
                 created_at_ms as i64,
-                lash_core_execution::store::ObligationId::mint(
-                    lash_core_execution::store::ObligationKind::TriggerDelivery,
-                )
+                lash_core_execution::store::ObligationKey::TriggerDelivery {
+                    occurrence_id: occurrence.occurrence_id.clone(),
+                    subscription_id: subscription.subscription_id.clone(),
+                }
+                .id()
                 .as_str(),
             ],
         )

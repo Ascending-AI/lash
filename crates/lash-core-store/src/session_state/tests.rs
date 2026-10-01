@@ -80,9 +80,15 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
     let root =
         br#"{"generation":"a","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
             .to_vec();
-    let mut snapshot = crate::plugin::ExecutionStateSnapshot::from_root(Some(root.into()));
-    snapshot.changed_component(LEAF_A, b"generation-a leaf-a".to_vec());
-    snapshot.changed_component(LEAF_B, b"generation-a leaf-b".to_vec());
+    let mut snapshot = crate::plugin::ExecutionStateCapture::replace(root.into());
+    snapshot.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(LEAF_A).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((b"generation-a leaf-a".to_vec()).into()),
+    );
+    snapshot.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(LEAF_B).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((b"generation-a leaf-b".to_vec()).into()),
+    );
     resident
         .set_execution_state_components(snapshot)
         .expect("stage valid two-leaf execution state");
@@ -114,9 +120,15 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
     let recovered_leaf_a = b"recovered leaf-a".to_vec();
     let recovered_leaf_b = b"recovered leaf-b".to_vec();
     let mut recovered =
-        crate::plugin::ExecutionStateSnapshot::from_root(Some(recovered_root.clone().into()));
-    recovered.changed_component(LEAF_A, recovered_leaf_a.clone());
-    recovered.changed_component(LEAF_B, recovered_leaf_b.clone());
+        crate::plugin::ExecutionStateCapture::replace(recovered_root.clone().into());
+    recovered.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(LEAF_A).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((recovered_leaf_a.clone()).into()),
+    );
+    recovered.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(LEAF_B).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((recovered_leaf_b.clone()).into()),
+    );
     resident
         .set_execution_state_components(recovered)
         .expect("fresh execution-state staging clears the mismatch marker");
@@ -144,9 +156,11 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
     ));
     let leaf_key = "execution_state/blake3/aa".to_string();
     let leaf_body = vec![7u8; 4096];
-    let mut snapshot =
-        crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root".to_vec().into()));
-    snapshot.changed_component(leaf_key.clone(), leaf_body.clone());
+    let mut snapshot = crate::plugin::ExecutionStateCapture::replace(b"root".to_vec().into());
+    snapshot.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(&leaf_key).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((leaf_body.clone()).into()),
+    );
     state
         .set_execution_state_components(snapshot)
         .expect("stage the changed leaf");
@@ -189,9 +203,11 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
     // dirty, so a body discard must leave it alone.
     let next_leaf_key = "execution_state/blake3/bb".to_string();
     let next_leaf_body = vec![9u8; 2048];
-    let mut next =
-        crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root-2".to_vec().into()));
-    next.changed_component(next_leaf_key, next_leaf_body.clone());
+    let mut next = crate::plugin::ExecutionStateCapture::replace(b"root-2".to_vec().into());
+    next.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(&next_leaf_key).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((next_leaf_body.clone()).into()),
+    );
     state
         .set_execution_state_components(next)
         .expect("stage the next changed leaf");
@@ -210,8 +226,11 @@ fn two_leaf_execution(root: &[u8], leaf_key: &str, leaf_body: &[u8]) -> RuntimeS
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    let mut snapshot = crate::plugin::ExecutionStateSnapshot::from_root(Some(root.to_vec().into()));
-    snapshot.changed_component(leaf_key.to_string(), leaf_body.to_vec());
+    let mut snapshot = crate::plugin::ExecutionStateCapture::replace(root.to_vec().into());
+    snapshot.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(leaf_key).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((leaf_body.to_vec()).into()),
+    );
     state
         .set_execution_state_components(snapshot)
         .expect("stage the execution state");
@@ -249,9 +268,12 @@ fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
     );
 
     // The next commit supersedes it.
-    let mut next =
-        crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root-2".to_vec().into()));
-    next.changed_component("execution_state/blake3/bb".to_string(), b"leaf-2".to_vec());
+    let mut next = crate::plugin::ExecutionStateCapture::replace(b"root-2".to_vec().into());
+    next.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse("execution_state/blake3/bb")
+            .expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((b"leaf-2".to_vec()).into()),
+    );
     state
         .set_execution_state_components(next)
         .expect("stage the next commit");
@@ -324,10 +346,15 @@ fn restoring_a_capture_keeps_held_leaves_unchanged_and_stages_missing_ones() {
     let mut state = two_leaf_execution(b"root-1", DURABLE, b"durable body");
     let result = commit_result_for(&state);
     state.apply_persisted_commit_result(result);
-    let mut pending =
-        crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root-2".to_vec().into()));
-    pending.unchanged_component(DURABLE.to_string());
-    pending.changed_component(PENDING.to_string(), b"pending body".to_vec());
+    let mut pending = crate::plugin::ExecutionStateCapture::replace(b"root-2".to_vec().into());
+    pending.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(DURABLE).expect("execution leaf key"),
+        crate::plugin::LeafChange::Unchanged,
+    );
+    pending.leaves_mut().expect("replacement capture").insert(
+        crate::plugin::ExecutionLeafName::parse(PENDING).expect("execution leaf key"),
+        crate::plugin::LeafChange::Changed((b"pending body".to_vec()).into()),
+    );
     state
         .set_execution_state_components(pending)
         .expect("stage an uncommitted leaf beside the durable one");
@@ -335,9 +362,18 @@ fn restoring_a_capture_keeps_held_leaves_unchanged_and_stages_missing_ones() {
     let restored = crate::plugin::HydratedExecutionState {
         root: b"root-3".to_vec().into(),
         components: [
-            (DURABLE.to_string(), b"durable body".to_vec().into()),
-            (PENDING.to_string(), b"pending body".to_vec().into()),
-            (MISSING.to_string(), b"missing body".to_vec().into()),
+            (
+                crate::plugin::ExecutionLeafName::parse(DURABLE).expect("durable leaf"),
+                b"durable body".to_vec().into(),
+            ),
+            (
+                crate::plugin::ExecutionLeafName::parse(PENDING).expect("pending leaf"),
+                b"pending body".to_vec().into(),
+            ),
+            (
+                crate::plugin::ExecutionLeafName::parse(MISSING).expect("missing leaf"),
+                b"missing body".to_vec().into(),
+            ),
         ]
         .into_iter()
         .collect(),

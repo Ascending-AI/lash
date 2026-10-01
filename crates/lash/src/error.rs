@@ -650,7 +650,6 @@ mod tests {
                 checkpoint_bytes: 3,
                 attachment_referrer_bytes: 5,
                 follow_on_bytes: 0,
-                agent_frame_bytes: 0,
                 turn_result_bytes: 0,
                 total_bytes: 10,
                 max_bytes: 9,

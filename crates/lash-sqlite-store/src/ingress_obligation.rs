@@ -2,14 +2,14 @@
 //! and the queued-batch table's obligation ledgers, composed.
 //!
 //! Admission arms the row it inserts inside its own `BEGIN IMMEDIATE`
-//! transaction, under the id [`ingress_obligation_id`] derives from the row,
+//! transaction, under the id [`ObligationKey::id`] derives from the row,
 //! so the producer attempts delivery right after its commit.
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, LazyLock};
 
 use lash_core_execution::store::ingress_obligation::{
-    DueObligationPeek, IngressLedger, IngressTable, ingress_obligation_id,
+    DueObligationPeek, IngressLedger, IngressTable,
 };
 use lash_core_execution::store::{ObligationId, ObligationKey, ObligationKind, ObligationLedger};
 use lash_store_sql::Rendered;
@@ -90,7 +90,7 @@ fn arm_tx(
         session_id: session_id.clone(),
         item_id: item_id.to_owned(),
     };
-    arm_table_tx(tx, sql, &key, ingress_obligation_id(item_id), now_ms)
+    arm_table_tx(tx, sql, &key, now_ms)
 }
 
 /// One table's due read, through its `obligation_peek_due` statement.

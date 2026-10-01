@@ -75,13 +75,25 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     )
     .await
     .expect("admit the session");
-    let mut snapshot_a = crate::plugin::ExecutionStateSnapshot::from_root(Some(
+    let mut snapshot_a = crate::plugin::ExecutionStateCapture::replace(
         br#"{"generation":"a","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
             .as_slice()
             .into(),
-    ));
-    snapshot_a.changed_component(LEAF_A, b"generation-a leaf-a".as_slice());
-    snapshot_a.changed_component(LEAF_B, b"generation-a leaf-b".as_slice());
+    );
+    snapshot_a
+        .leaves_mut()
+        .expect("replacement capture")
+        .insert(
+            crate::plugin::ExecutionLeafName::parse(LEAF_A).expect("execution leaf key"),
+            crate::plugin::LeafChange::Changed((b"generation-a leaf-a".as_slice()).into()),
+        );
+    snapshot_a
+        .leaves_mut()
+        .expect("replacement capture")
+        .insert(
+            crate::plugin::ExecutionLeafName::parse(LEAF_B).expect("execution leaf key"),
+            crate::plugin::LeafChange::Changed((b"generation-a leaf-b".as_slice()).into()),
+        );
     generation_a
         .set_execution_state_components(snapshot_a)
         .expect("stage valid generation-A two-leaf execution state");
@@ -95,13 +107,25 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
 
     let mut generation_b = generation_a.clone();
     generation_b.apply_persisted_commit_result(result_a.clone());
-    let mut snapshot_b = crate::plugin::ExecutionStateSnapshot::from_root(Some(
+    let mut snapshot_b = crate::plugin::ExecutionStateCapture::replace(
         br#"{"generation":"b","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
             .as_slice()
             .into(),
-    ));
-    snapshot_b.unchanged_component(LEAF_A);
-    snapshot_b.unchanged_component(LEAF_B);
+    );
+    snapshot_b
+        .leaves_mut()
+        .expect("replacement capture")
+        .insert(
+            crate::plugin::ExecutionLeafName::parse(LEAF_A).expect("execution leaf key"),
+            crate::plugin::LeafChange::Unchanged,
+        );
+    snapshot_b
+        .leaves_mut()
+        .expect("replacement capture")
+        .insert(
+            crate::plugin::ExecutionLeafName::parse(LEAF_B).expect("execution leaf key"),
+            crate::plugin::LeafChange::Unchanged,
+        );
     generation_b
         .set_execution_state_components(snapshot_b)
         .expect("stage valid generation-B root over unchanged leaves");

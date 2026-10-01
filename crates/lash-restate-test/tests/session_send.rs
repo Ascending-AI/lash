@@ -789,7 +789,13 @@ async fn dropped_schedule_is_reconciled() {
         .obligation_ledger(lash_core::store::ObligationKind::Ingress);
     assert_eq!(
         ledger
-            .state(&lash_core::store::ingress_obligation::ingress_obligation_id(input_id.as_str()))
+            .state(
+                &lash_core::store::ObligationKey::Ingress {
+                    session_id: session_id.clone(),
+                    item_id: (input_id.as_str()).to_string()
+                }
+                .id()
+            )
             .await
             .expect("obligation state"),
         Some(lash_core::store::ObligationState::Delivered)

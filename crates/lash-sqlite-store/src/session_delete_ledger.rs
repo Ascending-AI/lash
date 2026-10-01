@@ -50,7 +50,10 @@ pub(crate) fn arm_on_close_acknowledged_conn(
     {
         return Ok(());
     }
-    let id = ObligationId::mint(ObligationKind::SessionDelete);
+    let id = lash_core_execution::store::ObligationKey::SessionDelete {
+        session_id: next.session_id.clone(),
+    }
+    .id();
     let due = i64::try_from(at_ms).map_err(|_| {
         StoreError::Backend(format!(
             "obligation due instant {at_ms} exceeds the stored range"

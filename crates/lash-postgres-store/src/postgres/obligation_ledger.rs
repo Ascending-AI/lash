@@ -181,10 +181,10 @@ pub(crate) async fn arm_cleanup_tx(
         .map_err(store_sqlx_error)?;
     let decoded = existing.as_ref().map(cleanup_row).transpose()?;
     let decision = CleanupUpsert::decide(decoded.as_ref().map(|(_, body)| body), cleanup);
-    let id = decoded.map_or_else(
-        || ObligationId::mint(ObligationKind::ArtifactCleanup),
-        |(id, _)| id,
-    );
+    let id = ObligationKey::ArtifactCleanup {
+        referrer: cleanup.referrer(),
+    }
+    .id();
     let json = cleanup
         .to_json()
         .map_err(|error| StoreError::Backend(error.to_string()))?;
@@ -297,9 +297,8 @@ pub(crate) const DUE_AT_ONCE_MS: u64 = 0;
 
 /// Arm `key`'s row as a fresh obligation due at `now_ms` inside a producer's
 /// own transaction: the helper a slice's producer calls on its transaction.
-/// An ingress row's id is derived from its item (`crate::ingress_obligation`);
-/// every other kind's is minted. `None` when the row is missing or already
-/// carries an obligation.
+/// Every kind uses its typed key's id. `None` when the row is missing or
+/// already carries an obligation.
 pub(crate) async fn arm_obligation_tx(
     conn: &mut sqlx::PgConnection,
     key: &ObligationKey,
@@ -308,21 +307,7 @@ pub(crate) async fn arm_obligation_tx(
     if key.kind() == ObligationKind::Ingress {
         return crate::ingress_obligation::arm_ingress_tx(conn, key, now_ms).await;
     }
-    arm_obligation_id_tx(conn, key, &ObligationId::mint(key.kind()), now_ms).await
-}
-
-/// [`arm_obligation_tx`] with the id the row's own transaction derived (ADR
-/// 0109 §1.1): a producer that must name its obligation afterwards — the
-/// terminal write naming its scope close — arms the id it derived rather
-/// than a minted one.
-pub(crate) async fn arm_obligation_id_tx(
-    conn: &mut sqlx::PgConnection,
-    key: &ObligationKey,
-    id: &ObligationId,
-    now_ms: u64,
-) -> Result<Option<ObligationId>, StoreError> {
-    let (sql, _) = obligation_sql(key.kind());
-    arm_table_tx(conn, sql, key, id.clone(), now_ms).await
+    arm_table_tx(conn, obligation_sql(key.kind()).0, key, now_ms).await
 }
 
 /// Arm `key`'s row in the table `sql` addresses as obligation `id`, due at
@@ -332,9 +317,9 @@ pub(crate) async fn arm_table_tx(
     conn: &mut sqlx::PgConnection,
     sql: ObligationSql<'static>,
     key: &ObligationKey,
-    id: ObligationId,
     now_ms: u64,
 ) -> Result<Option<ObligationId>, StoreError> {
+    let id = key.id();
     let changed = key_query(sqlx::query(sql.arm.sql()), key)
         .bind(id.as_str())
         .bind(sql_i64("obligation due instant", now_ms)?)

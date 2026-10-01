@@ -176,6 +176,21 @@ pub async fn root_terminal_evidence_commits_in_the_head_transaction(store: Arc<d
         Some(terminal),
         "the first terminal stands"
     );
+    for (session, root) in [("scope-id:a:b", "c"), ("scope-id:a", "b:c")] {
+        let session_id = SessionId::from(session);
+        store
+            .admit_session(&crate::testing::store_fixtures::root_session_request(
+                &session_id,
+            ))
+            .await
+            .expect("admit delimiter-bearing session");
+        let state = self::state(&session_id);
+        store
+            .commit_runtime_state(turn_commit(&state, root, Some(ends(root, 0, None)), None))
+            .await
+            .expect("distinct typed scope-close keys cannot collide");
+        assert!(terminal_of(&store, &session_id, root).await.is_some());
+    }
 }
 
 /// The successor-sealed commit refusal (ADR 0105 §2, Q-B3): a root's commit

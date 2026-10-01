@@ -19,7 +19,7 @@ use std::num::NonZeroUsize;
 use lash_core::StoreSet;
 use lash_core::store::{
     HolderId, LeaseAnswer, LeaseClaim, LeaseName, ObligationId, ObligationKey, ObligationKind,
-    ObligationSettlement, StallReason, process_start_obligation_id,
+    ObligationSettlement, StallReason,
 };
 
 use super::*;
@@ -346,7 +346,10 @@ async fn process_start_transcript(
             )
             .await
             .expect("register an engine process");
-        let id = process_start_obligation_id(&record.id);
+        let id = lash_core::store::ObligationKey::ProcessStart {
+            process_id: record.id.clone(),
+        }
+        .id();
         out.push(format!(
             "register {alias} -> {:?}",
             ledger.state(&id).await.expect("read the armed state")
@@ -363,7 +366,12 @@ async fn process_start_transcript(
     out.push(format!(
         "register external -> {:?}",
         ledger
-            .state(&process_start_obligation_id(&external.id))
+            .state(
+                &lash_core::store::ObligationKey::ProcessStart {
+                    process_id: external.id.clone()
+                }
+                .id()
+            )
             .await
             .expect("read the unarmed state")
     ));

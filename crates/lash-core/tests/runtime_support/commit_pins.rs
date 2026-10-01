@@ -77,6 +77,56 @@ pub(crate) fn assert_commit_pins(
     expected: &[&str],
 ) {
     let digests = commits.iter().map(commit_digest).collect::<Vec<_>>();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the opt-in fixture generator supplies its capture directory to this test host"
+    )]
+    let capture_directory = std::env::var_os("LASH_RUNTIME_COMMIT_PIN_CAPTURE_DIR");
+    if let Some(directory) = capture_directory {
+        let restored_frame_digests = commits
+            .iter()
+            .map(|commit| {
+                let frame =
+                    commit.graph.nodes().iter().rev().find_map(|node| {
+                        node.frame_open().map(|_| node.node_id.as_str().to_owned())
+                    });
+                let mut value = serde_json::to_value(commit).expect("a commit serializes");
+                value
+                    .as_object_mut()
+                    .expect("a commit is an object")
+                    .insert(
+                        "current_frame_node_id".to_owned(),
+                        serde_json::to_value(frame).expect("a frame id serializes"),
+                    );
+                mask_run_variant(&mut value);
+                lash_core::stable_hash::sha256_hex(
+                    &serde_json::to_vec(&value).expect("a masked commit serializes"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let capture = serde_json::json!({
+            "scenario": scenario,
+            "expected": expected,
+            "digests": digests,
+            "restored_frame_digests": restored_frame_digests,
+        });
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the fixture regeneration host writes the test's captured pin evidence"
+        )]
+        let capture_written = std::fs::write(
+            std::path::Path::new(&directory).join(format!("{}.json", scenario.replace(' ', "-"))),
+            serde_json::to_vec_pretty(&capture).expect("a pin capture serializes"),
+        );
+        capture_written.expect("write the captured pin");
+        if digests != expected {
+            assert_eq!(
+                restored_frame_digests, expected,
+                "{scenario}: restoring only the removed frame claim must reproduce the old pin"
+            );
+        }
+        return;
+    }
     assert_eq!(digests, expected, "{scenario}: the committed bytes changed");
 }
 

@@ -238,7 +238,7 @@ impl LashRuntime {
             )
             .await?;
         self.state
-            .set_execution_state_components(crate::plugin::ExecutionStateSnapshot::from_hydrated(
+            .set_execution_state_components(crate::plugin::ExecutionStateCapture::from_hydrated(
                 snapshot.clone(),
             ))
             .map_err(|source| SessionError::Store {

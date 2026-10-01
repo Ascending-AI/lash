@@ -347,21 +347,6 @@ impl SessionHistoryStore for PostgresStore {
             }
             let leaf_generation: i64 = leaf_row.get("generation");
             let frame_id: String = leaf_row.get("frame_node_id");
-            if !admitted
-                && meta
-                    .current_frame_node_id
-                    .as_ref()
-                    .map(|frame| frame.as_str())
-                    != Some(frame_id.as_str())
-            {
-                return Err(StoreError::CurrentFrameNodeMismatch {
-                    claimed: meta
-                        .current_frame_node_id
-                        .as_ref()
-                        .map(|frame| frame.as_str().to_owned()),
-                    derived: Some(frame_id),
-                });
-            }
             let frame_row = readable_row(&mut tx, session_id, &frame_id)
                 .await?
                 .ok_or_else(|| {
@@ -471,15 +456,6 @@ impl SessionHistoryStore for PostgresStore {
             }
             graph
         } else {
-            if !admitted && meta.current_frame_node_id.is_some() {
-                return Err(StoreError::CurrentFrameNodeMismatch {
-                    claimed: meta
-                        .current_frame_node_id
-                        .as_ref()
-                        .map(|frame| frame.as_str().to_owned()),
-                    derived: None,
-                });
-            }
             lash_core_execution::SessionGraph::default()
         };
         let read = SessionWindowRead::new(

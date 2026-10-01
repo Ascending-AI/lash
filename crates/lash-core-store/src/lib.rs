@@ -121,8 +121,8 @@ pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlemen
 
 pub(crate) use config_transaction::{ConfigTransactionOutcome, ConfigTransactionRecord};
 pub(crate) use execution_state::{
-    AdmittedPluginConfig, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
-    HydratedExecutionState, PluginConfig,
+    AdmittedPluginConfig, CheckpointComponentKey, ExecutionLeafName, ExecutionStateCapture,
+    HydratedExecutionState, LeafChange, PluginConfig,
 };
 pub(crate) use lash_sansio::{
     TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnCause,
@@ -264,7 +264,8 @@ pub(crate) use turn_input_vocabulary::{TurnInputAdmissionMode, ingress_message_i
 /// Path shim: the durable half of what `lash-core` exposes as `crate::plugin`.
 pub(crate) mod plugin {
     pub(crate) use crate::{
-        ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState,
+        CheckpointComponentKey, ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState,
+        LeafChange,
     };
 }
 pub(crate) use attachments::AttachmentProducer;

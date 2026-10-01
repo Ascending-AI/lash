@@ -84,18 +84,18 @@ struct CheckpointArtifactShape {
 }
 
 impl CheckpointArtifactShape {
-    fn from_snapshot(snapshot: &lash_core::plugin::ExecutionStateSnapshot) -> Self {
-        let root = snapshot.root.as_ref();
+    fn from_snapshot(snapshot: &lash_core::plugin::ExecutionStateCapture) -> Self {
+        let root = snapshot.root();
         let changed_bodies = snapshot
-            .components
+            .leaves()
             .values()
             .filter_map(|component| match component {
-                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => Some(body),
-                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => None,
+                lash_core::plugin::LeafChange::Changed(body) => Some(body),
+                lash_core::plugin::LeafChange::Unchanged => None,
             })
             .collect::<Vec<_>>();
         Self {
-            manifest_count: snapshot.components.len() as u64 + u64::from(root.is_some()),
+            manifest_count: snapshot.leaves().len() as u64 + u64::from(root.is_some()),
             changed_body_count: changed_bodies.len() as u64 + u64::from(root.is_some()),
             changed_body_bytes: changed_bodies
                 .iter()

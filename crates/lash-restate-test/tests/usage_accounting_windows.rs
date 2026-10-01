@@ -415,7 +415,13 @@ async fn cut_before_send(kill: bool) {
             backend
                 .stores()
                 .obligation_ledger(lash_core::store::ObligationKind::ScopeClose)
-                .state(&lash_core::store::scope_close_obligation_id(&id, lost))
+                .state(
+                    &lash_core::store::ObligationKey::ScopeClose {
+                        session_id: id.clone(),
+                        root: lost.clone(),
+                    }
+                    .id(),
+                )
                 .await
                 .unwrap(),
             Some(lash_core::store::ObligationState::Delivered),

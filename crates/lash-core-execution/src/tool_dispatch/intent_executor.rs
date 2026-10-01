@@ -112,7 +112,7 @@ pub async fn execute_final_tool_intents(
             outcome = match &outcome {
                 crate::ToolIntentExecutionOutcome::Executed { .. } => "executed",
                 crate::ToolIntentExecutionOutcome::Refused { .. } => "refused",
-                crate::ToolIntentExecutionOutcome::ProtocolRefused { .. } => "protocol_refused",
+                crate::ToolIntentExecutionOutcome::ProtocolRefused { .. } => "protocol_refused"
             },
             "tool intent outcome"
         );

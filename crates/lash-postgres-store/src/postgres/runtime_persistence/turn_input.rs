@@ -616,6 +616,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             for row in &admitted {
                 crate::ingress_obligation::claim_turn_input_tx(
                     &mut tx,
+                    &row.session_id,
                     row.input_id.as_str(),
                     until_ms,
                 )

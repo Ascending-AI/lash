@@ -21,7 +21,7 @@ type ScopeCloseObligationRow = (
 ///
 /// - terminal evidence and the `ScopeClose` obligation arm together — a
 ///   `terminal_kind` with no `obligation_id`, or an obligation id that is
-///   not the row's derived [`scope_close_obligation_id`], is a producer bug;
+///   not the row's derived [`ObligationKey::id`], is a producer bug;
 /// - an undelivered obligation is always on the due index and its schedule
 ///   is bounded — `obligation_due_at_ms` is never further out than one
 ///   claim TTL (`claimed`) or one maximum backoff (`due`) from the read, so
@@ -62,10 +62,11 @@ fn scope_close_obligations(
                      together (ADR 0109 §3)"
                 );
                 if let Some(id) = &obligation_id {
-                    let derived = lash_core::store::scope_close_obligation_id(
-                        session_id,
-                        &lash_core::TurnId::from(root.as_str()),
-                    );
+                    let derived = lash_core::store::ObligationKey::ScopeClose {
+                        session_id: session_id.clone(),
+                        root: lash_core::TurnId::from(root.as_str()),
+                    }
+                    .id();
                     assert_eq!(
                         id.as_str(),
                         derived.as_str(),

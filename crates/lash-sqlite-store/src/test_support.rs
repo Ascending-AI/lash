@@ -150,39 +150,6 @@ impl StoreTestSupport for SqliteStore {
             .map_err(sqlite_error)
     }
 
-    async fn set_head_current_frame_for_testing(
-        &self,
-        session_id: &SessionId,
-        frame: Option<lash_core_execution::FrameNodeId>,
-    ) -> Result<(), StoreError> {
-        let session_id = session_id.clone();
-        self.conn
-            .write(move |tx| {
-                let head_json: String = tx.query_row(
-                    crate::session_sql::session_sql()
-                        .head_sqlite
-                        .select_head_json
-                        .sql(),
-                    params![session_id.as_str()],
-                    |row| row.get(0),
-                )?;
-                let mut head: serde_json::Value = serde_json::from_str(&head_json)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                head["current_frame_node_id"] = serde_json::to_value(frame)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                let head_json = serde_json::to_string(&head)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                crate::conn::cached_execute(
-                    tx,
-                    crate::session_sql::session_sql().head.set_head_json.sql(),
-                    params![session_id.as_str(), head_json],
-                )?;
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
     async fn rewrite_session_tool_access_for_testing(
         &self,
         session_id: &SessionId,

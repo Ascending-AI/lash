@@ -203,7 +203,7 @@ fn prune_process_rows_conn(
             conn,
             &cleanup,
             u64::try_from(pruned_at_ms).unwrap_or(0),
-            "registry",
+            crate::obligation_ledger::CleanupStorage::ProcessRegistry,
         )
         .map_err(lash_core_execution::PluginError::from)?;
     }

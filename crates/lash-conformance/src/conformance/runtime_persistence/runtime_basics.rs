@@ -42,13 +42,17 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         .agent_frame_records(&SessionId::from("root"));
     state.set_execution_state_snapshot(Some(b"frame-vm".to_vec().into()));
 
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state),
-        "commit-round-trip",
-    )
-    .await
-    .expect("commit runtime state");
+    let commit = RuntimeCommit::persisted_state_for_test(&state);
+    assert!(
+        serde_json::to_value(&commit)
+            .expect("serialize commit")
+            .get("current_frame_node_id")
+            .is_none(),
+        "a commit must not claim a frame already determined by its leaf"
+    );
+    commit_runtime_state_for_test(&store, commit, "commit-round-trip")
+        .await
+        .expect("commit runtime state");
     let read = store
         .load_session_window(
             &SessionId::from("root"),
@@ -58,6 +62,21 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         .expect("load session")
         .expect("session read");
 
+    let head = store
+        .load_session_head_meta(&SessionId::from("root"))
+        .await
+        .expect("head metadata")
+        .expect("committed head");
+    assert_eq!(
+        head.current_frame_node_id.as_ref(),
+        Some(&second_frame_node_id)
+    );
+    assert!(
+        serde_json::to_value(head.payload())
+            .expect("head payload")
+            .get("current_frame_node_id")
+            .is_none()
+    );
     assert_eq!(
         read.current_frame_node_id.as_deref(),
         Some(second_frame_node_id.as_str())
@@ -100,13 +119,8 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
             ))
         };
         let node = sample_session_node(&SessionId::from(session_id), node_id, None);
-        let derived_node_id = node.node_id.clone();
         let commit = RuntimeCommit {
             expected_head_revision: 0,
-            current_frame_node_id: Some(
-                crate::FrameNodeId::new(derived_node_id.clone())
-                    .expect("derived test frame identity is non-empty"),
-            ),
             graph: crate::GraphAppend::Extend { nodes: vec![node] },
             ..RuntimeCommit::persisted_state_for_test(&state)
         };

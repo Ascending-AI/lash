@@ -5,6 +5,14 @@ repo := justfile_directory()
 default:
   @just --list
 
+runtime-commit-pins:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${KILN_GATE_ID:?pin regeneration requires kiln gate}"
+  cd "{{repo}}"
+  source ./env.sh
+  python3 scripts/regenerate-runtime-commit-pins.py
+
 # FIG-4495 cut tooling. Call inside kiln gate lash <fork> -- just ...
 release-fixtures-capture tag dest:
   #!/usr/bin/env bash

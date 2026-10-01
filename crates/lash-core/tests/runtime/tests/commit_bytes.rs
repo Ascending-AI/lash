@@ -5,8 +5,12 @@
 //! and asserts a digest of every runtime commit the store applied, plus the
 //! assembled turn's committed facts, against values captured before commit
 //! content moved from the observation stream onto the driver's recorded state
-//! (FIG-3672 P6). A difference here requires an explicit durable-format
-//! decision before a pin changes.
+//! (FIG-3672 P6). A difference here is a durable-format change. During the
+//! pre-1.0 version freeze, shapes change in place and pins are regenerated.
+//!
+//! FIG-4666 removes the frame claim. `scripts/regenerate-runtime-commit-pins.py`
+//! verifies that restoring that field reproduces every previous digest before
+//! updating the pins; all other committed bytes retain their checks.
 //!
 //! The two cancelled pins were retaken once, for a change of value and not of
 //! shape (FIG-3672 P9): a host-local stop is now a durable request with
@@ -96,7 +100,7 @@ fn tool_call(call_id: &str, value: &str) -> MockCall {
 }
 
 struct Pinned {
-    commit_hashes: Vec<String>,
+    commits: Vec<lash_core::RuntimeCommit>,
     assembled: serde_json::Value,
 }
 
@@ -153,11 +157,7 @@ async fn run_pinned_turn(
         "the host stream ends with `Done`"
     );
     Pinned {
-        commit_hashes: store
-            .runtime_commits()
-            .iter()
-            .map(crate::runtime_support::commit_pins::commit_digest)
-            .collect(),
+        commits: store.runtime_commits(),
         assembled: assembled_facts(&turn),
     }
 }
@@ -188,10 +188,7 @@ fn assembled_facts(turn: &AssembledTurn) -> serde_json::Value {
 }
 
 fn assert_pinned(scenario: &str, pinned: &Pinned, hashes: &[&str], assembled: &str) {
-    assert_eq!(
-        pinned.commit_hashes, hashes,
-        "{scenario}: the committed bytes changed"
-    );
+    crate::runtime_support::commit_pins::assert_commit_pins(scenario, &pinned.commits, hashes);
     assert_eq!(
         pinned.assembled,
         serde_json::from_str::<serde_json::Value>(assembled).expect("pinned assembled turn"),
@@ -211,7 +208,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "tool turn",
         &pinned,
-        &["17ab103688026b2f89ab6faa5d64fab9a9263fd9f0469fe55caacd106275de81"],
+        &["68ee1c125cbc7b5e9e53e3f0f21b57a0482aaa20c0a1ba5804956fb5f692b80a"],
         r#"{
             "assistant_output": "done",
             "errors": [],
@@ -285,7 +282,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "parallel tool turn",
         &pinned,
-        &["548f9fc3ac60d3c996307c25aa5004bd92774f75ba718c10ea73b9f145613ea3"],
+        &["3c6f7abbce54e6cab7e75ed5c7b605b8b415d6fff3f8f7cb52a3b9274d6186e3"],
         r#"{
             "assistant_output": "all three echoed",
             "errors": [],
@@ -382,7 +379,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "provider failure",
         &pinned,
-        &["4c928613ff62c87fd1e4b508930ef86e4b2cc66a8347a0bd35ef62ec4580f0e2"],
+        &["b10eea05ddaf55f4632fe7c184acbf577d9578261104a5edcec237307bc4b472"],
         r#"{
             "assistant_output": "",
             "errors": [
@@ -420,7 +417,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled",
         &pinned,
-        &["f1cb6a5d75fec3a92ff20daa9e2a29796c8d15daf6f59af6c6c92c7156a07964"],
+        &["7cd9a2002d05a8be41c8cdb1e695253f83eb08870f083b28bbea042255de4031"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -482,7 +479,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["f38401b017b36698d98547c8971a3253d82480a78f92fe6914db7d5670747327"],
+        &["40ee6b7d3acc3abe46e85c9a475455018eed3536078b29b4791ec704c7d414d2"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -638,7 +635,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     crate::runtime_support::commit_pins::assert_commit_pins(
         "blocked host",
         &store.runtime_commits(),
-        &["548f9fc3ac60d3c996307c25aa5004bd92774f75ba718c10ea73b9f145613ea3"],
+        &["3c6f7abbce54e6cab7e75ed5c7b605b8b415d6fff3f8f7cb52a3b9274d6186e3"],
     );
     assert!(host.received().is_empty(), "the host has taken nothing yet");
 

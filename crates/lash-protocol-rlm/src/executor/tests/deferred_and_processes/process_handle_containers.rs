@@ -161,18 +161,18 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
         .await
         .expect("capture container state");
     let components = snapshot
-        .components
+        .leaves()
+        .clone()
         .into_iter()
         .map(|(key, component)| {
-            let lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) = component
-            else {
+            let lash_core::plugin::LeafChange::Changed(body) = component else {
                 panic!("a first capture supplies every leaf");
             };
             (key, body)
         })
         .collect();
     let hydrated = lash_core::plugin::HydratedExecutionState {
-        root: snapshot.root.expect("snapshot root"),
+        root: snapshot.root().expect("snapshot root").clone(),
         components,
     };
     let mut restored = RlmExecutionState::for_engine("typescript");

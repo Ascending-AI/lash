@@ -172,7 +172,6 @@ fn write_head(fleet: FleetFormat) -> Vec<u8> {
         schema_version: meta.schema_version,
         session_id: session,
         config: meta.config,
-        current_frame_node_id: None,
         published_by_drive: meta.published_by_drive,
     })
     .expect("encode the head")

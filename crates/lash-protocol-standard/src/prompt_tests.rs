@@ -506,7 +506,7 @@ async fn apply_prompt_command(
             .expect("settlement"),
         lash_core::runtime::SessionCommandSettlement::Applied {
             outcome: lash_core::runtime::SessionCommandOutcome::ConfigTransaction {
-                outcome: lash_core::ConfigTransactionOutcome::Applied { .. },
+                outcome: lash_core::ConfigTransactionOutcome::Applied { .. }
             },
             ..
         }

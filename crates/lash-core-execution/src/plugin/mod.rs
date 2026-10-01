@@ -71,11 +71,12 @@ pub use hooks::{
     ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
-    AssistantProseProjectorPlugin, CodeExecutionOutcome, CodeExecutorPlugin,
-    EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
-    HydratedExecutionState, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
-    ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-    ProtocolSessionRestoreView, SystemPromptContext, SystemPromptPurpose,
+    AssistantProseProjectorPlugin, CheckpointComponentKey, CodeExecutionOutcome,
+    CodeExecutorPlugin, EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionLeafName,
+    ExecutionStateCapture, HydratedExecutionState, InvalidExecutionLeafName, LeafChange,
+    PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
+    ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView, SystemPromptContext,
+    SystemPromptPurpose,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,

@@ -116,7 +116,6 @@ macro_rules! runtime_persistence_tests {
             (commit_rejects_carried_nondefault_node_budget, "root"),
             (commit_rejects_carried_nondefault_byte_budget, "root"),
             (commit_rejects_follow_on_bytes_over_budget, "root"),
-            (commit_rejects_agent_frame_bytes_over_budget, "root"),
             (commit_rejects_turn_result_bytes_over_budget, "root"),
             (commit_with_every_payload_family_inside_budget_succeeds, "root"),
             (load_hydrates_checkpoint, "hydrated"),

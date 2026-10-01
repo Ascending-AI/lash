@@ -102,8 +102,6 @@ pub struct RuntimeCommitBudgetMeasurement {
     /// Raw UTF-8 byte length of the committed attachment ids.
     pub attachment_referrer_bytes: usize,
     pub follow_on_bytes: usize,
-    /// Persisted JSON encoding of the selected Agent Frame identity.
-    pub agent_frame_bytes: usize,
     /// Persisted JSON encoding of the durable turn result stamp.
     pub turn_result_bytes: usize,
     /// Saturating sum of the budgeted components.
@@ -238,7 +236,6 @@ impl RuntimeCommit {
                 checkpoint_bytes = measurement.checkpoint_bytes,
                 attachment_referrer_bytes = measurement.attachment_referrer_bytes,
                 follow_on_bytes = measurement.follow_on_bytes,
-                agent_frame_bytes = measurement.agent_frame_bytes,
                 turn_result_bytes = measurement.turn_result_bytes,
                 actual = measurement.total_bytes,
                 limit = max_bytes,
@@ -251,7 +248,6 @@ impl RuntimeCommit {
                 checkpoint_bytes: measurement.checkpoint_bytes,
                 attachment_referrer_bytes: measurement.attachment_referrer_bytes,
                 follow_on_bytes: measurement.follow_on_bytes,
-                agent_frame_bytes: measurement.agent_frame_bytes,
                 turn_result_bytes: measurement.turn_result_bytes,
                 total_bytes: measurement.total_bytes,
                 max_bytes,
@@ -269,7 +265,6 @@ impl RuntimeCommit {
             checkpoint_bytes = measurement.checkpoint_bytes,
             attachment_referrer_bytes = measurement.attachment_referrer_bytes,
             follow_on_bytes = measurement.follow_on_bytes,
-            agent_frame_bytes = measurement.agent_frame_bytes,
             turn_result_bytes = measurement.turn_result_bytes,
             actual = measurement.total_bytes,
             limit = max_bytes,
@@ -364,12 +359,6 @@ impl RuntimeCommit {
             .map(|pending| measure_json(serde_json::to_vec(pending)))
             .transpose()?
             .unwrap_or_default();
-        let agent_frame_bytes = self
-            .current_frame_node_id
-            .as_ref()
-            .map(|frame_node_id| measure_json(serde_json::to_vec(frame_node_id)))
-            .transpose()?
-            .unwrap_or_default();
         let charged_outcomes = self
             .command_outcomes
             .iter()
@@ -387,7 +376,6 @@ impl RuntimeCommit {
             .saturating_add(checkpoint_bytes)
             .saturating_add(attachment_referrer_bytes)
             .saturating_add(follow_on_bytes)
-            .saturating_add(agent_frame_bytes)
             .saturating_add(turn_result_bytes);
         let graph_rows = self.graph.nodes().len();
         let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
@@ -401,7 +389,6 @@ impl RuntimeCommit {
             checkpoint_bytes,
             attachment_referrer_bytes,
             follow_on_bytes,
-            agent_frame_bytes,
             turn_result_bytes,
             total_bytes,
         })
@@ -549,7 +536,6 @@ mod tests {
                 checkpoint_bytes,
                 attachment_referrer_bytes,
                 follow_on_bytes,
-                agent_frame_bytes,
                 turn_result_bytes,
                 total_bytes,
                 max_bytes,
@@ -558,7 +544,6 @@ mod tests {
                 && checkpoint_bytes == expected_checkpoint_bytes
                 && attachment_referrer_bytes == expected_attachment_bytes
                 && follow_on_bytes == 0
-                && agent_frame_bytes == 0
                 && turn_result_bytes > 0
                 && total_bytes
                     == expected_session_config_bytes
@@ -601,39 +586,6 @@ mod tests {
             chain_depth: 1,
             attempts: 0,
         });
-
-        assert!(matches!(
-            commit.validate_budget(),
-            Err(StoreError::CommitByteBudgetExceeded {
-                max_bytes: BYTE_LIMIT,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn agent_frame_bytes_can_exceed_the_commit_budget_alone() {
-        const BYTE_LIMIT: usize = 2_048;
-        let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("budget-agent-frame"),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ))
-        };
-        let budget = CommitBudget::new(
-            CommitBudgetLimit::bounded(BYTE_LIMIT),
-            CommitBudgetLimit::Unbounded,
-        );
-        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
-        commit
-            .validate_budget()
-            .expect("the commit without an agent frame must fit");
-
-        commit.current_frame_node_id = Some(
-            crate::FrameNodeId::new("f".repeat(BYTE_LIMIT * 2))
-                .expect("test frame identity is non-empty"),
-        );
 
         assert!(matches!(
             commit.validate_budget(),
@@ -720,7 +672,6 @@ mod tests {
         assert!(measurement.checkpoint_bytes > 0);
         assert!(measurement.attachment_referrer_bytes > 0);
         assert!(measurement.follow_on_bytes > 0);
-        assert!(measurement.agent_frame_bytes > 0);
         assert!(measurement.turn_result_bytes > 0);
         assert!(measurement.total_bytes < BYTE_LIMIT);
     }
@@ -762,7 +713,6 @@ mod tests {
             checkpoint_bytes: usize::MAX,
             attachment_referrer_bytes: usize::MAX,
             follow_on_bytes: usize::MAX,
-            agent_frame_bytes: usize::MAX,
             turn_result_bytes: usize::MAX,
             total_bytes: usize::MAX,
             max_bytes: usize::MAX,

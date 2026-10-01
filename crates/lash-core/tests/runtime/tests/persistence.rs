@@ -896,12 +896,12 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
                         schema_version: lash_core::CURRENT_SESSION_STATE_VERSION,
                         session_id: read.session_id.clone(),
                         config: read.config.clone(),
-                        current_frame_node_id: read.current_frame_node_id.clone(),
                         published_by_drive: false,
                     },
                     read.head_revision,
                     read.checkpoint_ref.clone(),
                     read.window.leaf_node_id.clone(),
+                    read.current_frame_node_id.clone(),
                 )?));
             }
             lash_core::SessionCommitStore::load_session_head_meta(self.inner.as_ref(), session_id)

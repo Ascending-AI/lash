@@ -1200,9 +1200,11 @@ async fn reserve_postgres_deliveries(
             )?)
             .bind(created_at_ms as i64)
             .bind(
-                lash_core_execution::store::ObligationId::mint(
-                    lash_core_execution::store::ObligationKind::TriggerDelivery,
-                )
+                lash_core_execution::store::ObligationKey::TriggerDelivery {
+                    occurrence_id: occurrence.occurrence_id.clone(),
+                    subscription_id: subscription.subscription_id.clone(),
+                }
+                .id()
                 .as_str(),
             )
             .execute(&mut **tx)

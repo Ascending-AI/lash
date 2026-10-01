@@ -654,7 +654,12 @@ mod tests {
         // the attempt count and stays due for the reconcile's retry.
         let standing = backend
             .obligation_ledger(crate::store::ObligationKind::ProcessStart)
-            .standing(&crate::store::process_start_obligation_id(&record.id))
+            .standing(
+                &crate::store::ObligationKey::ProcessStart {
+                    process_id: record.id.clone(),
+                }
+                .id(),
+            )
             .await
             .expect("read the start obligation")
             .expect("the start obligation stands");

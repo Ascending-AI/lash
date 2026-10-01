@@ -55,7 +55,12 @@ impl CancelledStart {
     async fn start_obligation(&self, process_id: &ProcessId) -> lash_core::store::ObligationState {
         self.stores
             .start_ledger
-            .state(&lash_core::store::process_start_obligation_id(process_id))
+            .state(
+                &lash_core::store::ObligationKey::ProcessStart {
+                    process_id: process_id.clone(),
+                }
+                .id(),
+            )
             .await
             .expect("read the start obligation")
             .expect("registration armed the start obligation")
@@ -146,7 +151,12 @@ pub(super) async fn a_cancel_at_the_claim_await_still_submits_the_start() {
         start
             .stores
             .start_ledger
-            .standing(&lash_core::store::process_start_obligation_id(&stored.id))
+            .standing(
+                &lash_core::store::ObligationKey::ProcessStart {
+                    process_id: stored.id.clone()
+                }
+                .id()
+            )
             .await
             .expect("read the start obligation"),
         Some(lash_core::store::ObligationStanding {
