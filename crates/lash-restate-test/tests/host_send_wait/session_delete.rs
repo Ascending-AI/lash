@@ -327,7 +327,8 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
 }
 
 macro_rules! laws {
-    ($($name:ident, $store:ident, $replay:expr, $pinned:expr;)*) => {$ (
+    ($($(#[$attr:meta])* $name:ident, $store:ident, $replay:expr, $pinned:expr;)*) => {$ (
+        $(#[$attr])*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $name() { delete_after_answer(Stores::$store, $replay, $pinned).await; }
     )*};
@@ -338,13 +339,17 @@ laws! {
     a_pinned_delete_waits_for_its_closure_on_sqlite_memory_replaying, SqliteMemory, true, true;
     a_pinned_delete_waits_for_its_closure_on_sqlite_file, SqliteFile, false, true;
     a_pinned_delete_waits_for_its_closure_on_sqlite_file_replaying, SqliteFile, true, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     a_pinned_delete_waits_for_its_closure_on_postgres, Postgres, false, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     a_pinned_delete_waits_for_its_closure_on_postgres_replaying, Postgres, true, true;
     a_closing_delete_waits_for_its_scope_close_on_sqlite_memory, SqliteMemory, false, false;
     a_closing_delete_waits_for_its_scope_close_on_sqlite_memory_replaying, SqliteMemory, true, false;
     a_closing_delete_waits_for_its_scope_close_on_sqlite_file, SqliteFile, false, false;
     a_closing_delete_waits_for_its_scope_close_on_sqlite_file_replaying, SqliteFile, true, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     a_closing_delete_waits_for_its_scope_close_on_postgres, Postgres, false, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     a_closing_delete_waits_for_its_scope_close_on_postgres_replaying, Postgres, true, false;
 }
 
@@ -649,7 +654,8 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
 }
 
 macro_rules! completion_laws {
-    ($($name:ident, $store:ident, $replay:expr;)*) => {$ (
+    ($($(#[$attr:meta])* $name:ident, $store:ident, $replay:expr;)*) => {$ (
+        $(#[$attr])*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $name() { deletion_wait_reports_state_and_stalls(Stores::$store, $replay).await; }
     )*};
@@ -659,7 +665,9 @@ completion_laws! {
     deletion_wait_reports_state_and_stalls_on_sqlite_memory_replaying, SqliteMemory, true;
     deletion_wait_reports_state_and_stalls_on_sqlite_file, SqliteFile, false;
     deletion_wait_reports_state_and_stalls_on_sqlite_file_replaying, SqliteFile, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     deletion_wait_reports_state_and_stalls_on_postgres, Postgres, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     deletion_wait_reports_state_and_stalls_on_postgres_replaying, Postgres, true;
 }
 
