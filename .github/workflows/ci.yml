@@ -485,7 +485,7 @@ jobs:
           python3 scripts/check_worker_wire_schema.py
           python3 scripts/test_worker_wire_schema.py
           python3 scripts/test_loadtest_measurements.py
-          bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_upgrade.py && python3 scripts/test_loadtest_manifest.py
+          bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_upgrade.py && python3 scripts/test_loadtest_manifest.py && python3 scripts/test_loadtest_repro.py
           python3 scripts/test_buck2_event_digest.py
           python3 scripts/test_buck2_diagnostics.py
           python3 scripts/test_resolve_buck2_target.py
