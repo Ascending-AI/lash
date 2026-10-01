@@ -8,7 +8,7 @@ use lash_vm_protocol::*;
 /// Register as the host binary's first action. Returns false for a normal
 /// host invocation. The pool always execs with an empty environment.
 pub fn worker_entry() -> Result<bool, PoolError> {
-    worker_entry_with_frontend(&crate::frontend::TypeScriptFrontend)
+    worker_entry_with_frontend(&crate::frontend::TypeScriptFrontend::default())
 }
 
 /// Enter the credential-free worker with the host's compiled source frontend.
@@ -19,7 +19,7 @@ pub fn worker_entry_with_frontend(frontend: &dyn crate::Frontend) -> Result<bool
 
 #[cfg(feature = "testing")]
 pub fn worker_entry_with_hook(hook: &mut dyn FnMut(&ParentMessage)) -> Result<bool, PoolError> {
-    worker_entry_inner(&crate::frontend::TypeScriptFrontend, Some(hook))
+    worker_entry_inner(&crate::frontend::TypeScriptFrontend::default(), Some(hook))
 }
 
 #[expect(

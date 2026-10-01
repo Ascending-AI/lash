@@ -22,6 +22,15 @@ answer carries heapless MessagePack `AbilityOutcome`, and a failure carries
 `ExecutionHostError`. Descriptions contain no grants or backing host handles.
 The parent broker must authorize requests against its admitted context.
 
+Each TypeScript frontend owns one lazy parser thread, shared by its sequential
+Starts and preparation requests. Its reserved stack is 8 MiB plus 40,000 bytes
+per source byte at the 64 KiB source cap, about 2.45 GiB of address space. Pages
+commit only when touched. This preserves the standalone parser's arithmetic
+stack bound without creating a thread per cell. Both channels are rendezvous
+channels; each source and parsed tree moves out before the next request. The
+frontend retains no guest data or parse cache, and its drop joins the thread.
+A reset still drops and replaces the VM instance.
+
 The pool never retries guest execution. On infrastructure failure, it fences
 the checkout, kills and reaps the process, then replenishes its minimum.
 The broker must settle admitted operations and re-drive the owning substrate

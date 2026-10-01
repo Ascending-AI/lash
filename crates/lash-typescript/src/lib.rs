@@ -67,6 +67,53 @@ pub use signatures::{
     stdlib_name_count,
 };
 
+/// A source parser owned by one serial worker frontend.
+///
+/// The first admitted source starts one thread with the same proportional stack
+/// budget as a maximum-sized standalone source. Later parses reuse it. Dropping
+/// this owner closes its rendezvous channels and joins the thread. No source or
+/// parsed tree is retained between calls; source limits and diagnostics match
+/// [`parse`] and [`parse_cell`].
+#[derive(Default)]
+pub struct Parser {
+    parser: adapter::Parser,
+}
+
+impl Parser {
+    /// Parses a standalone source or a cell with the supplied live environment.
+    pub fn parse(
+        &mut self,
+        source: &str,
+        host: Option<&lashlang::LashlangHostEnvironment>,
+    ) -> Result<lashlang::Program, Diagnostic> {
+        let normalized = self.parser.parse(source)?;
+        match host {
+            Some(host) => lower::lower_with_ambient(
+                &normalized,
+                &host.globals,
+                &host.process_handles,
+                &host.expired_functions,
+            ),
+            None => lower::lower(&normalized),
+        }
+    }
+
+    /// Parses and links against the supplied host environment.
+    pub fn link(
+        &mut self,
+        source: &str,
+        host: &lashlang::LashlangHostEnvironment,
+    ) -> Result<lashlang::LinkedModule, Diagnostic> {
+        link_normalized(self.parser.parse(source)?, host)
+    }
+
+    /// Counts successful native parser-thread spawns by this parser.
+    #[doc(hidden)]
+    pub fn thread_spawn_count(&self) -> usize {
+        self.parser.spawns
+    }
+}
+
 pub fn parse(source: &str) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
     lower::lower(&normalized)
@@ -140,6 +187,13 @@ pub fn link(
     // The host environment already carries the session globals and module
     // catalog, so lowering reads them from the same surface the linker will.
     let normalized = adapter::parse(source)?;
+    link_normalized(normalized, host)
+}
+
+fn link_normalized(
+    normalized: adapter::Program,
+    host: &lashlang::LashlangHostEnvironment,
+) -> Result<lashlang::LinkedModule, Diagnostic> {
     let module_authority_roots = host
         .resources
         .module_instances()

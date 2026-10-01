@@ -903,13 +903,9 @@ mod tests {
         config.protocol.decode.max_frame_bytes = 1024;
         let codec = FrameCodec::new(config.protocol.decode);
         let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let mut server = Server::new(
-            pipe,
-            codec.clone(),
-            Bootstrap::from(&config),
-            &crate::frontend::TypeScriptFrontend,
-        )
-        .expect("server");
+        let frontend = crate::frontend::TypeScriptFrontend::default();
+        let mut server =
+            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &frontend).expect("server");
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
         let ready = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
             .expect("ready");
@@ -968,9 +964,8 @@ mod tests {
             let codec = codec.clone();
             let bootstrap = Bootstrap::from(&config);
             move || {
-                let mut server =
-                    Server::new(pipe, codec, bootstrap, &crate::frontend::TypeScriptFrontend)
-                        .expect("server");
+                let frontend = crate::frontend::TypeScriptFrontend::default();
+                let mut server = Server::new(pipe, codec, bootstrap, &frontend).expect("server");
                 server.run(&mut None).expect("run");
                 lash_vm_client::ipc::socket_calls()
             }
@@ -1079,3 +1074,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/performance/mod.rs"]
+mod performance_tests;

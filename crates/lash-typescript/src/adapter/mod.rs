@@ -14,6 +14,8 @@ mod functions;
 mod goal;
 pub(crate) mod nesting;
 mod optional_chain;
+mod parser;
+pub(crate) use parser::Parser;
 mod prototype_chain;
 mod rejections;
 mod template;

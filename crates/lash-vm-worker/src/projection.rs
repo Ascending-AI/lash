@@ -184,10 +184,15 @@ impl Wire {
         };
         match outcome {
             AbilityOutcome::Value(value) => AbilityOutcome::Value(self.rebind(value)),
-            AbilityOutcome::ResourceOperationBatch(Batch::AllResults(values)) => {
-                AbilityOutcome::ResourceOperationBatch(Batch::AllResults(
-                    values.into_iter().map(leaf).collect(),
-                ))
+            AbilityOutcome::ResourceOperationBatch(Batch::AllResults(mut values)) => {
+                for result in &mut values {
+                    if let Leaf::Value(value) = result
+                        && value.contains_projected()
+                    {
+                        *value = self.rebind(std::mem::replace(value, Value::Undefined));
+                    }
+                }
+                AbilityOutcome::ResourceOperationBatch(Batch::AllResults(values))
             }
             AbilityOutcome::ResourceOperationBatch(Batch::Selected {
                 leaf: index,
@@ -200,6 +205,9 @@ impl Wire {
         }
     }
     pub fn rebind(self: &Arc<Self>, value: Value) -> Value {
+        if !value.contains_projected() {
+            return value;
+        }
         match value {
             Value::Projected(value) => Value::Projected(self.resolve(&value).unwrap_or(value)),
             Value::List(values) => Value::List(

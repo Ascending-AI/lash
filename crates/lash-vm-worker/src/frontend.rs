@@ -17,7 +17,10 @@ pub struct FrontendRefusal {
     pub policy: bool,
 }
 
-pub(crate) struct TypeScriptFrontend;
+#[derive(Default)]
+pub(crate) struct TypeScriptFrontend {
+    pub(crate) parser: std::sync::Mutex<lash_typescript::Parser>,
+}
 
 impl Frontend for TypeScriptFrontend {
     fn language_id(&self) -> &'static str {
@@ -29,16 +32,17 @@ impl Frontend for TypeScriptFrontend {
         source: &str,
         cell_environment: Option<&LashlangHostEnvironment>,
     ) -> Result<Program, FrontendRefusal> {
-        let parsed = match cell_environment {
-            Some(environment) => lash_typescript::parse_cell(source, environment),
-            None => lash_typescript::parse(source),
-        };
+        let mut parser = self
+            .parser
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let parsed = parser.parse(source, cell_environment);
         parsed.map_err(|error| {
             let error = match cell_environment {
                 Some(environment)
                     if error.code == lash_typescript::DiagnosticCode::MethodUnsupported =>
                 {
-                    match lash_typescript::link(source, environment) {
+                    match parser.link(source, environment) {
                         Err(contextual) if contextual.code == error.code => contextual,
                         _ => error,
                     }
