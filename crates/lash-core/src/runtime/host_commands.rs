@@ -569,7 +569,9 @@ impl LashRuntime {
     /// of it durable: that admission's drive applies the command.
     ///
     /// A commit over the session's commit budget settles the command failed
-    /// with the budget refusal instead, over the durable head. A head whose
+    /// with the budget refusal instead, over the durable head; the budget
+    /// does not charge that refusal receipt (FIG-4471), so the settlement
+    /// fits wherever the head's bare commit does. A head whose
     /// bare settlement exceeds the budget is one a host lowered the budget
     /// below (ADR 0058, FIG-4393): the settlement's typed refusal ends the
     /// command root, the drive stops at it, and the command stays open until

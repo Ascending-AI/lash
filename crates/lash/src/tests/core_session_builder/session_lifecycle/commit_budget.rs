@@ -248,7 +248,9 @@ async fn assert_budget_command_error(
 
 #[tokio::test]
 async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
-    // Room for the command's settlement, not for the append it refuses.
+    // Room for the command's failed settlement, the bare head's commit
+    // (about 1.6 KB: its refusal receipt is not charged, FIG-4471), not for
+    // the append it refuses (about 10.9 KB).
     const CONFIGURED_BYTE_LIMIT: usize = 2048;
     let backend = double_backend().await;
     let factory = backend.session_store_factory();
@@ -279,6 +281,17 @@ async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() ->
         .await
         .expect_err("the public append must reject its over-limit commit");
 
+    let append_bytes = error
+        .to_string()
+        .split("runtime commit carries ")
+        .nth(1)
+        .and_then(|rest| rest.split_once(' '))
+        .and_then(|(bytes, _)| bytes.parse::<usize>().ok())
+        .unwrap_or_else(|| panic!("the refusal names the append's bytes: {error}"));
+    assert!(
+        append_bytes > CONFIGURED_BYTE_LIMIT,
+        "the refused append outgrows the budget: {error}"
+    );
     assert_budget_command_error(
         &factory,
         "append-byte-budget-surface",

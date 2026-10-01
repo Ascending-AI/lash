@@ -26,7 +26,9 @@ impl CommitBudgetLimit {
 /// Bytes cover the complete logical persisted payload carried by a
 /// [`RuntimeCommit`]: session configuration, graph delta, hydrated checkpoint,
 /// attachment-manifest ids, queued-work batches, the selected Agent Frame,
-/// and the durable turn result. Nodes bound all rows the commit
+/// and the durable turn result with its session-command outcomes, except a
+/// failed settlement's bounded refusal receipt, so a command over the budget
+/// settles failed whenever the head's bare commit fits. Nodes bound all rows the commit
 /// writes: graph nodes plus attachment-intent adoption rows. Hosts must choose
 /// bounded or unbounded behavior for both dimensions; this type deliberately
 /// has no `Default`. ADR 0058 documents 1 MiB and 512 recorded rows as
@@ -58,6 +60,28 @@ impl CommitBudget {
             CommitBudgetLimit::bounded(nodes),
         )
     }
+}
+
+/// The longest message a failed settlement's refusal receipt carries
+/// uncharged. The longest budget refusal, every count at `usize::MAX`, fits.
+const MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES: usize = 512;
+
+/// Whether `outcome` is a failed settlement's bounded refusal receipt, which
+/// the byte budget does not charge (FIG-4471).
+///
+/// A failed settlement commits the bare head: whatever its command put in
+/// resident state gave way to the durable head, and the receipt is all it
+/// adds. Charging that receipt would put a failed settlement over the size of
+/// the head's bare commit, which is what creation admits (FIG-4393), so a
+/// command over a budget its head fits could never settle and would stay
+/// open. Every other outcome, and a refusal whose message exceeds the bound,
+/// is charged.
+fn is_uncharged_refusal_receipt(outcome: &crate::SessionCommandOutcome) -> bool {
+    matches!(
+        outcome,
+        crate::SessionCommandOutcome::Failed { message, .. }
+            if message.len() <= MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES
+    )
 }
 
 pub struct RuntimeCommitBudgetMeasurement {
@@ -334,10 +358,15 @@ impl RuntimeCommit {
             .map(|frame_node_id| measure_json(serde_json::to_vec(frame_node_id)))
             .transpose()?
             .unwrap_or_default();
-        let command_outcome_bytes = if self.command_outcomes.is_empty() {
+        let charged_outcomes = self
+            .command_outcomes
+            .iter()
+            .filter(|(_, outcome)| !is_uncharged_refusal_receipt(outcome))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let command_outcome_bytes = if charged_outcomes.is_empty() {
             0
         } else {
-            measure_json(serde_json::to_vec(&self.command_outcomes))?
+            measure_json(serde_json::to_vec(&charged_outcomes))?
         };
         let turn_result_bytes = measure_json(serde_json::to_vec(&self.turn_commit))?
             .saturating_add(command_outcome_bytes);
@@ -724,5 +753,99 @@ mod tests {
             serde_json::json!({ "bounded": 1_048_576 })
         );
         assert_eq!(encoded["nodes"], serde_json::json!("unbounded"));
+    }
+
+    /// The longest refusals a failed settlement records, every count at
+    /// `usize::MAX`, stay within the uncharged receipt's bound.
+    #[test]
+    fn the_longest_budget_refusals_fit_the_uncharged_receipt() {
+        let bytes = StoreError::CommitByteBudgetExceeded {
+            session_config_bytes: usize::MAX,
+            graph_delta_bytes: usize::MAX,
+            checkpoint_bytes: usize::MAX,
+            attachment_referrer_bytes: usize::MAX,
+            follow_on_bytes: usize::MAX,
+            agent_frame_bytes: usize::MAX,
+            turn_result_bytes: usize::MAX,
+            total_bytes: usize::MAX,
+            max_bytes: usize::MAX,
+        };
+        let nodes = StoreError::CommitNodeBudgetExceeded {
+            node_count: usize::MAX,
+            max_nodes: usize::MAX,
+        };
+        for refusal in [bytes, nodes] {
+            let message = crate::runtime_error::runtime_error_from_store_commit(refusal).message;
+            assert!(
+                message.len() <= MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES,
+                "{} bytes: {message}",
+                message.len()
+            );
+        }
+    }
+
+    /// A failed settlement measures as its bare commit (FIG-4471): its
+    /// bounded refusal receipt is not charged, so a budget the bare commit
+    /// fits admits it. Every other outcome, and an unbounded refusal, is.
+    #[test]
+    fn a_failed_settlement_measures_as_its_bare_commit() {
+        let state = crate::RuntimeSessionState {
+            session_id: SessionId::from("budget-failed-settlement"),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        let unbounded =
+            CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::Unbounded);
+        let bare = RuntimeCommit::persisted_state_for_test_with_budget(&state, unbounded);
+        let bare_bytes = bare
+            .measure_budget()
+            .expect("measure the bare commit")
+            .total_bytes;
+        let settled = |outcome: crate::SessionCommandOutcome| {
+            let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(
+                &state,
+                CommitBudget::new(
+                    CommitBudgetLimit::bounded(bare_bytes),
+                    CommitBudgetLimit::Unbounded,
+                ),
+            );
+            commit.turn_commit = bare.turn_commit.clone();
+            commit
+                .command_outcomes
+                .insert(crate::BatchId::from("qwb:settled"), outcome);
+            commit
+        };
+        let refusal = |message: String| crate::SessionCommandOutcome::Failed {
+            code: crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded,
+            message,
+        };
+
+        let failed = settled(refusal("r".repeat(MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES)));
+        assert_eq!(
+            failed
+                .measure_budget()
+                .expect("measure the failed settlement")
+                .total_bytes,
+            bare_bytes
+        );
+        failed
+            .validate_budget()
+            .expect("a budget the bare commit fits admits its failed settlement");
+
+        for charged in [
+            refusal("r".repeat(MAX_UNCHARGED_REFUSAL_MESSAGE_BYTES + 1)),
+            crate::SessionCommandOutcome::AppendSessionNodes {
+                outcome: crate::session_append::AppendSessionNodesOutcome::Appended {
+                    node_ids: Vec::new(),
+                    leaf_node_id: crate::NodeId::new(String::new()),
+                },
+            },
+        ] {
+            assert!(matches!(
+                settled(charged).validate_budget(),
+                Err(StoreError::CommitByteBudgetExceeded { max_bytes, .. }) if max_bytes == bare_bytes
+            ));
+        }
     }
 }

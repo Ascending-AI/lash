@@ -54,6 +54,13 @@ command's settlement with the session's initial frame, and refuses a config
 that does not fit with the typed budget rejection, writing nothing. Every later
 head write is a budgeted commit.
 
+A command whose commit exceeds the budget settles failed with the budget
+rejection, over the durable head. That settlement is the head's bare commit
+plus its refusal receipt, and the budget does not charge a failed settlement's
+receipt whose message stays within 512 bytes (every budget rejection does), so
+a failed settlement fits whenever the head's bare commit does. Every other
+command outcome is charged.
+
 The budget is host policy, not durable state, so the host must not set it
 below its live heads. A host that does strands each such session's leading
 session command: the drive that meets it refuses the command root with the
