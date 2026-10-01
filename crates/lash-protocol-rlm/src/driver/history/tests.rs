@@ -217,12 +217,9 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                 },
             ],
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed(crate::feedback::render(
-                &lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Program,
-                    "read failed at secret.txt; cache failed at .cache/lash/state",
-                ),
-                "block",
+            outcome: lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Program,
+                "read failed at secret.txt; cache failed at .cache/lash/state",
             )),
         }),
     ));
@@ -237,7 +234,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
 
     read failed at secret.txt; cache failed at .cache/lash/state
 
-    Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected block.
+    Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.
     "#);
     assert!(observation.contains("Calls:\n- module.ok → ok\n- module.fail → err"));
     assert!(!observation.contains("secret: 1"), "arguments stay elided");
@@ -274,7 +271,7 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
 }
 
 #[test]
-fn legacy_unredacted_trajectory_errors_render_verbatim() {
+fn a_trajectory_failure_message_renders_verbatim() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
             id: "lashlang_step_legacy".to_string(),
@@ -284,9 +281,10 @@ fn legacy_unredacted_trajectory_errors_render_verbatim() {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed(
-                "read failed at /legacy/worker/private.txt".to_string(),
-            ),
+            outcome: lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Host,
+                "read failed at /legacy/worker/private.txt",
+            )),
         }),
     ));
 
@@ -295,6 +293,14 @@ fn legacy_unredacted_trajectory_errors_render_verbatim() {
 }
 
 fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord {
+    step_failed_with(
+        id,
+        code,
+        lash_core::CellFailure::new(lash_core::CellFailureKind::Program, error),
+    )
+}
+
+fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
             id: id.to_string(),
@@ -304,7 +310,7 @@ fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord 
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed(error.to_string()),
+            outcome: lash_rlm_types::CellOutcome::Failed(failure),
         }),
     ))
 }
@@ -416,15 +422,12 @@ fn every_failure_in_the_repaired_run_is_scrubbed() {
 /// read the second half without re-reading the first.
 #[test]
 fn a_refusal_and_a_runtime_failure_read_differently() {
-    let refused = rendered_text(&render(&[failed_step_event(
+    let refused = rendered_text(&render(&[step_failed_with(
         "lashlang_step_0",
         "class A {}",
-        &crate::feedback::render(
-            &lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Policy,
-                "TS_CLASS_UNSUPPORTED: classes",
-            ),
-            "block",
+        lash_core::CellFailure::new(
+            lash_core::CellFailureKind::Policy,
+            "TS_CLASS_UNSUPPORTED: classes",
         ),
     )]));
     assert!(
@@ -444,13 +447,10 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
         "{refused}"
     );
 
-    let threw = rendered_text(&render(&[failed_step_event(
+    let threw = rendered_text(&render(&[step_failed_with(
         "lashlang_step_0",
         "print rows[9]",
-        &crate::feedback::render(
-            &lash_core::CellFailure::new(lash_core::CellFailureKind::Program, "index out of range"),
-            "block",
-        ),
+        lash_core::CellFailure::new(lash_core::CellFailureKind::Program, "index out of range"),
     )]));
     assert!(threw.contains("index out of range"), "{threw}");
     assert!(!threw.lines().any(|line| line.starts_with('[')), "{threw}");
@@ -620,4 +620,71 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
 
     assert!(messages[0].starts_user_segment);
     assert!(!messages[1].starts_user_segment);
+}
+
+/// The `HistoryItem` type the prompt declares is derived from the shape a
+/// history item serializes as (FIG-4658 F66): the declaration names every key
+/// a cell can read on a step, whichever way the step ended.
+#[test]
+fn the_declared_history_item_names_every_key_a_step_serializes() {
+    let dialect = crate::dialect::SessionDialect::prompt_only(
+        std::sync::Arc::new(crate::dialect::TypescriptDialect),
+        lash_lashlang_runtime::LashlangSurface::default(),
+    );
+    let declaration = dialect.history_item_definition(true);
+    let entry = |outcome| lash_rlm_types::RlmTrajectoryEntry {
+        id: "lashlang_step_0".to_string(),
+        protocol_iteration: 0,
+        code: "print(rows)".to_string(),
+        output: vec!["rows".to_string().into()],
+        images: vec![lash_core::AttachmentRef {
+            id: "chart".parse().expect("valid attachment id"),
+            media_type: "image/png".parse().expect("valid media type"),
+            byte_len: 123,
+            type_metadata: None,
+            label: None,
+        }],
+        calls: vec![lash_rlm_types::RlmExecutedCall {
+            operation: "module.ok".to_string(),
+            outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
+        }],
+        calls_omitted: 3,
+        outcome,
+    };
+    for outcome in [
+        lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
+            lash_core::CellFailureKind::Program,
+            "index out of range",
+        )),
+        lash_rlm_types::CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
+        lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Retained(
+            lash_core::RetainedOutput {
+                reference: lash_core::AttachmentRef {
+                    id: "retained".parse().expect("valid attachment id"),
+                    media_type: "application/json".parse().expect("valid media type"),
+                    byte_len: 90_000,
+                    type_metadata: None,
+                    label: None,
+                },
+                witness: "{\"answer\"".to_string(),
+            },
+        )),
+    ] {
+        let item = serde_json::to_value(lash_rlm_types::RlmHistoryItem::from_trajectory_entry(
+            &entry(outcome),
+        ))
+        .expect("a history item serializes");
+        for key in item.as_object().expect("an item is an object").keys() {
+            assert!(
+                declaration.contains(&format!(" {key}: "))
+                    || declaration.contains(&format!(" {key}?: ")),
+                "`{key}` is written by a step and missing from: {declaration}"
+            );
+        }
+    }
+    assert!(
+        declaration
+            .contains("error?: { kind: \"policy\" | \"program\" | \"host\"; message: string }"),
+        "{declaration}"
+    );
 }

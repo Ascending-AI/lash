@@ -180,9 +180,9 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .refresh_execution_environment(runner.protocol_iteration)
                     .await
                 {
-                    Ok((sync, tool_surface)) => (Ok(Some(sync)), tool_surface),
-                    Err(super::tool_catalog::SyncFailure::Recorded(message)) => {
-                        (Err(message), Vec::new())
+                    Ok((sync, tool_surface)) => (Ok(sync), tool_surface),
+                    Err(super::tool_catalog::SyncFailure::Recorded(failure)) => {
+                        (Err(failure), Vec::new())
                     }
                     Err(super::tool_catalog::SyncFailure::Live(error)) => {
                         return Err(RuntimeEffectControllerError::from(error)

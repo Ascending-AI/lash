@@ -55,7 +55,6 @@ pub(crate) fn test_config_with_protocol_turn_options(
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
-        sync_execution_environment: true,
         model: "test-model".to_string(),
         max_context_tokens: None,
         turn_budget: lash_core::TurnBudget::Unbounded,
@@ -67,9 +66,6 @@ pub(crate) fn test_config_with_protocol_turn_options(
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
-        tool_specs: Vec::new().into(),
-        system_prompt: std::sync::Arc::from(""),
-        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("test"),
         agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
@@ -95,11 +91,7 @@ pub(crate) fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
             effects.push(effect);
             machine.handle_response(Response::ExecutionEnvironmentSynced {
                 id,
-                result: Ok(Some(sansio::ExecutionEnvironmentSync {
-                    system_prompt: std::sync::Arc::from(""),
-                    tool_specs: Arc::new(Vec::new()),
-                    projector_turn_inputs: None,
-                })),
+                result: Ok(sansio::ExecutionEnvironmentSync::default()),
             });
             continue;
         }
@@ -368,10 +360,9 @@ pub(crate) fn exec_response(
     }
 }
 
-pub(crate) fn program_failure_feedback(message: &str, cell_noun: &str) -> String {
-    format!(
-        "{message}\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected {cell_noun}."
-    )
+/// The typed failure a trajectory entry records for a defect in the program.
+pub(crate) fn program_failure(message: &str) -> lash_core::CellFailure {
+    lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
 }
 
 pub(crate) fn effects_include_runtime_error(effects: &[Effect], message_fragment: &str) -> bool {

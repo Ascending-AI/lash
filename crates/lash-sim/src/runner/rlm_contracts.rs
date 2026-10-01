@@ -735,7 +735,6 @@ fn rlm_contract_config_with_turn_options(
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
-        sync_execution_environment: true,
         model: "rlm-contract".to_string(),
         max_context_tokens: None,
         turn_budget: lash_core::TurnBudget::Unbounded,
@@ -747,9 +746,6 @@ fn rlm_contract_config_with_turn_options(
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
-        tool_specs: Vec::new().into(),
-        system_prompt: std::sync::Arc::from(""),
-        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("rlm-contract"),
         agent_frame_id: "rlm-contract-frame".to_string(),
         turn_id: TurnId::from("rlm-contract-turn"),
@@ -766,11 +762,7 @@ fn drain_rlm_contract_effects(machine: &mut lash_core::TurnMachine) -> Vec<lash_
             effects.push(effect);
             machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
                 id,
-                result: Ok(Some(lash_core::sansio::ExecutionEnvironmentSync {
-                    system_prompt: std::sync::Arc::from(""),
-                    tool_specs: Arc::new(Vec::new()),
-                    projector_turn_inputs: None,
-                })),
+                result: Ok(lash_core::sansio::ExecutionEnvironmentSync::default()),
             });
             continue;
         }

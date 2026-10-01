@@ -454,7 +454,7 @@ pub(crate) fn transcript_rows_from_committed(
                             code: step.code,
                             output,
                             success: !step.outcome.is_failed(),
-                            error: step.outcome.error().cloned(),
+                            error: step.outcome.error().map(|failure| failure.message.clone()),
                             tools: transcript_tools(step.calls, step.calls_omitted),
                         }]
                     }

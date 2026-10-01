@@ -348,7 +348,14 @@ fn check_rlm_exec_error_max_turn_stop(
     require_u64(result, "/llm_call_count", 1, contract)?;
     require_rlm_exec_code(result, "missing_name", contract)?;
     require_rlm_stopped_max_turns(result, contract)?;
-    require_rlm_trajectory_error(result, Some("unknown binding `missing_name`"), contract)?;
+    require_rlm_trajectory_error(
+        result,
+        Some((
+            lash_core::CellFailureKind::Program,
+            "unknown binding `missing_name`",
+        )),
+        contract,
+    )?;
     Ok(json!({
         "mode": "finish_required",
         "done": true,
@@ -600,7 +607,14 @@ fn check_rlm_typed_schema_mismatch_repair_loop(
     require_checkpoint(result, "after_work", contract)?;
     require_rlm_exec_code(result, "finish({ missing: true });", contract)?;
     require_rlm_system_contains(result, "did not match the required output schema", contract)?;
-    require_rlm_trajectory_error(result, Some("\"ok\" is a required property"), contract)?;
+    require_rlm_trajectory_error(
+        result,
+        Some((
+            lash_core::CellFailureKind::Program,
+            "\"ok\" is a required property",
+        )),
+        contract,
+    )?;
     Ok(json!({
         "mode": "finish_required_schema",
         "schema_feedback": "required property",
@@ -618,7 +632,10 @@ fn check_rlm_typed_schema_any_of_mismatch(
     require_rlm_system_contains(result, "did not match the required output schema", contract)?;
     require_rlm_trajectory_error(
         result,
-        Some("true is not valid under any of the schemas listed in the 'anyOf' keyword"),
+        Some((
+            lash_core::CellFailureKind::Program,
+            "true is not valid under any of the schemas listed in the 'anyOf' keyword",
+        )),
         contract,
     )?;
     Ok(json!({
@@ -819,28 +836,34 @@ pub(super) fn require_rlm_final_value(
     }
 }
 
+/// The last trajectory entry's typed failure: `expected` is its closed kind
+/// and its exact message, compared as the entry records them.
 pub(super) fn require_rlm_trajectory_error(
     result: &Value,
-    expected: Option<&str>,
+    expected: Option<(lash_core::CellFailureKind, &str)>,
     contract: &str,
 ) -> Result<(), String> {
     let Some(last) = rlm_trajectory_last(result) else {
         return Err(format!("{contract} missing RLM trajectory entry"));
     };
-    match expected {
-        Some(needle)
-            if last
-                .get("error")
-                .and_then(Value::as_str)
-                .is_some_and(|error| error.contains(needle)) =>
+    let recorded = last
+        .get("error")
+        .map(|error| serde_json::from_value::<lash_core::CellFailure>(error.clone()))
+        .transpose()
+        .map_err(|error| format!("{contract} trajectory error is not a typed failure: {error}"))?;
+    match (expected, recorded) {
+        (Some((kind, message)), Some(failure))
+            if failure.kind == kind && failure.message == message =>
         {
             Ok(())
         }
-        Some(needle) => Err(format!(
-            "{contract} trajectory error did not contain `{needle}`"
+        (Some((kind, message)), recorded) => Err(format!(
+            "{contract} trajectory error was not {kind:?} `{message}`: {recorded:?}"
         )),
-        None if last.get("error").is_none() => Ok(()),
-        None => Err(format!("{contract} trajectory unexpectedly had an error")),
+        (None, None) => Ok(()),
+        (None, Some(failure)) => Err(format!(
+            "{contract} trajectory unexpectedly had an error: {failure:?}"
+        )),
     }
 }
 

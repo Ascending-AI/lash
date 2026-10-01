@@ -50,6 +50,58 @@ struct EffectControllerTestProtocolSession;
 #[async_trait::async_trait]
 impl ProtocolSessionPlugin for EffectControllerTestProtocolSession {}
 
+/// A protocol whose session cannot render its system prompt: every
+/// execution-environment sync of its turns fails the same way.
+pub(super) struct PromptRefusingProtocolFactory;
+
+pub(super) const PROMPT_REFUSAL: &str = "the prompt template names no dialect";
+
+impl lash_core::facade_support::PluginFactory for PromptRefusingProtocolFactory {
+    fn id(&self) -> &'static str {
+        "test_protocol"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
+        Ok(Arc::new(PromptRefusingProtocolPlugin))
+    }
+}
+
+struct PromptRefusingProtocolPlugin;
+
+impl lash_core::facade_support::SessionPlugin for PromptRefusingProtocolPlugin {
+    fn id(&self) -> &'static str {
+        "effect_controller_test_protocol"
+    }
+
+    fn register(
+        &self,
+        registrar: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> Result<(), lash_core::PluginError> {
+        registrar
+            .protocol()
+            .session(Arc::new(PromptRefusingProtocolSession))?;
+        registrar
+            .protocol()
+            .protocol_driver(Arc::new(EffectControllerTestProtocolDriver))?;
+        Ok(())
+    }
+}
+
+struct PromptRefusingProtocolSession;
+
+#[async_trait::async_trait]
+impl ProtocolSessionPlugin for PromptRefusingProtocolSession {
+    async fn render_system_prompt(
+        &self,
+        _ctx: lash_core::plugin::SystemPromptContext<'_>,
+    ) -> Result<Arc<str>, lash_core::SessionError> {
+        Err(lash_core::PluginError::Invoke(PROMPT_REFUSAL.to_string()).into())
+    }
+}
+
 pub(super) struct EffectControllerTestCodeExecutor;
 
 #[async_trait::async_trait]
@@ -92,7 +144,7 @@ impl ProtocolDriverPlugin for EffectControllerTestProtocolDriver {
         input: lash_core::ProtocolBuildInput,
     ) -> lash_core::TurnDriverPreamble {
         lash_core::TurnDriverPreamble {
-            config: lash_core::TurnDriverConfig::chat(Arc::new(EffectControllerTestDriver), true),
+            config: lash_core::TurnDriverConfig::chat(Arc::new(EffectControllerTestDriver)),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names: input.tool_catalog.tool_names(),
             writer_formats: input.writer_formats,
@@ -143,7 +195,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
         &self,
         ctx: lash_core::DriverContextView<'_>,
         _driver_state: lash_core::ProtocolDriverState,
-        result: Result<lash_core::ExecResponse, String>,
+        result: Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<lash_core::DriverAction> {
         if let Some(evidence) = ctx.observed_cancellation() {
             return vec![lash_core::DriverAction::FinishCancelled {
@@ -164,9 +216,11 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
                 },
             ))],
             Err(error) => vec![
+                // The failure as the driver received it, so a test can read
+                // every field the host handed over.
                 lash_core::DriverAction::Emit(
                     lash_core::facade_support::SessionStreamEvent::Error {
-                        message: error,
+                        message: serde_json::to_string(&error).expect("an exec failure serializes"),
                         envelope: None,
                     },
                 ),

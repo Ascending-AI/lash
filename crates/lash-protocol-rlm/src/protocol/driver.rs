@@ -487,7 +487,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         &self,
         ctx: DriverContextView<'_>,
         driver_state: lash_core::ProtocolDriverState,
-        result: Result<ExecResponse, String>,
+        result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         let mut state = match decode_rlm_driver_state(driver_state) {
             Ok(state) => state,
@@ -556,7 +556,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
-                        self.dialect.prompt_vocabulary(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -569,12 +568,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     return actions;
                 }
             }
-            Err(error) => {
-                state.outcome = CellOutcome::Failed(lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Host,
-                    error,
-                ));
-            }
+            // The effect failed before the executor answered: a host
+            // failure that keeps its closed reason.
+            Err(failure) => state.outcome = CellOutcome::Failed(failure.into()),
         }
 
         if let Some(finish_value) = state.outcome.terminal_value() {
@@ -594,11 +590,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &ctx,
                     &mut actions,
                     trajectory_events(
-                        self.dialect.prompt_vocabulary(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
-                        Some(CellOutcome::Failed(error_text.clone())),
+                        // The program finished with a value its declared
+                        // schema refuses: a defect in the program.
+                        Some(CellOutcome::Failed(lash_core::CellFailure::new(
+                            lash_core::CellFailureKind::Program,
+                            error_text,
+                        ))),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
                         self.dialect.as_ref(),
@@ -612,7 +612,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
 
             actions.push(DriverAction::AppendEvents(trajectory_events(
-                self.dialect.prompt_vocabulary(),
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
@@ -635,13 +634,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         if let Err(err) = continue_or_stop_after_nonterminal(
             &ctx,
             &mut actions,
-            trajectory_events(
-                self.dialect.prompt_vocabulary(),
-                ctx.turn_id(),
-                ctx.protocol_iteration(),
-                &state,
-                None,
-            ),
+            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None),
             Vec::new(),
             if state.outcome.is_failed() {
                 AttemptProgress::Stalled
@@ -1034,7 +1027,6 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 }
 
 fn trajectory_entry(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -1044,9 +1036,7 @@ fn trajectory_entry(
     // validated finish) names its outcome explicitly; otherwise the entry
     // records the state's failure, and a pending finish never leaks in.
     let outcome = entry_outcome.unwrap_or_else(|| match &state.outcome {
-        CellOutcome::Failed(failure) => {
-            CellOutcome::Failed(crate::feedback::render(failure, vocabulary.cell_noun))
-        }
+        CellOutcome::Failed(failure) => CellOutcome::Failed(failure.clone()),
         CellOutcome::Running | CellOutcome::Finished(_) => CellOutcome::Running,
     });
     RlmTrajectoryEntry {
@@ -1066,7 +1056,6 @@ fn rlm_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &str) ->
 }
 
 fn trajectory_events(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -1079,7 +1068,6 @@ fn trajectory_events(
         events.push(event);
     }
     events.push(trajectory_event(trajectory_entry(
-        vocabulary,
         turn_id,
         protocol_iteration,
         state,
@@ -1483,29 +1471,27 @@ mod tests {
         );
     }
 
+    /// The durable entry keeps the cell's typed failure as the executor
+    /// reported it; recovery guidance is rendered when a prompt is projected
+    /// and never stored (FIG-4658 F21).
     #[test]
-    fn trajectory_capture_preserves_model_visible_error() {
+    fn trajectory_capture_keeps_the_typed_failure_and_no_guidance() {
         let raw_error = "read failed at /workspace/private/secret.txt";
+        let failure = lash_core::CellFailure::new(lash_core::CellFailureKind::Host, raw_error);
         let state = RlmDriverState {
             code: "read()".to_string(),
-            outcome: CellOutcome::Failed(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Host,
-                raw_error,
-            )),
+            outcome: CellOutcome::Failed(failure.clone()),
             ..RlmDriverState::default()
         };
 
-        let vocabulary =
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect);
-        let entry = trajectory_entry(vocabulary, &TurnId::from("turn"), 0, &state, None);
-        let error = entry.outcome.error().expect("captured public error");
+        let entry = trajectory_entry(&TurnId::from("turn"), 0, &state, None);
 
         assert_eq!(entry.code, "read()");
+        assert_eq!(entry.outcome.error(), Some(&failure));
+        let encoded = serde_json::to_value(&entry).expect("entry serializes");
         assert_eq!(
-            error,
-            &format!(
-                "{raw_error}\n\nNext: the host failed while handling this cell. Retry it; if the failure persists, report the host problem."
-            )
+            encoded["error"],
+            serde_json::json!({"kind": "host", "message": raw_error})
         );
     }
 

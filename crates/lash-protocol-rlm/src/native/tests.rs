@@ -38,7 +38,6 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: preamble.config.protocol,
         projector: preamble.config.projector,
-        sync_execution_environment: false,
         model: "scripted".to_string(),
         max_context_tokens: None,
         turn_budget: lash_core::TurnBudget::bounded(4),
@@ -50,9 +49,6 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         request_defaults: Default::default(),
         generation: Default::default(),
         autonomous: false,
-        tool_specs: Arc::new(Vec::new()),
-        system_prompt: Arc::from(""),
-        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("parity"),
         agent_frame_id: "parity-frame".to_string(),
         turn_id: TurnId::from("parity-turn"),
@@ -154,9 +150,25 @@ fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
         }),
     }
 }
+/// Every ready effect, with each execution-environment sync answered by an
+/// empty environment on the way.
 fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
+    drain_with_prompt(machine, "")
+}
+/// As [`drain`], with each sync recording `prompt` as the system prompt.
+fn drain_with_prompt(machine: &mut TurnMachine, prompt: &str) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
+        if let Effect::SyncExecutionEnvironment { id } = effect {
+            machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
+                    system_prompt: Arc::from(prompt),
+                    ..Default::default()
+                }),
+            });
+            continue;
+        }
         effects.push(effect);
     }
     effects
@@ -192,7 +204,7 @@ fn run(
     native: bool,
     termination: RlmTermination,
     prose: Option<&str>,
-    exec: Option<Result<lash_core::ExecResponse, String>>,
+    exec: Option<Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>>,
 ) -> (
     Vec<serde_json::Value>,
     Vec<lash_rlm_types::RlmTrajectoryEntry>,
@@ -566,7 +578,10 @@ fn termination_and_trajectory_parity() {
         }
         for result in [
             Ok(response(Some(serde_json::json!(1)))),
-            Err("runtime error".to_string()),
+            Err(lash_core::ExecCodeFailure::new(
+                lash_core::ExecCodeFailureReason::RuntimeStopped,
+                "runtime error",
+            )),
             Ok(response(None)),
         ] {
             assert_eq!(
@@ -1223,10 +1238,13 @@ fn configured_prompt_is_instructions_on_both_channels() {
             ("", None),
             (" \n\t", None),
         ] {
-            let mut config = config(native, RlmTermination::Natural);
-            config.system_prompt = Arc::from(prompt);
-            let mut machine = TurnMachine::new(config, Vec::new(), Default::default(), 0);
-            let effects = drain(&mut machine);
+            let mut machine = TurnMachine::new(
+                config(native, RlmTermination::Natural),
+                Vec::new(),
+                Default::default(),
+                0,
+            );
+            let effects = drain_with_prompt(&mut machine, prompt);
             let request = effects
                 .iter()
                 .find_map(|effect| match effect {

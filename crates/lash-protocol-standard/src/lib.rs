@@ -685,13 +685,10 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             BatchSugar::Disabled => catalog_specs,
         };
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(
-                Arc::new(StandardDriver {
-                    discovery: self.config.discovery.is_some(),
-                    batch: self.config.batch,
-                }),
-                true,
-            ),
+            config: TurnDriverConfig::chat(Arc::new(StandardDriver {
+                discovery: self.config.discovery.is_some(),
+                batch: self.config.batch,
+            })),
             tool_specs,
             tool_names,
             writer_formats: input.writer_formats,
@@ -1198,7 +1195,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: lash_core::ProtocolDriverState,
-        _result: Result<lash_core::ExecResponse, String>,
+        _result: Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }

@@ -1,4 +1,6 @@
 use super::*;
+use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
+pub(in crate::runtime) use crate::session::ExecutionEnvironmentSyncError as SyncFailure;
 use crate::{PluginError, ToolCatalog, TurnDriverPreamble};
 
 struct PreparedExecutionEnvironment {
@@ -66,7 +68,6 @@ impl RuntimeTurnDriver<'_> {
             turn_causes: self.turn_causes.clone(),
             protocol_run_offset: run_offset,
             turn_driver_preamble,
-            projector_turn_inputs: Default::default(),
             turn_budget: session_policy.turn_budget,
             no_progress_budget: session_policy.no_progress_budget,
             model_variant: session_policy.model_config().reasoning.clone(),
@@ -103,7 +104,7 @@ impl RuntimeTurnDriver<'_> {
     > {
         let execution_environment = self
             .prepare_execution_environment()
-            .map_err(SyncFailure::of_plugin_error)?;
+            .map_err(|error| SyncFailure::of_plugin_error(SyncFailureKind::ToolSurface, error))?;
         // The protocol plugin renders the prompt from the running root's
         // admitted config and the pinned tool surface (FIG-4589): a config
         // command applied while this root runs reaches the next root, and a
@@ -118,12 +119,11 @@ impl RuntimeTurnDriver<'_> {
                 purpose: crate::plugin::SystemPromptPurpose::Turn,
             })
             .await
-            .map_err(SyncFailure::of_session_error)?;
+            .map_err(|error| SyncFailure::of_session_error(SyncFailureKind::SystemPrompt, error))?;
         self.trace_prompt_built(protocol_iteration, &system_prompt);
-        let projector_turn_inputs = self
-            .projector_turn_inputs()
-            .await
-            .map_err(SyncFailure::of_session_error)?;
+        let projector_turn_inputs = self.projector_turn_inputs().await.map_err(|error| {
+            SyncFailure::of_session_error(SyncFailureKind::ProjectorInputs, error)
+        })?;
 
         Ok((
             crate::sansio::ExecutionEnvironmentSync {
@@ -132,7 +132,7 @@ impl RuntimeTurnDriver<'_> {
                     .turn_driver_preamble
                     .tool_specs
                     .clone(),
-                projector_turn_inputs: Some(projector_turn_inputs),
+                projector_turn_inputs,
             },
             execution_environment.tool_definitions,
         ))
@@ -166,8 +166,8 @@ impl RuntimeTurnDriver<'_> {
     ///
     /// `prompt_usage` is the previous turn's committed usage, held on the
     /// recorded session state; the bound-variables view is rendered by the
-    /// protocol's session plugin. The results are installed into the machine
-    /// config and journaled with each execution-environment sync, so a
+    /// protocol's session plugin. The results are journaled with each
+    /// execution-environment sync, the machine's only source for them, so a
     /// redriven iteration replays them rather than re-deriving them from live
     /// plugin cells (FIG-3538).
     async fn projector_turn_inputs(
@@ -290,39 +290,5 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         Ok(model)
-    }
-}
-
-/// Why an execution-environment sync could not rebuild the environment.
-pub(in crate::runtime) enum SyncFailure {
-    /// Deterministic over the turn's inputs: journaled as the sync's outcome,
-    /// which fails the turn and replays identically.
-    Recorded(String),
-    /// A fact about this attempt — a store, lease or session fault — that must
-    /// not be journaled: the turn aborts and a redrive rebuilds the
-    /// environment (the FIG-3575 live-fault class).
-    Live(crate::RuntimeError),
-}
-
-impl SyncFailure {
-    fn of_plugin_error(error: PluginError) -> Self {
-        let message = format!("protocol error: {error}");
-        let failure = error.into_turn_failure(crate::RuntimeErrorCode::ProtocolBeforeLlmCall);
-        if failure.turn_failure_cause().aborts_invocation() {
-            Self::Live(failure)
-        } else {
-            Self::Recorded(message)
-        }
-    }
-
-    fn of_session_error(error: crate::SessionError) -> Self {
-        match error {
-            crate::SessionError::Plugin(error) => Self::of_plugin_error(error),
-            error @ crate::SessionError::Store { .. } => Self::Live(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::StoreCommitFailed,
-                error.to_string(),
-            )),
-            error => Self::Recorded(error.to_string()),
-        }
     }
 }

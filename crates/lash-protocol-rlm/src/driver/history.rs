@@ -423,12 +423,7 @@ fn append_current_iteration_message(
     );
     if input.history_has_structure {
         current_prompt.push_str("\n\nSchema:\n");
-        current_prompt.push_str(
-            &input
-                .dialect
-                .history_item_definition(input.images)
-                .join("\n"),
-        );
+        current_prompt.push_str(&input.dialect.history_item_definition(input.images));
     }
     if !input.bound_variables.is_empty() {
         current_prompt.push_str("\n\n");
@@ -562,7 +557,7 @@ fn message_text(
 /// executed calls, error, and final value.
 /// Never empty.
 pub(crate) fn step_output_text(
-    _vocabulary: crate::dialect::DialectPromptVocabulary,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
     entry: &lash_rlm_types::RlmTrajectoryEntry,
 ) -> String {
@@ -613,11 +608,13 @@ pub(crate) fn step_output_text(
         }
     }
     match &entry.outcome {
-        lash_rlm_types::CellOutcome::Failed(error) => {
+        // The entry records the typed failure; its recovery guidance is
+        // prompt text, rendered here in this dialect's words.
+        lash_rlm_types::CellOutcome::Failed(failure) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
-            out.push_str(error);
+            out.push_str(&crate::feedback::render(failure, vocabulary.cell_noun));
         }
         lash_rlm_types::CellOutcome::Finished(lash_core::OutputValue::Inline(final_output)) => {
             if !out.is_empty() {

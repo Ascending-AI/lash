@@ -519,7 +519,7 @@ struct MinimalProtocolDriver;
 impl ProtocolDriverPlugin for MinimalProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(Arc::new(MinimalProtocolDriver), false),
+            config: TurnDriverConfig::chat(Arc::new(MinimalProtocolDriver)),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names: input.tool_catalog.tool_names(),
             writer_formats: input.writer_formats,
@@ -595,7 +595,7 @@ impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
         &self,
         _context: DriverContextView<'_>,
         _driver_state: lash_core::ProtocolDriverState,
-        _result: Result<lash_core::ExecResponse, String>,
+        _result: Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }

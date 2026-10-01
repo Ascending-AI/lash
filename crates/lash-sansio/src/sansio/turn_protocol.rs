@@ -384,7 +384,7 @@ pub enum Response {
     /// Live execution environment sync completed.
     ExecutionEnvironmentSynced {
         id: EffectId,
-        result: Result<Option<ExecutionEnvironmentSync>, String>,
+        result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
     },
     /// Full LLM response.
     LlmComplete {
@@ -402,7 +402,7 @@ pub enum Response {
     /// Mode code execution result.
     ExecResult {
         id: EffectId,
-        result: Result<crate::ExecResponse, String>,
+        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     },
     /// Checkpoint result with optional injected messages.
     Checkpoint {
@@ -415,10 +415,9 @@ pub enum Response {
 ///
 /// Every value here is derived from recorded turn state — the committed
 /// usage record and the journaled execution-environment sync — never read
-/// live at projection time. The host fills it when the machine is built and
-/// refreshes it through each journaled [`ExecutionEnvironmentSync`], so a
-/// redriven iteration replays the recorded inputs instead of re-deriving
-/// them from plugin cells (FIG-3538).
+/// live at projection time. They reach the machine only inside a journaled
+/// [`ExecutionEnvironmentSync`], so a redriven iteration replays the recorded
+/// inputs instead of re-deriving them from plugin cells (FIG-3538).
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 pub struct ProjectorTurnInputs {
     /// The turn's recorded prompt-usage figure: the previous turn's committed
@@ -432,16 +431,51 @@ pub struct ProjectorTurnInputs {
     pub bound_variables_prompt: Option<Arc<str>>,
 }
 
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+/// The environment one protocol iteration's model call is built from: the
+/// system prompt, the tool specs and the projector's recorded-state inputs.
+/// The host journals it as the iteration's sync outcome, and the machine
+/// holds it as [`SyncedEnvironment`]; it has no other home.
+#[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionEnvironmentSync {
     pub system_prompt: Arc<str>,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     /// The projector's recorded-state inputs for this iteration, journaled
-    /// with the rest of the sync so a redrive replays them verbatim. `None`
-    /// (including records written before this field existed) leaves the
-    /// machine's current inputs in place.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub projector_turn_inputs: Option<ProjectorTurnInputs>,
+    /// with the rest of the sync so a redrive replays them verbatim.
+    pub projector_turn_inputs: ProjectorTurnInputs,
+}
+
+/// The environment a machine holds, and the protocol iteration it was synced
+/// for. An iteration whose number differs syncs again before it prepares.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncedEnvironment {
+    pub protocol_iteration: usize,
+    pub sync: ExecutionEnvironmentSync,
+}
+
+/// Which part of an execution-environment sync failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionEnvironmentSyncFailureKind {
+    /// The turn's tool surface could not be pinned.
+    ToolSurface,
+    /// The protocol could not render the system prompt.
+    SystemPrompt,
+    /// The protocol could not render the projector's recorded-state inputs.
+    ProjectorInputs,
+}
+
+/// The recorded failure of an execution-environment sync: deterministic over
+/// the turn's inputs, journaled as the sync's outcome and replayed as the
+/// same failed turn. `code` is the cause's own failure code, `kind` the part
+/// of the sync that failed, and `message` the human detail.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionEnvironmentSyncFailure {
+    pub code: crate::session_model::FailureCode,
+    pub kind: ExecutionEnvironmentSyncFailureKind,
+    pub message: String,
 }
 
 impl Response {
@@ -606,6 +640,8 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
+    /// The environment the iteration synced.
+    pub(super) environment: &'a ExecutionEnvironmentSync,
 }
 
 impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
@@ -617,7 +653,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             turn_causes: self.turn_causes,
             protocol_iteration: self.protocol_iteration,
             use_tools,
-            projector_turn_inputs: &self.config.projector_turn_inputs,
+            environment: self.environment,
         })
     }
 
@@ -689,11 +725,10 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub turn_causes: &'a [TurnCause],
     pub protocol_iteration: usize,
     pub use_tools: bool,
-    /// Recorded-state inputs for this projection. Borrowed from the machine
-    /// config — which the journaled execution-environment sync keeps equal to
-    /// the recorded value — so a redrive projects from the same inputs
-    /// (FIG-3538).
-    pub projector_turn_inputs: &'a ProjectorTurnInputs,
+    /// The environment the iteration's journaled sync recorded: the system
+    /// prompt, the tool specs and the projector's recorded-state inputs. A
+    /// redrive projects from the same record (FIG-3538).
+    pub environment: &'a ExecutionEnvironmentSync,
 }
 
 /// **Purity contract (ADR 0105 §6).** Every method is synchronous, takes
@@ -719,13 +754,13 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
         }
 
         Arc::new(LlmRequest {
-            instructions: (!ctx.config.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.config.system_prompt.trim())),
+            instructions: (!ctx.environment.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.environment.system_prompt.trim())),
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),
             tools: if ctx.use_tools {
-                Arc::clone(&ctx.config.tool_specs)
+                Arc::clone(&ctx.environment.tool_specs)
             } else {
                 Arc::new(Vec::new())
             },
@@ -841,7 +876,7 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
         &self,
         ctx: DriverContextView<'_, M>,
         driver_state: M::DriverState,
-        result: Result<crate::ExecResponse, String>,
+        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction<M>>;
 }
 
@@ -929,7 +964,6 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub model_tool_calls: ModelToolCalls,
     pub protocol_driver: Arc<dyn ProtocolDriverHandle<M>>,
     pub projector: Arc<dyn ContextProjector<M>>,
-    pub sync_execution_environment: bool,
     pub model: String,
     /// Model context-window size in tokens, if known. Lets the kernel
     /// reclassify a zero-output `OutputLimit` terminal reason as
@@ -951,12 +985,6 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub request_defaults: crate::llm::capability::ModelRequestDefaults,
     pub generation: crate::llm::types::GenerationOptions,
     pub autonomous: bool,
-    pub tool_specs: Arc<Vec<LlmToolSpec>>,
-    pub system_prompt: Arc<str>,
-    /// The projector's recorded-state inputs for the upcoming iteration.
-    /// Filled by the host from recorded turn state and refreshed by each
-    /// journaled [`ExecutionEnvironmentSync`].
-    pub projector_turn_inputs: ProjectorTurnInputs,
     pub session_id: SessionId,
     /// The committed active frame whose history is being projected.
     pub agent_frame_id: String,

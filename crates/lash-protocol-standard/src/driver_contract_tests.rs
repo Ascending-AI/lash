@@ -22,7 +22,6 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
-        sync_execution_environment: false,
         model: "test-model".to_string(),
         max_context_tokens: None,
         turn_budget: max_turns
@@ -36,9 +35,6 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
-        tool_specs: Vec::new().into(),
-        system_prompt: Arc::from(""),
-        projector_turn_inputs: Default::default(),
         session_id: lash_core::SessionId::from("standard-driver-contract"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-driver-turn"),
@@ -62,9 +58,18 @@ fn machine(max_turns: Option<usize>) -> TurnMachine {
     )
 }
 
+/// Every ready effect, with each execution-environment sync answered by an
+/// empty environment on the way.
 fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
+        if let Effect::SyncExecutionEnvironment { id } = effect {
+            machine.handle_response(sansio::Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(sansio::ExecutionEnvironmentSync::default()),
+            });
+            continue;
+        }
         effects.push(effect);
     }
     effects

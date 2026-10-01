@@ -411,10 +411,7 @@ fn assembled_prompt_fragments_with_projection(
             "required": ["verdict"]
         })),
     ));
-    fragments.push((
-        "history definition",
-        dialect.history_item_definition(true).join("\n"),
-    ));
+    fragments.push(("history definition", dialect.history_item_definition(true)));
     fragments.push((
         "finish required",
         dialect.finish_required_copy(false, crate::plugin::RlmChannel::Cell),

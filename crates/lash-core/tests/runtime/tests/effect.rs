@@ -874,6 +874,9 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     assert_eq!(recorder.count_kind(RuntimeEffectKind::ExecCode), 1);
 }
 
+/// An `exec_code` effect that fails before the executor answers reaches the
+/// protocol driver typed (FIG-4658 F20): the closed reason travels with the
+/// message through the journal and the turn machine.
 #[tokio::test(flavor = "multi_thread")]
 async fn start_exec_without_code_executor_stops_as_runtime_error() {
     let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
@@ -938,11 +941,94 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         turn.outcome,
         TurnOutcome::Stopped(TurnStop::RuntimeError)
     ));
-    assert!(turn.errors.iter().any(|issue| {
-        issue
-            .message
-            .contains("code execution is not available in this session")
-    }));
+    let received = turn
+        .errors
+        .iter()
+        .find_map(|issue| serde_json::from_str::<serde_json::Value>(&issue.message).ok())
+        .expect("the driver reports the failure it received");
+    assert_eq!(
+        received,
+        serde_json::json!({
+            "reason": "executor_unavailable",
+            "message": "code execution is not available in this session",
+        })
+    );
+}
+
+/// A recorded execution-environment sync failure fails the turn under its
+/// cause's own code (FIG-4658 F20): the plugin's refusal is classified once,
+/// journaled typed, and reaches the turn's error still carrying that code
+/// instead of collapsing into `reconfigure_failed`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recorded_sync_failure_fails_the_turn_under_its_causes_code() {
+    let double = kernel_double(SEED + 30, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let recorder = RecordingEffectController::default();
+    let policy = SessionPolicy {
+        model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
+    };
+    let plugin_session =
+        lash_core::testing::test_plugin_host(vec![Arc::new(PromptRefusingProtocolFactory)])
+            .build_session(PluginSessionRequest::creation("root", Default::default()))
+            .expect("plugins");
+    let runtime_host = host_with_effect_recorder(&backend, recorder.clone());
+    let runtime_services = RuntimeServices::new(
+        plugin_session,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
+    let mut runtime = LashRuntime::from_embedded_state(
+        policy,
+        runtime_host,
+        runtime_services,
+        RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )),
+        lash_core::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("runtime");
+
+    let turn = runtime
+        .drive_turn(
+            TurnInput {
+                items: vec![InputItem::Text {
+                    text: "run code".to_string(),
+                }],
+                trace_turn_id: None,
+                turn_context: lash_core::TurnContext::default(),
+            },
+            lash_core::facade_support::TurnOptions::new(
+                CancellationToken::new(),
+                scoped_test_turn(&backend, &recorder, &TurnId::from("sync-refused")),
+            ),
+        )
+        .await
+        .expect("turn");
+
+    assert_eq!(
+        recorder.count_kind(RuntimeEffectKind::SyncExecutionEnvironment),
+        1,
+        "a recorded refusal is the sync's outcome, not an attempt fault"
+    );
+    assert_eq!(recorder.count_kind(RuntimeEffectKind::ExecCode), 0);
+    let issue = turn
+        .errors
+        .iter()
+        .find(|issue| issue.kind == lash_core::TurnFailureKind::ExecutionEnvironment)
+        .unwrap_or_else(|| panic!("the turn fails on its environment: {:?}", turn.errors));
+    assert_eq!(
+        issue.code,
+        Some(lash_core::FailureCode::from(
+            &lash_core::RuntimeErrorCode::ProtocolBeforeLlmCall
+        )),
+    );
+    assert!(issue.message.contains(PROMPT_REFUSAL), "{issue:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1399,5 +1485,6 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
 #[cfg(test)]
 mod effect_driver_support;
 use effect_driver_support::{
-    EffectControllerTestCodeExecutor, EffectControllerTestProtocolFactory,
+    EffectControllerTestCodeExecutor, EffectControllerTestProtocolFactory, PROMPT_REFUSAL,
+    PromptRefusingProtocolFactory,
 };

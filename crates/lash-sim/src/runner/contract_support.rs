@@ -548,7 +548,6 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
-        sync_execution_environment: false,
         model: "standard-max-turn-contract".to_string(),
         max_context_tokens: None,
         turn_budget: lash_core::TurnBudget::Unbounded,
@@ -560,9 +559,6 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
-        tool_specs: Vec::new().into(),
-        system_prompt: std::sync::Arc::from(""),
-        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("standard-max-turn-contract"),
         agent_frame_id: "standard-max-turn-frame".to_string(),
         turn_id: TurnId::from("standard-max-turn"),
@@ -591,6 +587,15 @@ pub(super) fn drain_contract_turn_machine_effects(
 ) -> Vec<lash_core::Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
+        // The contract is about the driver; the environment it runs in is
+        // empty.
+        if let lash_core::Effect::SyncExecutionEnvironment { id } = effect {
+            machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(lash_core::sansio::ExecutionEnvironmentSync::default()),
+            });
+            continue;
+        }
         effects.push(effect);
     }
     effects

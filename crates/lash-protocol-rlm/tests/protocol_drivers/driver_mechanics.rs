@@ -2113,14 +2113,14 @@ fn rlm_redrive_projects_identical_llm_envelope() {
     let journaled_sync = sansio::ExecutionEnvironmentSync {
         system_prompt: Arc::from("journaled system prompt"),
         tool_specs: Arc::new(Vec::new()),
-        projector_turn_inputs: Some(journaled_inputs),
+        projector_turn_inputs: journaled_inputs,
     };
 
     let recorded_initial =
         drive_rlm_to_second_llm_request(sansio::ProjectorTurnInputs::default(), &journaled_sync);
-    // The redrive's rebuilt machine starts from whatever the host re-derived —
-    // deliberately stale here — because the journaled sync is the authority for
-    // every iteration after the boundary it recorded.
+    // A different protocol-start record — deliberately stale here — changes
+    // iteration 1 only: each iteration projects from the sync journaled at
+    // its own boundary and carries nothing over from the one before.
     let redriven = drive_rlm_to_second_llm_request(
         sansio::ProjectorTurnInputs {
             prompt_usage: None,
@@ -2132,7 +2132,7 @@ fn rlm_redrive_projects_identical_llm_envelope() {
     assert_ne!(
         serde_json::to_vec(&recorded_initial.0).expect("first request serializes"),
         serde_json::to_vec(&redriven.0).expect("first request serializes"),
-        "the initial config inputs drive iteration 1, so the stale rebuild differs there"
+        "the protocol-start sync drives iteration 1, so the stale record differs there"
     );
     assert_eq!(
         serde_json::to_vec(&recorded_initial.1).expect("second request serializes"),
@@ -2146,14 +2146,15 @@ fn rlm_redrive_projects_identical_llm_envelope() {
     );
     assert!(
         !encoded.contains("STALE"),
-        "the redrive's stale initial inputs must not survive the journaled boundary"
+        "the stale protocol-start inputs must not survive the journaled boundary"
     );
 }
 
 /// Drive an RLM machine through one executed cell and return the two projected
-/// LLM requests. The iteration boundary's `SyncExecutionEnvironment` is
-/// answered with `journaled_sync` — the recorded outcome a redrive replays
-/// verbatim instead of re-deriving.
+/// LLM requests. The protocol-start sync records `initial_inputs`, and the
+/// iteration boundary's `SyncExecutionEnvironment` is answered with
+/// `journaled_sync` — the recorded outcome a redrive replays verbatim instead
+/// of re-deriving.
 fn drive_rlm_to_second_llm_request(
     initial_inputs: sansio::ProjectorTurnInputs,
     journaled_sync: &sansio::ExecutionEnvironmentSync,
@@ -2175,7 +2176,6 @@ fn drive_rlm_to_second_llm_request(
     let mut config = test_config();
     config.protocol_driver = preamble.config.protocol;
     config.projector = preamble.config.projector;
-    config.projector_turn_inputs = initial_inputs;
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("bind a value, then continue")],
@@ -2191,13 +2191,14 @@ fn drive_rlm_to_second_llm_request(
         };
         match effect {
             Effect::SyncExecutionEnvironment { id } => {
-                // The protocol-start sync answers as a host with nothing to
-                // refresh; the boundary sync replays the journaled record.
-                let result = if requests.is_empty() {
-                    Ok(None)
+                let result = Ok(if requests.is_empty() {
+                    sansio::ExecutionEnvironmentSync {
+                        projector_turn_inputs: initial_inputs.clone(),
+                        ..Default::default()
+                    }
                 } else {
-                    Ok(Some(journaled_sync.clone()))
-                };
+                    journaled_sync.clone()
+                });
                 machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
             }
             Effect::LlmCall { id, request } => {
@@ -2237,4 +2238,138 @@ fn drive_rlm_to_second_llm_request(
         .try_into()
         .unwrap_or_else(|_| panic!("two requests captured"));
     (first, second)
+}
+
+/// Drive one cell to its exec effect, answer it with `result`, and return the
+/// machine with the effects that followed.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the scripted reply is one cell, so the machine asks for one model call and then one exec"
+)]
+fn answer_one_cell(
+    code: &str,
+    result: Result<lash_sansio::ExecResponse, lash_core::ExecCodeFailure>,
+) -> (TurnMachine, Vec<Effect>) {
+    let preamble = lash_protocol_rlm::build_rlm_preamble(
+        lash_core::ProtocolBuildInput {
+            tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(Vec::new())),
+            plugin_extensions: Default::default(),
+            trigger_events: Default::default(),
+            writer_formats: lash_core::build_newest_writer_formats(),
+        },
+        lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),
+    );
+    let mut config = test_config();
+    config.protocol_driver = preamble.config.protocol;
+    config.projector = preamble.config.projector;
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("run some code")],
+        Default::default(),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(&typescript_block(code))])),
+    });
+    let effects = drain_effects(&mut machine);
+    let exec_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("exec effect");
+    machine.handle_response(Response::ExecResult {
+        id: exec_id,
+        result,
+    });
+    let effects = drain_effects(&mut machine);
+    (machine, effects)
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: an answered cell always records its trajectory entry, and the entry is a crate-owned serde type"
+)]
+fn last_trajectory_entry_json(machine: &TurnMachine) -> serde_json::Value {
+    serde_json::to_value(
+        machine_trajectory(machine)
+            .last()
+            .expect("the cell recorded a trajectory entry"),
+    )
+    .expect("the entry serializes")
+}
+
+/// An `exec_code` effect that failed before the executor answered reaches the
+/// trajectory typed (FIG-4658 F20): a host failure that keeps the closed
+/// reason the host journaled, not a string relabelled `host`.
+#[test]
+fn an_exec_failure_reaches_the_trajectory_with_its_closed_reason() {
+    for (reason, spelling) in [
+        (
+            lash_core::ExecCodeFailureReason::ExecutorUnavailable,
+            "executor_unavailable",
+        ),
+        (
+            lash_core::ExecCodeFailureReason::RuntimeStopped,
+            "runtime_stopped",
+        ),
+        (lash_core::ExecCodeFailureReason::Session, "session"),
+    ] {
+        let (machine, _) = answer_one_cell(
+            "print(\"hi\");",
+            Err(lash_core::ExecCodeFailure::new(
+                reason,
+                "the executor did not answer",
+            )),
+        );
+        assert_eq!(
+            last_trajectory_entry_json(&machine)["error"],
+            serde_json::json!({
+                "kind": "host",
+                "message": "the executor did not answer",
+                "exec_failure": spelling,
+            })
+        );
+    }
+}
+
+/// A durable trajectory entry keeps its cell failure typed, and the recovery
+/// guidance the model reads is rendered when the next prompt is projected
+/// (FIG-4658 F21): presentation copy never enters the record.
+#[test]
+fn a_failed_cell_is_recorded_typed_and_its_guidance_is_rendered_at_projection() {
+    let (mut machine, effects) = answer_one_cell(
+        "missing_name",
+        Ok(exec_response(
+            &[],
+            Some("unknown binding `missing_name`"),
+            None,
+        )),
+    );
+    assert_eq!(
+        last_trajectory_entry_json(&machine)["error"],
+        serde_json::json!({
+            "kind": "program",
+            "message": "unknown binding `missing_name`",
+        })
+    );
+
+    let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint after the cell");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: sansio::CheckpointDelivery::default(),
+    });
+    let effects = drain_effects(&mut machine);
+    let request = serde_json::to_string(find_llm_request(&effects).expect("next request"))
+        .expect("the request serializes");
+    assert!(
+        request.contains("unknown binding `missing_name`")
+            && request.contains("Next: the defect is in the program"),
+        "the projected prompt carries the failure and its guidance: {request}"
+    );
 }

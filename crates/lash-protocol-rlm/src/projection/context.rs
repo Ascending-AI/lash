@@ -811,7 +811,10 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            outcome: lash_rlm_types::CellOutcome::Failed("unknown name".to_string()),
+            outcome: lash_rlm_types::CellOutcome::Failed(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Program,
+                "unknown name",
+            )),
         };
         let terminal = RlmTrajectoryEntry {
             id: "terminal".to_string(),
@@ -866,7 +869,7 @@ mod tests {
             &projection.history()[1],
             RlmHistoryItem::LashlangStep { id, outcome, .. }
                 if id == "intermediate"
-                    && outcome.error().map(String::as_str) == Some("unknown name")
+                    && outcome.error().map(|error| error.message.as_str()) == Some("unknown name")
         ));
         assert!(matches!(
             &projection.history()[2],

@@ -22,18 +22,13 @@ use crate::session_model::Part;
 pub struct TurnDriverConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub protocol: Arc<dyn ProtocolDriverHandle<M>>,
     pub projector: Arc<dyn ContextProjector<M>>,
-    pub sync_execution_environment: bool,
 }
 
 impl<M: TurnProtocol> TurnDriverConfig<M> {
-    pub fn chat(
-        protocol: Arc<dyn ProtocolDriverHandle<M>>,
-        sync_execution_environment: bool,
-    ) -> Self {
+    pub fn chat(protocol: Arc<dyn ProtocolDriverHandle<M>>) -> Self {
         Self {
             protocol,
             projector: Arc::new(ChatContextProjector),
-            sync_execution_environment,
         }
     }
 }

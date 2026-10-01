@@ -72,7 +72,8 @@ impl Dialect for SeamProofDialect {
             execution_title: "Seam proof execution",
             cell_tags: CELL_TAGS,
             cell_noun: "cell",
-            history_type: "Log",
+            history_type: "list[LogItem]",
+            history_item_name: "LogItem",
             print_call: "give",
             print_statement_prefix: "give ",
             print_statement_suffix: "",
@@ -83,10 +84,6 @@ impl Dialect for SeamProofDialect {
             continue_as_example: r#"take r from control.continue_as WITH {"task": "go on"}"#,
             field_miss_rule: "Use only the field names listed below.",
         }
-    }
-
-    fn history_item_definition(&self, _images: bool) -> Vec<String> {
-        vec!["shape Log is list[record]".to_string()]
     }
 
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {

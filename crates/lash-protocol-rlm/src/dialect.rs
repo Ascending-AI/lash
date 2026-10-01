@@ -70,10 +70,6 @@ pub trait Dialect: Send + Sync + 'static {
     /// The words, tags and notation shared prompt fragments read.
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
 
-    /// The definition of one history item, in this dialect's notation, shown
-    /// where the prompt introduces the history collection.
-    fn history_item_definition(&self, images: bool) -> Vec<String>;
-
     /// The execution section of the system prompt, in its two parts.
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection;
 }
@@ -167,6 +163,10 @@ pub struct DialectPromptVocabulary {
     pub cell_noun: &'static str,
     /// The history collection's type, as the dialect spells it in prompts.
     pub history_type: &'static str,
+    /// The name `history_type` gives one item. Shared code defines it, through
+    /// [`Dialect::schema_definition`], from the shape a history item
+    /// serializes as.
+    pub history_item_name: &'static str,
     /// The call that shows a value for inspection.
     pub print_call: &'static str,
     /// The inspect form, ready to take a value expression.
@@ -376,8 +376,14 @@ impl SessionDialect {
             }))
     }
 
-    pub(crate) fn history_item_definition(&self, images: bool) -> Vec<String> {
-        self.dialect.history_item_definition(images)
+    /// The definition of one history item, shown where the prompt introduces
+    /// the history collection: the dialect's spelling of the shape the item
+    /// serializes as, which `lash-rlm-types` owns.
+    pub(crate) fn history_item_definition(&self, images: bool) -> String {
+        self.dialect.schema_definition(
+            self.dialect.prompt_vocabulary().history_item_name,
+            &lash_rlm_types::history_item_shape(images),
+        )
     }
 
     /// The fields of `shape` that say more than their type — a description,
@@ -858,6 +864,7 @@ mod tests {
                     close: "</fixture>",
                 },
                 history_type: "FixtureHistory",
+                history_item_name: "FixtureHistoryItem",
                 ..TypescriptDialect.prompt_vocabulary()
             }
         }
@@ -889,10 +896,6 @@ mod tests {
 
         fn render_tool_example(&self, _authored: &str) -> Option<String> {
             None
-        }
-
-        fn history_item_definition(&self, _images: bool) -> Vec<String> {
-            Vec::new()
         }
 
         fn render_execution_section(

@@ -364,9 +364,8 @@ fn rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_r
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Failed(program_failure_feedback(
+                outcome: lash_rlm_types::CellOutcome::Failed(program_failure(
                     "unknown binding `missing_name`",
-                    "cell",
                 )),
             }),
             ..RlmProtocolExpectations::default()
@@ -923,10 +922,9 @@ fn rlm_protocol_scenario_typed_schema_mismatch_checks_any_of() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(true);",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Failed(
-                    "true is not valid under any of the schemas listed in the 'anyOf' keyword"
-                        .to_string(),
-                ),
+                outcome: lash_rlm_types::CellOutcome::Failed(program_failure(
+                    "true is not valid under any of the schemas listed in the 'anyOf' keyword",
+                )),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -970,9 +968,9 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ missing: true });",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Failed(
-                    "\"ok\" is a required property".to_string(),
-                ),
+                outcome: lash_rlm_types::CellOutcome::Failed(program_failure(
+                    "\"ok\" is a required property",
+                )),
             }),
             ..RlmProtocolExpectations::default()
         })

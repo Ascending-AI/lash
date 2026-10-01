@@ -45,7 +45,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
             cumulative_usage: TokenUsage::default(),
-            synced_protocol_iteration: None,
+            environment: None,
             observed_cancellation: None,
         }
     }
@@ -128,7 +128,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
-            synced_protocol_iteration: self.synced_protocol_iteration,
+            environment: self.environment.clone(),
         }
     }
 
@@ -140,6 +140,20 @@ impl<M: TurnProtocol> TurnMachine<M> {
             return Err(TurnCheckpointRestoreError::IncompatibleSchemaVersion {
                 actual: checkpoint.schema_version,
                 expected: TURN_CHECKPOINT_SCHEMA_VERSION,
+            });
+        }
+        // Only a machine that has yet to sync holds no environment: every
+        // other wait was started by a driver that projected from one.
+        if checkpoint.environment.is_none()
+            && matches!(
+                &checkpoint.state,
+                MachineState::Waiting { work, .. }
+                    if !matches!(work, PendingWork::SyncExecutionEnvironment)
+            )
+        {
+            return Err(TurnCheckpointRestoreError::IncompatibleFormat {
+                message: "a checkpoint waiting on driver work records no execution environment"
+                    .to_string(),
             });
         }
         let side_effect_outbox = checkpoint
@@ -159,21 +173,46 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: checkpoint.protocol_iteration,
             protocol_run_offset: checkpoint.protocol_run_offset,
             cumulative_usage: checkpoint.cumulative_usage,
-            synced_protocol_iteration: checkpoint.synced_protocol_iteration,
+            environment: checkpoint.environment,
             observed_cancellation: None,
         })
     }
 
-    fn driver_context(&self) -> DriverContextView<'_, M> {
-        DriverContextView {
-            config: &self.config,
-            messages: &self.messages,
-            events: self.events.as_slice(),
-            turn_causes: &self.turn_causes,
-            protocol_iteration: self.protocol_iteration,
-            protocol_run_offset: self.protocol_run_offset,
-            observed_cancellation: self.observed_cancellation.as_ref(),
-        }
+    /// Run one driver step over the synced environment and apply the
+    /// actions it returns.
+    fn drive(
+        &mut self,
+        step: impl FnOnce(
+            &dyn ProtocolDriverHandle<M>,
+            DriverContextView<'_, M>,
+        ) -> Vec<DriverAction<M>>,
+    ) {
+        let driver = Arc::clone(&self.config.protocol_driver);
+        let Some(environment) = self.environment.as_ref() else {
+            // A fresh machine syncs before it prepares, and restore refuses a
+            // checkpoint that waits on driver work with no environment.
+            self.fail_turn(make_error_event(
+                crate::session_model::TurnFailureKind::ExecutionEnvironment,
+                Some(crate::session_model::TurnFailureCode::ReconfigureFailed.into()),
+                "the turn has no synced execution environment",
+                None,
+            ));
+            return;
+        };
+        let actions = step(
+            driver.as_ref(),
+            DriverContextView {
+                config: &self.config,
+                messages: &self.messages,
+                events: self.events.as_slice(),
+                turn_causes: &self.turn_causes,
+                protocol_iteration: self.protocol_iteration,
+                protocol_run_offset: self.protocol_run_offset,
+                observed_cancellation: self.observed_cancellation.as_ref(),
+                environment: &environment.sync,
+            },
+        );
+        self.apply_actions(actions);
     }
 
     fn next_id(&mut self) -> EffectId {
@@ -266,13 +305,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     // ─── State transitions ───
 
+    /// The protocol-start sync: the only way an environment reaches the
+    /// machine.
     fn prepare_protocol(&mut self) {
-        if self.config.sync_execution_environment {
-            self.start(PendingWork::SyncExecutionEnvironment);
-            return;
-        }
-
-        self.prepare_protocol_iteration();
+        self.start(PendingWork::SyncExecutionEnvironment);
     }
 
     fn prepare_protocol_iteration(&mut self) {
@@ -289,18 +325,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.finish(TurnOutcome::Stopped(TurnStop::MaxTurns));
             return;
         }
-        if self.config.sync_execution_environment
-            && self.synced_protocol_iteration != Some(self.protocol_iteration)
+        if self
+            .environment
+            .as_ref()
+            .is_none_or(|environment| environment.protocol_iteration != self.protocol_iteration)
         {
             self.start(PendingWork::SyncExecutionEnvironment);
             return;
         }
-        let actions = {
-            let driver = Arc::clone(&self.config.protocol_driver);
-            let ctx = self.driver_context();
-            driver.prepare_protocol_iteration(ctx)
-        };
-        self.apply_actions(actions);
+        self.drive(|driver, ctx| driver.prepare_protocol_iteration(ctx));
     }
 
     /// Wait on the host to fulfil `work`. Its effect is delivered by
@@ -310,9 +343,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn start(&mut self, work: PendingWork<M>) {
         if matches!(work, PendingWork::Llm { .. }) {
             let tool_list = self
-                .config
-                .tool_specs
+                .environment
                 .iter()
+                .flat_map(|environment| environment.sync.tool_specs.iter())
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -377,7 +410,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 }
                 DriverAction::AdvanceProtocolIteration => {
                     self.protocol_iteration += 1;
-                    self.synced_protocol_iteration = None;
                     progress_dirty = true;
                 }
                 DriverAction::FinishCancelled { evidence } => {
@@ -460,26 +492,25 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn handle_execution_environment_synced(
         &mut self,
-        result: Result<Option<ExecutionEnvironmentSync>, String>,
+        result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
     ) {
         match result {
-            Ok(update) => {
-                if let Some(update) = update {
-                    self.config.system_prompt = update.system_prompt;
-                    self.config.tool_specs = update.tool_specs;
-                    if let Some(projector_turn_inputs) = update.projector_turn_inputs {
-                        self.config.projector_turn_inputs = projector_turn_inputs;
-                    }
-                }
-                self.synced_protocol_iteration = Some(self.protocol_iteration);
+            Ok(sync) => {
+                self.environment = Some(SyncedEnvironment {
+                    protocol_iteration: self.protocol_iteration,
+                    sync,
+                });
                 self.state = MachineState::PrepareIteration;
             }
-            Err(error) => {
+            Err(failure) => {
                 self.fail_turn(make_error_event(
                     crate::session_model::TurnFailureKind::ExecutionEnvironment,
-                    Some(crate::session_model::TurnFailureCode::ReconfigureFailed.into()),
-                    format!("Failed to refresh execution environment: {error}"),
-                    Some(error),
+                    Some(failure.code),
+                    format!(
+                        "Failed to refresh execution environment: {}",
+                        failure.message
+                    ),
+                    Some(failure.message),
                 ));
             }
         }
@@ -609,13 +640,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 if self.handle_terminal_llm_response(&llm_response, text_streamed) {
                     return Ok(());
                 }
-                let actions = {
-                    let driver = Arc::clone(&self.config.protocol_driver);
-                    let calls = self
-                        .config
-                        .model_tool_calls
-                        .response(self.protocol_iteration, id);
-                    let ctx = self.driver_context();
+                let calls = self
+                    .config
+                    .model_tool_calls
+                    .response(self.protocol_iteration, id);
+                self.drive(|driver, ctx| {
                     driver.handle_llm_success(
                         ctx,
                         request,
@@ -624,8 +653,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         &calls,
                         text_streamed,
                     )
-                };
-                self.apply_actions(actions);
+                });
             }
         }
         Ok(())
@@ -847,24 +875,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
             });
         }
 
-        let actions = {
-            let driver = Arc::clone(&self.config.protocol_driver);
-            let ctx = self.driver_context();
-            driver.handle_tool_results(ctx, completed)
-        };
-        self.apply_actions(actions);
+        self.drive(|driver, ctx| driver.handle_tool_results(ctx, completed));
     }
 
     fn handle_exec_result(
         &mut self,
         driver_state: M::DriverState,
-        result: Result<crate::ExecResponse, String>,
+        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) {
-        let actions = {
-            let driver = Arc::clone(&self.config.protocol_driver);
-            let ctx = self.driver_context();
-            driver.handle_exec_result(ctx, driver_state, result)
-        };
-        self.apply_actions(actions);
+        self.drive(|driver, ctx| driver.handle_exec_result(ctx, driver_state, result));
     }
 }

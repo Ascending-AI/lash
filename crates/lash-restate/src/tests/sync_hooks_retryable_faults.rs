@@ -58,13 +58,23 @@ fn deterministic_fault() -> RuntimeEffectControllerError {
     )
 }
 
+/// The recorded refusal of a sync whose tool surface could not be pinned.
+fn catalog_refusal() -> lash_core::sansio::ExecutionEnvironmentSyncFailure {
+    lash_core::sansio::ExecutionEnvironmentSyncFailure {
+        code: lash_core::FailureCode::from(
+            &lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed,
+        ),
+        kind: lash_core::sansio::ExecutionEnvironmentSyncFailureKind::ToolSurface,
+        message: "fig3726: the catalog refused the sync".to_string(),
+    }
+}
+
 fn synced_environment() -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::SyncExecutionEnvironment {
-        result: Ok(Some(lash_core::sansio::ExecutionEnvironmentSync {
+        result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
             system_prompt: Arc::from("fig3726 system prompt"),
-            tool_specs: Arc::new(Vec::new()),
-            projector_turn_inputs: None,
-        })),
+            ..Default::default()
+        }),
         tool_surface: Vec::new(),
     }
 }
@@ -252,10 +262,7 @@ async fn an_environment_sync_store_fault_retries_the_step_without_journaling_it(
         |outcome| {
             matches!(
                 outcome,
-                RuntimeEffectOutcome::SyncExecutionEnvironment {
-                    result: Ok(Some(_)),
-                    ..
-                }
+                RuntimeEffectOutcome::SyncExecutionEnvironment { result: Ok(_), .. }
             )
         },
     );
@@ -298,6 +305,8 @@ async fn an_assistant_hook_session_fault_retries_the_step_without_journaling_it(
 
 /// The control for the sync arm: a deterministic refusal the sync itself
 /// recorded is journaled on the first attempt — no retry, no re-execution.
+/// The journal keeps the refusal typed (FIG-4658 F20): its cause's failure
+/// code, the part of the sync that failed and the message, not a string.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_deterministic_environment_sync_refusal_is_the_steps_recorded_outcome() {
     let envelope = RuntimeEffectEnvelope::new(
@@ -308,7 +317,7 @@ async fn a_deterministic_environment_sync_refusal_is_the_steps_recorded_outcome(
         envelope,
         Arc::new(|_| {
             Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
-                result: Err("fig3726: the catalog refused the sync".to_string()),
+                result: Err(catalog_refusal()),
                 tool_surface: Vec::new(),
             })
         }),
@@ -336,12 +345,21 @@ async fn a_deterministic_environment_sync_refusal_is_the_steps_recorded_outcome(
     let outcome = recorded
         .outcome
         .expect("the journaled outcome is the step's refusal");
-    assert!(
-        matches!(
-            outcome,
-            RuntimeEffectOutcome::SyncExecutionEnvironment { result: Err(_), .. }
-        ),
-        "the journaled outcome: {outcome:?}"
+    let RuntimeEffectOutcome::SyncExecutionEnvironment {
+        result: Err(failure),
+        ..
+    } = &outcome
+    else {
+        panic!("the journaled outcome: {outcome:?}");
+    };
+    assert_eq!(failure, &catalog_refusal());
+    assert_eq!(
+        serde_json::to_value(&outcome).expect("the outcome encodes")["result"]["Err"],
+        serde_json::json!({
+            "code": "lash:tool_catalog_resolution_failed",
+            "kind": "tool_surface",
+            "message": "fig3726: the catalog refused the sync",
+        })
     );
 }
 

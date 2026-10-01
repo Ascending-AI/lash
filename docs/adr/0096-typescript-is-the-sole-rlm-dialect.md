@@ -70,14 +70,16 @@ field and refuses one.
   constraints reach every surface from the same import. Shared code builds the
   per-field rows and the required-output block from the same shapes through
   `schema_type`. Inferred runtime values construct the same shape directly.
-- `schema_definition`: a named inferred record, with its fields spelled
-  through `schema_type`.
+- `schema_definition`: a named record, with its fields spelled through
+  `schema_type`. Shared code defines the history item this way, from the shape
+  `lash-rlm-types` reads off the item's own serialized form, so a dialect
+  never declares the item by hand.
 - `prompt_vocabulary`: language name, execution title, `CellTags`, cell noun,
-  history type, inspect and finish forms, continue-as forms, the field-miss
-  rule of its runtime.
-- `history_item_definition` and `render_execution_section`: the history item
-  schema and the whole execution section, given the transport, the rendered
-  tool docs, the catalog, the host environment and the discovery operation.
+  history type and history item name, inspect and finish forms, continue-as
+  forms, the field-miss rule of its runtime.
+- `render_execution_section`: the whole execution section, given the
+  transport, the rendered tool docs, the catalog, the host environment and the
+  discovery operation.
 
 Shared code does language-neutral work only: shape inference and naming,
 manifest binding resolution to a typed `ResolvedToolBinding` under the manifest

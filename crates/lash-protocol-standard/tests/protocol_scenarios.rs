@@ -567,7 +567,6 @@ fn standard_config() -> TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
-        sync_execution_environment: false,
         model: "test-model".to_string(),
         max_context_tokens: None,
         turn_budget: lash_core::TurnBudget::Unbounded,
@@ -579,9 +578,6 @@ fn standard_config() -> TurnMachineConfig {
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
-        tool_specs: Vec::new().into(),
-        system_prompt: std::sync::Arc::from(""),
-        projector_turn_inputs: Default::default(),
         session_id: lash_core::SessionId::from("standard-protocol-scenario"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-protocol-turn"),
@@ -600,9 +596,18 @@ fn user_message(content: &str) -> Message {
     }
 }
 
+/// Every ready effect, with each execution-environment sync answered by an
+/// empty environment on the way.
 fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
+        if let Effect::SyncExecutionEnvironment { id } = effect {
+            machine.handle_response(sansio::Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(sansio::ExecutionEnvironmentSync::default()),
+            });
+            continue;
+        }
         effects.push(effect);
     }
     effects
@@ -1317,7 +1322,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ThirdPartyDriver {
         &self,
         _ctx: lash_core::DriverContextView<'_>,
         _state: lash_core::ProtocolDriverState,
-        _result: Result<lash_core::ExecResponse, String>,
+        _result: Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<lash_core::DriverAction> {
         vec![lash_core::DriverAction::Finish(public_protocol_outcome())]
     }

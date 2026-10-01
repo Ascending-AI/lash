@@ -260,9 +260,8 @@ fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Failed(program_failure_feedback(
+                outcome: lash_rlm_types::CellOutcome::Failed(program_failure(
                     "unknown binding `missing_name`",
-                    "cell",
                 )),
             }),
             ..RlmProtocolExpectations::default()

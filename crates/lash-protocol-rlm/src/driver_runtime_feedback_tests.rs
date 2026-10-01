@@ -7,8 +7,11 @@ fn runtime_feedback_projectors_trim_configured_instructions() {
         (" \n\t ", None),
         ("  configured prompt\n", Some("configured prompt")),
     ] {
-        let mut config = projection_test_config("test-model", Default::default(), None);
-        config.system_prompt = Arc::from(prompt);
+        let config = projection_test_config("test-model", Default::default(), None);
+        let environment = lash_core::sansio::ExecutionEnvironmentSync {
+            system_prompt: Arc::from(prompt),
+            ..Default::default()
+        };
         let messages = lash_core::facade_support::MessageSequence::default();
         let context = || ProjectorContext {
             config: &config,
@@ -17,7 +20,7 @@ fn runtime_feedback_projectors_trim_configured_instructions() {
             turn_causes: &[],
             protocol_iteration: 0,
             use_tools: false,
-            projector_turn_inputs: &config.projector_turn_inputs,
+            environment: &environment,
         };
         let rlm = projector(1000).project(context());
         let chat = lash_core::sansio::ChatContextProjector.project(context());

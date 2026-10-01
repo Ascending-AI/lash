@@ -10,7 +10,7 @@ use crate::llm::types::{
     AttachmentSource, LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender,
     LlmToolChoice, LlmToolSpec,
 };
-use crate::sansio::{ExecutionEnvironmentSync, LlmCallError};
+use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure, LlmCallError};
 use crate::tool_dispatch::ToolTriggerEffectOutcome;
 use crate::{
     AttachmentCreateMeta, CausalRef, CheckpointDelivery, EffectAddress, ExecResponse,
@@ -1359,7 +1359,7 @@ pub enum RuntimeEffectOutcome {
         admitted: Box<CheckpointAdmittedSet>,
     },
     SyncExecutionEnvironment {
-        result: Result<Option<ExecutionEnvironmentSync>, String>,
+        result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
         /// The tool surface the sync built: every tool of the catalog the
         /// iteration's calls resolve against, as its definition. The drive
         /// installs it as the catalog, on the live pass and on every replay,
@@ -1541,7 +1541,7 @@ async fn durable_attachment_source(
 /// surface it recorded (FIG-3672).
 #[derive(Debug)]
 pub struct ServedExecutionEnvironmentSync {
-    pub result: Result<Option<ExecutionEnvironmentSync>, String>,
+    pub result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
     pub tool_surface: Vec<crate::ToolDefinition>,
 }
 

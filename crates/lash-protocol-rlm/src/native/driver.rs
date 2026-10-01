@@ -369,7 +369,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         &self,
         ctx: DriverContextView<'_>,
         driver_state: lash_core::ProtocolDriverState,
-        result: Result<ExecResponse, String>,
+        result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         let mut state = match decode_rlm_driver_state(
             driver_state,
@@ -441,7 +441,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
-                        self.dialect.prompt_vocabulary(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -455,12 +454,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     return actions;
                 }
             }
-            Err(error) => {
-                state.outcome = CellOutcome::Failed(lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Host,
-                    error,
-                ));
-            }
+            // The effect failed before the executor answered: a host
+            // failure that keeps its closed reason.
+            Err(failure) => state.outcome = CellOutcome::Failed(failure.into()),
         }
 
         if let Some(finish_value) = state.outcome.terminal_value() {
@@ -480,11 +476,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     &ctx,
                     &mut actions,
                     trajectory_events(
-                        self.dialect.prompt_vocabulary(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
-                        Some(CellOutcome::Failed(error_text.clone())),
+                        // The program finished with a value its declared
+                        // schema refuses: a defect in the program.
+                        Some(CellOutcome::Failed(lash_core::CellFailure::new(
+                            lash_core::CellFailureKind::Program,
+                            error_text,
+                        ))),
                         lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
@@ -499,7 +499,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             }
 
             actions.push(DriverAction::AppendEvents(trajectory_events(
-                self.dialect.prompt_vocabulary(),
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
@@ -524,7 +523,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             &ctx,
             &mut actions,
             trajectory_events(
-                self.dialect.prompt_vocabulary(),
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
@@ -803,7 +801,6 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 }
 
 fn trajectory_entry(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -813,9 +810,7 @@ fn trajectory_entry(
     // validated finish) names its outcome explicitly; otherwise the entry
     // records the state's failure, and a pending finish never leaks in.
     let outcome = entry_outcome.unwrap_or_else(|| match &state.outcome {
-        CellOutcome::Failed(failure) => {
-            CellOutcome::Failed(crate::feedback::render(failure, vocabulary.cell_noun))
-        }
+        CellOutcome::Failed(failure) => CellOutcome::Failed(failure.clone()),
         CellOutcome::Running | CellOutcome::Finished(_) => CellOutcome::Running,
     });
     RlmTrajectoryEntry {
@@ -835,20 +830,13 @@ fn rlm_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &str) ->
 }
 
 fn trajectory_events(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
     entry_outcome: Option<lash_rlm_types::HistoryCellOutcome>,
     transport_version: u32,
 ) -> Vec<SessionHistoryRecord> {
-    let entry = trajectory_entry(
-        vocabulary,
-        turn_id,
-        protocol_iteration,
-        state,
-        entry_outcome,
-    );
+    let entry = trajectory_entry(turn_id, protocol_iteration, state, entry_outcome);
     vec![
         super::transport::execution_event(
             entry.id.clone(),

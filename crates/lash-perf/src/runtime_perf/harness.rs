@@ -642,7 +642,7 @@ fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
             entry
                 .outcome
                 .error()
-                .is_some_and(|error| !error.trim().is_empty())
+                .is_some_and(|failure| !failure.message.trim().is_empty())
         })
         .collect()
 }
@@ -697,7 +697,7 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
             entry
                 .outcome
                 .error()
-                .is_some_and(|error| !error.trim().is_empty())
+                .is_some_and(|failure| !failure.message.trim().is_empty())
         })
         .collect::<Vec<_>>();
     if !errors.is_empty() {
@@ -707,7 +707,13 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
                 out,
                 "- iteration={} error={}",
                 entry.protocol_iteration,
-                preview(entry.outcome.error().map_or("", String::as_str), 900,)
+                preview(
+                    entry
+                        .outcome
+                        .error()
+                        .map_or("", |failure| failure.message.as_str()),
+                    900,
+                )
             );
             if !entry.code.trim().is_empty() {
                 let _ = writeln!(out, "  code={}", preview(&entry.code, 900));
@@ -720,7 +726,7 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
             entry.protocol_iteration,
             entry.outcome.terminal_value().map_or_else(
                 || "none".to_string(),
-                |value| lash_rlm_types::history_output_value(value).to_string()
+                |value| serde_json::json!(lash_rlm_types::HistoryValue::from(value)).to_string()
             )
         );
         if !entry.code.trim().is_empty() {

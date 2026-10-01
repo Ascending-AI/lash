@@ -29,7 +29,6 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         model_tool_calls: crate::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
-        sync_execution_environment: false,
         model: "test-model".to_string(),
         max_context_tokens: None,
         turn_budget: crate::TurnBudget::Unbounded,
@@ -41,9 +40,6 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         request_defaults: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
         autonomous: false,
-        tool_specs: Vec::new().into(),
-        system_prompt: Arc::from(""),
-        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("test".to_string()),
         agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
@@ -90,7 +86,26 @@ fn text_message(role: MessageRole, content: impl Into<String>) -> Message {
     }
 }
 
+/// Every effect the machine has ready, with each execution-environment sync
+/// answered by an empty environment on the way, so a test about anything
+/// else never has to serve one.
 fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    while let Some(effect) = machine.poll_effect() {
+        if let Effect::SyncExecutionEnvironment { id } = effect {
+            machine.handle_response(Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(ExecutionEnvironmentSync::default()),
+            });
+            continue;
+        }
+        effects.push(effect);
+    }
+    effects
+}
+
+/// Every effect the machine has ready, the syncs included and unanswered.
+fn drain_unsynced_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
         effects.push(effect);
@@ -379,7 +394,7 @@ impl ProtocolDriverHandle for ProseDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, String>,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -421,7 +436,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         turn_causes: std::slice::from_ref(&cause),
         protocol_iteration: 0,
         use_tools: false,
-        projector_turn_inputs: &config.projector_turn_inputs,
+        environment: &ExecutionEnvironmentSync::default(),
     });
     assert_eq!(active_request.scope.agent_frame_id, "test-frame");
     assert!(active_request.messages.iter().any(|message| {
@@ -450,7 +465,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         turn_causes: &[],
         protocol_iteration: 1,
         use_tools: false,
-        projector_turn_inputs: &config.projector_turn_inputs,
+        environment: &ExecutionEnvironmentSync::default(),
     });
     assert!(history_request.messages.iter().any(|message| {
         message.role == crate::llm::types::LlmRole::User
@@ -498,7 +513,7 @@ impl ProtocolDriverHandle for ExecDriver {
         &self,
         _ctx: DriverContextView<'_>,
         driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, String>,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         let state = driver_state
             .as_str()
@@ -561,7 +576,7 @@ impl ProtocolDriverHandle for SyncThenAdvanceDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, String>,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -605,7 +620,7 @@ impl ProtocolDriverHandle for CellEveryIterationDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, String>,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         vec![
             DriverAction::AdvanceProtocolIteration,
@@ -804,7 +819,7 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, String>,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -939,7 +954,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, String>,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -1852,11 +1867,9 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
             encoded
         );
 
-        let mut config = test_config(driver());
-        config.sync_execution_environment = machine.config.sync_execution_environment;
-        let mut restored =
-            TurnMachine::restore_from_checkpoint(config, decoded).expect("supported checkpoint");
-        let redelivered = drain_effects(&mut restored);
+        let mut restored = TurnMachine::restore_from_checkpoint(test_config(driver()), decoded)
+            .expect("supported checkpoint");
+        let redelivered = drain_unsynced_effects(&mut restored);
         assert_eq!(redelivered.len(), 1, "{redelivered:?}");
         assert_eq!(
             serde_json::to_value(&redelivered[0]).expect("redelivered effect"),
@@ -1864,15 +1877,13 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         );
     }
 
-    let mut config = test_config(Arc::new(ProseDriver));
-    config.sync_execution_environment = true;
     let mut machine = TurnMachine::new(
-        config,
+        test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
         crate::AppendVec::new(),
         0,
     );
-    let effects = drain_effects(&mut machine);
+    let effects = drain_unsynced_effects(&mut machine);
     assert_pinned(
         &mut machine,
         || Arc::new(ProseDriver),
@@ -1892,7 +1903,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(SyncThenAdvanceDriver),
         effects.last().expect("llm effect"),
-        serde_json::json!({"Waiting": {"effect_id": 1, "work": {"Llm": {
+        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Llm": {
             "request": serde_json::to_value(request).expect("request json"),
             "driver_state": null,
         }}}}),
@@ -1907,7 +1918,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(SyncThenAdvanceDriver),
         effects.last().expect("checkpoint effect"),
-        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Checkpoint": {
+        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"Checkpoint": {
             "checkpoint": "before_completion",
             "on_empty": "PrepareIteration",
         }}}}),
@@ -1935,7 +1946,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(ToolBatchDriver),
         tool_calls,
-        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Tools": {
+        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"Tools": {
             "calls": serde_json::to_value(calls).expect("calls json"),
         }}}}),
     );
@@ -1951,7 +1962,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(ExecDriver),
         effects.last().expect("exec effect"),
-        serde_json::json!({"Waiting": {"effect_id": 1, "work": {"Exec": {
+        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Exec": {
             "language": "code",
             "code": "print 1",
             "driver_state": "exec-state",
@@ -2130,59 +2141,187 @@ fn checkpoint_redelivers_waiting_exec_from_state_only() {
 }
 
 /// The protocol-start sync installs the environment it returns, so the first
-/// model call is built from the journaled surface a redrive serves, not from
-/// the config the machine was constructed with (FIG-3587).
+/// model call is built from the journaled surface a redrive serves (FIG-3587).
 #[test]
 fn initial_execution_environment_sync_installs_the_synced_environment() {
-    let mut config = test_config(Arc::new(ProseDriver));
-    config.sync_execution_environment = true;
-    config.system_prompt = Arc::from("live prompt");
     let mut machine = TurnMachine::new(
-        config,
+        test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
         crate::AppendVec::new(),
         0,
     );
 
-    let effects = drain_effects(&mut machine);
+    let effects = drain_unsynced_effects(&mut machine);
     let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
 
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: sync_id,
-        result: Ok(Some(ExecutionEnvironmentSync {
+        result: Ok(ExecutionEnvironmentSync {
             system_prompt: Arc::from("journaled prompt"),
-            tool_specs: Arc::new(Vec::new()),
-            projector_turn_inputs: None,
-        })),
+            ..ExecutionEnvironmentSync::default()
+        }),
     });
 
-    let effects = drain_effects(&mut machine);
+    let effects = drain_unsynced_effects(&mut machine);
     let (_, request) = find_llm_call(&effects).expect("first llm call");
     assert_eq!(request.instructions.as_deref(), Some("journaled prompt"));
 }
 
+fn recorded_environment(prompt: &str, tool: &str) -> ExecutionEnvironmentSync {
+    ExecutionEnvironmentSync {
+        system_prompt: Arc::from(prompt),
+        tool_specs: Arc::new(vec![crate::llm::types::LlmToolSpec {
+            name: tool.to_string(),
+            description: "desc".to_string(),
+            input_schema: serde_json::json!({ "type": "object" }).into(),
+            output_schema: serde_json::json!({ "type": "object" }).into(),
+        }]),
+        projector_turn_inputs: ProjectorTurnInputs::default(),
+    }
+}
+
+/// The environment has one home (FIG-4658 F76): a machine restored inside
+/// the iteration it synced projects from the sync its checkpoint recorded.
+/// It asks for no second sync, and nothing the restoring host holds can
+/// stand in for the record.
+#[test]
+fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
+    let effects = drain_unsynced_effects(&mut machine);
+    let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
+    machine.handle_response(Response::ExecutionEnvironmentSynced {
+        id: sync_id,
+        result: Ok(recorded_environment("recorded prompt", "recorded_tool")),
+    });
+
+    let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+    assert_eq!(encoded["environment"]["protocol_iteration"], 0);
+    assert_eq!(
+        encoded["environment"]["sync"]["system_prompt"],
+        "recorded prompt"
+    );
+    let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
+    let mut restored =
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+            .expect("supported checkpoint");
+
+    let effects = drain_unsynced_effects(&mut restored);
+    assert!(
+        find_execution_environment_sync(&effects).is_none(),
+        "a restored machine keeps the sync it recorded: {effects:?}"
+    );
+    let (_, request) = find_llm_call(&effects).expect("first llm call");
+    assert_eq!(request.instructions.as_deref(), Some("recorded prompt"));
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(SessionStreamEvent::LlmRequest { tool_list, .. })
+                if tool_list == "recorded_tool"
+        )),
+        "the request names the recorded tools: {effects:?}"
+    );
+}
+
+/// A checkpoint that waits on driver work was written after a sync, so one
+/// that records no environment is not a checkpoint this machine wrote.
+#[test]
+fn a_checkpoint_waiting_on_driver_work_without_an_environment_is_refused() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    assert!(find_llm_call(&effects).is_some());
+    let mut encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+    encoded["environment"] = serde_json::Value::Null;
+    let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
+
+    let Err(error) =
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+    else {
+        panic!("a checkpoint with no environment must be refused");
+    };
+    assert!(matches!(
+        error,
+        TurnCheckpointRestoreError::IncompatibleFormat { .. }
+    ));
+}
+
+/// A recorded sync failure fails the turn under its own code (FIG-4658 F20):
+/// the cause's code reaches the turn's error envelope instead of collapsing
+/// into `reconfigure_failed`.
+#[test]
+fn a_recorded_sync_failure_fails_the_turn_under_its_own_code() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
+    let effects = drain_unsynced_effects(&mut machine);
+    let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
+    let code = crate::session_model::FailureCode::lash(
+        crate::session_model::TurnFailureCode::BeforeLlmCallFailed,
+    );
+    machine.handle_response(Response::ExecutionEnvironmentSynced {
+        id: sync_id,
+        result: Err(ExecutionEnvironmentSyncFailure {
+            code: code.clone(),
+            kind: ExecutionEnvironmentSyncFailureKind::SystemPrompt,
+            message: "the prompt template names no dialect".to_string(),
+        }),
+    });
+
+    let effects = drain_unsynced_effects(&mut machine);
+    let envelope = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::Error {
+                envelope: Some(envelope),
+                ..
+            }) => Some(envelope),
+            _ => None,
+        })
+        .expect("the turn fails with an error envelope");
+    assert_eq!(
+        envelope.kind,
+        crate::session_model::TurnFailureKind::ExecutionEnvironment
+    );
+    assert_eq!(envelope.code, Some(code));
+    assert_eq!(
+        envelope.raw.as_deref(),
+        Some("the prompt template names no dialect")
+    );
+}
+
 #[test]
 fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
-    let mut config = test_config(Arc::new(SyncThenAdvanceDriver));
-    config.sync_execution_environment = true;
-    config.system_prompt = Arc::from("initial prompt");
     let mut machine = TurnMachine::new(
-        config,
+        test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
         crate::AppendVec::new(),
         0,
     );
 
-    let effects = drain_effects(&mut machine);
+    let effects = drain_unsynced_effects(&mut machine);
     let initial_sync_id =
         find_execution_environment_sync(&effects).expect("initial execution environment sync");
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: initial_sync_id,
-        result: Ok(None),
+        result: Ok(recorded_environment("initial prompt", "old_tool")),
     });
 
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    let effects = drain_unsynced_effects(&mut machine);
+    let (llm_id, request) = find_llm_call(&effects).expect("llm call");
+    assert_eq!(request.instructions.as_deref(), Some("initial prompt"));
+    let llm_id = *llm_id;
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
@@ -2196,32 +2335,23 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
         }),
     });
 
-    let effects = drain_effects(&mut machine);
+    let effects = drain_unsynced_effects(&mut machine);
     let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
     machine.handle_response(Response::Checkpoint {
         id: checkpoint_id,
         delivery: CheckpointDelivery::default(),
     });
 
-    let effects = drain_effects(&mut machine);
+    let effects = drain_unsynced_effects(&mut machine);
     let sync_id = find_execution_environment_sync(&effects)
         .expect("protocol_iteration execution environment sync");
 
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: sync_id,
-        result: Ok(Some(ExecutionEnvironmentSync {
-            system_prompt: Arc::from("updated prompt"),
-            tool_specs: Arc::new(vec![crate::llm::types::LlmToolSpec {
-                name: "new_tool".to_string(),
-                description: "desc".to_string(),
-                input_schema: serde_json::json!({ "type": "object" }).into(),
-                output_schema: serde_json::json!({ "type": "object" }).into(),
-            }]),
-            projector_turn_inputs: None,
-        })),
+        result: Ok(recorded_environment("updated prompt", "new_tool")),
     });
 
-    let effects = drain_effects(&mut machine);
+    let effects = drain_unsynced_effects(&mut machine);
     let (_, request) = find_llm_call(&effects).expect("second llm call");
     assert_eq!(request.tools.len(), 1);
     assert_eq!(request.tools[0].name, "new_tool");

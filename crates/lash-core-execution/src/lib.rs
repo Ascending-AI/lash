@@ -479,10 +479,11 @@ pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
 pub mod sansio {
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
-        ContextProjector, EffectId, ExecutionEnvironmentSync, ExpandedRow, ExpandedWrapper,
-        LlmCallError, ModelToolCalls, PendingToolCall, PendingWork, ProjectorTurnInputs,
-        ProtocolDriverHandle, Response, ResponseToolCalls, ToolExpansionPlan, TurnCause,
-        TurnMachine, render_turn_causes_prompt,
+        ContextProjector, EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
+        ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
+        ModelToolCalls, PendingToolCall, PendingWork, ProjectorTurnInputs, ProtocolDriverHandle,
+        Response, ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine,
+        render_turn_causes_prompt,
     };
 }
 
@@ -850,8 +851,9 @@ pub(crate) use runtime::{
 };
 pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub use session::{
-    ExecRequest, RuntimeExecutionContext, SessionConfigRefusal, SessionError, ToolDispatchSurface,
-    ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
+    ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext, SessionConfigRefusal,
+    SessionError, ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind,
+    resolve_trigger_owner_scope, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

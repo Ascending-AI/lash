@@ -96,7 +96,7 @@ impl ProtocolDriverPlugin for Driver {
         let tool_names = input.tool_catalog.tool_names();
 
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(protocol, true),
+            config: TurnDriverConfig::chat(protocol),
             tool_specs,
             tool_names,
             writer_formats: input.writer_formats,
@@ -130,7 +130,6 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
         trigger_events: TriggerEventCatalog::default(),
         writer_formats: lash_core::build_newest_writer_formats(),
     });
-    assert!(preamble.config.sync_execution_environment);
     assert!(preamble.tool_specs.is_empty());
     assert!(preamble.tool_names.is_empty());
 }

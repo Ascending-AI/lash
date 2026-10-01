@@ -363,7 +363,7 @@ impl RuntimeTurnDriver<'_> {
         // resolve against, whether the sync ran here or was served from the
         // journal (FIG-3672 P7b). Only a sync that built an environment
         // recorded one.
-        if matches!(result, Ok(Some(_))) {
+        if result.is_ok() {
             let authority = &self.turn_pipeline.state().authority;
             self.session
                 .install_recorded_tool_surface(
@@ -770,19 +770,7 @@ impl RuntimeTurnDriver<'_> {
         if let Some(evidence) = cancellation_evidence {
             machine.record_cancellation_evidence(evidence);
         }
-        self.handle_machine_response(
-            machine,
-            match result {
-                Ok(output) => Response::ExecResult {
-                    id,
-                    result: Ok(output),
-                },
-                Err(error) => Response::ExecResult {
-                    id,
-                    result: Err(error.message),
-                },
-            },
-        )?;
+        self.handle_machine_response(machine, Response::ExecResult { id, result })?;
         Ok(())
     }
 }

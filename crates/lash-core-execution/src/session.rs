@@ -373,9 +373,91 @@ impl SessionError {
         let reason = match self {
             Self::CodeExecutionUnavailable => crate::ExecCodeFailureReason::ExecutorUnavailable,
             Self::CodeExecutionRuntimeStopped => crate::ExecCodeFailureReason::RuntimeStopped,
-            _ => crate::ExecCodeFailureReason::Session,
+            Self::Io(_)
+            | Self::Json(_)
+            | Self::ModelUnconfigured { .. }
+            | Self::ModelUnavailable { .. }
+            | Self::ModelUnknown { .. }
+            | Self::Store { .. }
+            | Self::SessionCommandPending(_)
+            | Self::SessionCommandCancelled(_)
+            | Self::ToolSourcesUnavailable { .. }
+            | Self::SessionConfigRefused(_)
+            | Self::Plugin(_)
+            | Self::Protocol(_) => crate::ExecCodeFailureReason::Session,
         };
         crate::ExecCodeFailure::new(reason, self.to_string())
+    }
+}
+
+/// Why an execution-environment sync could not rebuild the environment.
+pub enum ExecutionEnvironmentSyncError {
+    /// Deterministic over the turn's inputs: journaled as the sync's outcome,
+    /// which fails the turn and replays identically.
+    Recorded(crate::sansio::ExecutionEnvironmentSyncFailure),
+    /// A fact about this attempt — a store, lease or session fault — that must
+    /// not be journaled: the turn aborts and a redrive rebuilds the
+    /// environment (the FIG-3575 live-fault class).
+    Live(crate::RuntimeError),
+}
+
+impl ExecutionEnvironmentSyncError {
+    /// A plugin's failure keeps the code its own classification gives it;
+    /// `kind` names the part of the sync that raised it.
+    pub fn of_plugin_error(
+        kind: crate::sansio::ExecutionEnvironmentSyncFailureKind,
+        error: crate::PluginError,
+    ) -> Self {
+        use crate::sansio::ExecutionEnvironmentSyncFailureKind as Kind;
+        let message = format!("protocol error: {error}");
+        let failure = error.into_turn_failure(match kind {
+            Kind::ToolSurface => crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
+            Kind::SystemPrompt | Kind::ProjectorInputs => {
+                crate::RuntimeErrorCode::ProtocolBeforeLlmCall
+            }
+        });
+        if failure.turn_failure_cause().aborts_invocation() {
+            Self::Live(failure)
+        } else {
+            Self::Recorded(crate::sansio::ExecutionEnvironmentSyncFailure {
+                code: crate::FailureCode::from(&failure.code),
+                kind,
+                message,
+            })
+        }
+    }
+
+    pub fn of_session_error(
+        kind: crate::sansio::ExecutionEnvironmentSyncFailureKind,
+        error: SessionError,
+    ) -> Self {
+        match error {
+            SessionError::Plugin(error) => Self::of_plugin_error(kind, error),
+            error @ SessionError::Store { .. } => Self::Live(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::StoreCommitFailed,
+                error.to_string(),
+            )),
+            // A session-layer refusal of the render itself: deterministic
+            // over the turn's inputs, with no narrower code of its own.
+            error @ (SessionError::Io(_)
+            | SessionError::Json(_)
+            | SessionError::CodeExecutionUnavailable
+            | SessionError::CodeExecutionRuntimeStopped
+            | SessionError::ModelUnconfigured { .. }
+            | SessionError::ModelUnavailable { .. }
+            | SessionError::ModelUnknown { .. }
+            | SessionError::SessionCommandPending(_)
+            | SessionError::SessionCommandCancelled(_)
+            | SessionError::ToolSourcesUnavailable { .. }
+            | SessionError::SessionConfigRefused(_)
+            | SessionError::Protocol(_)) => {
+                Self::Recorded(crate::sansio::ExecutionEnvironmentSyncFailure {
+                    code: crate::TurnFailureCode::ReconfigureFailed.into(),
+                    kind,
+                    message: error.to_string(),
+                })
+            }
+        }
     }
 }
 
@@ -606,16 +688,15 @@ impl Session {
     /// the recorded sync. The machine always syncs, since that sync is the
     /// only way the environment reaches it.
     pub fn protocol_driver_preamble(&self) -> Arc<crate::TurnDriverPreamble> {
-        let mut preamble =
-            self.plugins()
-                .protocol_driver()
-                .build_preamble(crate::ProtocolBuildInput {
-                    tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
-                    plugin_extensions: self.plugins().extensions().clone(),
-                    trigger_events: self.plugins().triggers().clone(),
-                    writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
-                });
-        preamble.config.sync_execution_environment = true;
+        let preamble = self
+            .plugins()
+            .protocol_driver()
+            .build_preamble(crate::ProtocolBuildInput {
+                tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
+                plugin_extensions: self.plugins().extensions().clone(),
+                trigger_events: self.plugins().triggers().clone(),
+                writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
+            });
         Arc::new(preamble)
     }
 

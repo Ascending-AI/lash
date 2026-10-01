@@ -72,24 +72,6 @@ impl Dialect for TypescriptDialect {
         TYPESCRIPT_PROMPT_VOCABULARY
     }
 
-    fn history_item_definition(&self, images: bool) -> Vec<String> {
-        let image_field = if images {
-            "; images?: Array<HistoryImage>"
-        } else {
-            ""
-        };
-        let mut lines = vec![
-            "type HistoryItem =".to_string(),
-            "  | { kind: \"message\"; id: string; role: \"user\" | \"system\" | \"assistant\" | \"event\"; content: string; attachments?: Array<HistoryAttachment> }".to_string(),
-            format!("  | {{ kind: \"lashlang_step\"; id: string; protocol_iteration: number; code: string; output: Array<unknown>{image_field}; error?: string | null; final_output?: unknown }}"),
-            "type HistoryAttachment = { id: string; media_type?: string | null; label?: string | null; source: string; reference: string }".to_string(),
-        ];
-        if images {
-            lines.push("type HistoryImage = { id: string; media_type: string; width?: number | null; height?: number | null; bytes: number; label?: string | null }".to_string());
-        }
-        lines
-    }
-
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
         render_execution_section(request)
     }
@@ -114,6 +96,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     cell_tags: TYPESCRIPT_CELL_TAGS,
     cell_noun: "cell",
     history_type: "HistoryItem[]",
+    history_item_name: "HistoryItem",
     print_call: "console.log",
     print_statement_prefix: "console.log(",
     print_statement_suffix: ")",

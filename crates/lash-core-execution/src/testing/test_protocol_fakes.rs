@@ -240,7 +240,7 @@ impl ProtocolDriverPlugin for TestProtocolDriver {
             TestDriverKind::EndsWithoutDone => Arc::new(EndsWithoutDoneDriver),
         };
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(driver, false),
+            config: TurnDriverConfig::chat(driver),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names,
             writer_formats: input.writer_formats,
@@ -537,7 +537,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: crate::ProtocolDriverState,
-        _result: Result<ExecResponse, String>,
+        _result: Result<ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -583,7 +583,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for EndsWithoutDoneDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: crate::ProtocolDriverState,
-        _result: Result<ExecResponse, String>,
+        _result: Result<ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }

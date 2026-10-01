@@ -121,7 +121,7 @@ impl ProtocolDriverHandle for ExpandingDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, String>,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }

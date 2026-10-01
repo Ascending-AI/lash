@@ -488,7 +488,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: lash_core::ProtocolDriverState,
-        _result: Result<ExecResponse, String>,
+        _result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         vec![DriverAction::Finish(TurnOutcome::Finished(
             TurnFinish::FinalValue {
@@ -505,7 +505,6 @@ fn checkpoint_config(
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
-        sync_execution_environment: false,
         model: "mock-model".to_string(),
         max_context_tokens: None,
         turn_budget: lash_core::TurnBudget::bounded(8),
@@ -517,11 +516,6 @@ fn checkpoint_config(
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
-        tool_specs: Arc::new(Vec::new()),
-        system_prompt: Arc::from(
-            "Synthetic sans-IO checkpoint profiler prompt. Preserve pending effects across checkpoint restore.",
-        ),
-        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("runtime-perf-turn-checkpoint"),
         agent_frame_id: "runtime-perf-turn-frame".to_string(),
         turn_id: TurnId::from("runtime-perf-turn"),
@@ -818,6 +812,19 @@ fn drain_checkpoint_machine(machine: &mut TurnMachine) {
 fn next_checkpoint_effect(machine: &mut TurnMachine) -> Option<Effect> {
     loop {
         match machine.poll_effect()? {
+            // The profiled checkpoints carry the environment this sync
+            // records.
+            Effect::SyncExecutionEnvironment { id } => {
+                machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
+                    id,
+                    result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
+                        system_prompt: Arc::from(
+                            "Synthetic sans-IO checkpoint profiler prompt. Preserve pending effects across checkpoint restore.",
+                        ),
+                        ..Default::default()
+                    }),
+                });
+            }
             Effect::Emit(_)
             | Effect::ReportToolCalls { .. }
             | Effect::Log { .. }

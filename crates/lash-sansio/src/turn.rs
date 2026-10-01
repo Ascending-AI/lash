@@ -3,9 +3,7 @@ use crate::TurnId;
 use std::sync::Arc;
 
 use crate::MessageSequence;
-use crate::sansio::{
-    ProjectorTurnInputs, TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol,
-};
+use crate::sansio::{TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol};
 use crate::turn_driver::TurnDriverPreamble;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
@@ -24,11 +22,6 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub turn_causes: Vec<crate::TurnCause>,
     pub protocol_run_offset: usize,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
-    /// The projector's recorded-state inputs for the upcoming iteration — see
-    /// [`ProjectorTurnInputs`]. The host derives them from recorded turn
-    /// state; later iterations refresh them through the journaled
-    /// execution-environment sync.
-    pub projector_turn_inputs: ProjectorTurnInputs,
     pub turn_budget: crate::TurnBudget,
     pub no_progress_budget: crate::NoProgressBudget,
     pub model_variant: crate::llm::capability::ReasoningSelection,
@@ -54,10 +47,6 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             model_tool_calls: input.model_tool_calls,
             protocol_driver: input.turn_driver_preamble.config.protocol.clone(),
             projector: input.turn_driver_preamble.config.projector.clone(),
-            sync_execution_environment: input
-                .turn_driver_preamble
-                .config
-                .sync_execution_environment,
             model: input.model,
             max_context_tokens: input.max_context_tokens,
             turn_budget: input.turn_budget,
@@ -69,10 +58,6 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             request_defaults: input.request_defaults,
             generation: input.generation,
             autonomous: input.autonomous,
-            tool_specs: input.turn_driver_preamble.tool_specs.clone(),
-            // The protocol-start sync installs the recorded system prompt.
-            system_prompt: Arc::from(""),
-            projector_turn_inputs: input.projector_turn_inputs,
             session_id: input.session_id,
             agent_frame_id: input.agent_frame_id,
             turn_id: input.turn_id,
@@ -149,7 +134,7 @@ mod tests {
             &self,
             _ctx: DriverContextView<'_>,
             _driver_state: serde_json::Value,
-            _result: Result<crate::ExecResponse, String>,
+            _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
         ) -> Vec<DriverAction> {
             Vec::new()
         }
@@ -161,7 +146,7 @@ mod tests {
             "read_file",
         )]));
         let turn_driver_preamble = Arc::new(TurnDriverPreamble {
-            config: TurnDriverConfig::chat(Arc::new(NoopDriver), false),
+            config: TurnDriverConfig::chat(Arc::new(NoopDriver)),
             tool_specs: tool_catalog.model_tool_specs(),
             tool_names: tool_catalog.tool_names(),
             writer_formats: crate::build_newest_writer_formats(),
@@ -179,7 +164,6 @@ mod tests {
             turn_causes: Vec::new(),
             protocol_run_offset: 2,
             turn_driver_preamble,
-            projector_turn_inputs: ProjectorTurnInputs::default(),
             turn_budget: crate::TurnBudget::bounded(3),
             no_progress_budget: crate::NoProgressBudget::default(),
             model_variant: crate::ReasoningSelection::Effort("mini".to_string()),

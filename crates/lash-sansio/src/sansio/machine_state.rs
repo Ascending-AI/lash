@@ -91,7 +91,9 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
-    pub(super) synced_protocol_iteration: Option<usize>,
+    /// The environment the machine last synced, and the iteration it was
+    /// synced for. `None` only before the protocol-start sync is answered.
+    pub(super) environment: Option<SyncedEnvironment>,
 }
 
 impl<M: TurnProtocol> TurnCheckpoint<M> {
@@ -232,7 +234,9 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
-    pub(super) synced_protocol_iteration: Option<usize>,
+    /// The one home of the turn's execution environment: the last recorded
+    /// sync, with the protocol iteration it was synced for.
+    pub(super) environment: Option<SyncedEnvironment>,
     /// Cancellation evidence the host has observed for this turn, recorded
     /// before the machine is told the provider call was cancelled. Lets the
     /// machine name the request that stopped it instead of minting internal

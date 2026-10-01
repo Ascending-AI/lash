@@ -152,6 +152,9 @@ fn project_iteration_request_with_generation(
     )
 }
 
+/// The system prompt of the environment every projection test syncs.
+const TEST_SYSTEM_PROMPT: &str = "stable RLM system prompt";
+
 fn project_iteration_request_with_inputs(
     projector: &RlmContextProjector,
     events: &[SessionHistoryRecord],
@@ -169,7 +172,11 @@ fn project_iteration_request_with_inputs(
         turn_causes: &[],
         protocol_iteration,
         use_tools: false,
-        projector_turn_inputs,
+        environment: &lash_core::sansio::ExecutionEnvironmentSync {
+            system_prompt: Arc::from(TEST_SYSTEM_PROMPT),
+            projector_turn_inputs: projector_turn_inputs.clone(),
+            ..Default::default()
+        },
     })
 }
 
@@ -190,7 +197,6 @@ pub(super) fn projection_test_config(
             crate::dialect::TypescriptDialect,
         ))),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
-        sync_execution_environment: true,
         model: model.to_string(),
         max_context_tokens,
         turn_budget: lash_core::TurnBudget::Unbounded,
@@ -202,9 +208,6 @@ pub(super) fn projection_test_config(
         request_defaults: Default::default(),
         generation,
         autonomous: false,
-        tool_specs: Arc::new(Vec::new()),
-        system_prompt: Arc::from("stable RLM system prompt"),
-        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("prefix-stability"),
         agent_frame_id: "prefix-stability-frame".to_string(),
         turn_id: TurnId::from("prefix-stability-turn"),

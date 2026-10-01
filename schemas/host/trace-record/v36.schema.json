@@ -38,6 +38,17 @@
     "CellFailure": {
       "description": "Structured failure returned by a code executor.",
       "properties": {
+        "exec_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecCodeFailureReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the `exec_code` effect failed before the executor produced a\nresponse, when that is the failure: the closed reason, kept typed\nthrough the protocol driver and the trajectory it records."
+        },
         "kind": {
           "$ref": "#/$defs/CellFailureKind"
         },

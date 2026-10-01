@@ -13,7 +13,9 @@ fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
         calls: Vec::new(),
         calls_omitted: 0,
         outcome: CellOutcome::from_parts(
-            error.map(str::to_string),
+            error.map(|message| {
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
+            }),
             terminal.then(|| serde_json::json!(1).into()),
         ),
     }
@@ -241,7 +243,6 @@ fn second_round_history_teaches_images_only_when_enabled() {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(tail.contains("type HistoryItem ="), "{tail}");
-        assert_eq!(tail.contains("HistoryImage"), images, "{tail}");
         assert_eq!(tail.contains("images?"), images, "{tail}");
     }
 }

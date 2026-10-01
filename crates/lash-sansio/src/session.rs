@@ -19,7 +19,9 @@ pub struct ExecutedCall {
 /// host-operation details. Protocols can safely replay it to a model as an
 /// execution ledger without exposing inputs or confusing a source module call
 /// with the host tool it resolved to.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ExecutedCallRecord {
     pub operation: String,
     pub outcome: ExecutedCallOutcome,
@@ -33,7 +35,9 @@ pub struct OmittedToolCalls {
     pub attachments: Vec<AttachmentSource>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutedCallOutcome {
     Ok,
@@ -93,6 +97,11 @@ pub struct CellFailure {
     /// failed (FIG-4546), kept typed through the plugin and host result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_limit: Option<crate::session_model::ToolCallLimitExceeded>,
+    /// Why the `exec_code` effect failed before the executor produced a
+    /// response, when that is the failure: the closed reason, kept typed
+    /// through the protocol driver and the trajectory it records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec_failure: Option<ExecCodeFailureReason>,
 }
 
 impl CellFailure {
@@ -102,6 +111,7 @@ impl CellFailure {
             message: message.into(),
             worker_limit: None,
             tool_call_limit: None,
+            exec_failure: None,
         }
     }
 
@@ -153,6 +163,17 @@ impl ExecCodeFailure {
         Self {
             reason,
             message: message.into(),
+        }
+    }
+}
+
+/// An `exec_code` effect that failed before the executor answered is a host
+/// failure of the cell; the closed reason travels with it.
+impl From<ExecCodeFailure> for CellFailure {
+    fn from(failure: ExecCodeFailure) -> Self {
+        Self {
+            exec_failure: Some(failure.reason),
+            ..Self::new(CellFailureKind::Host, failure.message)
         }
     }
 }

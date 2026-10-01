@@ -370,12 +370,7 @@ fn append_current_iteration_message(
     );
     if input.history_has_structure {
         current_prompt.push_str("\n\nSchema:\n");
-        current_prompt.push_str(
-            &input
-                .dialect
-                .history_item_definition(input.images)
-                .join("\n"),
-        );
+        current_prompt.push_str(&input.dialect.history_item_definition(input.images));
     }
     if !input.bound_variables.is_empty() {
         current_prompt.push_str("\n\n");

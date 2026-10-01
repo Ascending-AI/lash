@@ -90,7 +90,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 max_budget_tokens: config.max_budget_tokens,
                 dialect: Arc::clone(&dialect),
             }),
-            sync_execution_environment: true,
         },
         tool_specs: Arc::new(Vec::new()),
         tool_names,
@@ -255,12 +254,13 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let final_answer_format = final_answer_format_prompt(&options, vocabulary);
         let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
             ctx.protocol_iteration + 1,
-            ctx.projector_turn_inputs.prompt_usage.as_ref(),
+            ctx.environment.projector_turn_inputs.prompt_usage.as_ref(),
             effective_budget_tokens(self.max_budget_tokens, ctx.config.max_context_tokens),
             vocabulary,
             self.prompt_features.decomposition,
         );
         let bound_variables_prompt = ctx
+            .environment
             .projector_turn_inputs
             .bound_variables_prompt
             .as_deref()
@@ -293,8 +293,8 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
-            instructions: (!ctx.config.system_prompt.trim().is_empty())
-                .then(|| Arc::from(ctx.config.system_prompt.trim())),
+            instructions: (!ctx.environment.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.environment.system_prompt.trim())),
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),

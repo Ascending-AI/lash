@@ -1322,7 +1322,10 @@ pub mod runtime {
         TurnControlBindingId, TurnControlBindingIdError,
     };
     pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
-    pub use lash_sansio::sansio::{ExecutionEnvironmentSync, ProjectorTurnInputs};
+    pub use lash_sansio::sansio::{
+        ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
+        ExecutionEnvironmentSyncFailureKind, ProjectorTurnInputs,
+    };
     pub use lash_sansio::{CheckpointDelivery, EffectIdentityError};
 
     /// The capability an unroutable effect-group child's deployment lacks,
