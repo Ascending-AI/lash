@@ -685,11 +685,10 @@ async fn run_lashlang_process_scoped(
         Ok(output) => output,
         Err(error) => {
             drop(host);
-            guard.shutdown(false).await.map_err(|error| {
-                lash_core::ProcessInfraError::new(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
+            guard
+                .shutdown(false)
+                .await
+                .map_err(lash_core::ProcessInfraError::new)?;
             return Err(error);
         }
     };
@@ -737,9 +736,10 @@ async fn run_lashlang_process_scoped(
     {
         let _phase =
             lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, "rlm_process.shutdown");
-        guard.shutdown(false).await.map_err(|error| {
-            lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
-        })?;
+        guard
+            .shutdown(false)
+            .await
+            .map_err(lash_core::ProcessInfraError::new)?;
     }
     if let Some(fault) = incorporation_fault {
         return Err(lash_core::ProcessInfraError::new(fault));
