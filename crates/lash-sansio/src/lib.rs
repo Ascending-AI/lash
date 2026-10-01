@@ -31,6 +31,7 @@ mod tool_intents;
 pub mod tool_output;
 pub mod turn;
 pub mod turn_driver;
+pub mod worker_limit;
 mod workflow;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

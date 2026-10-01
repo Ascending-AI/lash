@@ -205,10 +205,9 @@ impl WorkerSlots for PoolSlots {
                             InfrastructureOutcome::WorkerLimitExceeded { limit } => {
                                 send(WorkerMessage::LimitExceeded { limit }, &mut outgoing)
                             }
-                            InfrastructureOutcome::PayloadTooLarge { limit, size } => send(
-                                WorkerMessage::PayloadTooLarge { limit, size },
-                                &mut outgoing,
-                            ),
+                            outcome @ InfrastructureOutcome::PayloadTooLarge { .. } => {
+                                let _ = outputs.blocking_send(WorkerRead::Failed(outcome));
+                            }
                             InfrastructureOutcome::WorkerCrashed { evidence } => {
                                 let _ = outputs.blocking_send(WorkerRead::Ended(evidence));
                             }

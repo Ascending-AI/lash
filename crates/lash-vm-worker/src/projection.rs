@@ -34,13 +34,11 @@ impl Wire {
         }
     }
     fn send(&self, pipe: &mut UnixStream, message: WorkerMessage) -> Result<(), PoolError> {
-        let header = self
+        let bytes = self
             .fences
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .outgoing
-            .next_header();
-        let bytes = self.codec.encode_worker(&WorkerFrame { header, message })?;
+            .encode(&self.codec, message)?;
         write_frame(pipe, &bytes, Instant::now() + Duration::from_secs(30))
     }
     fn read(
@@ -132,8 +130,18 @@ impl Wire {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = self.send(
             &mut pipe,
-            WorkerMessage::Refused {
-                reason: error.to_string(),
+            match error {
+                PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
+                    WorkerMessage::LimitExceeded { limit: *limit }
+                }
+                PoolError::Infrastructure(outcome) => WorkerMessage::Refused {
+                    outcome: outcome.clone(),
+                },
+                error => WorkerMessage::Refused {
+                    outcome: InfrastructureOutcome::ProtocolViolation {
+                        reason: error.to_string(),
+                    },
+                },
             },
         );
     }

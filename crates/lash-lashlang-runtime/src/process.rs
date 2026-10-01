@@ -826,8 +826,8 @@ async fn execute_lashlang(
             );
             return Ok(process_lashlang_failure(
                 LashlangProcessFailureCode::ProcessExecutionBoundExhausted,
-                format!("worker execution bound exhausted: {limit:?}"),
-                None,
+                format!("worker execution bound exhausted: {limit}"),
+                Some(serde_json::json!({ "worker_limit": limit })),
             )
             .into());
         }

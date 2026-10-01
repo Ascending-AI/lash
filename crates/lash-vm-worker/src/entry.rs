@@ -73,10 +73,8 @@ fn worker_entry_inner(
             )))
         });
     if let Err(error) = result {
-        if let PoolError::Infrastructure(InfrastructureOutcome::ProtocolViolation { reason }) =
-            &error
-        {
-            server.refuse(reason.clone())?;
+        if let PoolError::Infrastructure(_) = &error {
+            server.refuse(&error)?;
         }
         return Err(error);
     }

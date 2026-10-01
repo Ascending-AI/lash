@@ -1869,3 +1869,72 @@ pub(super) fn execute_code_reuses_reset_worker_for_repeat_source() {
         assert!(state.frame_held_module_refs().next().is_none());
     });
 }
+
+#[test]
+fn typed_worker_size_limits_are_recorded_cell_failures_across_the_plugin_boundary() {
+    let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
+    struct RestoreLoudness(bool);
+    impl Drop for RestoreLoudness {
+        fn drop(&mut self) {
+            set_execution_bound_exhaustion_loud(self.0);
+        }
+    }
+    let _restore = RestoreLoudness(set_execution_bound_exhaustion_loud(false));
+    block_on(async {
+        for effect_limit in [true, false] {
+            let double =
+                crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("handler");
+            let mut state = RlmExecutionState::new();
+            let mut config = state.vm.state().service().config().clone();
+            if effect_limit {
+                config.protocol.max_effect_value_bytes = 1;
+            } else {
+                config.protocol.max_vm_state_bytes = 1;
+            }
+            state.vm.state_mut().replace_service(
+                lash_vm_client::service::Service::new(config)
+                    .with_recovery_store(double.lash_backend().worker_recovery()),
+            );
+            let result = execute_code_with_bounds_test_render(
+                &mut state,
+                lash_core::testing::code_execution_context(crate::testing::double_ports(
+                    &double, &handler,
+                )),
+                ExecRequest {
+                    code: "finish(42);".to_owned(),
+                },
+                crate::testing::sqlite_memory_artifact_store().await,
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+            )
+            .await;
+            handler.close().await.expect("close handler");
+            let failure = result.error.expect("recorded run limit");
+            assert_eq!(
+                failure.kind,
+                lash_core::CellFailureKind::Program,
+                "{failure:?}"
+            );
+            let limit = failure.worker_limit.expect("typed cause");
+            match (effect_limit, limit) {
+                (true, lash_vm_protocol::WorkerLimit::EffectValue { size, bound: 1 })
+                | (false, lash_vm_protocol::WorkerLimit::VmState { size, bound: 1 }) => {
+                    assert!(size > 1)
+                }
+                other => panic!("the configured run limit: {other:?}"),
+            }
+            let encoded = serde_json::to_vec(&failure).expect("plugin result");
+            let decoded: lash_core::CellFailure =
+                serde_json::from_slice(&encoded).expect("host result");
+            assert_eq!(decoded.worker_limit, Some(limit));
+        }
+    });
+}

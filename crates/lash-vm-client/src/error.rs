@@ -88,6 +88,13 @@ mod tests {
 
     #[test]
     fn retryable_worker_faults_are_host_verdicts() {
+        assert!(
+            !PoolError::Infrastructure(InfrastructureOutcome::PayloadTooLarge {
+                limit: 1,
+                size: 2,
+            })
+            .is_host_verdict()
+        );
         for outcome in [
             InfrastructureOutcome::WorkerCrashed {
                 evidence: SupervisorEvidence::EndOfStream,
@@ -96,7 +103,6 @@ mod tests {
             InfrastructureOutcome::ProtocolViolation {
                 reason: "lost worker response".into(),
             },
-            InfrastructureOutcome::PayloadTooLarge { limit: 1, size: 2 },
             InfrastructureOutcome::WorkerLimitExceeded {
                 limit: WorkerLimit::Deadline,
             },
@@ -106,7 +112,19 @@ mod tests {
                 "{outcome:?}: a retryable worker fault must fail the attempt"
             );
         }
-        for limit in [WorkerLimit::Fuel, WorkerLimit::Heap, WorkerLimit::Depth] {
+        for limit in [
+            WorkerLimit::Fuel,
+            WorkerLimit::Heap,
+            WorkerLimit::Depth,
+            WorkerLimit::Observations,
+            WorkerLimit::EffectValue { size: 2, bound: 1 },
+            WorkerLimit::VmState { size: 2, bound: 1 },
+            WorkerLimit::Frame {
+                kind: lash_vm_protocol::WorkerFrameKind::Complete,
+                size: 2,
+                bound: 1,
+            },
+        ] {
             assert!(
                 !PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit })
                     .is_host_verdict(),

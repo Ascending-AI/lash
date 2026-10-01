@@ -533,3 +533,57 @@ async fn opening_a_frame_retires_the_old_frames_state() {
         .expect("the new frame's run completes");
     assert_eq!(results(&end), vec![serde_json::json!("undefined")]);
 }
+
+#[tokio::test]
+async fn an_oversized_journaled_effect_result_is_a_typed_run_limit() {
+    for needs_worker in [false, true] {
+        for failed in [false, true] {
+            let mut fixture = Fixture::new(1);
+            if needs_worker {
+                fixture.journal.needs_worker.insert("echo".into());
+            }
+            let payload = encode_value(&serde_json::json!("x".repeat(1024)));
+            let size = payload.0.len() as u64;
+            let outcome = if failed {
+                EffectOutcome::Failed(payload)
+            } else {
+                EffectOutcome::Value(payload)
+            };
+            fixture
+                .journal
+                .outcomes
+                .lock()
+                .expect("journal")
+                .insert("0".into(), Performed::outcome(outcome));
+            let mut broker = fixture.broker();
+            broker.bounds.protocol.max_effect_value_bytes = 512;
+            let failure = broker
+                .run(
+                    start(&ScriptedProgram::new(vec![echo(1)])),
+                    &CancellationToken::new(),
+                )
+                .await
+                .expect_err("an oversized result ends the run");
+            assert!(!failure.is_retryable());
+            let BrokerFailure::WorkerLost {
+                outcome,
+                settlement,
+            } = failure
+            else {
+                panic!("typed run limit")
+            };
+            assert_eq!(
+                serde_json::to_value(&outcome).expect("cause"),
+                serde_json::json!({
+                    "worker_limit_exceeded": { "limit": { "effect_value": { "size": size, "bound": 512 } } }
+                })
+            );
+            assert_eq!(settlement.settled.len(), 1, "the effect stays journaled");
+            assert_eq!(fixture.journal.outcomes.lock().expect("journal").len(), 1);
+            assert!(
+                fixture.journal.dispatches().is_empty(),
+                "the recorded effect was not dispatched again"
+            );
+        }
+    }
+}

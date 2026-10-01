@@ -75,7 +75,7 @@ use lash_vm_protocol::{
     EffectResponse, EncodedPayload, FrameCodec, FrameEpoch, FrameReader, HeaderRefusal,
     InfrastructureOutcome, MessageFence, OpaqueStateRefusal, OpaqueVmState, ParentFrame,
     ParentMessage, ProgramSource, ProtocolBounds, Start, StartState, StateExpectation,
-    SupervisorEvidence, VmContractReads, VmLimits, VmStateKind, WorkerMessage,
+    VmContractReads, VmLimits, VmStateKind, WorkerMessage,
 };
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -344,7 +344,15 @@ impl Broker<'_> {
                 checkpoint
                     .vm
                     .check(&self.expectation(kind))
-                    .map_err(|refusal| BrokerFailure::StateRefused { refusal })?;
+                    .map_err(|refusal| match refusal {
+                        refusal @ OpaqueStateRefusal::TooLarge { .. } => {
+                            BrokerFailure::WorkerLost {
+                                outcome: refusal.into(),
+                                settlement: Settlement::default(),
+                            }
+                        }
+                        refusal => BrokerFailure::StateRefused { refusal },
+                    })?;
                 let state = match kind {
                     VmStateKind::Continuation => StartState::Continuation(checkpoint.vm),
                     VmStateKind::Snapshot => StartState::Snapshot(checkpoint.vm),
@@ -412,7 +420,18 @@ impl Broker<'_> {
                         .perform(&operation)
                         .await
                         .map_err(|fault| BrokerFailure::Parent { fault })?;
-                    let outcome = self.deliverable(&mut ledger, &operation, performed, frame_epoch);
+                    let outcome = self
+                        .deliverable(&mut ledger, &operation, performed, frame_epoch)
+                        .map_err(|outcome| BrokerFailure::WorkerLost {
+                            outcome,
+                            settlement: Settlement {
+                                settled: vec![SettledOperation {
+                                    ordinal: operation.ordinal,
+                                    call_ids: operation.call_ids(),
+                                }],
+                                parked: Vec::new(),
+                            },
+                        })?;
                     held = Some(HeldOperation {
                         fingerprint: operation.fingerprint,
                         outcome,
@@ -441,7 +460,7 @@ impl Broker<'_> {
         operation: &AdmittedOperation,
         performed: Performed,
         frame_epoch: FrameEpoch,
-    ) -> EffectOutcome {
+    ) -> Result<EffectOutcome, InfrastructureOutcome> {
         if let (Some(handle), AdmittedKind::Invoke(call)) = (performed.granted, &operation.kind) {
             ledger.grant(handle, call, operation.ordinal, frame_epoch);
         }
@@ -450,16 +469,14 @@ impl Broker<'_> {
             EffectOutcome::Value(value) | EffectOutcome::Failed(value)
                 if value.0.len() as u64 > limit =>
             {
-                EffectOutcome::Failed(authority::encode_value(&serde_json::json!({
-                    "code": "lash_vm_result_too_large",
-                    "message": format!(
-                        "the result of {} is {} bytes, over the {limit}-byte bound; it stays journaled",
-                        operation.command_id(self.context),
-                        value.0.len()
-                    ),
-                })))
+                Err(InfrastructureOutcome::WorkerLimitExceeded {
+                    limit: lash_vm_protocol::WorkerLimit::EffectValue {
+                        size: value.0.len() as u64,
+                        bound: limit,
+                    },
+                })
             }
-            _ => performed.outcome,
+            _ => Ok(performed.outcome),
         }
     }
 }
@@ -512,8 +529,8 @@ impl Session<'_, '_> {
             Ok(other) => return self.violation(format!("the worker opened with {}", name(&other))),
             Err(stop) => return self.stopped(stop, Settlement::default()),
         }
-        if let Err(evidence) = self.send(ParentMessage::Start(Box::new(start))).await {
-            return self.lost(InfrastructureOutcome::WorkerCrashed { evidence });
+        if let Err(outcome) = self.send(ParentMessage::Start(Box::new(start))).await {
+            return self.lost(outcome);
         }
         loop {
             let message = match self.next_message(stop, frames).await {
@@ -571,7 +588,6 @@ impl Session<'_, '_> {
                 | WorkerMessage::ResetDone { .. }
                 | WorkerMessage::Prepared { .. }
                 | WorkerMessage::Progress { .. }
-                | WorkerMessage::PayloadTooLarge { .. }
                 | WorkerMessage::LimitExceeded { .. }) => {
                     return self.violation(format!("the worker sent {} mid-run", name(&other)));
                 }
@@ -598,9 +614,11 @@ impl Session<'_, '_> {
         self.last_request = Some(request.id);
         let broker = self.broker;
         if request.payload.0.len() as u64 > broker.bounds.protocol.max_effect_value_bytes {
-            return Some(self.lost(InfrastructureOutcome::PayloadTooLarge {
-                limit: broker.bounds.protocol.max_effect_value_bytes,
-                size: request.payload.0.len() as u64,
+            return Some(self.lost(InfrastructureOutcome::WorkerLimitExceeded {
+                limit: lash_vm_protocol::WorkerLimit::EffectValue {
+                    size: request.payload.0.len() as u64,
+                    bound: broker.bounds.protocol.max_effect_value_bytes,
+                },
             }));
         }
         if request.kind == EffectKind::ProjectionRead {
@@ -642,7 +660,7 @@ impl Session<'_, '_> {
                     .send(ParentMessage::Park)
                     .await
                     .err()
-                    .map(|evidence| self.lost(InfrastructureOutcome::WorkerCrashed { evidence }));
+                    .map(|outcome| self.lost(outcome));
             }
             return self
                 .answer(request.id, EffectOutcome::Unit, Settlement::default())
@@ -746,7 +764,10 @@ impl Session<'_, '_> {
                         }],
                         parked: Vec::new(),
                     };
-                    return self.answer(request_id, outcome, settled).await;
+                    return match outcome {
+                        Ok(outcome) => self.answer(request_id, outcome, settled).await,
+                        Err(outcome) => Some(SessionEnd::Lost(BrokerFailure::WorkerLost { outcome, settlement: settled })),
+                    };
                 }
                 read = self.checkout.transport.recv() => match read {
                     WorkerRead::Bytes(bytes) => {
@@ -782,7 +803,20 @@ impl Session<'_, '_> {
         let settlement =
             match tokio::time::timeout(broker.bounds.settle_deadline, &mut performing).await {
                 Ok(Ok(performed)) => {
-                    broker.deliverable(ledger, &operation, performed, self.frame_epoch);
+                    if let Err(outcome) =
+                        broker.deliverable(ledger, &operation, performed, self.frame_epoch)
+                    {
+                        return Some(SessionEnd::Lost(BrokerFailure::WorkerLost {
+                            outcome,
+                            settlement: Settlement {
+                                settled: vec![SettledOperation {
+                                    ordinal: operation.ordinal,
+                                    call_ids: operation.call_ids(),
+                                }],
+                                parked: Vec::new(),
+                            },
+                        }));
+                    }
                     Settlement {
                         settled: vec![SettledOperation {
                             ordinal: operation.ordinal,
@@ -815,21 +849,16 @@ impl Session<'_, '_> {
         stop: &CancellationToken,
         frames: &mut watch::Receiver<FrameEpoch>,
     ) -> ParkAnswer {
-        if let Err(evidence) = self.send(ParentMessage::Park).await {
-            return ParkAnswer::Ended(Box::new(
-                self.lost_settling(InfrastructureOutcome::WorkerCrashed { evidence }, operation),
-            ));
+        if let Err(outcome) = self.send(ParentMessage::Park).await {
+            return ParkAnswer::Ended(Box::new(self.lost_settling(outcome, operation)));
         }
         match self.next_message(stop, frames).await {
             Ok(WorkerMessage::Suspended { state }) => {
                 match state.check(&self.broker.expectation(VmStateKind::Continuation)) {
                     Ok(()) => ParkAnswer::Parked(state),
-                    Err(refusal) => ParkAnswer::Ended(Box::new(self.lost_settling(
-                        InfrastructureOutcome::ProtocolViolation {
-                            reason: format!("the parked state is refused: {refusal}"),
-                        },
-                        operation,
-                    ))),
+                    Err(refusal) => {
+                        ParkAnswer::Ended(Box::new(self.lost_settling(refusal.into(), operation)))
+                    }
                 }
             }
             // The run could not be captured where it stands. Once the
@@ -945,6 +974,19 @@ impl Session<'_, '_> {
         outcome: EffectOutcome,
         settled: Settlement,
     ) -> Option<SessionEnd> {
+        if let EffectOutcome::Value(value) | EffectOutcome::Failed(value) = &outcome
+            && value.0.len() as u64 > self.broker.bounds.protocol.max_effect_value_bytes
+        {
+            return Some(SessionEnd::Lost(BrokerFailure::WorkerLost {
+                outcome: InfrastructureOutcome::WorkerLimitExceeded {
+                    limit: lash_vm_protocol::WorkerLimit::EffectValue {
+                        size: value.0.len() as u64,
+                        bound: self.broker.bounds.protocol.max_effect_value_bytes,
+                    },
+                },
+                settlement: settled,
+            }));
+        }
         self.journaled_cancel |= matches!(outcome, EffectOutcome::Cancelled);
         match self
             .send(ParentMessage::EffectResponse(EffectResponse {
@@ -954,8 +996,8 @@ impl Session<'_, '_> {
             .await
         {
             Ok(()) => None,
-            Err(evidence) => Some(SessionEnd::Lost(BrokerFailure::WorkerLost {
-                outcome: InfrastructureOutcome::WorkerCrashed { evidence },
+            Err(outcome) => Some(SessionEnd::Lost(BrokerFailure::WorkerLost {
+                outcome,
                 settlement: settled,
             })),
         }
@@ -969,14 +1011,7 @@ impl Session<'_, '_> {
     ) -> Result<Checkpoint, BrokerFailure> {
         let kind = state.kind();
         if let Err(refusal) = state.check(&self.broker.expectation(kind)) {
-            let outcome = match refusal {
-                OpaqueStateRefusal::TooLarge { limit, len } => {
-                    InfrastructureOutcome::PayloadTooLarge { limit, size: len }
-                }
-                refusal => InfrastructureOutcome::ProtocolViolation {
-                    reason: format!("the worker's state is refused: {refusal}"),
-                },
-            };
+            let outcome = refusal.into();
             return Err(BrokerFailure::WorkerLost {
                 outcome,
                 settlement: Settlement::default(),
@@ -995,21 +1030,22 @@ impl Session<'_, '_> {
         Ok(checkpoint)
     }
 
-    async fn send(&mut self, message: ParentMessage) -> Result<(), SupervisorEvidence> {
+    async fn send(&mut self, message: ParentMessage) -> Result<(), InfrastructureOutcome> {
         let frame = ParentFrame {
-            header: self.outgoing.next_header(),
+            header: self.outgoing.next_header_copy(),
             message,
         };
-        let bytes = match self.broker.codec.encode_parent(&frame) {
-            Ok(bytes) => bytes,
-            // A frame the parent itself cannot encode is its own fault; the
-            // worker is treated as lost so the run is re-driven.
-            Err(refusal) => {
-                tracing::error!(%refusal, "a parent frame could not be encoded");
-                return Err(SupervisorEvidence::EndOfStream);
-            }
-        };
-        self.checkout.transport.send(bytes).await
+        let bytes = self
+            .broker
+            .codec
+            .encode_parent(&frame)
+            .map_err(InfrastructureOutcome::from)?;
+        self.outgoing.next_header();
+        self.checkout
+            .transport
+            .send(bytes)
+            .await
+            .map_err(|evidence| InfrastructureOutcome::WorkerCrashed { evidence })
     }
 
     /// The worker's next admitted message.
@@ -1040,17 +1076,7 @@ impl Session<'_, '_> {
                                 .map_err(ReadStop::Parent)?;
                             continue;
                         }
-                        WorkerMessage::Refused { reason } => {
-                            return Err(ReadStop::Lost(InfrastructureOutcome::ProtocolViolation {
-                                reason,
-                            }));
-                        }
-                        WorkerMessage::PayloadTooLarge { limit, size } => {
-                            return Err(ReadStop::Lost(InfrastructureOutcome::PayloadTooLarge {
-                                limit,
-                                size,
-                            }));
-                        }
+                        WorkerMessage::Refused { outcome } => return Err(ReadStop::Lost(outcome)),
                         WorkerMessage::LimitExceeded { limit } => {
                             return Err(ReadStop::Lost(
                                 InfrastructureOutcome::WorkerLimitExceeded { limit },
@@ -1169,7 +1195,6 @@ fn refused_header(refusal: HeaderRefusal) -> InfrastructureOutcome {
 fn name(message: &WorkerMessage) -> &'static str {
     match message {
         WorkerMessage::Progress { .. } => "Progress",
-        WorkerMessage::PayloadTooLarge { .. } => "PayloadTooLarge",
         WorkerMessage::LimitExceeded { .. } => "LimitExceeded",
         WorkerMessage::Ready { .. } => "Ready",
         WorkerMessage::EffectRequest(_) => "EffectRequest",

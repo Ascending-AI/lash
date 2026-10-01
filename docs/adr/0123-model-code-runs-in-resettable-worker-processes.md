@@ -192,6 +192,17 @@ transport or pool:
   pipe. A stream that outgrows the heap budget, or a single observation no
   frame can carry, is the run's limit `WorkerLimit::Observations`: recorded
   like fuel, heap or depth, never retried (FIG-4458).
+- **Encoded run limits.** An effect request or result over its byte bound is
+  `WorkerLimit::EffectValue`; an opaque snapshot or continuation over its bound
+  is `WorkerLimit::VmState`. Both carry the measured size and bound. A worker
+  frame that cannot encode is `WorkerLimit::Frame`, carrying the message kind,
+  complete encoded size and bound. Encoding counts without retaining bytes
+  past the cap, and the outgoing fence advances only after encoding succeeds.
+  These deterministic limits are recorded, never retried. Journaled effect
+  results stay journaled even when they exceed the delivery bound. The RLM
+  plugin result retains the typed limit in `CellFailure::worker_limit`; a
+  process terminal retains it in its structured failure data (FIG-4475,
+  FIG-4476).
 - **Infrastructure outcomes.** `WorkerCrashed`, `WorkerUnresponsive`,
   `ProtocolViolation`, `PayloadTooLarge` and `WorkerLimitExceeded` are kept
   apart from guest errors. EOF or exit is supervisor evidence, never worker
@@ -431,13 +442,14 @@ outcome. A process body fails its attempt retryably. An RLM cell fails its
 attempt retryably too: it seals nothing, the model never sees the verdict, and
 the turn journals nothing after it, not even its cancellation peek, since the
 retry runs the cell again. Only a limit the run itself exhausted — fuel, heap,
-frame depth or its observation stream, measured against the run's own bounds —
-is recorded: the process terminal `process_execution_bound_exhausted`, or the
-cell's program failure (FIG-4451, FIG-4458).
+frame depth, its observation stream, or its encoded effect values, VM state
+and frames, measured against their bounds, is recorded: the process terminal
+`process_execution_bound_exhausted`, or the cell's program failure (FIG-4451,
+FIG-4458, FIG-4475, FIG-4476).
 
 A retryable worker infrastructure failure follows the same rule during cell
-setup as during execution. A crashed or unresponsive worker, a broken protocol
-or a refused payload fails the attempt retryably, including during source
+setup as during execution. A crashed or unresponsive worker, or a broken
+protocol, fails the attempt retryably, including during source
 analysis and compilation. `PoolError::is_host_verdict` uses the infrastructure
 outcome's retryability classification. The cell records no Host failure for
 it, and its retry runs the same cell on a replacement worker (FIG-4459).

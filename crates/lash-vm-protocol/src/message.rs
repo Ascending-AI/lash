@@ -2,7 +2,7 @@
 //!
 //! Parent to worker: [`ParentMessage`] (`Start`, `EffectResponse`, `Park`,
 //! `Cancel`, `Reset`, `Shutdown`). Worker to parent: [`WorkerMessage`]
-//! (`Progress`, `PayloadTooLarge`, `LimitExceeded`, `Ready`, `EffectRequest`,
+//! (`Progress`, `LimitExceeded`, `Ready`, `EffectRequest`,
 //! `Suspended`, `Complete`, `GuestError`, `Cancelled`, `ResetDone`). Every message travels under a [`MessageHeader`], and a
 //! receiver admits it through a [`MessageFence`].
 //!
@@ -341,19 +341,15 @@ pub enum ParentMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerMessage {
-    /// The worker refused a malformed request or could not encode its result.
+    /// The worker refused a malformed request. Run limits use `LimitExceeded`.
     Refused {
-        reason: String,
+        outcome: crate::InfrastructureOutcome,
     },
     /// A bounded phase, with cumulative process CPU usage. It does not grant
     /// extra time when repeated: the parent owns the absolute phase deadline.
     Progress {
         phase: WorkerPhase,
         cpu_nanos: u64,
-    },
-    PayloadTooLarge {
-        limit: u64,
-        size: u64,
     },
     LimitExceeded {
         limit: crate::WorkerLimit,
@@ -393,6 +389,26 @@ pub enum WorkerMessage {
     Prepared {
         response: EncodedPayload,
     },
+}
+
+impl WorkerMessage {
+    pub fn kind(&self) -> crate::WorkerFrameKind {
+        use crate::WorkerFrameKind;
+        match self {
+            Self::Refused { .. } => WorkerFrameKind::Refused,
+            Self::Progress { .. } => WorkerFrameKind::Progress,
+            Self::LimitExceeded { .. } => WorkerFrameKind::LimitExceeded,
+            Self::Ready { .. } => WorkerFrameKind::Ready,
+            Self::EffectRequest(_) => WorkerFrameKind::EffectRequest,
+            Self::Observations { .. } => WorkerFrameKind::Observations,
+            Self::Suspended { .. } => WorkerFrameKind::Suspended,
+            Self::Complete { .. } => WorkerFrameKind::Complete,
+            Self::GuestError { .. } => WorkerFrameKind::GuestError,
+            Self::Cancelled => WorkerFrameKind::Cancelled,
+            Self::ResetDone { .. } => WorkerFrameKind::ResetDone,
+            Self::Prepared { .. } => WorkerFrameKind::Prepared,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

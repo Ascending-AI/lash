@@ -797,15 +797,20 @@ fn oversized_worker_output_is_typed_and_discards() {
     let pool = WorkerPool::new(cfg).expect("pool");
     let mut worker = checkout(&pool);
     let pid = worker.pid().expect("pid");
-    assert!(matches!(
-        worker.start(start(
+    let error = worker
+        .start(start(
             "finish('x'.repeat(1024));",
-            ExecutionMode::Foreground
-        )),
-        Err(PoolError::Infrastructure(
-            InfrastructureOutcome::PayloadTooLarge { limit: 200, .. }
+            ExecutionMode::Foreground,
         ))
-    ));
+        .expect_err("effect size limit");
+    let PoolError::Infrastructure(outcome) = error else {
+        panic!("typed size cause")
+    };
+    let encoded = serde_json::to_value(&outcome).expect("cause");
+    let cause = &encoded["worker_limit_exceeded"]["limit"]["effect_value"];
+    assert_eq!(cause["bound"], 200);
+    assert!(cause["size"].as_u64().is_some_and(|size| size > 200));
+    assert!(!outcome.is_retryable());
     assert_reaped(pid);
     assert_ne!(checkout(&pool).pid(), Some(pid));
 }
@@ -1355,4 +1360,180 @@ fn an_observation_stream_over_the_runs_heap_budget_is_its_typed_run_limit() {
     );
     assert!(!outcome.is_retryable(), "the run's own limit is final");
     assert_reaped(pid);
+}
+
+#[test]
+fn an_oversized_effect_value_is_a_typed_non_retryable_run_limit() {
+    let source = "const result = await tools.echo({ value: \"a value larger than the configured effect bound\" }); finish(result);";
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let WorkerMessage::EffectRequest(request) = worker
+        .start(start(source, ExecutionMode::Foreground))
+        .expect("request")
+    else {
+        panic!("effect request");
+    };
+    let size = request.payload.0.len() as u64;
+    drop(worker);
+    drop(pool);
+    let mut cfg = config("");
+    cfg.protocol.max_effect_value_bytes = size - 1;
+    let pool = WorkerPool::new(cfg).expect("bounded pool");
+    let mut worker = checkout(&pool);
+    let pid = worker.pid().expect("pid");
+    let error = worker
+        .start(start(source, ExecutionMode::Foreground))
+        .expect_err("effect limit");
+    let PoolError::Infrastructure(outcome) = error else {
+        panic!("typed cause: {error:?}")
+    };
+    assert_eq!(
+        serde_json::to_value(&outcome).expect("cause"),
+        serde_json::json!({
+            "worker_limit_exceeded": { "limit": { "effect_value": { "size": size, "bound": size - 1 } } }
+        })
+    );
+    assert!(!outcome.is_retryable());
+    assert_reaped(pid);
+}
+
+#[test]
+fn oversized_vm_state_is_a_typed_non_retryable_run_limit() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let message = worker
+        .start(start("finish(42);", ExecutionMode::Foreground))
+        .expect("start");
+    let WorkerMessage::Complete { state, .. } = drive(&mut worker, message) else {
+        panic!("complete")
+    };
+    let size = state.bytes().len() as u64;
+    drop(worker);
+    drop(pool);
+    let mut cfg = config("");
+    cfg.protocol.max_vm_state_bytes = size - 1;
+    let pool = WorkerPool::new(cfg).expect("bounded pool");
+    let mut worker = checkout(&pool);
+    let pid = worker.pid().expect("pid");
+    let message = worker
+        .start(start("finish(42);", ExecutionMode::Foreground))
+        .expect("start");
+    let WorkerMessage::EffectRequest(request) = message else {
+        panic!("finish request")
+    };
+    let error = worker
+        .effect_result(answer(request))
+        .expect_err("state limit");
+    let PoolError::Infrastructure(outcome) = error else {
+        panic!("typed cause: {error:?}")
+    };
+    assert_eq!(
+        serde_json::to_value(&outcome).expect("cause"),
+        serde_json::json!({
+            "worker_limit_exceeded": { "limit": { "vm_state": { "size": size, "bound": size - 1 } } }
+        })
+    );
+    assert!(!outcome.is_retryable());
+    assert_reaped(pid);
+}
+
+#[test]
+fn oversized_effect_answers_preserve_their_typed_run_limit() {
+    for failed in [false, true] {
+        let mut cfg = config("");
+        cfg.protocol.max_effect_value_bytes = 512;
+        let pool = WorkerPool::new(cfg).expect("pool");
+        let mut worker = checkout(&pool);
+        let WorkerMessage::EffectRequest(request) = worker
+            .start(start(
+                "const v = await tools.echo({ value: 1 }); finish(v);",
+                ExecutionMode::Foreground,
+            ))
+            .expect("request")
+        else {
+            panic!("request")
+        };
+        let payload = EncodedPayload(
+            rmp_serde::to_vec_named(&AbilityOutcome::Value(lashlang::Value::String(
+                "x".repeat(1024).into(),
+            )))
+            .expect("answer"),
+        );
+        let size = payload.0.len() as u64;
+        let error = worker
+            .effect_result(EffectResponse {
+                id: request.id,
+                outcome: if failed {
+                    EffectOutcome::Failed(payload)
+                } else {
+                    EffectOutcome::Value(payload)
+                },
+            })
+            .expect_err("effect value limit");
+        assert_eq!(
+            error,
+            PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+                limit: WorkerLimit::EffectValue { size, bound: 512 },
+            })
+        );
+        assert!(!error.is_host_verdict());
+    }
+}
+
+#[test]
+fn oversized_incoming_and_parked_vm_state_preserves_its_typed_run_limit() {
+    let source = "const v = await tools.echo({ value: 1 }); finish(v);";
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let message = worker
+        .start(start(source, ExecutionMode::Foreground))
+        .expect("request");
+    assert!(matches!(message, WorkerMessage::EffectRequest(_)));
+    let state = parked(worker.park().expect("parked"));
+    let size = state.bytes().len() as u64;
+    drop(worker);
+    drop(pool);
+    for bound in [size, size - 1] {
+        let mut cfg = config("");
+        cfg.protocol.max_vm_state_bytes = bound;
+        let pool = WorkerPool::new(cfg).expect("pool");
+        let mut worker = checkout(&pool);
+        let mut input = start(source, ExecutionMode::Foreground);
+        input.state = StartState::Continuation(state.clone());
+        let resumed = worker.start(input);
+        if bound == size {
+            assert!(
+                matches!(resumed, Ok(WorkerMessage::EffectRequest(_))),
+                "the exact bound is admitted: {resumed:?}"
+            );
+        } else {
+            assert_eq!(
+                resumed,
+                Err(PoolError::Infrastructure(
+                    InfrastructureOutcome::WorkerLimitExceeded {
+                        limit: WorkerLimit::VmState { size, bound },
+                    }
+                ))
+            );
+        }
+        drop(worker);
+        let mut worker = checkout(&pool);
+        worker
+            .start(start(source, ExecutionMode::Foreground))
+            .expect("request");
+        let result = worker.park();
+        if bound == size {
+            assert!(
+                matches!(result, Ok(ParkOutcome::Parked(_))),
+                "the exact bound parks: {result:?}"
+            );
+        } else {
+            assert_eq!(
+                result.expect_err("state limit"),
+                PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+                    limit: WorkerLimit::VmState { size, bound },
+                })
+            );
+        }
+    }
 }

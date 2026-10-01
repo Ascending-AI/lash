@@ -526,7 +526,7 @@ impl Checkout {
             })
         {
             self.discard();
-            return Err(PoolError::protocol(error));
+            return Err(PoolError::Infrastructure(error.into()));
         }
         // The host configuration is the ceiling, never a worker's assertion.
         let cap = |asked: Option<u64>, max: Option<u64>| match (asked, max) {
@@ -580,6 +580,16 @@ impl Checkout {
             return Err(PoolError::protocol(
                 "result does not answer the current request",
             ));
+        }
+        if let EffectOutcome::Value(value) | EffectOutcome::Failed(value) = &result.outcome
+            && value.0.len() as u64 > self.pool.config.protocol.max_effect_value_bytes
+        {
+            let error = limit(WorkerLimit::EffectValue {
+                size: value.0.len() as u64,
+                bound: self.pool.config.protocol.max_effect_value_bytes,
+            });
+            self.discard();
+            return Err(error);
         }
         self.pending = None;
         self.exchange(
@@ -682,7 +692,7 @@ impl Checkout {
     }
     fn send(&mut self, message: ParentMessage, timeout: Duration) -> Result<(), PoolError> {
         let frame = ParentFrame {
-            header: self.outgoing.next_header(),
+            header: self.outgoing.next_header_copy(),
             message,
         };
         let worker = self.worker.as_mut().ok_or_else(PoolError::eof)?;
@@ -697,6 +707,7 @@ impl Checkout {
         {
             return Err(PoolError::QueueFull { bytes: bytes.len() });
         }
+        self.outgoing.next_header();
         worker.send(&frame, timeout)
     }
     fn receive_control(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
@@ -815,7 +826,7 @@ impl Checkout {
                             WorkerPhase::Responding => timeout,
                         };
                 }
-                WorkerMessage::Refused { reason } => return Err(PoolError::protocol(reason)),
+                WorkerMessage::Refused { outcome } => return Err(outcome.into()),
                 WorkerMessage::Observations { payload } => {
                     // Each chunk crossed in one frame; the step's stream is
                     // held to the run's heap budget, never to a transport
@@ -831,14 +842,15 @@ impl Checkout {
                     self.observations.push(payload);
                 }
                 WorkerMessage::LimitExceeded { limit: exhausted } => return Err(limit(exhausted)),
-                WorkerMessage::PayloadTooLarge { limit, size } => {
-                    return Err(InfrastructureOutcome::PayloadTooLarge { limit, size }.into());
-                }
                 WorkerMessage::EffectRequest(request) => {
-                    self.bound(
-                        request.payload.0.len() as u64,
-                        self.pool.config.protocol.max_effect_value_bytes,
-                    )?;
+                    if request.payload.0.len() as u64
+                        > self.pool.config.protocol.max_effect_value_bytes
+                    {
+                        return Err(limit(WorkerLimit::EffectValue {
+                            size: request.payload.0.len() as u64,
+                            bound: self.pool.config.protocol.max_effect_value_bytes,
+                        }));
+                    }
                     self.pending = Some((request.id, request.kind));
                     self.resettable = true;
                     return Ok(WorkerMessage::EffectRequest(request));
@@ -869,7 +881,7 @@ impl Checkout {
                                 reads: &lashlang::vm_contract_reads(),
                                 max_bytes: self.pool.config.protocol.max_vm_state_bytes,
                             })
-                            .map_err(PoolError::protocol)?;
+                            .map_err(|refusal| PoolError::Infrastructure(refusal.into()))?;
                     }
                     self.resettable = !matches!(message, WorkerMessage::GuestError { .. });
                     if !self.resettable {

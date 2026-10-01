@@ -227,9 +227,13 @@ struct CappedWriter {
 }
 impl std::io::Write for CappedWriter {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if let Some(size) = &mut self.refused {
+            *size = size.saturating_add(bytes.len() as u64);
+            return Ok(bytes.len());
+        }
         if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
             self.refused = Some((self.bytes.len() as u64).saturating_add(bytes.len() as u64));
-            return Err(std::io::Error::other("frame exceeds its configured bound"));
+            return Ok(bytes.len());
         }
         let needed = self.bytes.len() + bytes.len();
         if needed > self.bytes.capacity() {

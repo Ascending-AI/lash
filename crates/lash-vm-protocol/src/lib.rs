@@ -40,7 +40,7 @@ pub use message::{
     OwnerEpoch, ParentFrame, ParentMessage, ProgramEntry, ProgramSource, Start, StartState,
     TransportSequence, VmLimits, WorkerFrame, WorkerMessage, WorkerPhase,
 };
-pub use outcome::{InfrastructureOutcome, SupervisorEvidence, WorkerLimit};
+pub use outcome::{InfrastructureOutcome, SupervisorEvidence, WorkerFrameKind, WorkerLimit};
 pub use state::{
     OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner, VmStateKind,
 };

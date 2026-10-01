@@ -86,6 +86,9 @@ pub enum CellFailureKind {
 pub struct CellFailure {
     pub kind: CellFailureKind,
     pub message: String,
+    /// The measured run limit, kept typed through the plugin and host result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_limit: Option<crate::worker_limit::WorkerLimit>,
 }
 
 impl CellFailure {
@@ -93,7 +96,13 @@ impl CellFailure {
         Self {
             kind,
             message: message.into(),
+            worker_limit: None,
         }
+    }
+
+    pub fn with_worker_limit(mut self, limit: crate::worker_limit::WorkerLimit) -> Self {
+        self.worker_limit = Some(limit);
+        self
     }
 }
 

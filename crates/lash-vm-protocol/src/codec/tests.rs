@@ -121,9 +121,24 @@ fn every_message_round_trips() {
         WorkerMessage::LimitExceeded {
             limit: crate::WorkerLimit::Fuel,
         },
-        WorkerMessage::PayloadTooLarge {
-            limit: 10,
-            size: 11,
+        WorkerMessage::LimitExceeded {
+            limit: crate::WorkerLimit::EffectValue {
+                size: 11,
+                bound: 10,
+            },
+        },
+        WorkerMessage::LimitExceeded {
+            limit: crate::WorkerLimit::VmState {
+                size: 11,
+                bound: 10,
+            },
+        },
+        WorkerMessage::LimitExceeded {
+            limit: crate::WorkerLimit::Frame {
+                kind: crate::WorkerFrameKind::Complete,
+                size: 11,
+                bound: 10,
+            },
         },
         WorkerMessage::Suspended {
             state: state.clone(),
@@ -399,7 +414,7 @@ fn envelope_and_encoding_allocation_fit_the_frame_bound() {
         limit: 8,
         refused: None,
     };
-    assert!(std::io::Write::write_all(&mut writer, &[0; 1024]).is_err());
+    std::io::Write::write_all(&mut writer, &[0; 1024]).unwrap();
     assert!(writer.bytes.is_empty());
     assert_eq!(writer.refused, Some(1024));
 }
@@ -415,7 +430,10 @@ fn bounded_encoder_capacity_does_not_double_past_the_cap() {
     std::io::Write::write_all(&mut writer, &[0; 3]).unwrap();
     assert_eq!(writer.bytes.len(), 10);
     assert!(writer.bytes.capacity() <= 10);
-    assert!(std::io::Write::write_all(&mut writer, &[0]).is_err());
+    std::io::Write::write_all(&mut writer, &[0; 3]).unwrap();
+    assert_eq!(writer.refused, Some(13));
+    std::io::Write::write_all(&mut writer, &[0; 4]).unwrap();
+    assert_eq!(writer.refused, Some(17));
     assert_eq!(writer.bytes.len(), 10);
 }
 

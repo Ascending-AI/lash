@@ -4,8 +4,8 @@
 //! A guest error is the program's own failure and travels as
 //! [`crate::WorkerMessage::GuestError`]. Everything here is the worker's
 //! failure: the parent fences the lease, settles the operations it already
-//! admitted, and reports the outcome as retryable infrastructure, so the
-//! owning substrate invocation is re-driven. A worker that produced one is
+//! admitted, and retries transient worker failures. A deterministic run limit is
+//! recorded as the run's terminal outcome. A worker that produced one is
 //! discarded, never reset.
 
 use serde::{Deserialize, Serialize};
@@ -28,32 +28,7 @@ pub enum SupervisorEvidence {
     },
 }
 
-/// The VM or worker limit a run exhausted.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerLimit {
-    Fuel,
-    Heap,
-    Depth,
-    /// A step's execution observations outgrew the run's heap budget, which
-    /// bounds the stream a worker holds and hands its parent, or a single
-    /// observation outgrew what one frame carries (FIG-4458).
-    Observations,
-    Deadline,
-}
-
-impl WorkerLimit {
-    /// Whether this limit is a verdict of the host and the attempt that met
-    /// it rather than of the run. Fuel, heap and frame depth are measured by
-    /// the VM against the run's own bounds, and a step's observations
-    /// against its heap budget, so every execution of the run meets them at
-    /// the same point. A deadline is the host's clock, or its
-    /// cumulative CPU and attempt accounting: a replay, or another host with
-    /// capacity, answers it differently (FIG-4451).
-    pub const fn is_host_verdict(self) -> bool {
-        matches!(self, Self::Deadline)
-    }
-}
+pub use lash_sansio::worker_limit::{WorkerFrameKind, WorkerLimit};
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,10 +52,26 @@ impl InfrastructureOutcome {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::WorkerLimitExceeded { limit } => limit.is_host_verdict(),
+            Self::PayloadTooLarge { .. } => false,
             Self::WorkerCrashed { .. }
             | Self::WorkerUnresponsive { .. }
-            | Self::ProtocolViolation { .. }
-            | Self::PayloadTooLarge { .. } => true,
+            | Self::ProtocolViolation { .. } => true,
+        }
+    }
+}
+
+impl From<crate::OpaqueStateRefusal> for InfrastructureOutcome {
+    fn from(refusal: crate::OpaqueStateRefusal) -> Self {
+        match refusal {
+            crate::OpaqueStateRefusal::TooLarge { limit, len } => Self::WorkerLimitExceeded {
+                limit: WorkerLimit::VmState {
+                    size: len,
+                    bound: limit,
+                },
+            },
+            refusal => Self::ProtocolViolation {
+                reason: refusal.to_string(),
+            },
         }
     }
 }
@@ -114,6 +105,16 @@ mod tests {
             (WorkerLimit::Heap, false),
             (WorkerLimit::Depth, false),
             (WorkerLimit::Observations, false),
+            (WorkerLimit::EffectValue { size: 2, bound: 1 }, false),
+            (WorkerLimit::VmState { size: 2, bound: 1 }, false),
+            (
+                WorkerLimit::Frame {
+                    kind: WorkerFrameKind::Complete,
+                    size: 2,
+                    bound: 1,
+                },
+                false,
+            ),
             (WorkerLimit::Deadline, true),
         ] {
             assert_eq!(limit.is_host_verdict(), host_verdict, "{limit:?}");

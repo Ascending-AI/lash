@@ -789,8 +789,12 @@ async fn execute_code_in_worker_scope(
             format!("unexpected compilation response: {other:?}"),
         )),
         Err(error) => {
-            fail_attempt_on_host_verdict(&ctx, &error);
-            Err((lash_core::CellFailureKind::Host, error.to_string()))
+            emit_step_trace(
+                &ctx,
+                &lashlang_execution_trace_config,
+                Err(&error.to_string()),
+            );
+            return worker_setup_failure(state, &ctx, error);
         }
     };
     emit_step_trace(
@@ -1042,18 +1046,21 @@ async fn execute_code_in_worker_scope(
                         lash_vm_broker::CheckoutRefusal::Infrastructure(
                             lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
                         ),
-                } => match limit {
-                    lash_vm_protocol::WorkerLimit::Fuel => Some("instruction budget exceeded"),
-                    lash_vm_protocol::WorkerLimit::Heap => Some("logical memory limit exceeded"),
-                    lash_vm_protocol::WorkerLimit::Depth => Some("frame depth limit exceeded"),
-                    lash_vm_protocol::WorkerLimit::Observations => {
-                        Some("execution observations exceeded their bound")
-                    }
-                    lash_vm_protocol::WorkerLimit::Deadline => None,
-                },
+                } if !limit.is_host_verdict() => Some(*limit),
                 _ => None,
             };
-            if let Some(message) = run_limit {
+            if let Some(limit) = run_limit {
+                let message = match limit {
+                    lash_vm_protocol::WorkerLimit::Fuel => "instruction budget exceeded".to_owned(),
+                    lash_vm_protocol::WorkerLimit::Heap => {
+                        "logical memory limit exceeded".to_owned()
+                    }
+                    lash_vm_protocol::WorkerLimit::Depth => "frame depth limit exceeded".to_owned(),
+                    lash_vm_protocol::WorkerLimit::Observations => {
+                        "execution observations exceeded their bound".to_owned()
+                    }
+                    limit => limit.to_string(),
+                };
                 #[cfg(any(test, feature = "testing"))]
                 assert!(
                     !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
@@ -1061,10 +1068,10 @@ async fn execute_code_in_worker_scope(
                 );
                 return exec_response_from(
                     host.into_collected(),
-                    Some(lash_core::CellFailure::new(
-                        lash_core::CellFailureKind::Program,
-                        message,
-                    )),
+                    Some(
+                        lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
+                            .with_worker_limit(limit),
+                    ),
                     None,
                 );
             }
@@ -1309,6 +1316,22 @@ fn worker_setup_failure(
     ctx: &RuntimeExecutionContext<'_>,
     error: lash_vm_client::PoolError,
 ) -> ExecResponse {
+    if let lash_vm_client::PoolError::Infrastructure(
+        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
+    ) = &error
+        && !limit.is_host_verdict()
+    {
+        let mut response = exec_setup_failure_or_stop(
+            state,
+            ctx,
+            lash_core::CellFailureKind::Program,
+            limit.to_string(),
+        );
+        if let Some(failure) = &mut response.error {
+            failure.worker_limit = Some(*limit);
+        }
+        return response;
+    }
     fail_attempt_on_host_verdict(ctx, &error);
     exec_setup_failure_or_stop(
         state,

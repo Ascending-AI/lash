@@ -35,6 +35,41 @@ pub(crate) struct Fences {
     pub next_effect: u64,
 }
 
+impl Fences {
+    pub(crate) fn encode(
+        &mut self,
+        codec: &FrameCodec,
+        message: WorkerMessage,
+    ) -> Result<Vec<u8>, PoolError> {
+        let bytes = encode_worker(codec, self.outgoing.next_header_copy(), message)?;
+        self.outgoing.next_header();
+        Ok(bytes)
+    }
+}
+
+fn encode_worker(
+    codec: &FrameCodec,
+    header: MessageHeader,
+    message: WorkerMessage,
+) -> Result<Vec<u8>, PoolError> {
+    let kind = message.kind();
+    codec
+        .encode_worker(&WorkerFrame { header, message })
+        .map_err(|refusal| match refusal {
+            CodecRefusal::FrameTooLarge { limit, declared } => {
+                InfrastructureOutcome::WorkerLimitExceeded {
+                    limit: WorkerLimit::Frame {
+                        kind,
+                        size: declared,
+                        bound: limit,
+                    },
+                }
+                .into()
+            }
+            refusal => refusal.into(),
+        })
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ParkedRun {
@@ -94,25 +129,30 @@ impl<'frontend> Server<'frontend> {
 
     fn send(&mut self, message: WorkerMessage) -> Result<(), PoolError> {
         let bytes = self
-            .codec
-            .encode_worker(&WorkerFrame {
-                header: self
-                    .fences
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .outgoing
-                    .next_header(),
-                message,
-            })
-            .map_err(PoolError::from)?;
+            .fences
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .encode(&self.codec, message)?;
         write_frame(
             &mut self.pipe,
             &bytes,
             Instant::now() + Duration::from_secs(30),
         )
     }
-    pub(crate) fn refuse(&mut self, reason: String) -> Result<(), PoolError> {
-        self.send(WorkerMessage::Refused { reason })
+    pub(crate) fn refuse(&mut self, error: &PoolError) -> Result<(), PoolError> {
+        self.send(match error {
+            PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
+                WorkerMessage::LimitExceeded { limit: *limit }
+            }
+            PoolError::Infrastructure(outcome) => WorkerMessage::Refused {
+                outcome: outcome.clone(),
+            },
+            error => WorkerMessage::Refused {
+                outcome: InfrastructureOutcome::ProtocolViolation {
+                    reason: error.to_string(),
+                },
+            },
+        })
     }
     fn progress(&mut self, phase: WorkerPhase) -> Result<(), PoolError> {
         if phase == WorkerPhase::Computing && self.cpu_ceiling.is_none() {
@@ -322,7 +362,13 @@ impl<'frontend> Server<'frontend> {
         payload: &EncodedPayload,
     ) -> Result<T, PoolError> {
         if payload.0.len() as u64 > self.bootstrap.effect {
-            return Err(PoolError::protocol("effect value too large"));
+            return Err(InfrastructureOutcome::WorkerLimitExceeded {
+                limit: WorkerLimit::EffectValue {
+                    size: payload.0.len() as u64,
+                    bound: self.bootstrap.effect,
+                },
+            }
+            .into());
         }
         self.codec.check_payload(&payload.0)?;
         rmp_serde::from_slice(&payload.0).map_err(PoolError::protocol)
@@ -473,13 +519,15 @@ impl<'frontend> Server<'frontend> {
                 reads: &lashlang::vm_contract_reads(),
                 max_bytes: self.bootstrap.state,
             })
-            .map_err(PoolError::protocol)
+            .map_err(|refusal| PoolError::Infrastructure(refusal.into()))
     }
     fn seal(&self, kind: VmStateKind, bytes: Vec<u8>) -> Result<OpaqueVmState, PoolError> {
         if bytes.len() as u64 > self.bootstrap.state {
-            return Err(InfrastructureOutcome::PayloadTooLarge {
-                limit: self.bootstrap.state,
-                size: bytes.len() as u64,
+            return Err(InfrastructureOutcome::WorkerLimitExceeded {
+                limit: WorkerLimit::VmState {
+                    size: bytes.len() as u64,
+                    bound: self.bootstrap.state,
+                },
             }
             .into());
         }
@@ -517,16 +565,11 @@ impl<'frontend> Server<'frontend> {
             .outgoing;
         fence.next_header();
         let header = fence.next_header();
-        let encode = |message| {
-            self.codec
-                .encode_worker(&WorkerFrame { header, message })
-                .map_err(PoolError::from)
-        };
+        let encode = |message| encode_worker(&self.codec, header, message);
         let bytes = match encode(message) {
-            Err(PoolError::Infrastructure(InfrastructureOutcome::PayloadTooLarge {
+            Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
                 limit,
-                size,
-            })) => encode(WorkerMessage::PayloadTooLarge { limit, size })?,
+            })) => encode(WorkerMessage::LimitExceeded { limit })?,
             result => result?,
         };
         self.progress(WorkerPhase::Responding)?;
@@ -543,10 +586,9 @@ impl<'frontend> Server<'frontend> {
     }
     fn deliver(&mut self, step: VmStep) -> Result<(), PoolError> {
         let message = match self.deliver_inner(step) {
-            Err(PoolError::Infrastructure(InfrastructureOutcome::PayloadTooLarge {
+            Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
                 limit,
-                size,
-            })) => WorkerMessage::PayloadTooLarge { limit, size },
+            })) => WorkerMessage::LimitExceeded { limit },
             result => result?,
         };
         self.respond(message)
@@ -645,9 +687,11 @@ impl<'frontend> Server<'frontend> {
                     ),
                 };
                 if payload.len() as u64 > self.bootstrap.effect {
-                    return Err(InfrastructureOutcome::PayloadTooLarge {
-                        limit: self.bootstrap.effect,
-                        size: payload.len() as u64,
+                    return Err(InfrastructureOutcome::WorkerLimitExceeded {
+                        limit: WorkerLimit::EffectValue {
+                            size: payload.len() as u64,
+                            bound: self.bootstrap.effect,
+                        },
                     }
                     .into());
                 }
@@ -803,4 +847,70 @@ fn materialize(value: lashlang::Value, depth: usize) -> Result<lashlang::Value, 
         )),
         other => other,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_oversized_non_observation_frame_preserves_its_fence_and_typed_cause() {
+        let mut config =
+            lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
+        config.protocol.decode.max_frame_bytes = 1024;
+        let codec = FrameCodec::new(config.protocol.decode);
+        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
+        let mut server = Server::new(
+            pipe,
+            codec.clone(),
+            Bootstrap::from(&config),
+            &crate::frontend::TypeScriptFrontend,
+        )
+        .expect("server");
+        let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
+        let ready = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
+            .expect("ready");
+        fence
+            .admit(&codec.decode_worker(&ready).expect("ready frame").header)
+            .expect("ready fence");
+        let message = WorkerMessage::Refused {
+            outcome: InfrastructureOutcome::ProtocolViolation {
+                reason: "x".repeat(2048),
+            },
+        };
+        let size = rmp_serde::to_vec_named(&WorkerFrame {
+            header: fence.next_header_copy(),
+            message: message.clone(),
+        })
+        .expect("measure")
+        .len() as u64
+            + FRAME_HEADER_BYTES as u64;
+        let error = server.send(message).expect_err("the frame is too large");
+        server.refuse(&error).expect("typed refusal frame");
+        let bytes = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
+            .expect("next frame");
+        let refused = codec.decode_worker(&bytes).expect("frame");
+        fence
+            .admit(&refused.header)
+            .expect("an encode refusal must not consume a transport sequence");
+        let PoolError::Infrastructure(outcome) = error else {
+            panic!("typed cause: {error:?}")
+        };
+        assert_eq!(
+            serde_json::to_value(&outcome).expect("cause"),
+            serde_json::json!({
+                "worker_limit_exceeded": { "limit": { "frame": {
+                    "kind": "refused", "size": size, "bound": 1024
+                } } }
+            })
+        );
+        let WorkerMessage::LimitExceeded { limit } = refused.message else {
+            panic!("typed refusal")
+        };
+        assert_eq!(
+            outcome,
+            InfrastructureOutcome::WorkerLimitExceeded { limit }
+        );
+        assert!(!outcome.is_retryable());
+    }
 }
