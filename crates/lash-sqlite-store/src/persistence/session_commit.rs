@@ -476,7 +476,10 @@ impl SqliteStore {
                                 Err(conflict) => return Err(superseded.unwrap_or(conflict)),
                             };
                             if let Some(replay) = replay {
+                                // A stale receipt replay has no write authority,
+                                // including cleanup of its own settled closure.
                                 if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
+                        && superseded.is_none()
                         && settlement.authorization().session_id() == commit.session_id
                         && commit.interrupted_turn_input_turn_id.as_ref() == Some(settlement.authorization().turn_id())
                         && commit.interrupted_turn_input_cancellation.as_ref() == settlement.effective_cancellation()

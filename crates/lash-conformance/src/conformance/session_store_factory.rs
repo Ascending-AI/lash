@@ -34,6 +34,7 @@ pub use config_commands::{
 pub use creation_budget::session_creation_refuses_a_head_no_commit_fits;
 mod state_version;
 mod turn_cancel;
+pub use turn_cancel::a_stale_fence_receipt_replay_leaves_the_store_byte_identical;
 
 /// Adapt one `turn_cancel` law to the factory type the catalogue in
 /// `macros.rs` addresses laws through. The bodies live in the `turn_cancel`

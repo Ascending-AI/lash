@@ -2289,6 +2289,40 @@ async fn postgres_attachment_materialization_turn_witnesses() {
         .await;
 }
 
+#[tokio::test]
+async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical() {
+    let Some((_database_fixture, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let factory =
+        Arc::new(storage.store()) as Arc<dyn lash_core_execution::store::ConformanceDeployment>;
+    lash_conformance::a_stale_fence_receipt_replay_leaves_the_store_byte_identical(
+        factory,
+        || async {
+            let pool = storage.pool();
+            let tables: Vec<String> = sqlx::query_scalar(
+                "SELECT tablename::text FROM pg_tables WHERE schemaname = current_schema() ORDER BY tablename",
+            )
+            .fetch_all(pool)
+            .await
+            .expect("read complete table census");
+            let mut snapshot = Vec::new();
+            for table in tables {
+                let mut rows: Vec<String> =
+                    sqlx::query_scalar(&format!("SELECT to_jsonb(t)::text FROM \"{table}\" AS t"))
+                        .fetch_all(pool)
+                        .await
+                        .expect("read table snapshot");
+                rows.sort();
+                snapshot.push((table, rows.join("\n")));
+            }
+            snapshot
+        },
+    )
+    .await;
+}
+
 lash_conformance::usage_ledger_store_tests!({
     let Some((lock, storage)) = storage().await else {
         return;
