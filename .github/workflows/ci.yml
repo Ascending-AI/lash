@@ -494,6 +494,7 @@ jobs:
           python3 scripts/test_resolve_buck2_target.py
           python3 tools/buck2/test_cargo_bin_env.py
           python3 tools/buck2/test_clippy_policy.py
+          python3 tools/buck2/tests/test_action_kinds.py
           python3 tools/buck2/tests/test_bootstrap_lock.py
           python3 tools/buck2/tests/test_driver.py
           python3 tools/buck2/tests/test_external_runner.py
