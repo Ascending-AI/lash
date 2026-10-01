@@ -2,6 +2,7 @@
 import json
 import re
 import subprocess
+import sys
 
 
 LABEL = re.compile(r'^(?:[A-Za-z0-9_.-]+)?//')
@@ -22,6 +23,12 @@ def canonical(label):
 
 def wildcard(label):
     return label == '...' or label.endswith(('/...', ':', ':all', ':*'))
+
+
+def skipped_line(labels, variants=0):
+    """The one line that keeps a pattern's dropped manual targets visible."""
+    names = sorted(labels) + ([f'{variants} feature-lane variants'] if variants else [])
+    return 'hermetic-build: patterns skip manual targets; name one to run it. Skipped: ' + ' '.join(names)
 
 
 def query_targets(argv, root, pattern):
@@ -66,11 +73,14 @@ def plan_test_command(argv, root):
         return argv
     chosen = set()
     expanded = {}
+    skipped = {}
     for index in positions:
         token = front[index]
         if wildcard(token):
             targets = query_targets(argv, root, token)
-            labels = sorted(label for label, attrs in targets.items() if 'manual' not in attrs.get('labels', []) + attrs.get('tags', []))
+            policy = {label: attrs.get('labels', []) + attrs.get('tags', []) for label, attrs in targets.items()}
+            labels = sorted(label for label, tags in policy.items() if 'manual' not in tags)
+            skipped.update((label, 'feature-lane' in tags) for label, tags in policy.items() if 'manual' in tags)
         else:
             labels = [token]
         expanded[index] = []
@@ -79,6 +89,10 @@ def plan_test_command(argv, root):
             if key not in chosen:
                 chosen.add(key)
                 expanded[index].append(label)
+    named = sorted(label.removeprefix('root') for label, variant in skipped.items() if not variant and label not in chosen)
+    variants = sum(variant for label, variant in skipped.items() if label not in chosen)
+    if named or variants:
+        print(skipped_line(named, variants), file=sys.stderr, flush=True)
     if not chosen:
         raise ValueError('No non-manual targets matched; name a manual target explicitly to run it')
     output = []

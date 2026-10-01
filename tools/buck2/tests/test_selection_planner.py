@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -45,6 +47,28 @@ class TestSelectionTests(unittest.TestCase):
             queries = [json.loads(line) for line in (root / 'query-argv.jsonl').read_text().splitlines()]
             self.assertEqual(len(queries), 1)
             self.assertEqual(queries[0][-1], '//pkg/...')
+
+    def test_pattern_reports_the_manual_targets_it_skips_on_one_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = self.fixture(root, {
+                'root//pkg:public': {'labels': []},
+                'root//pkg:named': {'labels': ['manual']},
+                'root//pkg:service': {'labels': ['cargo-service-gate', 'manual']},
+                'root//pkg:ui': {'labels': ['cargo-trybuild', 'manual']},
+                'root//pkg:ui__fv_0a1b2c3d': {'labels': ['feature-lane', 'manual']},
+                'root//pkg:lib__fv_0a1b2c3d': {'labels': ['feature-lane', 'manual']},
+            })
+            output = io.StringIO()
+            with redirect_stderr(output):
+                result = plan_test_command(self.command(executable, root, ['//pkg/...', '//pkg:named']), root)
+            front = result[:result.index('--')]
+            self.assertEqual(front[-2:], ['root//pkg:public', '//pkg:named'])
+            self.assertEqual(output.getvalue(), 'hermetic-build: patterns skip manual targets; name one to run it. Skipped: //pkg:service //pkg:ui 2 feature-lane variants\n')
+            output = io.StringIO()
+            with redirect_stderr(output):
+                plan_test_command(self.command(executable, root, ['//pkg:public', '//pkg:named']), root)
+            self.assertEqual(output.getvalue(), '')
 
     def test_relative_patterns_preserve_explicit_manual_targets(self):
         with tempfile.TemporaryDirectory() as directory:

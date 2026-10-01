@@ -84,6 +84,27 @@ def check_inventory() -> None:
         inventory["feature_lane_test_targets"]
     )
 
+    # A test only Cargo can execute never enters a list the test jobs run,
+    # under its own label or as a feature-lane variant; compile lists may.
+    cargo_only = {
+        target["label"]
+        for package in inventory["packages"]
+        for target in package["targets"]
+        if target.get("label") and "cargo-trybuild" in target.get("tags", [])
+    }
+    assert cargo_only
+    executed = (
+        inventory["feature_lane_test_targets"]
+        + inventory["workspace_test_suite_labels"]
+        + inventory["workspace_dev_suite_labels"]
+        + inventory["workspace_deferred_test_targets"]
+        + [label for labels in inventory["service_test_targets"].values() for label in labels]
+        + [member for members in inventory["workspace_test_batches"].values() for member in members]
+    )
+    assert not [
+        label for label in executed if re.sub(r"__fv_[0-9a-f]+$", "", label) in cargo_only
+    ]
+
     batches = inventory["workspace_test_batches"]
     member_owner = {}
     for batch, members in batches.items():

@@ -41,11 +41,14 @@ nested-Cargo tests, release artifacts and named recipes retain their contracts.
 Package patterns work as in stock Buck2. `kiln check //crates/lash-store-sql/...`
 selects every generated Cargo target beneath the package; `//pkg:all`, `//pkg:`
 and `//...` also work. `build`, `check` and `clippy` map each target to the
-output its label would select. They include manual targets and omit feature-lane
-variants. A `check`, `clippy` or `doc` pattern must match a generated target.
-A `build` pattern that matches none passes to Buck2 unchanged. `kiln test`
-drops manual targets from patterns. `kiln analyze` accepts labels and patterns
-as its dependency universe.
+output its label would select and omit feature-lane variants. As under Bazel, a
+pattern in `build`, `check`, `test`, `clippy`, `doc` or `analyze` skips every
+`manual` target and prints the skipped labels on one line; a manual target is
+selected only by its own label. An explicit `kiln test` of a `cargo-trybuild`
+label fails at once, naming `//crates/lash:ui_fixtures` and `just seal`. A
+`check`, `clippy` or `doc` pattern must match a generated target.
+A `build` pattern that matches none passes to Buck2 unchanged. `kiln analyze`
+accepts labels and patterns as its dependency universe.
 
 Use the owning target while editing. `python3 scripts/dev-test.py --dry-run`
 prints the diff, labels, revisions and commands. `--dependents` includes reverse

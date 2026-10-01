@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 
 from service_policy import needs_local_uncached
 from invocation import regular_file, run_command
+from test_selection import skipped_line
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULTS = {'build': '//:workspace_compile', 'check': '//:workspace_check', 'test': '//:dev_tests', 'clippy': '//:workspace_clippy', 'doc': '//:workspace_docs'}
@@ -50,6 +51,14 @@ BAZEL_FLAGS = {
     'test_timeout_filters': 'select test labels or package patterns explicitly',
 }
 DOCS = 'see docs/agents/hermetic-build.md'
+# Policy tags whose test cannot execute under Buck2 at all, with what proves
+# the same thing. The other `cargo-*` tags still run here when named:
+# `cargo-service-gate` against a live service, `cargo-frontend-assets` after
+# the frontend build; `cargo-feature-gate` targets have no Buck2 label.
+CARGO_ONLY = {
+    'cargo-trybuild': 'trybuild runs Cargo, which the Buck2 sandbox does not provide; test {package}:ui_fixtures, which seals the same .stderr pins, or run `just seal` (cargo test --workspace --locked --test ui)',
+}
+FEATURE_VARIANT = re.compile(r'__fv_[0-9a-f]+$')
 
 
 def validate_remote_configuration(path):
@@ -168,7 +177,22 @@ def pattern_matches(pattern, label):
     return owner == package or (recursive and (not package or owner.startswith(package + '/')))
 
 
-def expand_labels(tokens, inventory, operation):
+def manual(target):
+    return 'manual' in target.get('tags', ())
+
+
+def reject_cargo_only(labels, inventory):
+    """Fail an explicit test of a label only Cargo can execute, naming its replacement."""
+    tags = {target['label']: target.get('tags', ()) for package in inventory['packages'] for target in package['targets'] if target.get('label')}
+    for label in labels:
+        key = label.removeprefix('root')
+        key = key if key.startswith('//') else '//' + key.removeprefix('./')
+        for tag in tags.get(FEATURE_VARIANT.sub('', key), ()):
+            if tag in CARGO_ONLY:
+                raise ValueError(f'{key} is Cargo-only ({tag}) and cannot run under Buck2: ' + CARGO_ONLY[tag].format(package=key.split(':', 1)[0]))
+
+
+def expand_labels(tokens, inventory, operation, skipped=None):
     ordinary = [target for package in inventory['packages'] for target in package['targets']]
     records = ordinary + inventory.get('feature_lane_units', [])
     field = 'build_label' if operation == 'build' else operation + '_label'
@@ -176,7 +200,8 @@ def expand_labels(tokens, inventory, operation):
     # A wildcard names the generated Cargo targets beneath it, each mapped to
     # the operation's output exactly as if listed. Passing it to Buck2 instead
     # would build default outputs, so check and clippy would link or skip lint.
-    # Feature-lane variants stay behind their explicit //:feature_lane_* groups.
+    # Feature-lane variants stay behind their explicit //:feature_lane_* groups,
+    # and a `manual` target is selected only by its own label, as under Bazel.
     selectable = [target for target in ordinary if target.get('label') and field in target]
     groups = {
         'build_label': {'//:workspace_compile': 'workspace_build_targets', '//:feature_lane_compile': 'feature_lane_build_targets'},
@@ -198,9 +223,14 @@ def expand_labels(tokens, inventory, operation):
         key = token.removeprefix('root') if token.startswith('root//') else token
         pattern = package_pattern(key) if key.startswith('//') else None
         if pattern is not None:
-            matched = [target[field] for target in selectable if pattern_matches(pattern, target['label'])]
+            candidates = [target for target in selectable if pattern_matches(pattern, target['label'])]
+            matched = [target[field] for target in candidates if not manual(target)]
+            if skipped is not None:
+                skipped.extend(target['label'] for target in candidates if manual(target))
             if matched:
                 expanded.extend(matched)
+            elif candidates:
+                raise ValueError(f'No non-manual {operation} targets match {key}; name a manual target explicitly to select it')
             elif operation == 'build':
                 # Stock Buck2 builds non-Cargo packages such as tool rules.
                 expanded.append(token)
@@ -220,7 +250,7 @@ def expand_labels(tokens, inventory, operation):
     return expanded
 
 
-def command(options, remaining, executable, root, inventory=None):
+def command(options, remaining, executable, root, inventory=None, skipped=None):
     operation = options.operation
     actual = 'build' if operation in ('check', 'clippy', 'doc') else 'cquery' if operation == 'analyze' else operation
     result = [str(executable), '--isolation-dir', options.isolation_dir, actual]
@@ -252,7 +282,17 @@ def command(options, remaining, executable, root, inventory=None):
         invalid = [arg for arg in universe if not TARGET_PATTERN.match(arg)]
         if invalid:
             raise ValueError('analyze accepts only target labels and patterns: ' + ' '.join(invalid))
-        args = ['--show-providers', ' + '.join(f'deps({label})' for label in universe)]
+        terms = []
+        for label in universe:
+            pattern = package_pattern(label)
+            if pattern is None:
+                terms.append(f'deps({label})')
+                continue
+            # Buck2 tests carry policy tags as `labels`; the fixture rules as `tags`.
+            terms.append(f'deps({label} - attrfilter(labels, manual, {label}) - attrfilter(tags, manual, {label}))')
+            if inventory is not None and skipped is not None:
+                skipped.extend(target['label'] for package in inventory['packages'] for target in package['targets'] if target.get('label') and manual(target) and pattern_matches(pattern, target['label']))
+        args = ['--show-providers', ' + '.join(terms)]
     elif operation == 'run':
         if not labels:
             raise ValueError('run requires an explicit target')
@@ -261,8 +301,10 @@ def command(options, remaining, executable, root, inventory=None):
     if operation in ('build', 'check', 'clippy', 'doc'):
         if inventory is None:
             raise ValueError('Missing generated target inventory; run sync')
-        args = expand_labels(args, inventory, operation)
+        args = expand_labels(args, inventory, operation, skipped)
     if operation == 'test':
+        if inventory is not None:
+            reject_cargo_only([args[index] for index in labels], inventory)
         result += ['--exclude=lash.internal_test_binary', '--always-exclude']
         result += ['-c', f'test.v2_test_executor={root / "tools/buck2/test_runner.py"}']
         if '--' in args:
@@ -300,9 +342,12 @@ def main(argv=None):
             validate_remote_configuration(ROOT / '.buckconfig.local')
         subprocess.run([sys.executable, str(sync), '--check'], check=True)
     inventory = None
-    if options.operation in ('build', 'check', 'clippy', 'doc'):
+    if options.operation in ('analyze', 'build', 'check', 'clippy', 'doc', 'test'):
         inventory = json.loads((ROOT / 'tools/buck2/target-inventory.json').read_text())
-    argv = command(options, remaining, executable, ROOT, inventory)
+    skipped = []
+    argv = command(options, remaining, executable, ROOT, inventory, skipped)
+    if skipped:
+        print(skipped_line(dict.fromkeys(skipped)), file=sys.stderr, flush=True)
     if options.operation != 'test':
         environment = None
         if options.operation == 'run':

@@ -34,6 +34,10 @@ class DriverTests(unittest.TestCase):
         options, remaining = driver.arguments(args)
         return driver.command(options, remaining, Path('/buck2'), Path('/repo'), inventory)
 
+    def inventory(self, root):
+        (root / 'tools/buck2').mkdir(parents=True)
+        (root / 'tools/buck2/target-inventory.json').write_text(json.dumps({'packages': []}))
+
     def test_full_library_compile_and_native_cold_flags(self):
         inventory = {'packages': [{'targets': [{'label': '//lib:lib', 'build_label': '//lib:lib[static]'}]}], 'workspace_build_targets': ['//lib:lib[static]', '//bin:bin']}
         command = self.command(['build', '--jobs=2', '--no-remote-cache', '--write-to-cache-anyway', '--build-report=/report'], inventory)
@@ -71,7 +75,7 @@ class DriverTests(unittest.TestCase):
             'packages': [
                 {'targets': [
                     {'label': '//crates/sql:sql', 'build_label': '//crates/sql:sql[static]', 'check_label': '//crates/sql:sql[check]', 'clippy_label': '//crates/sql:sql[clippy.txt]'},
-                    {'label': '//crates/sql:sql__unit_test', 'build_label': '//crates/sql:sql__unit_test', 'check_label': '//crates/sql:sql__unit_test[check]', 'clippy_label': '//crates/sql:sql__unit_test[clippy.txt]', 'tags': ['manual']},
+                    {'label': '//crates/sql:sql__unit_test', 'build_label': '//crates/sql:sql__unit_test', 'check_label': '//crates/sql:sql__unit_test[check]', 'clippy_label': '//crates/sql:sql__unit_test[clippy.txt]', 'tags': []},
                 ]},
                 {'targets': [{'label': '//crates/sql/nested:nested', 'check_label': '//crates/sql/nested:nested[check]'}]},
                 {'targets': [{'label': '//crates/sqlite:sqlite', 'check_label': '//crates/sqlite:sqlite[check]'}]},
@@ -91,11 +95,74 @@ class DriverTests(unittest.TestCase):
             with self.subTest(operation=operation), self.assertRaisesRegex(ValueError, f'No generated {operation} targets match //tools/...'):
                 self.command([operation, '//tools/...'], inventory)
 
+    MANUAL_INVENTORY = {
+        'packages': [
+            {'targets': [
+                {'label': '//crates/api:api', 'build_label': '//crates/api:api[static]', 'check_label': '//crates/api:api[check]', 'clippy_label': '//crates/api:api[clippy.txt]', 'doc_label': '//crates/api:api[doc]'},
+                {'label': '//crates/api:live__test', 'build_label': '//crates/api:live__test', 'check_label': '//crates/api:live__test[check]', 'clippy_label': '//crates/api:live__test[clippy.txt]', 'tags': ['cargo-service-gate', 'manual']},
+                {'label': '//crates/api:ui__test', 'build_label': '//crates/api:ui__test', 'check_label': '//crates/api:ui__test[check]', 'clippy_label': '//crates/api:ui__test[clippy.txt]', 'tags': ['cargo-trybuild', 'manual']},
+            ]},
+            {'targets': [{'label': '//crates/svc:svc__unit_test', 'build_label': '//crates/svc:svc__unit_test', 'check_label': '//crates/svc:svc__unit_test[check]', 'tags': ['manual']}]},
+        ],
+        'feature_lane_units': [{'label': '//crates/api:ui__test__fv_0a1b2c3d', 'build_label': '//crates/api:ui__test__fv_0a1b2c3d', 'check_label': '//crates/api:ui__test__fv_0a1b2c3d[check]'}],
+    }
+
+    def skipping(self, args):
+        options, remaining = driver.arguments(args)
+        skipped = []
+        return driver.command(options, remaining, Path('/buck2'), Path('/repo'), self.MANUAL_INVENTORY, skipped), skipped
+
+    def test_patterns_skip_manual_targets_and_report_them(self):
+        manual = ['//crates/api:live__test', '//crates/api:ui__test']
+        for operation, output in (('build', '//crates/api:api[static]'), ('check', '//crates/api:api[check]'), ('clippy', '//crates/api:api[clippy.txt]')):
+            for pattern in ('//crates/api/...', '//crates/api:all', '//crates/api:'):
+                with self.subTest(operation=operation, pattern=pattern):
+                    command, skipped = self.skipping([operation, pattern])
+                    self.assertEqual(command[-1], output)
+                    self.assertFalse([arg for arg in command if '__test' in arg])
+                    self.assertEqual(skipped, manual)
+        command, skipped = self.skipping(['check', '//...'])
+        self.assertEqual([arg for arg in command if arg.endswith('[check]')], ['//crates/api:api[check]'])
+        self.assertEqual(skipped, manual + ['//crates/svc:svc__unit_test'])
+        command, skipped = self.skipping(['doc', '//crates/api/...'])
+        self.assertEqual((command[-1], skipped), ('//crates/api:api[doc]', []))
+        for operation in ('build', 'check'):
+            with self.subTest(operation=operation), self.assertRaisesRegex(ValueError, f'No non-manual {operation} targets match //crates/svc/...; name a manual target explicitly'):
+                self.skipping([operation, '//crates/svc/...'])
+        analyze, skipped = self.skipping(['--local', 'analyze', '//crates/api/...', '//crates/api:ui__test'])
+        self.assertEqual(analyze[-1], 'deps(//crates/api/... - attrfilter(labels, manual, //crates/api/...) - attrfilter(tags, manual, //crates/api/...)) + deps(//crates/api:ui__test)')
+        self.assertEqual(skipped, manual)
+        self.assertEqual(
+            driver.skipped_line(['//crates/api:ui__test', '//crates/api:live__test'], 2),
+            'hermetic-build: patterns skip manual targets; name one to run it. Skipped: //crates/api:live__test //crates/api:ui__test 2 feature-lane variants',
+        )
+
+    def test_explicit_manual_labels_still_select(self):
+        for operation, suffix in (('build', ''), ('check', '[check]'), ('clippy', '[clippy.txt]')):
+            with self.subTest(operation=operation):
+                command, skipped = self.skipping([operation, '//crates/api/...', '//crates/api:ui__test', 'root//crates/api:live__test'])
+                self.assertEqual(command[-2:], ['//crates/api:ui__test' + suffix, '//crates/api:live__test' + suffix])
+                self.assertEqual(skipped, ['//crates/api:live__test', '//crates/api:ui__test'])
+        command, skipped = self.skipping(['check', '//crates/api:ui__test__fv_0a1b2c3d'])
+        self.assertEqual((command[-1], skipped), ('//crates/api:ui__test__fv_0a1b2c3d[check]', []))
+        # Manual without a Cargo-only tag, and a service gate, run when named.
+        command, skipped = self.skipping(['test', '//crates/svc:svc__unit_test', '//crates/api:live__test'])
+        front = command[:command.index('--')]
+        self.assertEqual((front[-2:], skipped), (['//crates/svc:svc__unit_test', '//crates/api:live__test'], []))
+
+    def test_explicit_cargo_only_test_fails_naming_the_replacement(self):
+        for label in ('//crates/api:ui__test', 'root//crates/api:ui__test', 'crates/api:ui__test', '//crates/api:ui__test__fv_0a1b2c3d'):
+            with self.subTest(label=label), self.assertRaisesRegex(ValueError, r'^//crates/api:ui__test\S* is Cargo-only \(cargo-trybuild\) and cannot run under Buck2: .*test //crates/api:ui_fixtures, .*`just seal` \(cargo test --workspace --locked --test ui\)$'):
+                self.skipping(['test', '//crates/svc:svc__unit_test', label])
+        # The planner drops it from a pattern, so the pattern itself is accepted.
+        command, _ = self.skipping(['test', '//crates/api/...'])
+        self.assertIn('//crates/api/...', command[:command.index('--')])
+
     def test_test_and_analyze_accept_package_recursive_patterns(self):
         command = self.command(['test', '//crates/sql/...'])
         self.assertIn('//crates/sql/...', command[:command.index('--')])
-        analyze = self.command(['--local', 'analyze', '//crates/sql/...', 'root//crates/core:core'])
-        self.assertEqual(analyze[-1], 'deps(//crates/sql/...) + deps(//crates/core:core)')
+        analyze = self.command(['--local', 'analyze', '//crates/sql:sql', 'root//crates/core:core'])
+        self.assertEqual(analyze[-1], 'deps(//crates/sql:sql) + deps(//crates/core:core)')
         self.assertEqual(self.command(['--local', 'analyze'])[-1], 'deps(//:workspace_compile)')
         for bad in ('--show-output', '//a) + deps(//b', '//crates/sql:sql[check]'):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'analyze accepts only target labels and patterns'):
@@ -306,6 +373,7 @@ class DriverTests(unittest.TestCase):
             root = Path(work)
             (root / '.buckconfig.local').write_text(REMOTE_CONFIG)
             (root / '.buck2').mkdir()
+            self.inventory(root)
             seen = []
             def safe_directory(path):
                 path.mkdir(mode=0o700)
@@ -336,6 +404,7 @@ class DriverTests(unittest.TestCase):
     def test_remote_configuration_requires_pool_metadata_but_local_remains_available(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
+            self.inventory(root)
             local = root / '.buckconfig.local'
             local.write_text(
                 '[buck2_re_client]\n'
