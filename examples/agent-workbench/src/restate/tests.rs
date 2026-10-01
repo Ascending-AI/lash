@@ -82,6 +82,75 @@ impl lash::runtime::RuntimeEffectController for CountingProcessEffectController 
     }
 }
 
+/// Serves each effect as the Restate controller's journaled lane does: a
+/// fault the step marks as its attempt's is handed back unrecorded, for the
+/// engine to run the step again, and any other fault is the step's recorded
+/// outcome, which every replay serves.
+#[derive(Default)]
+struct JournalLaneEffectController {
+    attempt_faults: AtomicUsize,
+    recorded_faults: AtomicUsize,
+}
+
+impl lash::runtime::AwaitEventResolver for JournalLaneEffectController {
+    /// A journal-lane double mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::runtime::RuntimeEffectController for JournalLaneEffectController {
+    async fn execute_effect(
+        &self,
+        envelope: lash::runtime::RuntimeEffectEnvelope,
+        local_executor: lash::runtime::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash::runtime::RuntimeEffectOutcome, lash::runtime::RuntimeEffectControllerError>
+    {
+        let kind = envelope.command.kind();
+        match local_executor.execute(envelope).await {
+            Err(fault) if fault.journal_disposition(kind).is_retryable_derivation() => {
+                self.attempt_faults.fetch_add(1, Ordering::SeqCst);
+                Err(fault)
+            }
+            Err(fault) => {
+                self.recorded_faults.fetch_add(1, Ordering::SeqCst);
+                Err(fault.into_journaled())
+            }
+            outcome => outcome,
+        }
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: lash::runtime::RuntimeEffectGroup,
+    ) -> Result<lash::runtime::EffectGroupHandle, lash::runtime::RuntimeEffectControllerError> {
+        Err(lash::runtime::effect_groups_unsupported(
+            "JournalLaneEffectController",
+        ))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut lash::runtime::EffectGroupHandle,
+        _cancel: lash::runtime::TurnCancelWait,
+    ) -> Result<lash::runtime::GroupSettlement, lash::runtime::RuntimeEffectControllerError> {
+        Err(lash::runtime::effect_groups_unsupported(
+            "JournalLaneEffectController",
+        ))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: lash::runtime::EffectGroupHandle,
+        _disposition: lash::runtime::LoserPolicy,
+    ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
+        Err(lash::runtime::effect_groups_unsupported(
+            "JournalLaneEffectController",
+        ))
+    }
+}
+
 struct OccurrenceFailureTriggerStore {
     inner: Arc<lash_sqlite_store::SqliteTriggerStore>,
     occurrence_failure: Option<lash::plugins::PluginError>,
@@ -463,12 +532,14 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
         let state =
             crate::tests::recoverable_chat_test_state_with_trigger_store(&double, trigger_store)
                 .await;
-        let effect_host = state.core.effect_host();
-        let scoped_effect_controller = effect_host
-            .scoped(lash::runtime::AdmittedScope::runtime_operation(
-                "cron-occurrence-classification-test",
-            ))
-            .expect("scope inline trigger emission");
+        // The occurrence's ingest is a journaled step (FIG-4503), so the
+        // emission runs under a handler's controller, as the cron job's does.
+        let controller = JournalLaneEffectController::default();
+        let scoped_effect_controller = lash::runtime::ScopedEffectController::borrowed(
+            &controller,
+            lash::runtime::AdmittedScope::runtime_operation("cron-occurrence-classification-test"),
+        )
+        .expect("scope trigger emission");
         let error = match emit_cron_occurrence_with_effect_controller(
             state,
             WorkbenchCronRequest {
@@ -502,6 +573,17 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
                 "{case} must retain the canonical refusal message: {rendered}"
             );
         }
+        // A typed refusal is the ingest's recorded outcome. An unknown
+        // failure is the attempt's: recorded, every retry of the handler
+        // would replay it and never reach the store again.
+        assert_eq!(
+            (
+                controller.recorded_faults.load(Ordering::SeqCst),
+                controller.attempt_faults.load(Ordering::SeqCst),
+            ),
+            if expected_terminal { (1, 0) } else { (0, 1) },
+            "{case} must be recorded only when it is a typed refusal: {rendered}"
+        );
     }
 }
 

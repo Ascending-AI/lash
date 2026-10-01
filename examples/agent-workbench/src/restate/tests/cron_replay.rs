@@ -27,6 +27,9 @@ use std::convert::Infallible;
 const INVOCATION_CONTENT_TYPE: &str = "application/vnd.restate.invocation.v6";
 
 const MSG_START: u16 = 0x0000;
+const MSG_SUSPENSION: u16 = 0x0001;
+const MSG_ERROR: u16 = 0x0002;
+const MSG_END: u16 = 0x0003;
 const MSG_RUN_PROPOSAL: u16 = 0x0005;
 const MSG_INPUT: u16 = 0x0400;
 const MSG_OUTPUT: u16 = 0x0401;
@@ -37,7 +40,12 @@ const MSG_CALL: u16 = 0x040D;
 const MSG_ONE_WAY: u16 = 0x040E;
 const MSG_RUN: u16 = 0x0411;
 const MSG_GET_LAZY_STATE_DONE: u16 = 0x8002;
+const MSG_CALL_DONE: u16 = 0x800D;
+const MSG_CALL_INVOCATION_ID_DONE: u16 = 0x800E;
 const MSG_RUN_DONE: u16 = 0x8011;
+
+/// The scope index an emission's effect bracket calls (FIG-4503).
+const SCOPE_INDEX_SERVICE: &str = "LashDurableWaitIndex";
 
 fn encode_restate_message(message_type: u16, payload: Vec<u8>) -> Bytes {
     let mut encoded = BytesMut::with_capacity(8 + payload.len());
@@ -191,6 +199,63 @@ fn encode_run_completion(completion_id: u32, value: &[u8]) -> Bytes {
     encode_restate_message(MSG_RUN_DONE, notification.to_vec())
 }
 
+fn encode_call_invocation_id_completion(completion_id: u32, invocation_id: &str) -> Bytes {
+    let mut notification = BytesMut::new();
+    put_varint_field(&mut notification, 1, u64::from(completion_id));
+    put_len_field(&mut notification, 16, invocation_id.as_bytes());
+    encode_restate_message(MSG_CALL_INVOCATION_ID_DONE, notification.to_vec())
+}
+
+fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes {
+    let mut nested_value = BytesMut::new();
+    put_len_field(&mut nested_value, 1, value);
+    let mut notification = BytesMut::new();
+    put_varint_field(&mut notification, 1, u64::from(completion_id));
+    put_len_field(&mut notification, 5, &nested_value);
+    encode_restate_message(MSG_CALL_DONE, notification.to_vec())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct CallCommandFrame {
+    service: String,
+    handler: String,
+    invocation_id_notification_idx: u32,
+    result_completion_id: u32,
+}
+
+fn decode_call_command(payload: &[u8]) -> Option<CallCommandFrame> {
+    Some(CallCommandFrame {
+        service: String::from_utf8(protobuf_len_field(payload, 1)?.to_vec()).ok()?,
+        handler: String::from_utf8(protobuf_len_field(payload, 2)?.to_vec()).ok()?,
+        invocation_id_notification_idx: u32::try_from(protobuf_varint_field(payload, 10)?).ok()?,
+        result_completion_id: u32::try_from(protobuf_varint_field(payload, 11)?).ok()?,
+    })
+}
+
+fn call_command_frames(output: &[u8]) -> Vec<CallCommandFrame> {
+    restate_frames(output)
+        .into_iter()
+        .filter(|(message_type, _)| *message_type == MSG_CALL)
+        .map(|(_, frame)| {
+            decode_call_command(frame.get(8..).expect("call command payload"))
+                .expect("call command decodes")
+        })
+        .collect()
+}
+
+/// The reply the scope index gives an emission's effect bracket: it admits
+/// the effect at `begin_effect`, and acknowledges `end_effect`.
+fn scope_index_reply(call: &CallCommandFrame) -> Option<&'static [u8]> {
+    if !call.service.ends_with(SCOPE_INDEX_SERVICE) {
+        return None;
+    }
+    match call.handler.as_str() {
+        "begin_effect" => Some(br#"{"wire":1,"body":true}"#),
+        "end_effect" => Some(br#"{"wire":1,"body":null}"#),
+        _ => None,
+    }
+}
+
 fn proposed_run_completion(payload: &[u8]) -> Option<(u32, &[u8])> {
     let mut cursor = 0;
     let mut completion_id = None;
@@ -341,7 +406,10 @@ async fn invoke_cron_run_body(endpoint: &Endpoint, body: Bytes) -> Result<Bytes,
 }
 
 /// Drive a fresh (non-replay) `run` invocation to completion, answering the
-/// handler's state read and accepting every run proposal it makes.
+/// handler's state read, accepting every run proposal it makes, and answering
+/// the scope index for each effect bracket. A call to anything else, or an
+/// attempt that ends without an output, fails the drive instead of leaving
+/// the handler waiting.
 async fn invoke_cron_run_driven(
     endpoint: &Endpoint,
     object_key: &str,
@@ -415,7 +483,24 @@ async fn invoke_cron_run_driven(
                         .await
                         .map_err(|error| format!("run completion failed: {error}"))?;
                 }
-                MSG_OUTPUT => {
+                MSG_CALL => {
+                    let call = decode_call_command(payload).ok_or("invalid call command")?;
+                    let reply = scope_index_reply(&call)
+                        .ok_or_else(|| format!("the driver cannot answer {call:?}"))?;
+                    let input = sender.as_mut().expect("cron run input stays open");
+                    input
+                        .send_data(encode_call_invocation_id_completion(
+                            call.invocation_id_notification_idx,
+                            &format!("inv_cron_replay_{}", call.result_completion_id),
+                        ))
+                        .await
+                        .map_err(|error| format!("call invocation id failed: {error}"))?;
+                    input
+                        .send_data(encode_call_completion(call.result_completion_id, reply))
+                        .await
+                        .map_err(|error| format!("call completion failed: {error}"))?;
+                }
+                MSG_OUTPUT | MSG_SUSPENSION | MSG_ERROR | MSG_END => {
                     drop(sender.take());
                 }
                 _ => {}
@@ -678,8 +763,25 @@ async fn handler_cancels_without_rearming_or_emitting(register_and_disable: bool
 
     let types = command_frame_types(&output);
     assert!(
-        !types.contains(&MSG_SLEEP) && !types.contains(&MSG_CALL) && !types.contains(&MSG_ONE_WAY),
+        !types.contains(&MSG_SLEEP) && !types.contains(&MSG_ONE_WAY),
         "a cancelled tick must not re-arm; command types were {types:?}"
+    );
+    // The only calls are the effect bracket of the outcome's journaled
+    // ingest (FIG-4503).
+    let calls = call_command_frames(&output);
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        ["begin_effect", "end_effect"],
+        "a cancelled tick calls only its outcome's effect bracket: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.service.ends_with(SCOPE_INDEX_SERVICE)),
+        "a cancelled tick calls only the scope index: {calls:?}"
     );
     assert!(
         types.contains(&MSG_CLEAR_STATE),
@@ -769,7 +871,7 @@ async fn non_live_session_cancels_without_reading_a_failing_registration_store()
     assert!(
         !restate_frames(&output)
             .iter()
-            .any(|(message_type, _)| *message_type == 0x0002),
+            .any(|(message_type, _)| *message_type == MSG_ERROR),
         "the registration-store failure must not surface as a handler error"
     );
     let occurrences = lash::triggers::TriggerStore::list_occurrences(

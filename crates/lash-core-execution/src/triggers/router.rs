@@ -1089,6 +1089,25 @@ fn recorded_store_fault(error: PluginError) -> crate::RuntimeEffectControllerErr
     }
 }
 
+/// A store fault inside an emission's recorded ingest (FIG-4519).
+///
+/// A store that did not answer reports an opaque session error, which names
+/// no cause. It is the attempt's, under the live code a plugin hook's opaque
+/// failure settles as: recorded, every replay would serve the outage as the
+/// ingest's refusal, and nothing would ever write the occurrence. A lost
+/// bind stays its step's recorded outcome, since the delivery's recovery
+/// binds it.
+fn ingest_store_fault(error: PluginError) -> crate::RuntimeEffectControllerError {
+    match error {
+        error @ PluginError::Session(_) => crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::PluginSessionManager,
+            error.to_string(),
+        )
+        .retryable_uncommitted_derivation(),
+        error => recorded_store_fault(error),
+    }
+}
+
 fn wrong_command(
     runner: &str,
     envelope: &crate::RuntimeEffectEnvelope,
@@ -1123,7 +1142,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for OccurrenceIn
             .store
             .ingest_occurrence(*request)
             .await
-            .map_err(recorded_store_fault)?;
+            .map_err(ingest_store_fault)?;
         Ok(crate::RuntimeEffectOutcome::IngestTriggerOccurrence {
             receipt: Box::new(receipt),
         })
