@@ -18,12 +18,16 @@ The host submits through `LashSession::send`. The engine endpoint runs the
 production session driver and process worker. The scripted model returns a
 TypeScript cell that starts a child waiting for a signal, with the process
 plugin's `lifetime::starter` policy. PostgreSQL must record `Until(Turn)`.
-A fixture checkpoint hook raises typed `StoreCommitFailed` at the checkpoint
-after the work that starts the child. Restate pauses after
+The second model call returns a cell that does nothing. A fixture response hook
+raises typed `StoreCommitFailed` while it derives that call's response, once
+the child is live: the completion is journaled and its derivation retries, where
+a checkpoint hook's failure is the checkpoint's recorded outcome and fails the
+root. Restate pauses after
 the turn handler's existing eight-attempt bound, with 50 ms retry intervals;
 the production recovery tick records the engine park.
-Repair removes the fault. Redrive serves the recorded first cell and model
-effect, then a distinct second model call returns the answer. The harness never
+Repair removes the fault. Redrive serves the recorded first cell and both
+recorded model effects without buying the second completion again, then a
+distinct third model call returns the answer. The harness never
 constructs admitted roots or drives a host turn
 inline. Attachment bytes use a private SQLite byte store; session, input,
 root, process, scope and control-intent records all use PostgreSQL.
@@ -36,7 +40,7 @@ Each execution emits these case rows in `cases.jsonl`:
   Cancelled terminal and one scope close, and await the child's cancellation.
 - `parked_redrive`: observe no terminal or close while parked, repair and
   redrive by park ID, then require the original admission and exact journal
-  command bytes, two distinct model calls,
+  command bytes, three distinct model calls,
   a real successful output and one child cancellation.
 - `parked_cancel`: discard the first reply, recover the retained decision
   through `ParkedWork::intents`, then repeat the exact park address.
@@ -48,8 +52,8 @@ Each execution emits these case rows in `cases.jsonl`:
   own live child. Only the original scope closes.
 
 - `lost_reply_repeat`: report three stale repeats per parked verb and require
-  unchanged receipts, one model call per original root plus the successor's
-  distinct model call, and no duplicate
+  unchanged receipts, two model calls per original root plus the successor's
+  two distinct model calls, and no duplicate
   terminal write, scope close or child-cancel request.
 
 Parked cancel and fork release the held root invocation. Restate can cascade

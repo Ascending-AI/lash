@@ -271,7 +271,10 @@ class SchemaValidationTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             commands = log.read_text()
-            self.assertIn("kiln test //examples/workflow-graph-roundtrip:test_batch", commands)
+            self.assertIn(
+                "kiln test //examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+                commands,
+            )
             self.assertIn("//examples/workflow-graph-roundtrip:workflow_graph__test", commands)
             self.assertNotIn("cargo ", commands)
 

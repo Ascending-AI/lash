@@ -23,7 +23,10 @@ if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
   # Functional E2E runs without a Kiln fork or pool credentials.
   cargo test -p workflow-graph-roundtrip --all-targets --locked
 else
-  kiln test //examples/workflow-graph-roundtrip:test_batch \
+  # The package's tests are manual-tagged, so it has no `:test_batch`.
+  kiln test //examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test \
+    //examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test \
+    //examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test \
     //examples/workflow-graph-roundtrip:authoring__test \
     //examples/workflow-graph-roundtrip:roundtrip__test \
     //examples/workflow-graph-roundtrip:type_facets__test \

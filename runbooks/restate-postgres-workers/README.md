@@ -169,7 +169,7 @@ store to decide an epoch.
 Run them without the distributed services:
 
 ```sh
-kiln test //runbooks/restate-postgres-workers:test_batch
+kiln test //runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test
 # or, with plain Cargo after sourcing env.sh:
 cargo test -p lash-restate-postgres-workers-e2e --bin lash-e2e-runner
 ```
@@ -179,7 +179,7 @@ services:
 
 ```sh
 kiln build //runbooks/restate-postgres-workers:all
-kiln test //runbooks/restate-postgres-workers:test_batch
+kiln test //runbooks/restate-postgres-workers:restate-postgres-workers__unit_test
 ```
 
 The focused parked-tool process-loss replay gate lives at the Restate endpoint

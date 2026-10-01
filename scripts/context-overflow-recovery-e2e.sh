@@ -36,8 +36,10 @@ trap cleanup EXIT
 
 # The mapping this scenario judges, proved in the kernel before a row is spent.
 if [[ -f .buckconfig.local ]]; then
+  # Buck2 prints a passing test's libtest result line only when asked.
   kiln test \
     --test_arg=context_overflow_response_stops_as_its_own_outcome \
+    --test_output=all \
     //crates/lash-sansio:lash-sansio__unit_test \
     2>&1 | tee "$artifact_root/01-contract-tests.log" | tee "$run_log"
 else

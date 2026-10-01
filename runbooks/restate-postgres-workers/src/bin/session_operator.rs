@@ -64,14 +64,19 @@ impl Harness {
                         }).ok_or_else(|| lash::provider::LlmTransportError::new("operator marker missing"))?;
                     let encoded = serde_json::to_value(&request)
                         .map_err(|error| lash::provider::LlmTransportError::new(error.to_string()))?;
-                    let first = encoded["scope"]["request_id"].as_str()
-                        .is_some_and(|id| id.ends_with(":llm:0"));
+                    let call = encoded["scope"]["request_id"].as_str().unwrap_or_default();
+                    let first = call.ends_with(":llm:0");
+                    // The second call of a faulted root: its response is the
+                    // one whose derivation fails until the repair.
+                    let second = call.ends_with(":llm:1");
                     sqlx::query("INSERT INTO operator_model_calls(marker, request_json) VALUES ($1, $2)")
                         .bind(marker.as_ref()).bind(encoded.to_string())
                         .execute(&pool).await
                         .map_err(|error| lash::provider::LlmTransportError::new(error.to_string()))?;
-                    let body = if marker.contains("withdraw") || !first {
+                    let body = if marker.contains("withdraw") || !(first || second) {
                         "finish(\"real answer\");".to_string()
+                    } else if second {
+                        "const settled = true;".to_string()
                     } else {
                         format!("const child = async () => {{ await waitSignal(\"never\"); return \"child\"; }};\nconst handle = await processes.start({{ definition: child }});\n{}", if marker.contains("running") { "await tools.hold({ running: true });\nfinish(\"real answer\");" } else { "" })
                     };
@@ -227,6 +232,34 @@ impl Harness {
             .context("retained operator receipt")
     }
 
+    /// The retained decision once its engine half is acknowledged. The store
+    /// half commits first, so a receipt read at once may still be pending and
+    /// would differ from every later read by that state alone.
+    async fn acknowledged_receipt(
+        &self,
+        session: &SessionId,
+        root: &TurnId,
+        park: lash_core::store::ParkId,
+        verb: &str,
+    ) -> Result<lash_core::store::ControlIntent> {
+        tokio::time::timeout(WAIT, async {
+            loop {
+                let intent = self.receipt(session, root, park, verb).await?;
+                if matches!(
+                    intent.state,
+                    lash_core::store::ControlIntentState::Acknowledged { .. }
+                ) {
+                    return Ok(intent);
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .context(format!(
+            "{verb} acknowledgement deadline for {session}/{root}"
+        ))?
+    }
+
     async fn journal(&self, session: &SessionId, root: &TurnId, label: &str) -> Result<Value> {
         let client = reqwest::Client::builder()
             .no_proxy()
@@ -365,8 +398,8 @@ impl Harness {
         self.assert_open(&SessionId::from(format!("operator:{tag}")), &root, &child)
             .await?;
         ensure!(
-            self.calls(tag).await? == 1,
-            "park has exactly one recorded model effect"
+            self.calls(tag).await? == 2,
+            "park has exactly two recorded model effects"
         );
         Ok((session, root, park.park_id, child))
     }
@@ -433,13 +466,16 @@ impl SessionPlugin for FaultPlugin {
         let repaired = self.repaired.clone();
         let pool = self.pool.clone();
         // The fault fires once the root's work has started its child: the
-        // checkpoint after that work fails until the operator repairs it.
-        reg.turn().checkpoint(Arc::new(move |ctx| {
+        // response derivation of the next model call fails until the
+        // operator repairs it. That step retries a live fault, so the engine
+        // pauses the root and parks it with the paid completion journaled. A
+        // checkpoint records every fault as its outcome, so a fault there
+        // fails the root for good (FIG-4636).
+        reg.output().response(Arc::new(move |ctx| {
             let repaired = repaired.clone();
             let pool = pool.clone();
             Box::pin(async move {
-                if ctx.checkpoint == lash_core::CheckpointKind::AfterWork
-                    && ctx.session_id.as_str() != "operator:running"
+                if ctx.session_id.as_str() != "operator:running"
                     && !repaired.load(Ordering::SeqCst)
                 {
                     let has_child: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM lash_processes p JOIN lash_session_roots r ON p.lifetime_scope_id = 'turn:' || octet_length(r.session_id)::text || ':' || r.session_id || ':' || octet_length(r.root)::text || ':' || r.root WHERE r.session_id = $1 AND r.terminal_kind IS NULL)")
@@ -454,7 +490,10 @@ impl SessionPlugin for FaultPlugin {
                         ));
                     }
                 }
-                Ok(Vec::new())
+                Ok(lash::plugins::AssistantResponseTransform {
+                    response: ctx.response,
+                    events: Vec::new(),
+                })
             })
         }));
         Ok(())
@@ -585,7 +624,7 @@ async fn main() -> Result<()> {
     .fetch_one(&h.pool)
     .await?;
     ensure!(
-        admission == after && h.calls("redrive").await? == 2,
+        admission == after && h.calls("redrive").await? == 3,
         "redrive preserves root admission and model journal"
     );
     let journal_after = h.journal(&sid, &root, "redrive-after").await?;
@@ -620,7 +659,7 @@ async fn main() -> Result<()> {
     let lost = h.core.parked_work().cancel(&target, cancel_park).await?;
     drop(lost);
     let repeated = h
-        .receipt(&cancel_sid, &cancel_root, cancel_park, "cancel")
+        .acknowledged_receipt(&cancel_sid, &cancel_root, cancel_park, "cancel")
         .await?;
     let cancel_before = h
         .terminal(&cancel_sid, &cancel_root, "cancelled", &cancel_child, true)
@@ -650,7 +689,9 @@ async fn main() -> Result<()> {
         .fork(&fork_sid, &fork_root, fork_park)
         .await?;
     drop(lost);
-    let repeated_fork = h.receipt(&fork_sid, &fork_root, fork_park, "fork").await?;
+    let repeated_fork = h
+        .acknowledged_receipt(&fork_sid, &fork_root, fork_park, "fork")
+        .await?;
     let lash_core::store::ControlIntentKind::Fork {
         new_root: Some(successor),
         ..
@@ -703,7 +744,7 @@ async fn main() -> Result<()> {
     let fork_calls = h.calls("park-fork").await?;
     let duplicate_effects: i64 = sqlx::query_scalar("SELECT count(*) FROM (SELECT request_json::jsonb->'scope'->>'request_id' AS id FROM operator_model_calls GROUP BY id HAVING count(*) > 1) duplicates")
         .fetch_one(&h.pool).await?;
-    ensure!(cancel_calls == 1 && fork_calls == 2 && duplicate_effects == 0);
+    ensure!(cancel_calls == 2 && fork_calls == 4 && duplicate_effects == 0);
     emit(
         "lost_reply_repeat",
         json!({"cancel_intent":repeated.id,"fork_intent":repeated_fork.id,"receipts_preserved":true,"stale_requests_refused":6,"repeats":3,"cancel_model_calls":cancel_calls,"fork_model_calls":fork_calls,"duplicate_model_effects":duplicate_effects}),

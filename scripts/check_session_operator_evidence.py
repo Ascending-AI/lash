@@ -21,7 +21,7 @@ def check(path):
         if case == "withdrawal":
             valid &= d["input_terminal"] is True and d["model_calls"] == 0
         elif case == "lost_reply_repeat":
-            valid &= d["repeats"] == 3 and d["cancel_model_calls"] == 1 and d["fork_model_calls"] == 2 and d["duplicate_model_effects"] == 0
+            valid &= d["repeats"] == 3 and d["cancel_model_calls"] == 2 and d["fork_model_calls"] == 4 and d["duplicate_model_effects"] == 0
             valid &= d["receipts_preserved"] is True and d["stale_requests_refused"] == 6
         else:
             valid &= d["terminal_writes"] == d["child_cancels"] == d["scope_closes"] == d["child_scope_closes"] == 1
@@ -32,7 +32,7 @@ def check(path):
             valid &= child_ended
             valid &= d["terminal_kind"] == ("answered" if case == "parked_redrive" else "cancelled")
             if case == "parked_redrive":
-                valid &= d["same_admission"] is True and d["model_calls"] == 2 and d["same_journal_prefix"] is True and d["recorded_commands"] > 0
+                valid &= d["same_admission"] is True and d["model_calls"] == 3 and d["same_journal_prefix"] is True and d["recorded_commands"] > 0
             if case == "parked_fork":
                 valid &= bool(d["successor"]) and d["successor"] != d["original"] and d["successor_scope_open"] is True
         if not valid:
