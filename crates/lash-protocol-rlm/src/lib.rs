@@ -43,7 +43,7 @@ pub use lash_lashlang_runtime::{
 /// tool's JSON Schemas.
 pub use lash_sansio::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
-    ShapeField, ShapeKind,
+    ShapeField, ShapeKind, ShapeRow,
 };
 pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{

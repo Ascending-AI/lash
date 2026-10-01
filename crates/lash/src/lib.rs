@@ -1251,7 +1251,7 @@ pub mod durability {
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
         BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,
-        EffectJournalRetirement, EffectRetirementGate, ProcessLocalExecution,
+        EffectJournalRetirement, EffectRetirementGate, HostStartAdmission, ProcessLocalExecution,
         ProcessOutcomeObserver, ProcessTurnCancellation, RuntimeAwaitEventOptions,
         RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
@@ -1342,8 +1342,8 @@ pub mod runtime {
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
         RuntimeNamedPhase, RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase,
         RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext, TurnControlBinding,
-        WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
+        SessionTurnDefaultMint, SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext,
+        TurnControlBinding, WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
@@ -1467,8 +1467,8 @@ pub mod restate {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::SessionDriver;
     pub use lash_core::engine::{
-        Admitted, AdmittedWork, DriveHold, DriveOutcome, DriveRequest, DriveRequestId, DriveStop,
-        ReconcileCursor, RootOutcome, RootRunEnd,
+        Admitted, AdmittedWork, DriveHold, DriveLoop, DriveOutcome, DriveRequest, DriveRequestId,
+        DriveStop, ReconcileCursor, RootOutcome, RootRunEnd,
     };
     pub use lash_core_store::compat::ComponentId;
     pub use lash_core_store::store::fleet_finalize::{

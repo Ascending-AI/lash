@@ -194,7 +194,7 @@ async fn two_sessions_under_two_model_keys_each_keep_their_request_defaults_acro
     for (id, key, _) in &recorded {
         core.session(*id)
             .create(crate::SessionCreation {
-                spec: SessionSpec::new().model(*key),
+                spec: crate::SessionSpec::new().model(*key),
                 ..crate::SessionCreation::default()
             })
             .await?;

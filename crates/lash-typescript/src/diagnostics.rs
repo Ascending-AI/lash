@@ -746,6 +746,7 @@ mod tests {
             ("adapter/functions.rs", include_str!("adapter/functions.rs")),
             ("adapter/goal.rs", include_str!("adapter/goal.rs")),
             ("adapter/nesting.rs", include_str!("adapter/nesting.rs")),
+            ("adapter/parser.rs", include_str!("adapter/parser.rs")),
             (
                 "adapter/prototype_chain.rs",
                 include_str!("adapter/prototype_chain.rs"),

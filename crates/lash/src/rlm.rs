@@ -147,7 +147,7 @@ pub use lash_protocol_rlm::{
 /// JSON Schemas, shared by every prompt surface.
 pub use lash_protocol_rlm::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
-    ShapeField, ShapeKind,
+    ShapeField, ShapeKind, ShapeRow,
 };
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.

@@ -1296,6 +1296,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         self.assertEqual(
             {
                 "crates/lash",
+                "crates/lash-protocol-rlm",
                 "crates/lash-restate",
                 "crates/lash-restate-test",
                 "examples/agent-workbench",
