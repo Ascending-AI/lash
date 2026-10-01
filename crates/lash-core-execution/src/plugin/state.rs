@@ -224,11 +224,7 @@ impl PluginStateStore {
                 actual: namespace.generation,
             });
         }
-        let registered_edits = if matches!(state.phase, StatePhase::Registering(_)) {
-            Some(edits.clone())
-        } else {
-            None
-        };
+        let recorded_edits = edits.clone();
         let namespace = state
             .data
             .plugins
@@ -271,9 +267,7 @@ impl PluginStateStore {
             .expect("plugin generation exhausted");
         namespace.values = values;
         namespace.generation = generation;
-        if let Some(edits) = registered_edits {
-            state.record(self.plugin_id(), edits);
-        }
+        state.record(self.plugin_id(), recorded_edits);
         Ok(generation)
     }
 }
@@ -312,6 +306,9 @@ pub(super) struct PluginStateRegistry {
     pub(super) data: PluginState,
     phase: StatePhase,
     source: Option<crate::BlobRef>,
+    /// An accepted write landed since `data` was hydrated from `source`:
+    /// `data` no longer equals that hydration.
+    tail: bool,
 }
 impl Default for PluginStateRegistry {
     fn default() -> Self {
@@ -319,6 +316,7 @@ impl Default for PluginStateRegistry {
             data: PluginState::default(),
             phase: StatePhase::Registering(Vec::new()),
             source: None,
+            tail: false,
         }
     }
 }
@@ -331,9 +329,12 @@ impl PluginStateRegistry {
             ..Self::default()
         }
     }
+    /// Registration writes are replayed over every hydration, so they are
+    /// part of it; a write accepted once ready is a tail the source lacks.
     fn record(&mut self, id: &str, edits: Vec<PluginStateEdit>) {
-        if let StatePhase::Registering(log) = &mut self.phase {
-            log.push((id.into(), edits));
+        match &mut self.phase {
+            StatePhase::Registering(log) => log.push((id.into(), edits)),
+            StatePhase::Ready => self.tail = true,
         }
     }
     pub(super) fn initialize(
@@ -349,6 +350,7 @@ impl PluginStateRegistry {
                 data: snapshot.clone(),
                 phase: StatePhase::Ready,
                 source: None,
+                tail: false,
             }));
             for (id, edits) in log {
                 PluginStateStore::bind(
@@ -378,9 +380,11 @@ impl PluginStateRegistry {
     /// (FIG-4202), so an accepted write the head does not carry is an
     /// uncommitted tail, and the live state drops it exactly as a cold
     /// rebuild from that head would (ADR 0078 §5). A namespace bound live
-    /// but absent from the head stays bound, at its default.
+    /// but absent from the head stays bound, at its default. Only a live
+    /// state still equal to its hydration from this head is left as it is:
+    /// a head the bound turn left unchanged still drops the tail.
     pub(super) fn hydrate_live(&mut self, snapshot: &PluginState) {
-        if self.was_hydrated_from(snapshot) {
+        if !self.tail && self.was_hydrated_from(snapshot) {
             return;
         }
         let empty = PluginNamespaceState::default();
@@ -402,6 +406,7 @@ impl PluginStateRegistry {
             self.data.plugins.entry(id).or_default();
         }
         self.source = Some(state_ref(snapshot));
+        self.tail = false;
     }
 }
 #[expect(

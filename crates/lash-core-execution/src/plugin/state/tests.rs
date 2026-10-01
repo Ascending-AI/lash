@@ -450,6 +450,52 @@ fn live_hydration_adopts_the_recorded_head_over_an_uncommitted_tail() {
     );
 }
 
+/// A runtime rematerialized from a head, then handed an accepted write, is
+/// re-hydrated from that same head when the bound turn left its plugin
+/// state unchanged: the tail is dropped all the same (FIG-4600).
+#[test]
+fn live_hydration_from_the_unchanged_source_head_drops_the_uncommitted_tail() {
+    let recorded = {
+        let state = store();
+        state.state.lock_recover().initialize(None).unwrap();
+        state.set("value", serde_json::json!(1)).unwrap();
+        state.state.lock_recover().data.clone()
+    };
+    let registry = Arc::new(Mutex::new(PluginStateRegistry::registering(Some(
+        &recorded,
+    ))));
+    let state = PluginStateStore::bind(
+        &crate::RuntimeOwner::Session(SessionId::from("session")),
+        "mock",
+        registry.clone(),
+    );
+    state.set("registered", serde_json::json!(true)).unwrap();
+    registry.lock_recover().initialize(Some(&recorded)).unwrap();
+    registry.lock_recover().hydrate_live(&recorded);
+    assert_eq!(
+        (state.generation(), state.get("registered")),
+        (2, Some(serde_json::json!(true))),
+        "a state still equal to its hydration keeps its registration writes"
+    );
+
+    state.set("value", serde_json::json!(2)).unwrap();
+    assert!(state.remove("registered").is_ok());
+    registry.lock_recover().hydrate_live(&recorded);
+    assert_eq!(
+        (state.generation(), state.get("value"), state.keys().len()),
+        (1, Some(serde_json::json!(1)), 1),
+        "the head the runtime was built from does not carry the accepted writes"
+    );
+
+    state.remove("value").unwrap();
+    registry.lock_recover().hydrate_live(&recorded);
+    assert_eq!(
+        (state.generation(), state.get("value")),
+        (1, Some(serde_json::json!(1))),
+        "a removal is a tail as a set is"
+    );
+}
+
 #[test]
 fn state_handle_debug_does_not_expose_other_namespaces() {
     let registry = Arc::new(Mutex::new(PluginStateRegistry::default()));
