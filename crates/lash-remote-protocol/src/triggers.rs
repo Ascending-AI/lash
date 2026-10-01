@@ -127,11 +127,24 @@ pub struct RemoteTriggerOccurrenceRecord {
     pub occurred_at_ms: u64,
 }
 
+/// Typed provider-route refusals, with the remaining runtime vocabulary
+/// preserved under its author namespace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTriggerDeliveryFailureCode {
+    TriggerRouteUnavailable,
+    TriggerRouteRevoked,
+    Runtime { code: crate::RemoteFailureCode },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteTriggerDeliveryEmitOutcome {
     Started,
-    Failed { reason: String },
+    Failed {
+        code: RemoteTriggerDeliveryFailureCode,
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

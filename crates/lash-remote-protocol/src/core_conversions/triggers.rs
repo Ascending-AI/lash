@@ -189,14 +189,47 @@ impl TryFrom<RemoteTriggerEmitReport> for lash_core::facade_support::TriggerEmit
     }
 }
 
+impl From<lash_core::RuntimeErrorCode> for RemoteTriggerDeliveryFailureCode {
+    fn from(code: lash_core::RuntimeErrorCode) -> Self {
+        match code {
+            lash_core::RuntimeErrorCode::TriggerRouteUnavailable => Self::TriggerRouteUnavailable,
+            lash_core::RuntimeErrorCode::TriggerRouteRevoked => Self::TriggerRouteRevoked,
+            other => Self::Runtime {
+                code: crate::RemoteFailureCode::from(&other),
+            },
+        }
+    }
+}
+
+impl From<RemoteTriggerDeliveryFailureCode> for lash_core::RuntimeErrorCode {
+    fn from(code: RemoteTriggerDeliveryFailureCode) -> Self {
+        match code {
+            RemoteTriggerDeliveryFailureCode::TriggerRouteUnavailable => {
+                Self::TriggerRouteUnavailable
+            }
+            RemoteTriggerDeliveryFailureCode::TriggerRouteRevoked => Self::TriggerRouteRevoked,
+            RemoteTriggerDeliveryFailureCode::Runtime { code } => {
+                if code.namespace().as_str() == "lash" {
+                    Self::from_wire_code(code.spelling())
+                } else {
+                    Self::from_wire_code(&code.namespaced())
+                }
+            }
+        }
+    }
+}
+
 impl From<lash_core::facade_support::TriggerDeliveryEmitOutcome>
     for RemoteTriggerDeliveryEmitOutcome
 {
     fn from(value: lash_core::facade_support::TriggerDeliveryEmitOutcome) -> Self {
         match value {
             lash_core::facade_support::TriggerDeliveryEmitOutcome::Started => Self::Started,
-            lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { reason } => {
-                Self::Failed { reason }
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { code, reason } => {
+                Self::Failed {
+                    code: code.into(),
+                    reason,
+                }
             }
         }
     }
@@ -208,7 +241,10 @@ impl From<RemoteTriggerDeliveryEmitOutcome>
     fn from(value: RemoteTriggerDeliveryEmitOutcome) -> Self {
         match value {
             RemoteTriggerDeliveryEmitOutcome::Started => Self::Started,
-            RemoteTriggerDeliveryEmitOutcome::Failed { reason } => Self::Failed { reason },
+            RemoteTriggerDeliveryEmitOutcome::Failed { code, reason } => Self::Failed {
+                code: code.into(),
+                reason,
+            },
         }
     }
 }

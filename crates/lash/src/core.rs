@@ -781,6 +781,7 @@ pub struct LashCoreBuilder {
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_observation_config: crate::process_observation::ProcessObservationConfig,
+    trigger_route_restorer: Option<Arc<dyn lash_core::TriggerRouteRestorer>>,
 }
 
 impl LashCoreBuilder {
@@ -812,11 +813,23 @@ impl LashCoreBuilder {
             process_tool_visibility_filter: None,
             live_replay_store: None,
             process_observation_config: Default::default(),
+            trigger_route_restorer: None,
         }
     }
 
     pub fn protocol_plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.protocol_factory = Some(plugin);
+        self
+    }
+
+    /// Install the live service that restores captured provider routes for
+    /// new trigger deliveries. Recorded starts and refusals replay without
+    /// consulting it again; the service is never serialized into a command.
+    pub fn trigger_route_restorer(
+        mut self,
+        restorer: Arc<dyn lash_core::TriggerRouteRestorer>,
+    ) -> Self {
+        self.trigger_route_restorer = Some(restorer);
         self
     }
 

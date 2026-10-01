@@ -472,20 +472,25 @@ impl RuntimeSessionServices {
             .process_wiring()
             .cloned()
             .map(|wiring| {
-                crate::TriggerRouter::new(self.current.host.core.trigger_store(), wiring)
-                    .with_process_artifacts(
-                        Arc::clone(&self.current.host.core.durability.process_env_store),
-                        self.current.host.core.process_engines.clone(),
-                    )
-                    .with_process_starts(
-                        self.current
-                            .host
-                            .core
-                            .backend()
-                            .obligation_ledger(crate::store::ObligationKind::ProcessStart),
-                        Arc::clone(&self.current.host.core.clock),
-                        self.current.host.core.control.relay_policy(),
-                    )
+                let mut router =
+                    crate::TriggerRouter::new(self.current.host.core.trigger_store(), wiring)
+                        .with_process_artifacts(
+                            Arc::clone(&self.current.host.core.durability.process_env_store),
+                            self.current.host.core.process_engines.clone(),
+                        )
+                        .with_process_starts(
+                            self.current
+                                .host
+                                .core
+                                .backend()
+                                .obligation_ledger(crate::store::ObligationKind::ProcessStart),
+                            Arc::clone(&self.current.host.core.clock),
+                            self.current.host.core.control.relay_policy(),
+                        );
+                if let Some(restorer) = &self.current.host.core.control.trigger_route_restorer {
+                    router = router.with_route_restorer(Arc::clone(restorer));
+                }
+                router
             })
     }
 

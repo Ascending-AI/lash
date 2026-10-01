@@ -353,10 +353,16 @@ pub fn trigger_delivery_start_key(reservation: &TriggerDeliveryReservation) -> c
 /// The refusal a recorded emission raises when one of its deliveries did not
 /// start. See [`TriggerRouter::emit_recorded`] for why this is an error rather
 /// than a `Failed` entry in an otherwise successful report.
-fn unstarted_delivery(subscription_id: &str, reason: &str) -> PluginError {
-    PluginError::Session(format!(
-        "trigger delivery for subscription `{subscription_id}` did not start: {reason}"
-    ))
+fn unstarted_delivery(
+    subscription_id: &str,
+    code: &crate::RuntimeErrorCode,
+    reason: &str,
+) -> PluginError {
+    crate::RuntimeEffectControllerError::new(
+        code.clone(),
+        format!("trigger delivery for subscription `{subscription_id}` did not start: {reason}"),
+    )
+    .into()
 }
 
 /// What a router wired for immediate `ProcessStart` attempts carries: the
@@ -496,8 +502,8 @@ impl TriggerRouter {
             .emit_reporting_realization(request, effect_controller)
             .await?;
         for delivery in &report.deliveries {
-            if let TriggerDeliveryEmitOutcome::Failed { reason } = &delivery.outcome {
-                return Err(unstarted_delivery(&delivery.subscription_id, reason));
+            if let TriggerDeliveryEmitOutcome::Failed { code, reason } = &delivery.outcome {
+                return Err(unstarted_delivery(&delivery.subscription_id, code, reason));
             }
         }
         Ok((report, realization))
@@ -561,10 +567,12 @@ impl TriggerRouter {
                 // on the next replay (FIG-4513).
                 Err(DeliveryStartFault::Attempt(fault)) => return Err(fault.into()),
                 Err(DeliveryStartFault::Delivery(err)) => {
+                    let error = crate::RuntimeEffectControllerError::from(err);
                     deliveries.push(reservation.emit_report(
                         None,
                         TriggerDeliveryEmitOutcome::Failed {
-                            reason: err.to_string(),
+                            code: error.code,
+                            reason: error.message,
                         },
                     ));
                     continue;

@@ -1075,9 +1075,9 @@ fn collect_service_fields(
 /// They are each parameter whose type names the trait (directly, or through
 /// a type parameter bounded by it), and each `let` binding whose annotation
 /// or initializer names the trait, a field declared with it, or another such
-/// binding. A delimiter tree carries no types, so this follows declarations
-/// and nothing else: a receiver reached only through a closure parameter, a
-/// `match` arm or a struct literal is not followed.
+/// binding. Typed closure parameters name their service directly; inferred
+/// closure parameters follow the method's receiver, and match-arm bindings
+/// follow the scrutinee. Struct literals do not supply inferred types.
 fn service_receivers(
     signature: &[Token],
     body: &[Token],
@@ -1147,9 +1147,38 @@ fn collect_bindings<'a>(
     fields: &BTreeSet<&str>,
     names: &mut BTreeSet<&'a str>,
 ) {
+    collect_closure_parameters(tokens, types, false, names);
     for (at, token) in tokens.iter().enumerate() {
-        if let Kind::Group(_, inner) = &token.kind {
+        if let Kind::Group(delimiter, inner) = &token.kind {
+            if *delimiter == Delimiter::Paren
+                && at >= 2
+                && tokens[at - 2].is_punct('.')
+                && matches!(
+                    tokens[at - 1].ident(),
+                    Some("map" | "map_or" | "map_or_else" | "and_then" | "inspect" | "for_each")
+                )
+            {
+                let chain = receiver_chain(tokens, at - 2);
+                let inferred = chain
+                    .iter()
+                    .any(|ident| fields.contains(ident) || names.contains(ident));
+                collect_closure_parameters(inner, types, inferred, names);
+            }
             collect_bindings(inner, types, fields, names);
+        }
+        if token.ident() == Some("match") {
+            let rest = &tokens[at + 1..];
+            if let Some(end) = rest
+                .iter()
+                .position(|token| token.group(Delimiter::Brace).is_some())
+            {
+                let inferred = flatten_idents(&rest[..end])
+                    .iter()
+                    .any(|ident| fields.contains(ident) || names.contains(ident));
+                if inferred && let Some(arms) = rest[end].group(Delimiter::Brace) {
+                    collect_match_patterns(arms, names);
+                }
+            }
         }
         if token.ident() != Some("let") {
             continue;
@@ -1178,6 +1207,67 @@ fn collect_bindings<'a>(
             }));
         }
     }
+}
+
+/// Closure declarations are sibling tokens, with the body grouped separately.
+fn collect_closure_parameters<'a>(
+    tokens: &'a [Token],
+    types: &[&str],
+    inferred: bool,
+    names: &mut BTreeSet<&'a str>,
+) {
+    let mut at = 0;
+    while at < tokens.len() {
+        if !tokens[at].is_punct('|') {
+            at += 1;
+            continue;
+        }
+        let Some(end) = tokens[at + 1..]
+            .iter()
+            .position(|token| token.is_punct('|'))
+        else {
+            break;
+        };
+        let end = at + 1 + end;
+        for parameter in split_commas(&tokens[at + 1..end]) {
+            if let Some((name, ty)) = declared(parameter) {
+                if ty.iter().any(|ident| types.contains(ident)) {
+                    names.insert(name);
+                }
+            } else if inferred {
+                collect_pattern_names(parameter, names);
+            }
+        }
+        at = end + 1;
+    }
+}
+
+/// A top-level comma ends an arm; groups keep its body out of its pattern.
+fn collect_match_patterns<'a>(tokens: &'a [Token], names: &mut BTreeSet<&'a str>) {
+    let mut start = 0;
+    let mut in_body = false;
+    for at in 0..tokens.len() {
+        if tokens[at].is_punct(',') || (in_body && tokens[at].group(Delimiter::Brace).is_some()) {
+            start = at + 1;
+            in_body = false;
+        }
+        if tokens[at].is_punct('=') && tokens.get(at + 1).is_some_and(|token| token.is_punct('>')) {
+            let pattern = &tokens[start..at];
+            let guard = pattern
+                .iter()
+                .position(|token| token.ident() == Some("if"))
+                .unwrap_or(pattern.len());
+            collect_pattern_names(&pattern[..guard], names);
+            start = at + 2;
+            in_body = true;
+        }
+    }
+}
+
+fn collect_pattern_names<'a>(tokens: &'a [Token], names: &mut BTreeSet<&'a str>) {
+    names.extend(flatten_idents(tokens).into_iter().filter(|ident| {
+        !matches!(*ident, "mut" | "ref") && ident.chars().next().is_some_and(char::is_lowercase)
+    }));
 }
 
 /// If a call's argument list follows at `at` (directly, or after a

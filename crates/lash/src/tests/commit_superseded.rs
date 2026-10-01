@@ -572,7 +572,10 @@ async fn a_live_fault_retried_past_drive_head_keeps_the_recorded_ready() -> Resu
         ));
     })
     .await;
-    a_redriven_root_past_drive_head_ends_with_its_refusal(fixture).await
+    Box::pin(a_redriven_root_past_drive_head_ends_with_its_refusal(
+        fixture,
+    ))
+    .await
 }
 
 /// FIG-4058: the refused run fails between meeting its refusal and writing
@@ -587,5 +590,8 @@ async fn a_refused_root_failed_before_its_end_write_replays_to_an_ended_root() -
         ));
     })
     .await;
-    a_redriven_root_past_drive_head_ends_with_its_refusal(fixture).await
+    Box::pin(a_redriven_root_past_drive_head_ends_with_its_refusal(
+        fixture,
+    ))
+    .await
 }

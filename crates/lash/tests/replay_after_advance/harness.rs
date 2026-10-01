@@ -280,6 +280,15 @@ pub struct World {
 
 impl World {
     pub async fn new(kind: StorageKind, live: bool, tag: &str) -> Self {
+        Self::with_route_restorer(kind, live, tag, None).await
+    }
+
+    pub async fn with_route_restorer(
+        kind: StorageKind,
+        live: bool,
+        tag: &str,
+        restorer: Option<Arc<dyn lash::triggers::TriggerRouteRestorer>>,
+    ) -> Self {
         let storage = Storage::new(kind).await;
         let engine = if live {
             assert!(
@@ -306,7 +315,7 @@ impl World {
             })
             .build()
             .into_handle();
-        let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+        let mut builder = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .plugin(lash_core::testing::process_engine_plugin_fixture())
@@ -324,7 +333,11 @@ impl World {
                     )
                     .expect("one key registers"),
             ))
-            .model("mock-model")
+            .model("mock-model");
+        if let Some(restorer) = restorer {
+            builder = builder.trigger_route_restorer(restorer);
+        }
+        let core = builder
             .build(lash_core::LeaseOwnerIdentity::opaque(
                 "replay-after-advance",
                 "facade",

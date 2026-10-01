@@ -50,6 +50,10 @@ fn main() {
         }],
     };
     report.validate().unwrap();
+    let _failure = lash::remote::triggers::RemoteTriggerDeliveryEmitOutcome::Failed {
+        code: lash::remote::triggers::RemoteTriggerDeliveryFailureCode::TriggerRouteRevoked,
+        reason: "grant withdrawn".into(),
+    };
 
     let _cause = lash::remote::turn_result::RemoteCausalRef::TriggerOccurrence {
         occurrence_id: "occurrence:1".to_string(),

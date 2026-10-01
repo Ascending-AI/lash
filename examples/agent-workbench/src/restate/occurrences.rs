@@ -14,7 +14,7 @@ pub(crate) struct CronEmitReport {
 }
 
 /// Every delivery a trigger occurrence produced, with the outcome and, for a
-/// refusal, the reason.
+/// refusal, the typed code and reason.
 ///
 /// `started_process_ids()` leaves out a delivery that failed to start, so
 /// tracing only that turned a delivery the store had reserved and then refused
@@ -28,16 +28,17 @@ pub(crate) fn trigger_delivery_trace(
             .deliveries
             .iter()
             .map(|delivery| {
-                let (outcome, reason) = match &delivery.outcome {
-                    lash::triggers::TriggerDeliveryEmitOutcome::Started => ("started", None),
-                    lash::triggers::TriggerDeliveryEmitOutcome::Failed { reason } => {
-                        ("failed", Some(reason.clone()))
+                let (outcome, code, reason) = match &delivery.outcome {
+                    lash::triggers::TriggerDeliveryEmitOutcome::Started => ("started", None, None),
+                    lash::triggers::TriggerDeliveryEmitOutcome::Failed { code, reason } => {
+                        ("failed", Some(code), Some(reason))
                     }
                 };
                 json!({
                     "subscription_id": delivery.subscription_id,
                     "process_id": delivery.process_id,
                     "outcome": outcome,
+                    "code": code,
                     "reason": reason,
                 })
             })

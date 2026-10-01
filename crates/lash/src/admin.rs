@@ -94,11 +94,14 @@ impl CoreTriggerAdmin {
         let store = self.store()?;
         let ports = self.core.substrate_slot.ports().await;
         let process_work = ports.process;
-        let router = lash_core::facade_support::TriggerRouter::new(store, process_work)
+        let mut router = lash_core::facade_support::TriggerRouter::new(store, process_work)
             .with_process_artifacts(
                 Arc::clone(&self.core.env.core.durability.process_env_store),
                 self.core.host_process_engines.clone(),
             );
+        if let Some(restorer) = &self.core.env.core.control.trigger_route_restorer {
+            router = router.with_route_restorer(std::sync::Arc::clone(restorer));
+        }
         router
             .emit(request, &scoped_effect_controller)
             .await

@@ -205,7 +205,13 @@ async fn trigger_route_world(
     tag: &str,
     probe: &Arc<RouteProbe>,
 ) -> (World, lash_core::facade_support::TriggerRouter, Operation) {
-    let world = World::new(kind, live, tag).await;
+    let world = World::with_route_restorer(
+        kind,
+        live,
+        tag,
+        Some(Arc::clone(probe) as Arc<dyn lash::triggers::TriggerRouteRestorer>),
+    )
+    .await;
     let backend = world.engine.backend();
     let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         backend.process_env_store().as_ref(),
@@ -261,12 +267,12 @@ async fn trigger_route_world(
     )
     .with_route_restorer(Arc::clone(probe) as Arc<dyn lash_core::TriggerRouteRestorer>);
     let operation: Operation = {
-        let router = router.clone();
+        let core = world.core.clone();
         Arc::new(move |scoped| {
-            let router = router.clone();
+            let core = core.clone();
             Box::pin(async move {
                 receipt(
-                    router
+                    core.triggers()
                         .emit(
                             lash_core::TriggerOccurrenceRequest::new(
                                 "raa.route",
@@ -274,7 +280,7 @@ async fn trigger_route_world(
                                 json!({"law": "route"}),
                                 "raa-route-occurrence",
                             ),
-                            &scoped,
+                            scoped,
                         )
                         .await,
                 )
@@ -340,11 +346,25 @@ pub async fn trigger_route_unavailable_at_start(kind: StorageKind, live: bool) {
         "raa-route-unavailable",
         operation,
         async |recorded: &Value| {
+            assert_eq!(
+                recorded["deliveries"][0]["outcome"]["failed"]["code"],
+                json!("trigger_route_unavailable"),
+                "the report carries the typed refusal code: {recorded}"
+            );
+            let report: lash::triggers::TriggerEmitReport =
+                serde_json::from_value(recorded.clone()).expect("decode the facade report");
+            assert!(matches!(
+                report.deliveries[0].outcome,
+                lash::triggers::TriggerDeliveryEmitOutcome::Failed {
+                    code: lash::triggers::RuntimeErrorCode::TriggerRouteUnavailable,
+                    ..
+                }
+            ));
             let reason = recorded["deliveries"][0]["outcome"]["failed"]["reason"]
                 .as_str()
                 .unwrap_or_else(|| panic!("the first emission's delivery failed: {recorded}"));
             assert!(
-                reason.contains("trigger_route_unavailable") && reason.contains("connect timeout"),
+                reason.contains("connect timeout"),
                 "the start records the typed refusal: {reason}"
             );
             assert_eq!(probe.calls(), 1, "the fresh start asked the restorer once");

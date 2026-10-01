@@ -447,7 +447,8 @@ facade's session and process lookups) that runs on a replay path outside
 every recorded step. Its surface also holds the live host services a durable
 path consults (the trigger route restorer): a call to one outside every
 recorded step fails the same way. A service call is matched by its receiver's
-declared trait (a field, parameter or binding declared with it), not by the
+declared trait, including typed closure parameters and bindings carried
+through closure receivers or match scrutinees, not by the
 method's bare name, so an unrelated method of the same name is no hit. It
 parses the store and service traits, so a new trait method must be classified
 as a read, as a write or admission, or as a live service before the gate
@@ -459,7 +460,11 @@ host service has no pin class: it serves new work only. The route restorer is
 asked inside the delivery start's recorded admission (`register_process_start`),
 and only while no process holds the start's key, so its answer, an unavailable
 or revoked route included, is that step's recorded outcome; a replay reads the
-record and a redrive finds the started process, and neither asks again. The
+record and a redrive finds the started process, and neither asks again.
+Hosts install this live service through `LashCoreBuilder::trigger_route_restorer`;
+immediate facade and session emissions and delivery recovery share it. Emit
+reports retain the recorded refusal code as an enum locally and remotely.
+The
 gate's self-tests plant a read ahead of a journaled command, including in the
 real facade, and a restorer call ahead of the delivery start and of the
 Restate registration step, and require the gate to fail.

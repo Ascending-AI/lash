@@ -69,6 +69,9 @@ pub const DEFAULT_ABORT_DRAIN_GRACE: std::time::Duration = std::time::Duration::
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
+    /// Live restoration of captured provider routes for new trigger starts,
+    /// shared by immediate delivery and recovery. Never journaled as wiring.
+    pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
     /// The termination policy a root records on its first execution. Terminal
     /// assembly reads the root's record, never this field (FIG-4389).
     pub termination: TerminationPolicy,
@@ -229,6 +232,7 @@ impl RuntimeHostConfig {
                 termination: TerminationPolicy::default(),
                 abort_drain_grace: DEFAULT_ABORT_DRAIN_GRACE,
                 effect_host,
+                trigger_route_restorer: None,
                 process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
                 lease_timings: crate::LeaseTimings::default(),
                 process_tool_visibility_filter: None,

@@ -82,6 +82,7 @@ impl CoreSessionDriver {
             scopes: Arc::clone(&self.config.env.core.control.scope_close),
             processes: Some(ports.process.clone()),
             administration,
+            trigger_route_restorer: self.config.env.core.control.trigger_route_restorer.clone(),
             clock: Arc::clone(&self.config.env.core.clock),
             policy: self.config.env.core.control.relay_policy(),
         })

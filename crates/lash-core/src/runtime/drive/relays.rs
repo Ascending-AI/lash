@@ -121,6 +121,8 @@ pub struct RelayParts {
     pub processes: Option<ProcessWorkWiring>,
     /// What a physical delete runs through.
     pub administration: Option<SessionAdministration>,
+    /// The same live route service the deployment uses for immediate emits.
+    pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
     pub clock: Arc<dyn Clock>,
     /// The policy every kind's relay runs under: the host's attempt budget
     /// (ADR 0109 §1.8) on the kinds' shared retry shape.
@@ -156,6 +158,7 @@ pub fn obligation_relays(
         scopes,
         processes,
         administration,
+        trigger_route_restorer,
         clock,
         policy,
     } = parts;
@@ -214,7 +217,7 @@ pub fn obligation_relays(
                 // The router a recovered delivery starts through is wired the
                 // way the deployment's own emits are, so the recovered start
                 // registers the process a first attempt would have.
-                let router = crate::TriggerRouter::new(backend.trigger_store(), wiring.clone())
+                let mut router = crate::TriggerRouter::new(backend.trigger_store(), wiring.clone())
                     .with_process_artifacts(
                         backend.process_env_store(),
                         administration.process_engines().clone(),
@@ -224,6 +227,9 @@ pub fn obligation_relays(
                         Arc::clone(&clock),
                         policy,
                     );
+                if let Some(restorer) = &trigger_route_restorer {
+                    router = router.with_route_restorer(Arc::clone(restorer));
+                }
                 Arc::new(
                     TriggerDeliveryRelay::new(backend.obligation_ledger(kind), router)
                         .with_policy(policy),

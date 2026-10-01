@@ -264,6 +264,22 @@ fn trigger_types_are_homed_in_triggers(
     let _ = lash::triggers::empty_trigger_source_key("ui.button.pressed");
 }
 
+fn trigger_route_service_is_installable(
+    builder: lash::LashCoreBuilder,
+    restorer: std::sync::Arc<dyn lash::triggers::TriggerRouteRestorer>,
+    outcome: lash::triggers::TriggerDeliveryEmitOutcome,
+) {
+    let _ = builder.trigger_route_restorer(restorer);
+    let _ = matches!(
+        outcome,
+        lash::triggers::TriggerDeliveryEmitOutcome::Failed {
+            code: lash::triggers::RuntimeErrorCode::TriggerRouteUnavailable
+                | lash::triggers::RuntimeErrorCode::TriggerRouteRevoked,
+            ..
+        }
+    );
+}
+
 async fn persistence_load_helpers_are_nameable(
     store: &lash::persistence::SessionStore,
 ) -> Result<Option<RuntimeSessionState>, StoreError> {

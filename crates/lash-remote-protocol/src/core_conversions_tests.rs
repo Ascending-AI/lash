@@ -436,6 +436,9 @@ fn prompt_layer_round_trips_without_protocol_crate_depending_on_core_by_default(
     assert_eq!(core, prompt);
 }
 
+#[path = "core_conversions_tests/trigger_route_refusals.rs"]
+mod trigger_route_refusals;
+
 #[test]
 fn trigger_dtos_round_trip_core_values() {
     let request = lash_core::TriggerOccurrenceRequest::new(

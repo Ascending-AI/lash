@@ -876,6 +876,60 @@ mod self_test {
     }
 
     #[test]
+    fn host_service_closure_parameters_are_followed() {
+        let found = hits(
+            r#"
+            struct Router { service: Option<Arc<dyn TriggerRouteRestorer>> }
+            async fn start(&self, scoped: ScopedEffectController<'_>) {
+                let typed = |host: Arc<dyn TriggerRouteRestorer>| async move {
+                    host.restore(&capture).await
+                };
+                self.service.as_ref().map(|mapped| async move {
+                    mapped.restore(&capture).await
+                });
+                let unrelated = |other: ReplayOrdinals| other.restore(&state);
+            }
+        "#,
+        );
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            check(&found, &[])
+                .iter()
+                .all(|failure| failure.contains("consults a live host service"))
+        );
+    }
+
+    #[test]
+    fn host_service_match_arm_bindings_are_followed() {
+        let found = hits(
+            r#"
+            struct Router { service: Option<Arc<dyn TriggerRouteRestorer>> }
+            async fn start(&self, scoped: ScopedEffectController<'_>) {
+                match self.service.as_ref() {
+                    Some(matched) => matched.restore(&capture).await,
+                    None => Ok(()),
+                }
+                let alias = self.service.clone();
+                match alias {
+                    Some(ref borrowed) => { borrowed.restore(&capture).await; }
+                    None => (),
+                }
+                match unrelated {
+                    Some(other) => other.restore(&state),
+                    None => (),
+                }
+            }
+        "#,
+        );
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            check(&found, &[])
+                .iter()
+                .all(|failure| failure.contains("consults a live host service"))
+        );
+    }
+
+    #[test]
     fn a_host_service_call_inside_a_step_or_of_another_type_passes() {
         let found = hits(
             r#"

@@ -285,7 +285,7 @@ mod tests {
         assert!(
             matches!(
                 &report.deliveries[0].outcome,
-                TriggerDeliveryEmitOutcome::Failed { reason }
+                TriggerDeliveryEmitOutcome::Failed { reason, .. }
                     if reason.contains("captured source contract")
             ),
             "off-contract occurrence must refuse, got {:?}",
@@ -381,7 +381,7 @@ mod tests {
             assert!(
                 matches!(
                     &delivery.outcome,
-                    TriggerDeliveryEmitOutcome::Failed { reason } if reason.contains(marker)
+                    TriggerDeliveryEmitOutcome::Failed { reason, .. } if reason.contains(marker)
                 ),
                 "expected a visible {marker} refusal, got {:?}",
                 delivery.outcome
