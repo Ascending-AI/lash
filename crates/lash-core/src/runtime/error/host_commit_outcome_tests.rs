@@ -57,3 +57,21 @@ fn park_and_close_preserve_store_contention_as_typed_store_error() {
         }
     ));
 }
+
+#[test]
+fn a_superseded_drive_fence_is_a_superseded_commit_on_every_commit_path() {
+    let stale = || StoreError::StaleDriveFence {
+        session_id: crate::SessionId::from("fenced"),
+        fence_epoch: 1,
+        current_epoch: 2,
+    };
+    for mapped in [
+        runtime_error_from_store_commit(stale()),
+        super::runtime_error_from_turn_input_admission(stale()),
+    ] {
+        assert_eq!(mapped.code, RuntimeErrorCode::StoreCommitSuperseded);
+        assert!(!mapped.is_retryable());
+        assert!(!crate::runtime::drive::engine_retries(&mapped));
+        assert!(mapped.message.contains("fenced"), "{mapped:?}");
+    }
+}

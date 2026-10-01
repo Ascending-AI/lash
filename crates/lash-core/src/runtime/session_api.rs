@@ -1443,15 +1443,10 @@ impl LashRuntime {
             Err(crate::StoreError::SessionCommandWithdrawn { .. }) => return Ok(false),
             result => result,
         }
-        .map_err(|error| match error {
-            // A later admission sealed after the drain presented its
-            // fence: nothing was written, and the drive applies the
-            // command (ADR 0109 §7).
-            error @ crate::StoreError::StaleDriveFence { .. } => {
-                RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, error.to_string())
-            }
-            error => super::runtime_error_from_store_commit(error),
-        })?;
+        // A later admission may have sealed after the drain presented its
+        // fence: nothing was written, the refusal is a superseded commit,
+        // and that admission's drive applies the command (ADR 0109 §7).
+        .map_err(super::runtime_error_from_store_commit)?;
         commit_state.apply_persisted_commit_result(result);
         commit_state.mark_node_ids_persisted(persisted_node_ids);
         Ok(true)

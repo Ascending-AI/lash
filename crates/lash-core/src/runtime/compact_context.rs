@@ -389,14 +389,9 @@ impl LashRuntime {
                         // read: nothing applied, and the lane is read again
                         // (FIG-3927 §2.7).
                         crate::StoreError::SessionCommandWithdrawn { .. } => Ok(false),
-                        // A later admission sealed after the command root's:
-                        // that admission's drive applies the command.
-                        error @ crate::StoreError::StaleDriveFence { .. } => {
-                            Err(RuntimeError::new(
-                                RuntimeErrorCode::StoreCommitSuperseded,
-                                error.to_string(),
-                            ))
-                        }
+                        // A later admission that sealed after the command
+                        // root's is a superseded commit: that admission's
+                        // drive applies the command.
                         error => Err(super::runtime_error_from_store_commit(error)),
                     };
                 }

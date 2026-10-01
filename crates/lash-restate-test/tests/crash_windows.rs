@@ -1692,6 +1692,8 @@ async fn live_restate_cell_replay_positional_parity_and_nested_isolation() {
 mod attachment_delivery;
 #[path = "crash_windows/process_root_recovery.rs"]
 mod process_root_recovery;
+#[path = "crash_windows/superseded_fence_commit.rs"]
+mod superseded_fence_commit;
 
 #[path = "crash_windows/journal_settlement_cleanup.rs"]
 mod journal_settlement_cleanup;

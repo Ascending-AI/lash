@@ -736,12 +736,9 @@ impl LashRuntime {
                     crate::StoreError::AppendAncestorNotActive { required_node_id } => {
                         Ok(Ok(CommandCommit::AncestorNotActive { required_node_id }))
                     }
-                    // A later admission sealed after the command root's:
-                    // that admission's drive applies the command.
-                    error @ crate::StoreError::StaleDriveFence { .. } => Err(RuntimeError::new(
-                        RuntimeErrorCode::StoreCommitSuperseded,
-                        error.to_string(),
-                    )),
+                    // A later admission that sealed after the command root's
+                    // is a superseded commit: that admission's drive applies
+                    // the command.
                     error => Err(super::runtime_error_from_store_commit(error)),
                 }
             }

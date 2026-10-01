@@ -13,10 +13,10 @@
 //!   once across a crash between the two — inside the close, or at the
 //!   report handover before it (FIG-3979) — and never for a parked root.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use lash_core::engine::{DriveOutcome, DriveStop, RootOutcome, ScopeCloseSink};
+use lash_core::engine::{DriveAbort, DriveOutcome, DriveStop, RootOutcome, ScopeCloseSink};
 use lash_core::store::{
     AdmissionId, ControlIntentId, DriveEpochSeal, RootStartNonce, RootTerminal, RootTerminalCause,
     RootTerminalKind, RootTerminalWrite, TurnCommitId,
@@ -239,6 +239,12 @@ pub async fn a_host_id_naming_a_terminal_root_is_answered_not_rerun(
 /// seals the session while the admitted root runs, so the root's commit
 /// carries a stale fence. It commits nothing, writes no evidence and closes
 /// no scope; a later drive of the same root commits it once.
+///
+/// The refusal is the run's first commit, which no replay repeats, and it is
+/// permanent: the fence can never commit again. The run ends `Refused` with
+/// the typed, non-retryable `StoreCommitSuperseded` in the attempt that met
+/// it, after one model call, and never asks its engine for a retry
+/// (FIG-4512).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -251,16 +257,19 @@ pub async fn a_root_whose_admission_a_successor_sealed_commits_nothing(
 ) {
     let mut parts = DriveParts::new(prefix, "root-superseded", &effect_host, &stores, 8).await;
     let sealed_over = Arc::new(AtomicBool::new(false));
+    let calls = Arc::new(AtomicUsize::new(0));
     let model = crate::testing::TestProvider::builder()
         .kind("stub")
         .complete({
             let store = Arc::clone(&parts.store);
             let session_id = parts.session_id.clone();
             let sealed_over = Arc::clone(&sealed_over);
+            let calls = Arc::clone(&calls);
             move |_request| {
                 let store = Arc::clone(&store);
                 let session_id = session_id.clone();
                 let sealed_over = Arc::clone(&sealed_over);
+                calls.fetch_add(1, Ordering::SeqCst);
                 async move {
                     if !sealed_over.swap(true, Ordering::SeqCst) {
                         let seal = store
@@ -303,15 +312,26 @@ pub async fn a_root_whose_admission_a_successor_sealed_commits_nothing(
             lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
                 .await
                 .map(|_| ())
-                .map_err(|abort| format!("{abort:?}"))
         })
     })
     .await;
     assert!(sealed_over.load(Ordering::SeqCst), "the successor sealed");
-    let refusal = refused.expect_err("the stale commit is refused");
-    assert!(
-        refusal.contains("StaleDriveFence") || refusal.contains("drive fence"),
-        "{refusal}"
+    match refused {
+        Err(DriveAbort::Refused(refusal)) => {
+            assert_eq!(
+                refusal.code,
+                crate::RuntimeErrorCode::StoreCommitSuperseded,
+                "{refusal:?}"
+            );
+            assert!(!refusal.is_retryable(), "{refusal:?}");
+            assert!(refusal.message.contains("drive fence"), "{refusal:?}");
+        }
+        other => panic!("the stale commit ends the run refused, with no retry: {other:?}"),
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the refused run called the model once"
     );
     assert_eq!(parts.epoch().await.epoch, 2, "the successor's seal stands");
     assert_eq!(terminal(&parts, &root).await, None, "no evidence");

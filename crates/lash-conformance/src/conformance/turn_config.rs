@@ -358,7 +358,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_refuses_its_stale_ep
         .await
         .expect("the tier's runner ran the redriven root")
         .expect_err("the older admission is fenced out after the config drive");
-    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitSuperseded);
     assert!(
         error.message.contains("drive fence epoch") && error.message.contains("is stale"),
         "the refusal names the stale drive epoch: {error:?}"

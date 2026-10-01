@@ -505,8 +505,9 @@ pub enum RuntimeErrorCode {
 /// with a different submission), so it surfaces typed as
 /// [`RuntimeErrorCode::DurableIdentityConflict`]; a closing or deleted
 /// session's refusal surfaces as [`RuntimeErrorCode::SessionDeleted`] with its
-/// cause (ADR 0109 §4); every other admission failure is a store commit
-/// failure.
+/// cause (ADR 0109 §4); a superseded drive fence surfaces as
+/// [`RuntimeErrorCode::StoreCommitSuperseded`]; every other admission failure
+/// is a store commit failure.
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
         err @ (crate::store::StoreError::WriterFenced { .. }
@@ -539,7 +540,8 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
                 }),
             }),
         err @ (crate::store::StoreError::SessionClosing { .. }
-        | crate::store::StoreError::SessionDeleted { .. }) => runtime_error_from_store_commit(err),
+        | crate::store::StoreError::SessionDeleted { .. }
+        | crate::store::StoreError::StaleDriveFence { .. }) => runtime_error_from_store_commit(err),
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
@@ -570,7 +572,10 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
                 "{err}; reload the durable head and re-establish lease and claim authority before retrying"
             ),
         ),
-        err @ crate::store::StoreError::TurnCancelIntentChanged { .. } => {
+        // A stale drive fence is permanent: a later admission's drive owns
+        // the session and the fence can never commit again (ADR 0105 §9).
+        err @ (crate::store::StoreError::TurnCancelIntentChanged { .. }
+        | crate::store::StoreError::StaleDriveFence { .. }) => {
             RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, err.to_string())
         }
         ref err @ crate::store::StoreError::SessionDeleted { ref session_id } => {
