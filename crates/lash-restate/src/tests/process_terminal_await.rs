@@ -181,12 +181,16 @@ impl World {
         ));
         let (observed_tx, observed) = tokio::sync::mpsc::unbounded_channel();
         let attempts = Arc::new(AtomicUsize::new(0));
-        let host = Arc::new(RestateEffectHost::new_for_test(connection));
+        let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress: ingress.clone(),
+                admin: crate::RestateAdminClient::new(match &server {
+                    Some(_) => connection.clone(),
+                    None => RestateConnection::new(required("RESTATE_ADMIN_URL")),
+                }),
                 attachments: stores.attachment_referrers(),
                 sessions: stores.session_store_factory(),
                 process_workflow: LashProcessWorkflowImpl::new_for_test(

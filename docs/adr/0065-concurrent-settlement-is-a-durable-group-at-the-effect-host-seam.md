@@ -79,17 +79,21 @@ the durable opener can redrive and register its context again. Its durable
 end closes its groups under `Cancel` before committing its terminal, and the
 index seats an uncommitted child as `RuntimeEffectGroupChildCancelled`
 without resolving an executor. This also holds on deployments with no
-context source. A tool-child routing miss reads the index's durable cancel
-decision through ingress before retrying: cancellation or retirement ends
-the invocation without executing or seating anything. A committed drain
-keeps retrying, because close cannot cancel its committed final (FIG-4604).
+context source. Every child routing miss reads the index's durable child
+notification through ingress before retrying. Cancellation, retirement or
+an already seated settlement releases the invocation through the engine's
+existing admin kill operation, without executing or seating anything. A
+successful handler return cannot skip a recorded executor's journal tail;
+the kill ends the invocation while preserving its decided seat. A committed
+drain keeps retrying while its seat is still owed,
+because close cannot cancel its committed final (FIG-4604, FIG-4634).
 
 A handler-driven engine records the answer once, in the child's own journal,
 so every replay takes the same branch on whichever worker retries it. A child
 recorded as unroutable settles `Failed` with the terminal
 `RuntimeEffectGroupChildUnroutable`, whose cause names the missing capability,
-and its opener's rank wait resolves. A child recorded as routable keeps the
-retry on any miss.
+and its opener's rank wait resolves. A child recorded as routable keeps
+retrying routing misses while the index still needs its seat.
 
 `GroupReopen::RetainedShape` preserves recorded membership;
 `GroupReopen::RetainedContent` also checks the offered child content. The shape

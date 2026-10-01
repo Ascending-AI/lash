@@ -48,6 +48,7 @@ enum EffectGroupChildRoute {
 pub(crate) struct EffectGroupDispatchImpl {
     pub(super) executors: Arc<dyn GroupExecutors>,
     pub(super) ingress: RestateIngressClient,
+    pub(super) admin: crate::RestateAdminClient,
     pub(super) authority_id: crate::ingress::RestateAuthorityId,
     pub(super) infinite_retry_policy: RunRetryPolicy,
     /// The catalog a session-scope child reads its owning session's state
@@ -68,6 +69,7 @@ impl EffectGroupDispatchImpl {
     pub(crate) fn new(
         host: &crate::RestateEffectHost,
         ingress: RestateIngressClient,
+        admin: crate::RestateAdminClient,
         infinite_retry_policy: RunRetryPolicy,
         sessions: Arc<dyn lash_core::DeploymentStore>,
         route: crate::services::ServiceRoute,
@@ -76,6 +78,7 @@ impl EffectGroupDispatchImpl {
         Self {
             executors: host.group_executors(),
             ingress,
+            admin,
             authority_id: host.authority_id().clone(),
             infinite_retry_policy,
             sessions,
@@ -407,11 +410,9 @@ impl EffectGroupDispatchImpl {
             // host's stack like every other child kind, so a layer over that
             // host sees the wait (FIG-3780).
             let Some(executor) = self.executors.executor_for(&request.envelope) else {
-                return Err(std::io::Error::other(format!(
-                    "no executor currently routes effect group {} child {}; retry on a carrying deployment",
-                    request.group_key, request.position
-                ))
-                .into());
+                return self
+                    .end_unrouted_child(&request.group_key, request.position, ctx.invocation_id())
+                    .await;
             };
             let controller = RestateRuntimeEffectController::new(
                 ctx,
@@ -454,15 +455,17 @@ impl EffectGroupDispatchImpl {
         let run_cancellation = cancellation.clone();
         let envelope = request.envelope.clone();
         let executors = Arc::clone(&self.executors);
+        let dispatch = self.clone();
+        let invocation_id = ctx.invocation_id().to_string();
         let group_key = request.group_key.clone();
         let position = request.position;
         let mut run = Box::pin(
             ctx.run(move || async move {
                 let Some(executor) = executors.executor_for(&envelope) else {
-                    return Err(std::io::Error::other(format!(
-                        "no executor currently routes effect group {group_key} child {position}; retry on a carrying deployment"
-                    ))
-                    .into());
+                    dispatch
+                        .end_unrouted_child(&group_key, position, &invocation_id)
+                        .await?;
+                    return Ok(Json(None));
                 };
                 let outcome = tokio::select! {
                     biased;
@@ -484,7 +487,7 @@ impl EffectGroupDispatchImpl {
                     ))
                     .into());
                 }
-                Ok(Json(outcome))
+                Ok(Json(Some(outcome)))
             })
             .name(format!(
                 "lash:effect-group:{}:{}",
@@ -517,7 +520,50 @@ impl EffectGroupDispatchImpl {
             }
         };
 
+        let Some(outcome) = outcome else {
+            return Ok(());
+        };
         record_child_settlement(&ctx, self.route.namespace(), request, outcome, None).await
+    }
+
+    /// Reads the index outside the child's journal on a routing miss. Admission
+    /// and routing may replay accepted answers from before the seat became
+    /// unnecessary. The engine's existing release path ends this invocation
+    /// without replaying an executor's journal tail or seating again. A
+    /// committed drain whose seat is still owed keeps retrying.
+    async fn end_unrouted_child(
+        &self,
+        group_key: &str,
+        position: usize,
+        invocation_id: &str,
+    ) -> HandlerResult<()> {
+        let notice = self
+            .ingress
+            .call_lash_object::<_, Option<EffectGroupNotification>>(
+                &self
+                    .route
+                    .namespace()
+                    .stable(crate::LashService::EffectGroupState)
+                    .name(),
+                group_key,
+                "child_cancel",
+                &EffectGroupChildCancelRequest { position },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/child_cancel", error))?;
+        if notice.is_some_and(|notice| notice.child_seat_is_no_longer_needed()) {
+            self.admin
+                .kill_invocation(&crate::RestateInvocationId::new(invocation_id))
+                .await
+                .map_err(|error| {
+                    ingress_group_error("release an ended effect-group child", error)
+                })?;
+            return Ok(());
+        }
+        Err(std::io::Error::other(format!(
+            "no executor currently routes effect group {group_key} child {position}; retry on a carrying deployment"
+        ))
+        .into())
     }
 
     /// Decides, once, whether the child is this lane's to run at all, and
@@ -569,35 +615,9 @@ impl EffectGroupDispatchImpl {
         terminal: ToolChildTerminal,
     ) -> HandlerResult<()> {
         let Some(executor) = self.executors.executor_for(&request.envelope) else {
-            // Admission and the route may replay answers from before the
-            // opener's durable end. Read the index's monotonic cancel fact
-            // outside the journal on this miss: it already seated the child,
-            // so this invocation only ends, without executing or seating it.
-            // A committed drain has no cancel decision and keeps retrying.
-            let cancel = self
-                .ingress
-                .call_lash_object::<_, Option<EffectGroupNotification>>(
-                    &self
-                        .route
-                        .namespace()
-                        .stable(crate::LashService::EffectGroupState)
-                        .name(),
-                    &request.group_key,
-                    "child_cancel",
-                    &EffectGroupChildCancelRequest {
-                        position: request.position,
-                    },
-                )
-                .await
-                .map_err(|error| ingress_group_error("EffectGroupIndex/child_cancel", error))?;
-            if cancel.is_some_and(|notice| notice.is_child_cancel()) {
-                return Ok(());
-            }
-            return Err(std::io::Error::other(format!(
-                "no executor currently routes effect group {} tool child {}; retry on a carrying deployment",
-                request.group_key, request.position
-            ))
-            .into());
+            return self
+                .end_unrouted_child(&request.group_key, request.position, ctx.invocation_id())
+                .await;
         };
         let Some(driver) = executor.tool_child_driver() else {
             return Err(TerminalError::new(format!(
@@ -1373,6 +1393,8 @@ async fn seat_child_outcome(
             }
         }
     };
+    #[cfg(test)]
+    crate::tests::effect_group_routing_miss::before_seat(&request.group_key);
     let recorded = namespace
         .effect_group_state(ctx, request.group_key.clone())
         .record_settlement(EffectGroupRecordSettlementRequest {
@@ -1382,6 +1404,8 @@ async fn seat_child_outcome(
         .call()
         .await?
         .into_body();
+    #[cfg(test)]
+    crate::tests::effect_group_routing_miss::after_seat(&request.group_key).await?;
     match recorded {
         EffectGroupRecordSettlementResponse::Recorded { .. }
         | EffectGroupRecordSettlementResponse::Duplicate { .. }

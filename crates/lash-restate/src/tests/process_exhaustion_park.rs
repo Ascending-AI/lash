@@ -119,6 +119,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         crate::services::LashServiceParts {
             effect_host: &host,
             ingress: RestateIngressClient::new(connection.clone()),
+            admin: crate::RestateAdminClient::new(connection.clone()),
             attachments: Arc::clone(&sessions) as Arc<dyn lash_core::AttachmentReferrers>,
             sessions,
             process_workflow: LashProcessWorkflowImpl::new_for_test(

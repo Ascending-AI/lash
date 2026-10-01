@@ -221,7 +221,8 @@ async fn endpoint(ingress: Arc<dyn HttpTransport>, executors: Arc<ChildExecutors
     super::endpoint_protocol::endpoint_on_route(
         crate::EffectGroupDispatchImpl::new(
             &host,
-            crate::RestateIngressClient::new(connection),
+            crate::RestateIngressClient::new(connection.clone()),
+            crate::RestateAdminClient::new(connection),
             restate_sdk::context::RunRetryPolicy::new(),
             super::memory_session_store_factory().await,
             dispatch_route(),

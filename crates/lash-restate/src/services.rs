@@ -784,6 +784,8 @@ pub(crate) struct LashServiceParts<'a, R> {
     pub(crate) effect_host: &'a RestateEffectHost,
     /// The ingress the effect-group dispatcher watches cancellation through.
     pub(crate) ingress: RestateIngressClient,
+    /// The engine's existing admin client, shared with execution release.
+    pub(crate) admin: crate::RestateAdminClient,
     /// The session catalog a session-scope group child checks its state
     /// generation in before it runs (FIG-3619).
     pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
@@ -830,6 +832,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
     let LashServiceParts {
         effect_host,
         ingress,
+        admin,
         sessions,
         attachments,
         process_workflow,
@@ -872,6 +875,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
         EffectGroupDispatchImpl::new(
             effect_host,
             ingress.clone(),
+            admin.clone(),
             RunRetryPolicy::new(),
             Arc::clone(&sessions),
             route,

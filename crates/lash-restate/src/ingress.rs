@@ -912,8 +912,23 @@ impl RestateAdminClient {
         &self,
         invocation_id: &RestateInvocationId,
     ) -> Result<(), RestateHttpError> {
-        self.patch_invocation(invocation_id, "kill", "Restate invocation kill")
+        match self
+            .patch_invocation(invocation_id, "kill", "Restate invocation kill")
             .await
+        {
+            Err(
+                error @ RestateHttpError::Status {
+                    status: 404 | 409, ..
+                },
+            ) => {
+                // Confirm a concurrent release or retention sweep ended this id.
+                match self.invocation_status(invocation_id).await? {
+                    Some(status) if status.is_still_active() => Err(error),
+                    _ => Ok(()),
+                }
+            }
+            result => result,
+        }
     }
 
     pub async fn invocation_status(

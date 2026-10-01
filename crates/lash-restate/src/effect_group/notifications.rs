@@ -80,6 +80,11 @@ pub enum EffectGroupNotification {
 }
 
 impl EffectGroupNotification {
+    /// Whether the index no longer needs a seat from this child's invocation.
+    pub(crate) fn child_seat_is_no_longer_needed(&self) -> bool {
+        matches!(self, Self::Cancel | Self::Retired | Self::Settled)
+    }
+
     /// Whether a child's cancel fact is a cancel: a decided cancel or a
     /// retirement. A seated child, or a group the index has no record of, is
     /// not cancelled.

@@ -218,6 +218,7 @@ impl RestateEngine {
             LashServiceParts {
                 effect_host: &self.effect_host,
                 ingress: RestateIngressClient::new(self.connection.clone()),
+                admin: self.admin.clone(),
                 sessions: self.stores.session_store_factory(),
                 attachments: self.stores.attachment_referrers(),
                 process_workflow: self.process.workflow(

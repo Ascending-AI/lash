@@ -146,6 +146,7 @@ async fn build_endpoint_builder(
         crate::services::LashServiceParts {
             effect_host: &host,
             ingress: ingress.clone(),
+            admin: crate::RestateAdminClient::new(connection.clone()),
             sessions: stores.session_store_factory(),
             attachments: stores.attachment_referrers(),
             process_workflow: LashProcessWorkflowImpl::new(

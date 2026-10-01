@@ -113,6 +113,7 @@ impl World {
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress: RestateIngressClient::new(connection.clone()),
+                admin: crate::RestateAdminClient::new(connection.clone()),
                 attachments: stores.session_store_factory()
                     as Arc<dyn lash_core::AttachmentReferrers>,
                 sessions: stores.session_store_factory(),

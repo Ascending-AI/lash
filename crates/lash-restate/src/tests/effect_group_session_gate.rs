@@ -158,6 +158,7 @@ fn endpoint(sessions: Arc<dyn DeploymentStore>, executors: Arc<CountingExecutors
         crate::EffectGroupDispatchImpl::new(
             &host,
             crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
+            crate::RestateAdminClient::new("http://127.0.0.1:9"),
             restate_sdk::context::RunRetryPolicy::new(),
             sessions,
             dispatch_route(),

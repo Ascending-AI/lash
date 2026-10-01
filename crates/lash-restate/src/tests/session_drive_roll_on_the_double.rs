@@ -333,6 +333,7 @@ impl SessionRoll {
                 crate::services::LashServiceParts {
                     effect_host: &host,
                     ingress: ingress.clone(),
+                    admin: crate::RestateAdminClient::new(connection.clone()),
                     attachments: Arc::clone(&sessions) as Arc<dyn lash_core::AttachmentReferrers>,
                     sessions: Arc::clone(&sessions),
                     process_workflow: LashProcessWorkflowImpl::new(

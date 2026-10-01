@@ -200,6 +200,17 @@ impl ConformanceExecutors {
 }
 
 impl GroupExecutors for ConformanceExecutors {
+    fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+        if !self.mapping_current.load(Ordering::SeqCst) {
+            return self.executor_for(envelope).is_some();
+        }
+        self.current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|executors| executors.routes(envelope))
+    }
+
     /// The installed resolver's routing: a law that installs one which
     /// routes through a layer sees the endpoint's wait children cross it.
     fn route_handler_child_controller<'run>(
@@ -403,131 +414,8 @@ impl HarnessServer {
     }
 }
 
-/// The harness's admin face: where it modifies retained service state and
-/// controls invocations.
-#[derive(Clone)]
-pub(super) enum HarnessAdmin {
-    Live {
-        admin_url: String,
-    },
-    InProcess {
-        server: lash_restate_test::RestateTestServer,
-    },
-}
-
-impl HarnessAdmin {
-    /// Whether the invocation of workflow `service`'s `run` handler under
-    /// `key` is paused: its retry policy spent its attempts, and it runs
-    /// nothing more until an operator resumes it.
-    pub(super) async fn workflow_paused(&self, service: &str, key: &str) -> bool {
-        match self {
-            Self::InProcess { server } => {
-                let target = format!("{service}/{key}/run");
-                server
-                    .invocations()
-                    .iter()
-                    .any(|view| view.target == target && view.status == "paused")
-            }
-            Self::Live { admin_url } => {
-                crate::RestateAdminClient::new(RestateConnection::new(admin_url.clone()))
-                    .workflow_invocation_status(service, key, "run")
-                    .await
-                    .ok()
-                    .flatten()
-                    .is_some_and(|status| status.status.as_str() == "paused")
-            }
-        }
-    }
-
-    /// Kills the open invocation of workflow `service`'s `run` handler under
-    /// `key`, as an operator does, and returns its id once the killed
-    /// execution can run no more work: an abort only stops an attempt's task
-    /// at its next yield, so on the in-process server this waits for the
-    /// killed attempt's task to end — a caller that serves a resubmission
-    /// next must not be overtaken by the killed poll still in flight. A
-    /// live server cannot report its deployment-side tasks, so there the
-    /// kill's own acknowledgement is all there is.
-    pub(super) async fn kill_workflow_run(&self, service: &str, key: &str) -> String {
-        match self {
-            Self::InProcess { server } => {
-                let target = format!("{service}/{key}/run");
-                let open = server
-                    .invocations()
-                    .into_iter()
-                    .find(|view| view.target == target && view.status != "completed")
-                    .unwrap_or_else(|| panic!("an open invocation of `{target}`"));
-                assert_eq!(
-                    server.kill_and_await(&open.id).await,
-                    Some(true),
-                    "kill the open invocation of `{target}`"
-                );
-                open.id
-            }
-            Self::Live { admin_url } => {
-                let admin =
-                    crate::RestateAdminClient::new(RestateConnection::new(admin_url.clone()));
-                let open = admin
-                    .workflow_invocation_status(service, key, "run")
-                    .await
-                    .unwrap_or_else(|error| panic!("find the run of `{service}/{key}`: {error}"))
-                    .unwrap_or_else(|| panic!("an invocation of `{service}/{key}/run`"));
-                admin
-                    .kill_invocation(&crate::RestateInvocationId::new(open.id.clone()))
-                    .await
-                    .unwrap_or_else(|error| panic!("kill `{}`: {error}", open.id));
-                open.id
-            }
-        }
-    }
-
-    /// Purges the completed invocation `id` as the retention sweep does: its
-    /// journal is gone, and its workflow key starts over.
-    pub(super) async fn purge_invocation(&self, id: &str) {
-        match self {
-            Self::InProcess { server } => {
-                // A kill completes the invocation on its own schedule: purge
-                // once it has.
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-                loop {
-                    match server.purge(id) {
-                        Some(true) => return,
-                        Some(false) if tokio::time::Instant::now() < deadline => {
-                            tokio::time::sleep(Duration::from_millis(10)).await;
-                        }
-                        other => panic!("purge `{id}`: {other:?}"),
-                    }
-                }
-            }
-            Self::Live { admin_url } => {
-                let client = reqwest::Client::builder()
-                    .http2_prior_knowledge()
-                    .build()
-                    .expect("build Restate admin client");
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-                loop {
-                    let response = client
-                        .patch(format!(
-                            "{}/invocations/{id}/purge",
-                            admin_url.trim_end_matches('/')
-                        ))
-                        .send()
-                        .await
-                        .unwrap_or_else(|error| panic!("purge `{id}`: {error}"));
-                    let status = response.status();
-                    if status.is_success() {
-                        return;
-                    }
-                    let body = response.text().await.unwrap_or_default();
-                    assert!(
-                        tokio::time::Instant::now() < deadline,
-                        "purge `{id}`: {status} {body}"
-                    );
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                }
-            }
-        }
-    }
-}
+mod admin;
+pub(super) use admin::HarnessAdmin;
 
 pub(super) struct LiveConformanceHarness {
     connection: RestateConnection,
@@ -686,6 +574,7 @@ impl LiveConformanceHarness {
         };
         let ingress = RestateIngressClient::new(connection.clone());
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
+        let invocation_admin = crate::RestateAdminClient::new(admin.connection());
         register(&host);
         let (stores, sqlite, tier) = tier.open().await;
         // The endpoint's accounting continuation settles into the store set
@@ -699,6 +588,7 @@ impl LiveConformanceHarness {
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress,
+                admin: invocation_admin,
                 sessions: stores.session_store_factory(),
                 attachments: stores.attachment_referrers(),
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
@@ -774,12 +664,7 @@ impl LiveConformanceHarness {
 
     /// The admin API of the server this harness runs on.
     pub(super) fn admin_connection(&self) -> RestateConnection {
-        match &self.admin {
-            HarnessAdmin::Live { admin_url } => RestateConnection::new(admin_url.clone()),
-            HarnessAdmin::InProcess { server } => {
-                RestateConnection::with_transport(server.ingress_url(), server.transport())
-            }
-        }
+        self.admin.connection()
     }
 
     /// The harness's admin face: an operator's kill and the retention
@@ -851,6 +736,7 @@ impl LiveConformanceHarness {
         &self,
     ) -> Arc<dyn Fn(Arc<dyn lash_core::DeploymentStore>) -> Endpoint + Send + Sync> {
         let connection = self.connection.clone();
+        let admin = self.admin_client();
         let stores = Arc::clone(&self.stores);
         let process_runner = Arc::clone(&self.process_runner);
         Arc::new(move |sessions| {
@@ -860,6 +746,7 @@ impl LiveConformanceHarness {
                 crate::services::LashServiceParts {
                     effect_host: &host,
                     ingress: RestateIngressClient::new(connection.clone()),
+                    admin: admin.clone(),
                     sessions,
                     attachments: stores.attachment_referrers(),
                     process_workflow: LashProcessWorkflowImpl::new_for_test(
@@ -884,9 +771,17 @@ impl LiveConformanceHarness {
         Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>
     }
 
+    pub(super) fn release_group_context(&self, group_key: &str) {
+        self.host.group_executors().release_group(group_key);
+    }
+
     /// Makes `executors` the endpoint's current group-child resolver.
     pub(super) fn install_executors(&self, executors: Arc<dyn GroupExecutors>) {
         self.executors.install(executors);
+    }
+
+    pub(super) fn install_current_executors(&self, executors: Arc<dyn GroupExecutors>) {
+        self.executors.install_mapping_current(executors);
     }
 
     /// A per-run discriminator for law identities: the Restate server's
