@@ -356,15 +356,24 @@ const STEP_WRAPPERS: &[StepWrapper] = &[
 
 /// A method of a module-private trait whose every call sits inside a recorded
 /// step's span: its body runs inside that step, so its reads are recorded.
-/// The gate proves the trait is declared without a visibility in `files[0]`
-/// (only that module and its children can call the method), that it declares
-/// `method`, and that every call named `method` in `files` (the module's
-/// production sources) lies inside a recorded span. A call moved outside its
-/// step fails the gate.
+/// The gate proves the trait is private in `declaring_file` and declares
+/// `method`. It checks every call named `method` in the declaring directory's
+/// production sources, recursively. This includes path-directed sibling
+/// modules as well as children in subdirectories, without a file list.
+/// A call moved outside its step fails the gate.
 struct StepBody {
-    files: &'static [&'static str],
+    declaring_file: &'static str,
     trait_name: &'static str,
     method: &'static str,
+}
+
+impl StepBody {
+    fn covers(&self, file: &str) -> bool {
+        let directory = std::path::Path::new(self.declaring_file)
+            .parent()
+            .expect("a step body's declaring file has a parent directory");
+        !is_test_path(file) && std::path::Path::new(file).starts_with(directory)
+    }
 }
 
 const STEP_BODIES: &[StepBody] = &[
@@ -372,7 +381,7 @@ const STEP_BODIES: &[StepBody] = &[
     // `load.model-children.list` step, whose stored IDs drive cancellation
     // (FIG-4348).
     StepBody {
-        files: &[LOAD_WORKER, LOAD_BEHAVIORS],
+        declaring_file: LOAD_WORKER,
         trait_name: "WorkloadProcessCleanup",
         method: "owned",
     },
@@ -424,13 +433,13 @@ fn check_tree(
     for body in bodies {
         let declaring = files
             .iter()
-            .find(|(path, _)| path == body.files[0])
+            .find(|(path, _)| path == body.declaring_file)
             .map(|(_, source)| source.as_str())
             .unwrap_or_default();
         if !scan::declares_private_trait(declaring, body.trait_name).unwrap_or(false) {
             failures.push(format!(
                 "step body `{}`: {} declares no private trait `{}`",
-                body.method, body.files[0], body.trait_name
+                body.method, body.declaring_file, body.trait_name
             ));
         }
         if !scan::trait_methods(declaring, body.trait_name)
@@ -444,12 +453,12 @@ fn check_tree(
         let calls: Vec<_> = survey
             .calls
             .iter()
-            .filter(|call| call.name == body.method && body.files.contains(&call.file.as_str()))
+            .filter(|call| call.name == body.method && body.covers(&call.file))
             .collect();
         if calls.is_empty() {
             failures.push(format!(
-                "stale step body `{}`: nothing in {:?} calls it",
-                body.method, body.files
+                "stale step body `{}`: nothing below {} calls it",
+                body.method, body.declaring_file
             ));
         }
         for call in calls.iter().filter(|call| !call.recorded) {
@@ -466,7 +475,7 @@ fn check_tree(
         .filter(|hit| {
             !bodies
                 .iter()
-                .any(|body| hit.function == body.method && body.files.contains(&hit.file.as_str()))
+                .any(|body| hit.function == body.method && body.covers(&hit.file))
         })
         .collect();
     failures.extend(check(&unowned, pins));
@@ -962,6 +971,31 @@ mod self_test {
                 .any(|failure| failure.contains("step body `owned` is called outside")),
             "{failures:?}"
         );
+    }
+
+    #[test]
+    fn a_new_worker_module_is_covered_without_editing_the_proof() {
+        let mut files = read_sources();
+        for path in [
+            "runbooks/restate-postgres-workers/src/load/new_cleanup.rs",
+            "runbooks/restate-postgres-workers/src/load/worker/new_cleanup.rs",
+        ] {
+            files.push((
+                path.to_owned(),
+                "async fn cleanup(admin: &impl WorkloadProcessCleanup) { admin.owned(session).await; }"
+                    .to_owned(),
+            ));
+            let failures = check_tree(&files, PINS, STEP_WRAPPERS, STEP_BODIES);
+            assert!(
+                failures.iter().any(|failure| failure.starts_with(path)
+                    && failure.contains("step body `owned` is called outside")),
+                "a new worker module's unrecorded listing must fail the proof: {failures:?}"
+            );
+            files.last_mut().unwrap().1 =
+                "async fn cleanup(ctx: WorkflowContext<'_>, admin: &impl WorkloadProcessCleanup) { ctx.run(|| async { admin.owned(session).await }).await; }"
+                    .to_owned();
+            assert!(check_tree(&files, PINS, STEP_WRAPPERS, STEP_BODIES).is_empty());
+        }
     }
 
     /// A wrapper that awaits its future before the step it names records

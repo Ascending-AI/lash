@@ -41,6 +41,50 @@ struct Services {
     authority: lash_restate::RestateAuthorityId,
 }
 
+/// Bind the production load dispatcher beside the evidence probe. The
+/// witness pool is lazy: deleting a session never queries load metrics.
+struct DeleteProbe {
+    services: Arc<OnceLock<Services>>,
+    connection: lash_restate::RestateConnection,
+}
+
+impl E2eLoadWorkflow for DeleteProbe {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        request: Json<LoadRequest>,
+    ) -> HandlerResult<Json<LoadResponse>> {
+        let services = self.services.get().expect("the core precedes the handler");
+        let worker = LoadWorker::new(LoadWorkerConfig {
+            worker_id: "load-behavior-replay".to_owned(),
+            core: services.core.clone(),
+            witness: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/unused")
+                .unwrap(),
+            load: LoadContext::named("smoke-v1").unwrap(),
+            restate_ingress_url: self.connection.ingress_url().to_owned(),
+            restate_authority_id: services.authority.clone(),
+            model: lash_core::ModelSpec::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .unwrap(),
+            active: ActiveOperations::default(),
+        });
+        // Preserve the double's transport as well as the live connection.
+        assert!(
+            worker
+                .administration
+                .set(lash_restate::RestateSessionAdministration::new(
+                    services.core.session_administration().await,
+                    self.connection.clone(),
+                    services.authority.clone(),
+                ))
+                .is_ok()
+        );
+        worker.run(ctx, request).await
+    }
+}
+
 struct Probe {
     services: Arc<OnceLock<Services>>,
     /// Every pass's answers, in order: the first attempt's, then each
@@ -260,20 +304,48 @@ async fn prune_promotion(core: &lash::LashCore, process: &str) {
     );
 }
 
-async fn advance(core: &lash::LashCore, run: &str, advance: Advance, recorded: &Evidence) {
+async fn advance(
+    core: &lash::LashCore,
+    ingress: &lash_restate::RestateIngressClient,
+    run: &str,
+    advance: Advance,
+    recorded: &Evidence,
+) {
     let session = session_of(run);
     match advance {
         Advance::PrunePromotion => {
             prune_promotion(core, &recorded.promotion.process_id).await;
         }
         Advance::DeleteSession => {
-            lash_core::SessionCatalogStore::delete_session(
-                core.backend().session_store_factory().as_ref(),
-                &SessionId::from(session.clone()),
-            )
-            .await
-            .unwrap();
-            assert!(core.session(session).open().await.is_err());
+            let request = LoadRequest::DeleteSession {
+                run: run.to_owned(),
+                session_id: session.clone(),
+            };
+            let response = ingress
+                .call_workflow_json::<_, LoadResponse>(
+                    "E2eLoadWorkflow",
+                    &request.workflow_key(),
+                    "run",
+                    &request,
+                )
+                .await
+                .unwrap();
+            let LoadResponse::DeleteSession(report) = response else {
+                panic!("the workload delete must return its delete report: {response:?}");
+            };
+            assert_eq!(report.session_id, session);
+            assert_eq!(report.deletion, DeletionOutcome::Deleted, "{report:?}");
+            assert!(report.reopen_refusal.is_some(), "{report:?}");
+            assert!(core.session(session.clone()).open().await.is_err());
+            assert!(
+                core.backend()
+                    .trigger_store()
+                    .list_subscriptions(lash_core::TriggerSubscriptionFilter::for_session(session))
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "the workload delete removes the behavior subscription before replay"
+            );
         }
         Advance::EditSubscription => {
             turn(core, &session, "edit", 2).await;
@@ -415,6 +487,13 @@ async fn witness(
                     }
                     .serve(),
                 )
+                .bind(
+                    DeleteProbe {
+                        services: cell.clone(),
+                        connection: double.connection(),
+                    }
+                    .serve(),
+                )
                 .build(),
         )
         .await
@@ -470,7 +549,7 @@ async fn witness(
         1,
         "{storage} {case:?}: {emitted:?}"
     );
-    advance(core, &run, case, &original).await;
+    advance(core, &ingress, &run, case, &original).await;
     let advanced = starts(core).await;
     // Kill even on always_replay: its suspended and streaming attempts must
     // both replay the evidence after the store moved on.
@@ -661,13 +740,23 @@ async fn live_witness(case: Advance) {
             let cell = cell.clone();
             let passes = passes.clone();
             move |builder| {
-                builder.bind(
-                    Probe {
-                        services: cell,
-                        passes,
-                    }
-                    .serve(),
-                )
+                builder
+                    .bind(
+                        Probe {
+                            services: cell.clone(),
+                            passes,
+                        }
+                        .serve(),
+                    )
+                    .bind(
+                        DeleteProbe {
+                            services: cell,
+                            connection: lash_restate::RestateConnection::new(env(
+                                "RESTATE_INGRESS_URL",
+                            )),
+                        }
+                        .serve(),
+                    )
             }
         },
     )
@@ -737,7 +826,7 @@ async fn live_witness(case: Advance) {
     let original = assert_original("live", case, &passes.lock().unwrap());
     let emitted = starts(core).await;
     assert_eq!(emitted.processes.len(), 1, "live {case:?}: {emitted:?}");
-    advance(core, &run, case, &original).await;
+    advance(core, &ingress, &run, case, &original).await;
     let advanced = starts(core).await;
     backend.stop_serving(true);
     backend.start_serving().await.unwrap();

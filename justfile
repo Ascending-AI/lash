@@ -228,8 +228,9 @@ effect-group-conformance-e2e:
 # segment's handover, and between a tool presentation's put and its journaled
 # outcome; and the host session law (FIG-4277): a host whose session was
 # deleted while it was parked replays its journal after its deployment dies.
-# Suite wiring lives in `scripts/restate-suites.toml` under `server-double`,
-# `namespaces`, `crash-windows` and `host-send-wait`.
+# The load workload's deletion and behavior evidence replay laws also run
+# here, through the production delete handler. Suite wiring lives in
+# `scripts/restate-suites.toml`.
 server-double-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -244,6 +245,10 @@ server-double-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite crash-windows --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite host-send-wait --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite host-send-wait --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite workload-delete --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite workload-delete --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite load-behavior-replay --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite load-behavior-replay --leg replay
 
 # The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
 # (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its

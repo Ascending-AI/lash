@@ -1178,6 +1178,28 @@ class RestateSuiteSelectionTests(unittest.TestCase):
     def plan(self, *paths: str) -> dict[str, str]:
         return ci_plan.classify([("M", path) for path in paths])
 
+    def test_load_replay_suites_run_both_legs_in_a_ci_selected_recipe(self) -> None:
+        import tomllib
+
+        registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
+        suites = {name for name, spec in registry.items()
+                  if spec["cwd"] == "runbooks/restate-postgres-workers"}
+        self.assertTrue(suites)
+        recipes = json.loads(subprocess.check_output(
+            ["just", "--dump", "--dump-format", "json"], cwd=ROOT, text=True
+        ))["recipes"]
+        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["functional-e2e"]
+        selected = {row["recipe"] for row in job["strategy"]["matrix"]["include"]}
+        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run functional E2E")
+        self.assertIn("just ${{ matrix.recipe }}", run)
+        for suite in suites:
+            for leg in ("live", "replay"):
+                with self.subTest(suite=suite, leg=leg):
+                    self.assertTrue(any(
+                        f"suite {suite} --leg {leg}" in str(recipes[recipe]["body"])
+                        for recipe in selected
+                    ), f"{suite} {leg} has no CI-selected recipe")
+
     def test_the_registry_derives_the_suite_owners(self) -> None:
         self.assertEqual(
             {
