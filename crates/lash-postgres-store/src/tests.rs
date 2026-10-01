@@ -217,7 +217,6 @@ async fn seed_failure_evidence_session(
             ..Default::default()
         },
         refusal: lash_core_execution::ChargeSafetyRefusalEvidence {
-            code: "unsafe_retry_after_output_started".to_string(),
             denial_reason: lash_core_execution::ChargeSafetyDenialReason::GuaranteeRequired,
             protocol_position: lash_core_execution::ProtocolPosition::OutputStarted,
             attempt_number: 1,

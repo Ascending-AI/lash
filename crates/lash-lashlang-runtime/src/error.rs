@@ -173,6 +173,39 @@ pub enum LashlangRuntimeError {
     },
 }
 
+/// The process host operation at a failed boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessHostOp {
+    /// Append a yield or wake event.
+    AppendProcessEvent,
+    /// Await a durable sleep.
+    SleepProcess,
+    /// Resolve a signal event type.
+    ValidateSignalName,
+    /// Persist signal-wait state.
+    SetSignalWait,
+    /// Await a durable signal.
+    AwaitSignal,
+    /// Clear signal-wait state.
+    ClearSignalWait,
+    /// Read a journaled clock or random value.
+    LanguageRuntimeValue,
+}
+
+impl std::fmt::Display for ProcessHostOp {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::AppendProcessEvent => "append process event",
+            Self::SleepProcess => "sleep process",
+            Self::ValidateSignalName => "validate signal name",
+            Self::SetSignalWait => "set signal wait",
+            Self::AwaitSignal => "await signal",
+            Self::ClearSignalWait => "clear signal wait",
+            Self::LanguageRuntimeValue => "read language runtime value",
+        })
+    }
+}
+
 /// A typed failure exposed through the Lashlang execution-host boundary.
 #[non_exhaustive]
 #[derive(Debug, Error)]
@@ -235,31 +268,13 @@ pub enum LashlangHostError {
         operation: String,
         host_operation: String,
     },
-    /// Preparing a child-process start at the process host boundary failed.
-    #[error("{message}")]
-    PrepareProcessStart { message: String },
-    /// Appending a process event at the process host boundary failed.
-    #[error("{message}")]
-    AppendProcessEvent { message: String },
-    /// Sleeping a process at the process host boundary failed.
-    #[error("{message}")]
-    SleepProcess { message: String },
-    /// Validating a signal name at the process host boundary failed.
-    #[error("{message}")]
-    ValidateSignalName { message: String },
-    /// Reading or persisting durable signal-wait state at the process host
-    /// boundary failed: one recorded step does both (FIG-3673).
-    #[error("{message}")]
-    SetSignalWait { message: String },
-    /// Awaiting a signal at the process host boundary failed.
-    #[error("{message}")]
-    AwaitSignal { message: String },
-    /// Clearing signal-wait state at the process host boundary failed.
-    #[error("{message}")]
-    ClearSignalWait { message: String },
-    /// Sending a signal at the process host boundary failed.
-    #[error("{message}")]
-    SignalProcess { message: String },
+    /// A process host operation failed with its original typed cause.
+    #[error("{op}: {source}")]
+    HostBoundary {
+        op: ProcessHostOp,
+        #[source]
+        source: lash_core::PluginError,
+    },
     /// `print` was invoked from a process body where it is unavailable.
     #[error("`print` is not available inside lashlang process bodies")]
     PrintUnavailable,

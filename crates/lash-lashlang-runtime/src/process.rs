@@ -27,7 +27,7 @@ use lashlang::{ExecutionHost, ExecutionHostError};
 
 use crate::{
     LASHLANG_ENGINE_KIND, LashlangHostEnvironmentCheck, LashlangHostError, LashlangProcessEngine,
-    LashlangProcessFailureCode, LashlangProcessInput,
+    LashlangProcessFailureCode, LashlangProcessInput, ProcessHostOp,
     bridge::{
         lashlang_value_to_json, process_event_payload, process_sleep,
         protocol_tool_reply_to_lashlang_value,
@@ -659,6 +659,7 @@ async fn run_lashlang_process_scoped(
         ordinals,
         worker_recovery,
         cancellation: cancellation.clone(),
+        host_failure: Default::default(),
         effect_summary: segment_state
             .as_ref()
             .map_or_else(EffectSummaryWriter::default, |state| {
@@ -684,12 +685,13 @@ async fn run_lashlang_process_scoped(
     let output = match output {
         Ok(output) => output,
         Err(error) => {
+            let host_failure = host.host_failure.lock_recover().take();
             drop(host);
             guard
                 .shutdown(false)
                 .await
                 .map_err(lash_core::ProcessInfraError::new)?;
-            return Err(error);
+            return Err(host_failure.map_or(error, lash_core::ProcessInfraError::new));
         }
     };
     // A body refused at its journal (FIG-3586) stopped where it diverged: it
@@ -698,11 +700,9 @@ async fn run_lashlang_process_scoped(
     // process stays non-terminal and every redrive refuses again with nothing
     // dispatched until an operator acts.
     let refused = host.ctx.nested_replay_mismatch().is_some();
-    // A run whose summary failed to commit at a boundary stopped there: it
-    // writes nothing more, and reports the failure as infrastructure below.
-    let incorporation_fault = host.effect_summary.take_incorporation_fault();
+    let host_failure = host.host_failure.lock_recover().take();
     let mut output = output;
-    if !refused && incorporation_fault.is_none() && output.is_terminal() {
+    if !refused && host_failure.is_none() && output.is_terminal() {
         // A body that ends must end where the run that wrote its journal
         // ended (FIG-3586). Its terminal is the registry's to record, so it
         // journals no seal of its own.
@@ -724,7 +724,7 @@ async fn run_lashlang_process_scoped(
     // the cursors the handover carried. A failed close leaves `closing`
     // recorded and surfaces as infrastructure, so the run is retried rather
     // than committing a terminal whose accounting was never incorporated.
-    if output.is_terminal() && !refused {
+    if output.is_terminal() && !refused && host_failure.is_none() {
         let _phase = host.ctx.named_phase("rlm_process.close_groups");
         host.ctx.close_opener_groups().await.map_err(|error| {
             lash_core::ProcessInfraError::new(lash_core::PluginError::RuntimeEffectController(
@@ -741,7 +741,7 @@ async fn run_lashlang_process_scoped(
             .await
             .map_err(lash_core::ProcessInfraError::new)?;
     }
-    if let Some(fault) = incorporation_fault {
+    if let Some(fault) = host_failure {
         return Err(lash_core::ProcessInfraError::new(fault));
     }
     if output.is_terminal()
@@ -921,12 +921,18 @@ struct LashlangProcessHost<'run> {
     /// This run's recorded cancellation fact, read by the VM's cooperative
     /// cancellation probe so a cancelled process terminates as an uncatchable
     /// host terminal instead of running to completion inside a guest handler.
-    /// Only recorded observations advance it: a cancelled tool call, a wait
-    /// the process's cancellation won, a cancel checkpoint (FIG-3673).
+    /// Recorded cancellation and a failed host boundary stop the guest.
+    /// A host failure is returned separately, never committed as cancellation.
     cancellation: crate::ExecutionCancellation,
     /// The durable effect summary this run writes at result incorporation.
     effect_summary: EffectSummaryWriter,
+    host_failure: std::sync::Mutex<Option<lash_core::PluginError>>,
 }
+
+#[cfg(any(test, feature = "testing"))]
+mod host_failure_testing;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use host_failure_testing::process_event_host_failure_stops_execution;
 
 #[async_trait::async_trait]
 trait SignalWaitProcesses: Send + Sync {
@@ -1286,10 +1292,7 @@ impl LashlangProcessHost<'_> {
         );
         let appended = self.ctx.append_process_events(batch).await.map(|_| ());
         commands.finish(&in_flight)?;
-        self.settle_boundary(&summary, &appended);
-        appended.map_err(|error| LashlangHostError::AppendProcessEvent {
-            message: error.to_string(),
-        })?;
+        self.settle_boundary(&summary, appended, ProcessHostOp::AppendProcessEvent)?;
         Ok(())
     }
 
@@ -1348,10 +1351,15 @@ impl LashlangProcessHost<'_> {
         }
         slept.map_err(|error| {
             commands.journal_error(&in_flight, error, |error| {
-                LashlangHostError::SleepProcess {
-                    message: error.to_string(),
+                if error.code == lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled {
+                    LashlangHostError::HostBoundary {
+                        op: ProcessHostOp::SleepProcess,
+                        source: lash_core::PluginError::RuntimeEffectController(error),
+                    }
+                    .into()
+                } else {
+                    self.controller_boundary_error(ProcessHostOp::SleepProcess, error)
                 }
-                .into()
             })
         })?;
         if let Some(call_site) = &call_site
@@ -1374,10 +1382,7 @@ impl LashlangProcessHost<'_> {
             Ok(event_type) => event_type,
             Err(error) => {
                 commands.skipped(&command)?;
-                return Err(LashlangHostError::ValidateSignalName {
-                    message: error.to_string(),
-                }
-                .into());
+                return Err(self.host_boundary_error(ProcessHostOp::ValidateSignalName, error));
             }
         };
         let in_flight = commands
@@ -1425,10 +1430,11 @@ impl LashlangProcessHost<'_> {
                     }),
                 )
                 .await;
-        self.settle_boundary(&summary, &entered);
-        entered.map_err(|error| LashlangHostError::SetSignalWait {
-            message: error.to_string(),
-        })?;
+        self.settle_boundary(
+            &summary,
+            entered.map_err(lash_core::PluginError::RuntimeEffectController),
+            ProcessHostOp::SetSignalWait,
+        )?;
         if let Some(call_site) = &call_site {
             self.lashlang_execution_trace.emit_waiting(
                 call_site,
@@ -1471,10 +1477,7 @@ impl LashlangProcessHost<'_> {
         }
         let payload = payload.map_err(|error| {
             commands.journal_error(&in_flight, error, |error| {
-                LashlangHostError::AwaitSignal {
-                    message: error.to_string(),
-                }
-                .into()
+                self.controller_boundary_error(ProcessHostOp::AwaitSignal, error)
             })
         })?;
         let processes = self.processes.clone();
@@ -1490,10 +1493,11 @@ impl LashlangProcessHost<'_> {
                 }),
             )
             .await;
-        self.settle_boundary(&summary, &cleared);
-        cleared.map_err(|error| LashlangHostError::ClearSignalWait {
-            message: error.to_string(),
-        })?;
+        self.settle_boundary(
+            &summary,
+            cleared.map_err(lash_core::PluginError::RuntimeEffectController),
+            ProcessHostOp::ClearSignalWait,
+        )?;
         if let Some(call_site) = &call_site
             && !self.cancellation.is_cancelled()
         {

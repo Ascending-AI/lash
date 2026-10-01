@@ -145,7 +145,6 @@ async fn seed_window_fixture(
                 }),
                 billed_usage: crate::llm::types::LlmUsage::default(),
                 refusal: crate::ChargeSafetyRefusalEvidence {
-                    code: "history-fixture".to_string(),
                     denial_reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
                     protocol_position: crate::ProtocolPosition::OutputStarted,
                     attempt_number: 1,

@@ -1616,6 +1616,35 @@ pub enum ChargeSafetyDenialReason {
     RetryAfterExceedsCap,
 }
 
+impl ChargeSafetyDenialReason {
+    /// The terminal provider code for these refusal facts.
+    pub const fn failure_code(
+        self,
+        position: ProtocolPosition,
+    ) -> crate::session_model::TurnFailureCode {
+        use crate::session_model::TurnFailureCode;
+        match self {
+            Self::GuaranteeRequired => match position {
+                ProtocolPosition::NoResponse => {
+                    TurnFailureCode::UnsafeRetryWithoutTransportClassification
+                }
+                ProtocolPosition::ResponseObserved => {
+                    TurnFailureCode::UnsafeRetryAfterResponseObserved
+                }
+                ProtocolPosition::OutputStarted => TurnFailureCode::UnsafeRetryAfterOutputStarted,
+                ProtocolPosition::TerminalObserved => {
+                    TurnFailureCode::UnsafeRetryAfterTerminalObserved
+                }
+            },
+            Self::UnsafeRetryLimitExceeded => TurnFailureCode::ChargeSafetyUnsafeRetryLimitExceeded,
+            Self::DuplicateCostLimitExceeded => {
+                TurnFailureCode::ChargeSafetyDuplicateCostLimitExceeded
+            }
+            Self::RetryAfterExceedsCap => TurnFailureCode::RetryAfterExceedsCap,
+        }
+    }
+}
+
 /// Typed outcome of consulting host charge-safety policy for one prospective
 /// unsafe retry.
 ///

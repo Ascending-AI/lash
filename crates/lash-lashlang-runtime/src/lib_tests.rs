@@ -5,6 +5,26 @@ use lashlang::testing::ast_builders as b;
 
 const SEED: u64 = 0x1a5_1a9;
 
+#[tokio::test]
+async fn process_shutdown_preserves_typed_failures() {
+    crate::testing::process_shutdown_preserves_typed_failures(&sqlite_recording_backend().await)
+        .await;
+}
+
+#[tokio::test]
+async fn process_event_host_failure_stops_execution() {
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("double");
+    let backend = lash_conformance::recording_backend_over(Arc::clone(double.engine_stores()));
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn("host-law", "append"))
+        .await
+        .expect("handler");
+    crate::testing::process_event_host_failure_stops_execution(&backend, handler.scoped()).await;
+    handler.close().await.expect("close handler");
+}
+
 /// A storage-backed test backend for paths that do not execute engine effects.
 pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
     lash_conformance::recording_backend_over(sqlite_memory_store_set().await)

@@ -67,9 +67,8 @@ impl TurnFailurePartialOutput {
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
+#[serde(deny_unknown_fields)]
 pub struct ChargeSafetyRefusalEvidence {
-    /// Stable refusal code surfaced on the terminal provider error.
-    pub code: String,
     /// FIG-2144's typed policy bound; no parallel refusal enum is introduced.
     pub denial_reason: crate::ChargeSafetyDenialReason,
     /// Furthest protocol position reached by the refused attempt.
@@ -77,6 +76,15 @@ pub struct ChargeSafetyRefusalEvidence {
     /// One-based unsafe retry number from FIG-2144's typed decision.
     pub attempt_number: u8,
     pub attempt_count: u32,
+}
+
+impl ChargeSafetyRefusalEvidence {
+    /// The provider refusal code, derived from the retained denial facts.
+    pub fn code(&self) -> lash_sansio::session_model::FailureCode {
+        lash_sansio::session_model::FailureCode::lash(
+            self.denial_reason.failure_code(self.protocol_position),
+        )
+    }
 }
 
 /// Durable component retained for one failed provider generation.
@@ -133,13 +141,6 @@ impl TurnFailureEvidence {
             partial_output,
             billed_usage,
             refusal: ChargeSafetyRefusalEvidence {
-                code: error
-                    .code
-                    .clone()
-                    .unwrap_or(lash_sansio::session_model::FailureCode::lash(
-                        lash_sansio::session_model::TurnFailureCode::ChargeSafetyRetryDenied,
-                    ))
-                    .to_string(),
                 denial_reason: *reason,
                 protocol_position: attempt.protocol_position,
                 attempt_number: *attempt_number,
@@ -170,6 +171,85 @@ pub struct TurnFailureSettlement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn charge_safety_evidence_stores_only_denial_facts() {
+        let error = crate::sansio::LlmCallError {
+            message: "failed generation".into(),
+            retryable: false,
+            kind: crate::llm::types::ProviderFailureKind::Stream,
+            raw: None,
+            code: None,
+            terminal_reason: crate::llm::types::LlmTerminalReason::ProviderError,
+            request_body: None,
+            partial_response: None,
+        };
+        use crate::{ChargeSafetyDenialReason as Reason, ProtocolPosition as Position};
+        let positions = [
+            Position::NoResponse,
+            Position::ResponseObserved,
+            Position::OutputStarted,
+            Position::TerminalObserved,
+        ];
+        for (reason, codes) in [
+            (
+                Reason::GuaranteeRequired,
+                [
+                    "unsafe_retry_without_transport_classification",
+                    "unsafe_retry_after_response_observed",
+                    "unsafe_retry_after_output_started",
+                    "unsafe_retry_after_terminal_observed",
+                ],
+            ),
+            (
+                Reason::UnsafeRetryLimitExceeded,
+                ["charge_safety_unsafe_retry_limit_exceeded"; 4],
+            ),
+            (
+                Reason::DuplicateCostLimitExceeded,
+                ["charge_safety_duplicate_cost_limit_exceeded"; 4],
+            ),
+            (Reason::RetryAfterExceedsCap, ["retry_after_exceeds_cap"; 4]),
+        ] {
+            for (position, code) in positions.into_iter().zip(codes) {
+                let record: crate::LlmCallRecord = serde_json::from_value(serde_json::json!({
+                    "call_id": "charge-safety-evidence-law",
+                    "attempts": [{
+                        "ordinal": 1,
+                        "outcome": "failed",
+                        "protocol_position": position,
+                        "retry_budget_consumed": false,
+                        "retry_decision": {
+                            "scheduled": false,
+                            "charge_safety": {
+                                "outcome": "denied", "tokens_at_stake": 10,
+                                "attempt_number": 1, "reason": reason,
+                            }
+                        }
+                    }]
+                }))
+                .expect("typed denied call");
+                let evidence = TurnFailureEvidence::from_llm_failure(&error, &record)
+                    .expect("denial evidence");
+                let mut wire = serde_json::to_value(&evidence).expect("encoded evidence");
+                assert!(
+                    wire["refusal"].get("code").is_none(),
+                    "the code is derived, not stored: {wire}"
+                );
+                assert_eq!(evidence.refusal.code().to_string(), format!("lash:{code}"));
+                assert_eq!(
+                    serde_json::from_value::<TurnFailureEvidence>(wire.clone())
+                        .expect("round trip"),
+                    evidence
+                );
+                wire["refusal"]["code"] = serde_json::json!(format!("lash:{code}"));
+                assert!(
+                    serde_json::from_value::<TurnFailureEvidence>(wire).is_err(),
+                    "the deleted redundant field is refused"
+                );
+            }
+        }
+    }
 
     #[test]
     fn partial_output_residency_is_byte_exact_at_and_over_the_bound() {

@@ -11,6 +11,63 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn process_shutdown_preserves_typed_failures() {
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(
+        &lash_postgres_store::testing::required_database_url(),
+    )
+    .await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+        .await
+        .expect("open PostgreSQL");
+    let bytes = tempfile::tempdir().expect("attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(bytes.path())),
+    ));
+    lash_lashlang_runtime::testing::process_shutdown_preserves_typed_failures(
+        &lash_conformance::recording_backend_over(stores),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn process_event_host_failure_stops_execution() {
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(
+        &lash_postgres_store::testing::required_database_url(),
+    )
+    .await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+        .await
+        .expect("open PostgreSQL");
+    let bytes = tempfile::tempdir().expect("attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(bytes.path())),
+    ));
+    let backend = lash_conformance::recording_backend_over(stores.clone());
+    let double = lash_restate_test::backend_with_store_set(
+        0x4643,
+        lash_restate_test::ServerConfig::default(),
+        Default::default(),
+        |_| async { Ok(stores as Arc<dyn lash_core::StoreSet>) },
+    )
+    .await
+    .expect("PostgreSQL double");
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn("host-law", "append"))
+        .await
+        .expect("handler");
+    lash_lashlang_runtime::testing::process_event_host_failure_stops_execution(
+        &backend,
+        handler.scoped(),
+    )
+    .await;
+    handler.close().await.expect("close handler");
+}
+
 // No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
 // No live_replay_tests!: live replay is an in-process cache, not PostgreSQL-backed storage.
 // No runtime_persistence_clock_tests!: the backend clock is PostgreSQL-owned and not controllable.

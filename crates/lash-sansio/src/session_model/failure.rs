@@ -178,8 +178,6 @@ pub enum TurnFailureCode {
     ChargeSafetyDuplicateCostLimitExceeded,
     /// The provider's requested retry delay exceeds the host's cap.
     RetryAfterExceedsCap,
-    /// The host charge-safety policy denied the retry outright.
-    ChargeSafetyRetryDenied,
     /// Structured output validation failed before the call could complete.
     InvalidStructuredOutput,
     /// The provider response body could not be read.
@@ -334,7 +332,6 @@ impl TurnFailureCode {
                 "charge_safety_duplicate_cost_limit_exceeded"
             }
             Self::RetryAfterExceedsCap => "retry_after_exceeds_cap",
-            Self::ChargeSafetyRetryDenied => "charge_safety_retry_denied",
             Self::InvalidStructuredOutput => "invalid_structured_output",
             Self::BodyReadFailed => "body_read_failed",
             Self::HttpResponseBodyTooLarge => "http_response_body_too_large",
@@ -397,7 +394,6 @@ impl TurnFailureCode {
                 | Self::ChargeSafetyUnsafeRetryLimitExceeded
                 | Self::ChargeSafetyDuplicateCostLimitExceeded
                 | Self::RetryAfterExceedsCap
-                | Self::ChargeSafetyRetryDenied
         )
     }
 
@@ -442,7 +438,6 @@ impl TurnFailureCode {
                 Self::ChargeSafetyDuplicateCostLimitExceeded
             }
             "retry_after_exceeds_cap" => Self::RetryAfterExceedsCap,
-            "charge_safety_retry_denied" => Self::ChargeSafetyRetryDenied,
             "invalid_structured_output" => Self::InvalidStructuredOutput,
             "body_read_failed" => Self::BodyReadFailed,
             "http_response_body_too_large" => Self::HttpResponseBodyTooLarge,
@@ -529,7 +524,6 @@ impl TurnFailureCode {
         Self::ChargeSafetyUnsafeRetryLimitExceeded,
         Self::ChargeSafetyDuplicateCostLimitExceeded,
         Self::RetryAfterExceedsCap,
-        Self::ChargeSafetyRetryDenied,
         Self::InvalidStructuredOutput,
         Self::BodyReadFailed,
         Self::HttpResponseBodyTooLarge,
@@ -1150,7 +1144,6 @@ mod tests {
             TurnFailureCode::ChargeSafetyUnsafeRetryLimitExceeded,
             TurnFailureCode::ChargeSafetyDuplicateCostLimitExceeded,
             TurnFailureCode::RetryAfterExceedsCap,
-            TurnFailureCode::ChargeSafetyRetryDenied,
             TurnFailureCode::InvalidStructuredOutput,
             TurnFailureCode::BodyReadFailed,
             TurnFailureCode::HttpResponseBodyTooLarge,
@@ -1349,7 +1342,7 @@ mod tests {
     fn all_named_covers_every_named_arm() {
         assert_eq!(
             TurnFailureCode::ALL_NAMED.len(),
-            77,
+            76,
             "a new named arm must be added to ALL_NAMED"
         );
         for code in TurnFailureCode::ALL_NAMED {

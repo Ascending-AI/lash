@@ -10,15 +10,13 @@ use super::*;
 /// Recording is in memory: the summary reaches the log only as the prelude of
 /// the run's next boundary write (a wait's enter or clear, an event the body
 /// appends, or the terminal completion), in that write's own transaction. A
-/// boundary write that carried a summary and failed is an incorporation
-/// failure, never a program error: the run's scope is cancelled so the guest
-/// stops at its next step, and the run reports the failure as infrastructure
-/// so a redrive re-derives and re-commits the same summary.
+/// failed boundary write leaves the summary pending and stops the guest.
+/// The runner receives the original typed cause, so a retry re-derives and
+/// re-commits the same summary.
 #[derive(Default)]
 pub(super) struct EffectSummaryWriter {
     pending: std::sync::Mutex<Vec<lash_core::ProcessEffectOccurrence>>,
     omissions: std::sync::Mutex<BTreeMap<String, lash_core::ProcessEffectOmittedCounts>>,
-    incorporation_fault: std::sync::Mutex<Option<lash_core::PluginError>>,
 }
 
 /// The pending occurrences one boundary write carries: `requests` in the
@@ -37,12 +35,7 @@ impl EffectSummaryWriter {
         Self {
             pending: std::sync::Mutex::new(pending),
             omissions: std::sync::Mutex::new(omissions),
-            incorporation_fault: std::sync::Mutex::new(None),
         }
-    }
-
-    pub(super) fn take_incorporation_fault(&self) -> Option<lash_core::PluginError> {
-        self.incorporation_fault.lock_recover().take()
     }
 
     pub(super) fn pending(&self) -> Vec<lash_core::ProcessEffectOccurrence> {
@@ -114,29 +107,46 @@ impl EffectSummaryWriter {
 }
 
 impl LashlangProcessHost<'_> {
-    /// Settle the boundary write that carried `prelude`: a committed write
-    /// drops the occurrences it carried; a failed one that carried any is an
-    /// incorporation failure (see [`EffectSummaryWriter`]).
-    pub(super) fn settle_boundary<E: std::fmt::Display>(
+    pub(super) fn host_boundary_error(
+        &self,
+        op: ProcessHostOp,
+        source: lash_core::PluginError,
+    ) -> ExecutionHostError {
+        let error = LashlangHostError::HostBoundary {
+            op,
+            source: source.clone(),
+        };
+        self.host_failure.lock_recover().get_or_insert(source);
+        self.cancellation.cancel();
+        error.into()
+    }
+
+    pub(super) fn controller_boundary_error(
+        &self,
+        op: ProcessHostOp,
+        source: lash_core::RuntimeEffectControllerError,
+    ) -> ExecutionHostError {
+        if source.journaled {
+            LashlangHostError::HostBoundary {
+                op,
+                source: lash_core::PluginError::RuntimeEffectController(source),
+            }
+            .into()
+        } else {
+            self.host_boundary_error(op, lash_core::PluginError::RuntimeEffectController(source))
+        }
+    }
+
+    /// A failed write keeps its summary pending and aborts with the original cause.
+    pub(super) fn settle_boundary(
         &self,
         prelude: &SummaryPrelude,
-        written: &Result<(), E>,
-    ) {
-        match written {
-            Ok(()) => self.effect_summary.settle(prelude),
-            Err(error) if !prelude.requests.is_empty() => {
-                self.effect_summary
-                    .incorporation_fault
-                    .lock_recover()
-                    .get_or_insert_with(|| {
-                        lash_core::PluginError::Session(format!(
-                            "a boundary write carrying the process's effect summary failed: {error}"
-                        ))
-                    });
-                self.cancellation.cancel();
-            }
-            Err(_) => {}
-        }
+        written: Result<(), lash_core::PluginError>,
+        op: ProcessHostOp,
+    ) -> Result<(), ExecutionHostError> {
+        written.map_err(|source| self.host_boundary_error(op, source))?;
+        self.effect_summary.settle(prelude);
+        Ok(())
     }
 
     /// Incorporates one recorded effect outcome into the durable summary.
@@ -215,7 +225,7 @@ impl LashlangProcessHost<'_> {
                 value
             }
             Err(error) => Err(self.commands().journal_error(in_flight, error, |error| {
-                ExecutionHostError::new(error.to_string())
+                self.controller_boundary_error(ProcessHostOp::LanguageRuntimeValue, error)
             })),
         }
     }
@@ -316,6 +326,10 @@ impl LashlangProcessHost<'_> {
                         .await
                     }
                     Err(error) => Err(error),
+                };
+                let result = match result {
+                    Err(error) if self.is_cancelled() => return Err(error),
+                    result => result,
                 };
                 bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(result));
                 continue;

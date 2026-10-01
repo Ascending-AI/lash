@@ -11,7 +11,8 @@ pub use aggregate::{
 pub use worker_execution::WorkerRun;
 mod error;
 pub use error::{
-    LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError, ToolBindingError,
+    LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError, ProcessHostOp,
+    ToolBindingError,
 };
 mod host_identity;
 pub use host_identity::LashlangHostIdentities;

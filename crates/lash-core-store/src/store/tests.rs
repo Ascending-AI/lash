@@ -471,7 +471,6 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
         partial_output: None,
         billed_usage: crate::llm::types::LlmUsage::default(),
         refusal: crate::ChargeSafetyRefusalEvidence {
-            code: "unsafe_retry_after_output_started".to_string(),
             denial_reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
             protocol_position: crate::ProtocolPosition::OutputStarted,
             attempt_number: 1,

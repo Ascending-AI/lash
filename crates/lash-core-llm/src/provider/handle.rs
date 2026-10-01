@@ -513,7 +513,7 @@ impl ProviderHandle {
                             throttle_retry_available = throttle_wait.is_some(),
                             counted_retry_available,
                             decision = "deny",
-                            reason = charge_safety_retry_reason(reason, protocol_position),
+                            reason = %charge_safety_retry_reason(reason, protocol_position),
                             "provider retry denied because another generation is not proven charge-safe"
                         );
                     }
@@ -521,9 +521,7 @@ impl ProviderHandle {
                     let (delay, reason, consumed) = match &verdict {
                         RetryVerdict::Refusal(RetryRefusal::ChargeSafety(reason)) => (
                             None,
-                            Some(
-                                charge_safety_retry_reason(*reason, protocol_position).to_string(),
-                            ),
+                            Some(charge_safety_retry_reason(*reason, protocol_position)),
                             true,
                         ),
                         RetryVerdict::Refusal(RetryRefusal::RetryAfterCap) => {
@@ -1040,59 +1038,36 @@ fn unsafe_retry_refusal(
     position: ProtocolPosition,
 ) -> LlmTransportError {
     let original_message = std::mem::take(&mut failure.message);
-    let (code, message) = match position {
-        ProtocolPosition::OutputStarted => (
-            TurnFailureCode::UnsafeRetryAfterOutputStarted,
-            format!(
-                "provider output was already paid for and cannot be safely regenerated without an idempotency or resume guarantee: {original_message}"
-            ),
+    let message = match position {
+        ProtocolPosition::OutputStarted => format!(
+            "provider output was already paid for and cannot be safely regenerated without an idempotency or resume guarantee: {original_message}"
         ),
-        ProtocolPosition::ResponseObserved => (
-            TurnFailureCode::UnsafeRetryAfterResponseObserved,
-            format!(
-                "the provider response is not in a charge-safe retry class and cannot be safely regenerated: {original_message}"
-            ),
+        ProtocolPosition::ResponseObserved => format!(
+            "the provider response is not in a charge-safe retry class and cannot be safely regenerated: {original_message}"
         ),
-        ProtocolPosition::NoResponse => (
-            TurnFailureCode::UnsafeRetryWithoutTransportClassification,
-            format!(
-                "the provider failure is not in a charge-safe retry class and cannot be safely regenerated: {original_message}"
-            ),
+        ProtocolPosition::NoResponse => format!(
+            "the provider failure is not in a charge-safe retry class and cannot be safely regenerated: {original_message}"
         ),
-        ProtocolPosition::TerminalObserved => (
-            TurnFailureCode::UnsafeRetryAfterTerminalObserved,
-            format!(
-                "the provider attempt already reached a terminal response and cannot be safely regenerated: {original_message}"
-            ),
+        ProtocolPosition::TerminalObserved => format!(
+            "the provider attempt already reached a terminal response and cannot be safely regenerated: {original_message}"
         ),
     };
     failure.message = message;
-    failure.code = Some(FailureCode::lash(code));
+    failure.code = Some(FailureCode::lash(
+        ChargeSafetyDenialReason::GuaranteeRequired.failure_code(position),
+    ));
     failure.retry_verdict = TransportRetryVerdict::Forbidden;
     failure
-}
-
-fn charge_safety_denial_reason(reason: ChargeSafetyDenialReason) -> &'static str {
-    match reason {
-        ChargeSafetyDenialReason::GuaranteeRequired => "charge_safety_guarantee_required",
-        ChargeSafetyDenialReason::UnsafeRetryLimitExceeded => {
-            "charge_safety_unsafe_retry_limit_exceeded"
-        }
-        ChargeSafetyDenialReason::DuplicateCostLimitExceeded => {
-            "charge_safety_duplicate_cost_limit_exceeded"
-        }
-        ChargeSafetyDenialReason::RetryAfterExceedsCap => "retry_after_exceeds_cap",
-    }
 }
 
 fn charge_safety_retry_reason(
     reason: ChargeSafetyDenialReason,
     position: ProtocolPosition,
-) -> &'static str {
+) -> String {
     if reason == ChargeSafetyDenialReason::GuaranteeRequired {
-        retry_refusal_reason(position)
+        retry_refusal_reason(position).to_owned()
     } else {
-        charge_safety_denial_reason(reason)
+        reason.failure_code(position).as_str().to_owned()
     }
 }
 
@@ -1106,10 +1081,12 @@ fn charge_safety_refusal(
     }
     let mut failure = failure;
     let original_message = std::mem::take(&mut failure.message);
-    let code = charge_safety_denial_reason(reason);
-    failure.message =
-        format!("host charge-safety policy denied the retry ({code}): {original_message}");
-    failure.code = Some(FailureCode::lash(TurnFailureCode::from_wire(code)));
+    let code = reason.failure_code(position);
+    failure.message = format!(
+        "host charge-safety policy denied the retry ({}): {original_message}",
+        code.as_str()
+    );
+    failure.code = Some(FailureCode::lash(code));
     failure.retry_verdict = TransportRetryVerdict::Forbidden;
     failure
 }

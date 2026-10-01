@@ -1349,15 +1349,18 @@ impl<'run> RuntimeExecutionContext<'run> {
                 err.code.namespaced(),
                 crate::TurnFailureCause::Outcome,
                 err.message,
-            )),
+            )
+            .into_journaled()),
             crate::Resolution::Timeout => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::ProcessSignalWaitTimeout,
                 "process signal wait timed out",
-            )),
+            )
+            .into_journaled()),
             crate::Resolution::Cancelled => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::ProcessSignalWaitCancelled,
                 "process signal wait was cancelled",
-            )),
+            )
+            .into_journaled()),
         }
     }
 

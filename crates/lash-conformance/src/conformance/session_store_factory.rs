@@ -201,7 +201,6 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
             ..Default::default()
         },
         refusal: crate::ChargeSafetyRefusalEvidence {
-            code: "unsafe_retry_after_output_started".to_string(),
             denial_reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
             protocol_position: crate::ProtocolPosition::OutputStarted,
             attempt_number: 1,
