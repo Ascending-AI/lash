@@ -34,6 +34,11 @@ path = "src/bin/context_overflow_recovery.rs"
 test = false
 
 [[bin]]
+name = "lash-e2e-session-operator"
+path = "src/bin/session_operator.rs"
+test = false
+
+[[bin]]
 name = "lash-loadtest-smoke"
 path = "src/bin/loadtest_smoke.rs"
 test = false

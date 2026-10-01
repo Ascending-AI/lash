@@ -25,8 +25,8 @@ mod work_drivers;
 
 pub use drain::{DeploymentDrainStatus, GenerationDrainStatus};
 use session_driver::{CoreSessionDriver, CoreSessionDriverConfig};
-pub(crate) use work_drivers::ResolvedQueuedWork;
-use work_drivers::{CoreWorkSetup, CoreWorkSlot, WakeDeliveryDriverSetup};
+use work_drivers::{CoreWorkSetup, WakeDeliveryDriverSetup};
+pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
 pub struct LashCore {
@@ -337,7 +337,7 @@ impl LashCore {
     /// (FIG-3659).
     pub fn parked_work(&self) -> crate::parked_work::ParkedWork {
         crate::parked_work::ParkedWork {
-            work: self.env.queued_work(),
+            work: Arc::clone(&self.substrate_slot),
             scopes: Arc::clone(&self.env.core.control.scope_close),
             scope_close_obligations: Arc::new(
                 lash_core::runtime::drive::ScopeCloseRelay::over_backend(

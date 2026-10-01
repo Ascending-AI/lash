@@ -36,7 +36,7 @@ pub struct ParkedWork {
     pub(crate) store_factory: Arc<dyn DeploymentStore>,
     pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) clock: Arc<dyn Clock>,
-    pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,
+    pub(crate) work: Arc<crate::core::CoreWorkSlot>,
     pub(crate) scopes: Arc<dyn lash_core::engine::ScopeCloseSink>,
     /// The `ScopeClose` kind's relay (ADR 0109 §3): a cancelled or forked
     /// root's scope close is its obligation's immediate delivery.

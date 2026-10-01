@@ -487,6 +487,9 @@ agent-workbench-attachment-usage-gate port='3030':
 restate-postgres-workers-e2e:
   bash "{{repo}}/scripts/restate-postgres-workers-e2e.sh"
 
+session-operator-e2e:
+  bash "{{repo}}/scripts/session-operator-e2e.sh"
+
 process-operations-e2e:
   bash "{{repo}}/scripts/process-operations-e2e.sh"
 

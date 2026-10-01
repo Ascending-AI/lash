@@ -111,6 +111,9 @@ impl ParkedWork {
             } => (session_id, turn_id),
             ParkedWorkRef::Process { process_id } => {
                 self.work
+                    .ports()
+                    .await
+                    .queued_port()
                     .control()
                     .resume_process(process_id, park)
                     .await
@@ -222,7 +225,7 @@ impl ParkedWork {
         let state = lash_core::runtime::drive::ControlIntentRelay::new(
             Arc::clone(&self.intents),
             Arc::clone(&self.store_factory),
-            Arc::clone(&self.work),
+            self.work.ports().await.queued_port(),
             Arc::clone(&self.scopes),
             Arc::clone(&self.scope_close_obligations),
             Arc::clone(&self.clock),

@@ -1,5 +1,12 @@
 # Restate Postgres Workers E2E
 
+The focused public-facade operator scenario runs with
+`kiln gate lash <fork> -- just session-operator-e2e`. It proves withdrawal,
+running cancellation, parked redrive/cancel/fork and lost-reply repeats on
+private live Restate/PostgreSQL services. See
+[the executable runbook](../session-operator/runbook.md) for its six case rows,
+twenty-run acceptance count and artifact paths.
+
 The full distributed harness runs with:
 
 ```sh
