@@ -9,7 +9,9 @@ pub use crate::executable_generation::{ExecutableGeneration, ExecutableGeneratio
 use crate::{RuntimeEffectKind, SessionId};
 use serde::{Deserialize, Serialize};
 
+mod cause;
 mod classification;
+pub use cause::{GroupChildCapability, RuntimeErrorCause};
 pub(crate) use classification::RuntimeErrorClass;
 pub use classification::TurnFailureCause;
 
@@ -410,6 +412,9 @@ pub enum RuntimeErrorCode {
     /// intents it declared are reported lost rather than replaced by the
     /// seating invocation's own refusal (ADR 0099 §5).
     RuntimeEffectGroupChildCommittedFinalLost,
+    /// The deployment serving the child's lane lacks a capability the child
+    /// needs, named by [`RuntimeErrorCause::EffectGroupChildUnroutable`].
+    RuntimeEffectGroupChildUnroutable,
     /// Drain deferred while this host still works the group or its children.
     /// Retry succeeds once it finishes; permanent refusal uses
     /// `RuntimeEffectGroupShape`.
@@ -812,6 +817,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupChildCommittedFinalLost => {
                 "runtime_effect_group_child_committed_final_lost"
             }
+            Self::RuntimeEffectGroupChildUnroutable => "runtime_effect_group_child_unroutable",
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::AggregateAwaitUnsettled => "aggregate_await_unsettled",
@@ -1056,6 +1062,7 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectGroupChildCancelDecided,
         Self::RuntimeEffectGroupChildAttachExpired,
         Self::RuntimeEffectGroupChildCommittedFinalLost,
+        Self::RuntimeEffectGroupChildUnroutable,
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
         Self::AggregateAwaitUnsettled,
@@ -1279,6 +1286,7 @@ impl RuntimeErrorCode {
             "runtime_effect_group_child_committed_final_lost" => {
                 Self::RuntimeEffectGroupChildCommittedFinalLost
             }
+            "runtime_effect_group_child_unroutable" => Self::RuntimeEffectGroupChildUnroutable,
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "aggregate_await_unsettled" => Self::AggregateAwaitUnsettled,
@@ -1406,47 +1414,6 @@ pub struct IngressReservedSourceKeyRefusal {
     pub session_id: SessionId,
     pub ingress_kind: String,
     pub source_key: String,
-}
-
-/// Typed terminal cause retained when a controller-owned runtime effect must
-/// abort through the generic runtime error boundary.
-///
-/// Every cause is terminal by construction. [`RuntimeError::is_terminal`]
-/// therefore treats the presence of any cause as terminal, independently of
-/// the code's ordinary classification.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum RuntimeErrorCause {
-    IngressReservedSourceKey {
-        #[serde(flatten)]
-        refusal: Box<IngressReservedSourceKeyRefusal>,
-    },
-    StoreRefusal {
-        refusal: Box<crate::store::StoreRefusal>,
-    },
-    SessionDeleted {
-        session_id: SessionId,
-    },
-    /// An artifact publish or acquire named a referrer that has a fence
-    /// (ADR 0113 §2.7): the typed half of
-    /// [`RuntimeErrorCode::ArtifactReferrerEnded`].
-    ArtifactReferrerEnded {
-        referrer: Box<crate::artifact_referrer::ArtifactReferrer>,
-    },
-}
-
-impl RuntimeErrorCause {
-    /// The fenced referrer `cause` names, if it is an ended-referrer refusal.
-    #[must_use]
-    pub fn ended_referrer(
-        cause: Option<&Self>,
-    ) -> Option<&crate::artifact_referrer::ArtifactReferrer> {
-        match cause {
-            Some(Self::ArtifactReferrerEnded { referrer }) => Some(referrer),
-            _ => None,
-        }
-    }
 }
 
 /// The session-state generations an admission refused (FIG-3619): the one
@@ -1673,6 +1640,7 @@ impl RuntimeError {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::ArtifactReferrerEnded { .. }
+            | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }

@@ -14,6 +14,23 @@ pub trait GroupExecutors: Send + Sync {
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>>;
 
+    /// The capability this deployment lacks to ever execute `envelope`'s
+    /// child, when its wiring says so.
+    ///
+    /// [`executor_for`](Self::executor_for) answering `None` is a fact of one
+    /// attempt: the child is not carried here now, and a handler-driven engine
+    /// retries it on a carrying deployment. This is the other fact: nothing on
+    /// this deployment can run the child on any attempt, so the engine settles
+    /// it with the typed refusal naming the capability instead (FIG-4550). It
+    /// resolves nothing and may be asked any number of times. The default is
+    /// `None`: a resolver that cannot tell claims nothing permanent.
+    fn missing_capability(
+        &self,
+        _envelope: &RuntimeEffectEnvelope,
+    ) -> Option<crate::GroupChildCapability> {
+        None
+    }
+
     /// Keep locally available tool contexts reachable while a handler-driven
     /// group outlives the execution that opened it. A runtime may have pinned
     /// them earlier, before group formation's first await.

@@ -29,6 +29,21 @@ enum EffectGroupChildRunOutcome {
     Cancelled,
 }
 
+/// Whether the deployment that first took an admitted child could ever
+/// execute it: recorded once, so every replay of the child takes the branch
+/// its first attempt took (FIG-4550).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum EffectGroupChildRoute {
+    /// Nothing ruled the child out. An attempt that then finds no executor is
+    /// on a deployment that does not carry the child now, and retries.
+    Routable,
+    /// The deployment that first took the child can never execute it.
+    Unroutable {
+        missing: lash_core::GroupChildCapability,
+    },
+}
+
 #[derive(Clone)]
 pub(crate) struct EffectGroupDispatchImpl {
     pub(super) executors: Arc<dyn GroupExecutors>,
@@ -345,6 +360,18 @@ impl EffectGroupDispatchImpl {
             return Ok(());
         }
 
+        // A deployment that can never execute the child settles it with the
+        // typed refusal naming what it lacks, so the opener's rank wait
+        // resolves; one that only does not carry it now fails its attempt
+        // below, which retries on a carrying deployment (FIG-4550).
+        if let EffectGroupChildRoute::Unroutable { missing } =
+            self.record_child_route(&ctx, request).await?
+        {
+            return self
+                .settle_unrun_child(ctx, request, UnrunChild::Unroutable(missing))
+                .await;
+        }
+
         // The child's durable cancel fact (ADR 0105 §4, FIG-3904), which the
         // group index holds (FIG-4344). No child races it at handler level: a
         // wait child races it as a journaled arm, a tool child reads it at
@@ -491,6 +518,33 @@ impl EffectGroupDispatchImpl {
         };
 
         record_child_settlement(&ctx, self.route.namespace(), request, outcome, None).await
+    }
+
+    /// Decides, once, whether the child is this lane's to run at all, and
+    /// journals the answer.
+    ///
+    /// The resolver's answer is a fact of the deployment that gives it, and a
+    /// lane's deployments need not agree: the recorded route is what keeps a
+    /// retry on another deployment on the branch the first attempt took. The
+    /// step resolves no executor, so a resolver that hands each one out once
+    /// still has it for the child's run.
+    async fn record_child_route(
+        &self,
+        ctx: &SharedWorkflowContext<'_>,
+        request: &EffectGroupChildRequest,
+    ) -> HandlerResult<EffectGroupChildRoute> {
+        let route = match self.executors.missing_capability(&request.envelope) {
+            Some(missing) => EffectGroupChildRoute::Unroutable { missing },
+            None => EffectGroupChildRoute::Routable,
+        };
+        let Json(route) = ctx
+            .run(move || async move { Ok::<_, restate_sdk::errors::HandlerError>(Json(route)) })
+            .name(format!(
+                "lash:effect-group:route:{}:{}",
+                request.group_key, request.position
+            ))
+            .await?;
+        Ok(route)
     }
 
     /// A tool child's handler-level run (ADR 0099 §2): a tool child is a
@@ -651,7 +705,8 @@ impl EffectGroupDispatchImpl {
     }
 
     /// Settles a child this invocation cannot run: its session's state
-    /// generation is refused here, or its attach expired (§8). The committed
+    /// generation is refused here, its attach expired (§8), or the deployment
+    /// that first took it can never execute it (FIG-4550). The committed
     /// final wins (ADR 0099 §5): the typed refusal is offered to the §4 point
     /// and seats only where no final is committed. Where an earlier
     /// invocation committed one and ended before its seat, this invocation
@@ -717,6 +772,19 @@ impl EffectGroupDispatchImpl {
                 )
                 .await
             }
+            // An unroutable child commits nothing before its route is
+            // recorded, so a tool final at its point is not this deployment's
+            // to report lost: the attempt ends, and a carrying deployment
+            // drains it.
+            PointAnswer::Taken {
+                committed: EffectGroupCommittedFinal::Tool { .. },
+                ..
+            } if matches!(unrun, UnrunChild::Unroutable(_)) => Err(std::io::Error::other(format!(
+                "effect group {} child {} holds a committed tool final this deployment cannot \
+                 drain ({refusal}); retry on a carrying deployment",
+                request.group_key, request.position
+            ))
+            .into()),
             PointAnswer::Taken { committed, .. } => {
                 seat_committed_final(&ctx, namespace, request, committed, &unrun.why_unrealized())
                     .await
@@ -1094,6 +1162,23 @@ async fn session_generation_refusal(
     }
 }
 
+/// The typed refusal of a child whose lane is served by a deployment that can
+/// never execute it (FIG-4550): terminal, and it names the capability.
+fn unroutable_error(
+    request: &EffectGroupChildRequest,
+    missing: lash_core::GroupChildCapability,
+) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::group_child_unroutable(
+        missing,
+        format!(
+            "effect group {} child {} reached a deployment that serves its lane and has no \
+             `{missing}`, so no attempt there can execute it; the child settles with this \
+             refusal rather than retrying",
+            request.group_key, request.position
+        ),
+    )
+}
+
 /// The §8 typed failure: this invocation is a successor minted under the
 /// idempotency key after the retained child invocation's retention expired —
 /// it never runs, and its settlement records the refusal so the opener's
@@ -1410,6 +1495,9 @@ enum UnrunChild {
     GenerationRefused(RuntimeEffectControllerError),
     /// The index retains another invocation id for the child's position (§8).
     AttachExpired,
+    /// The deployment that first took the child lacks a capability it needs
+    /// (FIG-4550).
+    Unroutable(lash_core::GroupChildCapability),
 }
 
 impl UnrunChild {
@@ -1418,6 +1506,7 @@ impl UnrunChild {
         match self {
             Self::GenerationRefused(refusal) => refusal.clone(),
             Self::AttachExpired => attach_expired_error(request),
+            Self::Unroutable(missing) => unroutable_error(request, *missing),
         }
     }
 
@@ -1431,6 +1520,9 @@ impl UnrunChild {
             ),
             Self::AttachExpired => {
                 "the invocation that committed it is gone, and its retention expired".to_owned()
+            }
+            Self::Unroutable(missing) => {
+                format!("the deployment serving this lane has no `{missing}`")
             }
         }
     }
@@ -1522,5 +1614,30 @@ mod tests {
         );
         let message = error.to_string();
         assert!(message.contains("group-1"), "{message}");
+    }
+
+    /// The unroutable refusal is an outcome, never a live fault the engine
+    /// would retry, and its cause names the capability in a form that
+    /// survives the settlement's encoding.
+    #[test]
+    fn unroutable_error_is_terminal_and_names_the_missing_capability() {
+        let missing = lash_core::GroupChildCapability::ToolChildContextSource;
+        let error = unroutable_error(&request(), missing);
+        assert_eq!(
+            error.code,
+            RuntimeErrorCode::RuntimeEffectGroupChildUnroutable
+        );
+        assert_eq!(
+            error.turn_failure_cause(),
+            lash_core::TurnFailureCause::Outcome
+        );
+        assert!(!is_engine_retried_fault(&error));
+        let decoded: RuntimeEffectControllerError =
+            serde_json::from_slice(&serde_json::to_vec(&error).expect("encode")).expect("decode");
+        assert_eq!(
+            decoded.cause,
+            Some(lash_core::RuntimeErrorCause::EffectGroupChildUnroutable { missing })
+        );
+        assert!(error.to_string().contains("tool_child_context_source"));
     }
 }

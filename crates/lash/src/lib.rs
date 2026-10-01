@@ -1309,6 +1309,9 @@ pub mod runtime {
     pub use lash_sansio::sansio::{ExecutionEnvironmentSync, ProjectorTurnInputs};
     pub use lash_sansio::{CheckpointDelivery, EffectIdentityError};
 
+    /// The capability an unroutable effect-group child's deployment lacks,
+    /// named by [`RuntimeErrorCause::EffectGroupChildUnroutable`].
+    pub use lash_core::GroupChildCapability;
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;

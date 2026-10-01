@@ -53,9 +53,22 @@ while `ToolAttempt` names an atomic attempt body.
 A first open resolves all children before creating group state. A missing
 runner refuses the whole open with a shape error naming the child and its
 replay key. Repeating the refused open cannot reinterpret a partly recorded
-group as accepted. A reopen uses the retained shape and dispatch route. Missing
-execution wiring on a carrying deployment remains visible and retryable; it
-neither invents a settlement nor denies access to ranks already recorded.
+group as accepted. A reopen uses the retained shape and dispatch route. A
+deployment that does not carry a recorded child now leaves it accepted: the
+miss remains visible and retryable, and it neither invents a settlement nor
+denies access to ranks already recorded.
+
+A resolver tells that miss apart from one no retry repairs
+(`GroupExecutors::missing_capability`). A deployment that serves the group's lane and
+lacks a capability the child needs can never run it: a tool child with no live
+opener on a deployment with no tool-child context source, or a host that serves
+the lane with no resolver registered. A handler-driven engine records, once and
+in the child's own journal, whether the deployment that first took the child
+ruled it out, so every replay takes the same branch on whichever deployment
+retries it. A child recorded as unroutable settles `Failed` with the terminal
+`RuntimeEffectGroupChildUnroutable`, whose cause names the missing capability,
+and its opener's rank wait resolves. A child recorded as routable keeps the
+retry on any miss.
 
 `GroupReopen::RetainedShape` preserves recorded membership;
 `GroupReopen::RetainedContent` also checks the offered child content. The shape

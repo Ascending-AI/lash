@@ -341,6 +341,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupChildAttachExpired => Terminal,
             // the committed final's invocation is gone and nothing can realize it.
             Self::RuntimeEffectGroupChildCommittedFinalLost => Terminal,
+            // the deployment's wiring lacks a capability the child needs.
+            Self::RuntimeEffectGroupChildUnroutable => Terminal,
             // this host still works the group; a later drain succeeds.
             Self::RuntimeEffectGroupDrainDeferred => Retryable,
             // the group was assembled inconsistently.

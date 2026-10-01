@@ -122,6 +122,54 @@ fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     );
 }
 
+/// A host that serves a lane with no resolver registered can never run a
+/// group child, and says which capability it lacks; once one is registered
+/// the miss is that resolver's to classify (FIG-4550).
+#[test]
+fn a_host_with_no_registered_resolver_names_the_missing_registration() {
+    struct NoChildRuns;
+
+    impl GroupExecutors for NoChildRuns {
+        fn executor_for(
+            &self,
+            _envelope: &RuntimeEffectEnvelope,
+        ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+            None
+        }
+    }
+
+    let host = RestateEffectHost::new_for_test(RestateConnection::new("https://restate.invalid"));
+    let envelope = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::runtime_operation("group"),
+                "group-1:child:0",
+            )
+            .expect("valid child address"),
+            lash_core::RuntimeAttribution::none(),
+            "effect",
+        ),
+        lash_core::RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "child".to_owned(),
+        },
+    );
+    let executors = host.group_executors();
+    assert!(executors.executor_for(&envelope).is_none());
+    assert_eq!(
+        executors.missing_capability(&envelope),
+        Some(lash_core::GroupChildCapability::GroupExecutors)
+    );
+
+    host.register_group_executors(Arc::new(NoChildRuns) as Arc<dyn GroupExecutors>)
+        .expect("the first resolver registers");
+    assert!(executors.executor_for(&envelope).is_none());
+    assert_eq!(
+        executors.missing_capability(&envelope),
+        None,
+        "a registered resolver that cannot tell claims nothing permanent"
+    );
+}
+
 #[test]
 fn session_administrative_read_rejects_non_session_scope_aliases() {
     for scope in [

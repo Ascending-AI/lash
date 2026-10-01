@@ -1906,6 +1906,7 @@ mod opener_end;
 mod presentation;
 mod recovery;
 mod siblings;
+mod unroutable;
 
 pub use admission_fence::*;
 pub use batch_group::*;
@@ -1922,3 +1923,4 @@ pub use opener_end::*;
 pub use presentation::*;
 pub use recovery::*;
 pub use siblings::*;
+pub use unroutable::*;

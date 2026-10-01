@@ -481,12 +481,21 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
 
     /// Every tool child is this resolver's, whether or not its opener is live
     /// in this process: the process whose opener is live runs it. Every other
-    /// command routes exactly when [`executor_for`](Self::executor_for) answers.
+    /// command routes exactly when [`executor_for`](Self::executor_for) answers,
+    /// or when a law's fallback resolver says it routes it.
     fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
-        matches!(
+        if matches!(
             envelope.command,
             RuntimeEffectCommand::ToolInvocation { .. }
         ) || super::group_executors::GroupExecutors::executor_for(self, envelope).is_some()
+        {
+            return true;
+        }
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(fallback) = self.law_fallback.get() {
+            return fallback.routes(envelope);
+        }
+        false
     }
 
     /// Routes through the host that installed this resolver: a layer over
@@ -516,6 +525,9 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
     ///   or a later incarnation of this one — runs it. Failing instead would
     ///   turn "this worker cannot reach that opener" into a terminal the
     ///   journal keeps forever.
+    ///
+    /// [`missing_capability`](Self::missing_capability) says which miss no
+    /// retry repairs.
     ///
     /// The `Sleep`/`AwaitEvent` executors are built with turn-cancel
     /// observation off: a group child's cancellation is the group's — the
@@ -568,6 +580,31 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
                 .law_fallback
                 .get()
                 .and_then(|fallback| fallback.executor_for(envelope)),
+            #[cfg(not(any(test, feature = "testing")))]
+            _ => None,
+        }
+    }
+
+    /// A tool child with no live opener and no pin here is built from the
+    /// deployment's context source. With none installed nothing on this
+    /// deployment can build it, and the opener that could lend its context is
+    /// itself waiting on the child (FIG-4550). Every other child is this
+    /// deployment's to run or to leave to a carrying one.
+    fn missing_capability(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Option<crate::GroupChildCapability> {
+        match &envelope.command {
+            RuntimeEffectCommand::ToolInvocation { request } => self
+                .child_opener(&request.scope.opener, envelope)
+                .is_none()
+                .then_some(crate::GroupChildCapability::ToolChildContextSource),
+            RuntimeEffectCommand::Sleep { .. } | RuntimeEffectCommand::AwaitEvent { .. } => None,
+            #[cfg(any(test, feature = "testing"))]
+            _ => self
+                .law_fallback
+                .get()
+                .and_then(|fallback| fallback.missing_capability(envelope)),
             #[cfg(not(any(test, feature = "testing")))]
             _ => None,
         }

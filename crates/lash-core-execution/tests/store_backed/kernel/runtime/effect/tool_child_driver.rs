@@ -466,6 +466,12 @@ mod tests {
             "a tool child is routed wherever its opener is live, so a preflight answered \
              by another worker must not refuse its group"
         );
+        assert_eq!(
+            crate::GroupExecutors::missing_capability(tool_children.as_ref(), &envelope),
+            Some(crate::GroupChildCapability::ToolChildContextSource),
+            "with no context source installed nothing on this deployment builds the \
+             child's context, so the miss is the deployment's and not this attempt's"
+        );
 
         let lent_dispatch = lent();
         let lent_controller = lent_dispatch
@@ -520,6 +526,11 @@ mod tests {
         assert!(
             !crate::GroupExecutors::routes(tool_children.as_ref(), &envelope),
             "a command the resolver never runs is not routed from any worker"
+        );
+        assert_eq!(
+            crate::GroupExecutors::missing_capability(tool_children.as_ref(), &envelope),
+            None,
+            "a command that is not this resolver's claims nothing permanent"
         );
     }
     /// §3's cancellation line, wrong direction: a recorded binding this host did

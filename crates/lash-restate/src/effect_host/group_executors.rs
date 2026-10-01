@@ -2,8 +2,8 @@ use super::RestateEffectHostController;
 use std::sync::Arc;
 
 use lash_core::{
-    GroupExecutors, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
-    RuntimeError, ScopedEffectController,
+    GroupChildCapability, GroupExecutors, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectLocalExecutor, RuntimeError, ScopedEffectController,
 };
 
 /// The deployment host's registered resolver, read at call time.
@@ -42,6 +42,15 @@ impl GroupExecutors for RestateHostGroupExecutors {
             .group_executors
             .get()?
             .executor_for(envelope)
+    }
+
+    /// A host that serves the lane with no resolver registered runs no child
+    /// at all, on any attempt: the missing registration is the capability.
+    fn missing_capability(&self, envelope: &RuntimeEffectEnvelope) -> Option<GroupChildCapability> {
+        match self.controller.group_executors.get() {
+            Some(executors) => executors.missing_capability(envelope),
+            None => Some(GroupChildCapability::GroupExecutors),
+        }
     }
 
     fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
