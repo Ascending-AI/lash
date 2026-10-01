@@ -12,7 +12,10 @@
 //! * (a) for every journal point of every segment's `run` invocation, a fresh
 //!   backend under the same seed drops the attempt just before the server
 //!   stores that frame and replays the invocation, with and without
-//!   always-replay (every step replays from the journal);
+//!   always-replay (every step replays from the journal). An always-replay
+//!   run costs about four times a plain one in CPU, so that matrix is cut
+//!   into [`ALWAYS_REPLAY_PARTS`] cases that together cover every point and
+//!   run side by side (FIG-4615);
 //! * (b) the same points, with a fresh process worker (a new core's, with no
 //!   live openers or caches) installed as the crash drops the attempt, as a
 //!   restarted deployment comes back;
@@ -50,6 +53,10 @@ const SIGNAL: &str = "go";
 /// the first segment, so the signal wait and the second call run in later
 /// ones.
 const SEGMENT_EFFECT_BUDGET: u64 = 2;
+/// Cases the always-replay matrix is cut into. Each takes the crash points
+/// whose index is its own modulo this, so the cases are disjoint, cover every
+/// point and cost about what a plain matrix does.
+const ALWAYS_REPLAY_PARTS: usize = 4;
 
 struct CountingTool {
     executions: Arc<AtomicUsize>,
@@ -598,15 +605,27 @@ async fn reference(seed: u64, config: &ServerConfig) -> Run {
 
 /// (a) and (b): every journal point of every segment, crashed once and
 /// redriven, reaches the reference terminal with each tool call run once, or
-/// twice where the crash lost its result.
-async fn every_journal_point_recovers(config: ServerConfig, fresh_worker_on_crash: bool) {
+/// twice where the crash lost its result. `part` is `Some((index, of))` to
+/// run only the points whose index is `index` modulo `of`.
+async fn every_journal_point_recovers(
+    config: ServerConfig,
+    fresh_worker_on_crash: bool,
+    part: Option<(usize, usize)>,
+) {
     let seed = 0x3809;
     let started = Instant::now();
     let reference = reference(seed, &config).await;
-    let points = crash_points(&reference, config.always_replay);
-    assert!(points.len() > 30, "{} crash points", points.len());
+    let all_points = crash_points(&reference, config.always_replay);
+    assert!(all_points.len() > 30, "{} crash points", all_points.len());
+    let points: Vec<_> = all_points
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| part.is_none_or(|(part, of)| index % of == part))
+        .map(|(_, point)| point)
+        .collect();
+    assert!(!points.is_empty(), "the part selects no crash point");
     let mut violations = Vec::new();
-    for (rule, lost_run) in &points {
+    for (rule, lost_run) in points.iter().copied() {
         let run = run_process(Scenario {
             config: config.clone(),
             crash: Some(rule.clone()),
@@ -628,10 +647,11 @@ async fn every_journal_point_recovers(config: ServerConfig, fresh_worker_on_cras
         }
     }
     println!(
-        "process crash matrix (always_replay={}, fresh_worker={fresh_worker_on_crash}): \
-         {} journal points in {:?}, {} violations",
+        "process crash matrix (always_replay={}, fresh_worker={fresh_worker_on_crash}, \
+         part={part:?}): {} of {} journal points in {:?}, {} violations",
         config.always_replay,
         points.len(),
+        all_points.len(),
         started.elapsed(),
         violations.len()
     );
@@ -643,17 +663,46 @@ async fn every_journal_point_recovers(config: ServerConfig, fresh_worker_on_cras
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_journal_point_of_a_segmented_process_recovers_to_the_reference_terminal() {
-    every_journal_point_recovers(ServerConfig::default(), false).await;
+    every_journal_point_recovers(ServerConfig::default(), false, None).await;
+}
+
+/// One case per part below: a part without its case would leave crash points
+/// unrun.
+const _: () = assert!(ALWAYS_REPLAY_PARTS == 4);
+
+async fn part_of_every_journal_point_recovers_when_every_step_replays(part: usize) {
+    assert!(part < ALWAYS_REPLAY_PARTS);
+    every_journal_point_recovers(
+        ServerConfig::default().always_replay(true),
+        false,
+        Some((part, ALWAYS_REPLAY_PARTS)),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_journal_point_recovers_when_every_step_replays() {
-    every_journal_point_recovers(ServerConfig::default().always_replay(true), false).await;
+async fn every_journal_point_recovers_when_every_step_replays_part_0() {
+    part_of_every_journal_point_recovers_when_every_step_replays(0).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_journal_point_recovers_when_every_step_replays_part_1() {
+    part_of_every_journal_point_recovers_when_every_step_replays(1).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_journal_point_recovers_when_every_step_replays_part_2() {
+    part_of_every_journal_point_recovers_when_every_step_replays(2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_journal_point_recovers_when_every_step_replays_part_3() {
+    part_of_every_journal_point_recovers_when_every_step_replays(3).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_journal_point_recovers_on_a_fresh_process_worker() {
-    every_journal_point_recovers(ServerConfig::default(), true).await;
+    every_journal_point_recovers(ServerConfig::default(), true, None).await;
 }
 
 /// (c): concurrent attempts, every step replayed, and
