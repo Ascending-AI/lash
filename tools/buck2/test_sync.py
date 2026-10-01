@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from collections import defaultdict
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -644,6 +645,7 @@ def check_external_buildscripts() -> None:
         assert '"CARGO_CRATE_NAME": "build_script_' in block, block.splitlines()[0]
     assert '"cdylib"' not in generated
     check_buildscript_link_projection(module)
+    check_workflow_graph_schema_discovery(module)
     metadata_edges = {
         re.search(r'^\s*name = "([^"]+)"', block, re.M).group(1): sorted(
             re.findall(r'":([^"\]]+\[metadata\])"', block)
@@ -947,6 +949,47 @@ def check_schema_source_inputs() -> None:
         assert target.group(1) == "export_file" and 'mode = "reference",' in target.group(2), (
             f"{label} must be export_file(mode = \"reference\"), not {target.group(1)}"
         )
+
+
+def check_workflow_graph_schema_discovery(module) -> None:
+    """The root filegroup names the one workflow-graph schema, whatever its version."""
+    with tempfile.TemporaryDirectory(prefix="lash-graph-schema-") as directory:
+        root = pathlib.Path(directory)
+        schemas = root / module.WORKFLOW_GRAPH_SCHEMA_DIRECTORY
+        schemas.mkdir(parents=True)
+        original = module.ROOT
+        module.ROOT = root
+        try:
+            for present, expected in (
+                (["v21"], "v21"),
+                (["v1"], "v1"),
+                ([], None),
+                (["v1", "v21"], None),
+            ):
+                for stale in schemas.iterdir():
+                    stale.unlink()
+                names = [f"{version}.schema.json" for version in present]
+                for name in names:
+                    (schemas / name).write_text("{}\n", encoding="utf-8")
+                try:
+                    found = module.workflow_graph_schema()
+                except SystemExit as error:
+                    assert expected is None, f"{present} failed: {error}"
+                    message = str(error)
+                    assert "exactly one" in message, message
+                    for name in names or ["none"]:
+                        assert name in message, f"{message!r} does not name {name}"
+                    continue
+                assert expected is not None, f"{present} selected {found}"
+                path = f"{module.WORKFLOW_GRAPH_SCHEMA_DIRECTORY}/{expected}.schema.json"
+                assert found == path, found
+                inventory = defaultdict(list)
+                assert (
+                    'filegroup(\n    name = "workflow_graph_schema",\n'
+                    f'    srcs = ["{path}"],\n    copy = False,\n'
+                ) in module.root_buck(inventory)
+        finally:
+            module.ROOT = original
 
 
 def check_feature_lane_executable_selection() -> None:

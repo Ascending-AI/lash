@@ -800,6 +800,26 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
     return result
 
 
+WORKFLOW_GRAPH_SCHEMA_DIRECTORY = "schemas/host/workflow-graph"
+
+
+def workflow_graph_schema() -> str:
+    """The one committed workflow-graph schema document, whatever its version.
+
+    The Rust version constant is feature-gated, so the generator follows the
+    file the schema generator wrote. Any other count is a half-applied version
+    change, which must fail here instead of selecting a document silently.
+    """
+    pattern = f"{WORKFLOW_GRAPH_SCHEMA_DIRECTORY}/v*.schema.json"
+    found = sorted(path.relative_to(ROOT).as_posix() for path in ROOT.glob(pattern))
+    if len(found) != 1:
+        raise SystemExit(
+            f"tools/buck2/sync.py: //:workflow_graph_schema needs exactly one {pattern}, "
+            f"found {', '.join(found) if found else 'none'}"
+        )
+    return found[0]
+
+
 def root_buck(inventory: dict) -> str:
     def suite(name: str, labels: list[str]) -> str:
         return (
@@ -834,13 +854,14 @@ def root_buck(inventory: dict) -> str:
             suite("feature_lane_clippy", inventory["feature_lane_clippy_build_targets"]),
         ]
     )
-    return aggregates + '''filegroup(
-    name = "workflow_graph_schema",
-    srcs = ["schemas/host/workflow-graph/v21.schema.json"],
-    copy = False,
-    visibility = ["PUBLIC"],
-)
-
+    return aggregates + (
+        "filegroup(\n"
+        '    name = "workflow_graph_schema",\n'
+        f"    srcs = [{json.dumps(workflow_graph_schema())}],\n"
+        "    copy = False,\n"
+        '    visibility = ["PUBLIC"],\n'
+        ")\n"
+    ) + '''
 filegroup(
     name = "dialect_deviation_register",
     srcs = ["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
