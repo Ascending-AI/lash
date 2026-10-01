@@ -81,6 +81,8 @@ from pathlib import Path
 from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
+INVENTORY = ROOT / "tools/buck2/target-inventory.json"
+VM_WORKER_LABEL = "//crates/lash-vm-worker:lash-vm-worker__bin"
 REGISTRY = ROOT / "scripts" / "restate-suites.toml"
 # The replay leg's known divergences, sharded one file per ticket that brings
 # its laws back, so two changes never queue on restate-suites.toml.
@@ -366,8 +368,7 @@ def build(labels: Sequence[str]) -> list[Path]:
     checkout. Outputs are resolved from the build report, never from a
     configuration-hashed buck-out path.
     """
-    worker_label = "//crates/lash-vm-worker:lash-vm-worker__bin"
-    build_labels = list(dict.fromkeys([*labels, worker_label]))
+    build_labels = list(dict.fromkeys([*labels, VM_WORKER_LABEL]))
     report_root = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
     report = report_root / f"restate-build-{os.getpid()}.json"
     argv = [
@@ -405,41 +406,42 @@ def build(labels: Sequence[str]) -> list[Path]:
             raise SystemExit(f"{label} built, but {path} is missing")
         return path
 
-    worker = output(worker_label)
+    worker = output(VM_WORKER_LABEL)
     os.environ["LASH_VM_WORKER"] = str(worker)
     return [output(label) for label in labels]
 
 
-def package_binaries(package: str) -> list[str]:
-    """The labels of a package's Rust binaries, from generated inventory."""
-    inventory_path = ROOT / "tools/buck2/target-inventory.json"
-    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+def package_binaries(package: str) -> dict[str, str]:
+    """A package's Rust binary labels and their Cargo names, from generated inventory."""
     manifest = package.removeprefix("//") + "/Cargo.toml"
-    labels = [
-        target["label"]
-        for entry in inventory["packages"]
+    binaries = {
+        target["label"]: target["cargo"]
+        for entry in json.loads(INVENTORY.read_text(encoding="utf-8"))["packages"]
         if entry["manifest"] == manifest
         for target in entry["targets"]
         if target.get("kind") == "bin"
-    ]
-    if not labels:
-        raise SystemExit(f"{inventory_path.relative_to(ROOT)} declares no binaries for {package}")
-    return labels
+    }
+    if not binaries:
+        raise SystemExit(f"{INVENTORY.relative_to(ROOT)} declares no binaries for {package}")
+    return binaries
 
 
 def stage_binaries(package: str, destination: Path) -> list[Path]:
     """Build a package's binaries and stage them under their Cargo names.
 
-    A generated binary label is `<cargo-name>__bin`; consumers (compose files,
-    the E2E drivers) mount the Cargo name. Each is stripped, as Cargo's
-    release profile strips them: the stage is shipped between jobs, and an
-    unstripped fastbuild binary is roughly twice the size.
+    Buck2 names a binary's output after its crate (`lash_e2e_worker`), but
+    consumers (compose files, the E2E drivers) mount the Cargo `[[bin]]` name
+    (`lash-e2e-worker`), which the generated inventory records per label.
+    Each is stripped, as Cargo's release profile strips them: the stage is
+    shipped between jobs, and an unstripped fastbuild binary is roughly twice
+    the size.
     """
-    labels = package_binaries(package)
+    binaries = package_binaries(package)
+    binaries[VM_WORKER_LABEL] = package_binaries("//crates/lash-vm-worker")[VM_WORKER_LABEL]
     destination.mkdir(parents=True, exist_ok=True)
     staged = []
-    for built in build([*labels, "//crates/lash-vm-worker:lash-vm-worker__bin"]):
-        target = destination / built.name.removesuffix("__bin")
+    for label, built in zip(binaries, build(list(binaries)), strict=True):
+        target = destination / binaries[label]
         shutil.copyfile(built, target)
         target.chmod(0o755)
         subprocess.run(["strip", str(target)], check=True)
@@ -637,7 +639,7 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     if args.binary:
         binary = Path(args.binary).resolve()
         if not os.environ.get("LASH_VM_WORKER"):
-            build(["//crates/lash-vm-worker:lash-vm-worker__bin"])
+            build([VM_WORKER_LABEL])
     else:
         (binary,) = build([suite.label])
     cwd = ROOT / suite.cwd
