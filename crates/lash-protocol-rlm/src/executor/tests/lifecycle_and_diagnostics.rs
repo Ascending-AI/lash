@@ -303,6 +303,22 @@ pub(super) fn host_cancellation_is_a_terminal_stop_not_a_program_error() {
     );
 }
 
+/// FIG-4547: an aggregate with no members is the program's defect — retrying
+/// the identical cell fails the same way — even though the host still ends
+/// the execution uncatchably (ADR 0099 §11 clause 5).
+#[test]
+pub(super) fn an_unsettled_aggregate_is_a_program_failure_not_a_host_one() {
+    assert_eq!(
+        lashlang_runtime_feedback_kind(
+            &lashlang::RuntimeError::AggregateAwaitUnsettled {
+                aggregate: "Promise.race".to_string(),
+            },
+            false,
+        ),
+        lash_core::CellFailureKind::Program
+    );
+}
+
 #[test]
 pub(super) fn execution_started_inventory_matches_lifecycle() {
     block_on(async {

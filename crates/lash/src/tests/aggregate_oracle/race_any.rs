@@ -334,7 +334,8 @@ async fn a_losers_final_after_the_close_is_refused(tier: &JournaledTier) -> Resu
 
 /// §11 clause 5: `Promise.race([])` never settles, so the host ends the cell
 /// with the typed unsettled-await error rather than parking it forever. It is
-/// not catchable, so the cell's own `catch` never runs.
+/// not catchable, so the cell's own `catch` never runs, and the empty
+/// aggregate is reported to the model as the program's defect (FIG-4547).
 async fn racing_nothing_ends_the_cell_with_a_typed_host_error(tier: &JournaledTier) -> Result<()> {
     let run = run_cells(
         tier,
@@ -358,10 +359,12 @@ async fn racing_nothing_ends_the_cell_with_a_typed_host_error(tier: &JournaledTi
         tier.name
     );
     assert!(
-        run.requests
-            .get(1)
-            .is_some_and(|request| request.contains("aggregate_await_unsettled")),
-        "{}: the model sees the typed host error: {:?}",
+        run.requests.get(1).is_some_and(|request| {
+            request.contains("aggregate_await_unsettled")
+                && request.contains("guard the empty case")
+                && request.contains("the defect is in the program")
+        }),
+        "{}: the model sees the typed terminal as the program's defect: {:?}",
         tier.name,
         run.requests.get(1)
     );

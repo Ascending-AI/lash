@@ -1263,9 +1263,12 @@ fn lashlang_runtime_feedback_kind(
     match error {
         _ if host_cancelled => lash_core::CellFailureKind::Host,
         lashlang::RuntimeError::HostCancelled => lash_core::CellFailureKind::Host,
-        // An await nothing can settle is the host's lifetime ending, not the
-        // program's error (ADR 0099 §11 clause 5).
-        lashlang::RuntimeError::AggregateAwaitUnsettled { .. } => lash_core::CellFailureKind::Host,
+        // An aggregate with no members is the program's defect: the host ends
+        // the cell uncatchably (ADR 0099 §11 clause 5), but a retry of the
+        // identical cell fails the same way (FIG-4547).
+        lashlang::RuntimeError::AggregateAwaitUnsettled { .. } => {
+            lash_core::CellFailureKind::Program
+        }
         // An aggregate's infrastructure failure or host stop travels on the
         // host-control channel (ADR 0099 §10 L3): the host's, not the program's.
         lashlang::RuntimeError::AggregateHostControl { .. } => lash_core::CellFailureKind::Host,

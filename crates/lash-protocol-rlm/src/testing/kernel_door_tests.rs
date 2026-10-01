@@ -319,6 +319,63 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell() {
     }
 }
 
+/// FIG-4547: an aggregate with no members is the program's defect, not a host
+/// failure — the identical retry fails the same way, so host-retry guidance
+/// would waste a turn. `Promise.race([])` ends the cell on the uncatchable
+/// `AggregateAwaitUnsettled` terminal (ADR 0099 §11 clause 5 — the `catch`
+/// never runs) and `Promise.any([])` rejects uncaught; both classify as
+/// program failures.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_aggregate_fails_the_cell_as_a_program_defect() {
+    for (aggregate, cell) in [
+        (
+            "Promise.race",
+            r#"try {
+  finish(await Promise.race([]));
+} catch (error) {
+  finish("caught");
+}"#,
+        ),
+        ("Promise.any", r#"finish(await Promise.any([]));"#),
+    ] {
+        let double = super::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(super::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            super::double_ports(&double, &handler),
+            std::sync::Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        let response = run_cell(context, cell).await;
+        let failure = response
+            .error
+            .as_ref()
+            .unwrap_or_else(|| panic!("{aggregate}: the empty aggregate fails the cell"));
+        assert_eq!(
+            failure.kind,
+            lash_core::CellFailureKind::Program,
+            "{aggregate}: an aggregate with no members is the program's defect, \
+             not a host failure to retry: {failure:?}"
+        );
+        assert_ne!(
+            response.terminal_finish,
+            Some(serde_json::json!("caught")),
+            "{aggregate}: the empty-aggregate failure stays uncatchable"
+        );
+        if aggregate == "Promise.race" {
+            assert!(
+                failure.message.contains("no members to settle")
+                    && failure.message.contains("guard the empty case"),
+                "{aggregate}: the feedback names the empty aggregate and its \
+                 guard: {failure:?}"
+            );
+        }
+        handler.close().await.expect("close the cell's handler");
+    }
+}
+
 /// A context that claims a scope other than the one its lent controller
 /// admits is refused when it is built, before any effect runs.
 #[tokio::test(flavor = "multi_thread")]

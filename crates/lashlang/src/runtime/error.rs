@@ -504,7 +504,7 @@ pub enum RuntimeError {
     /// the analogue of Node exiting on an unsettled top-level await
     /// (ADR 0099 §11 clause 5). Not catchable: the program's semantics are
     /// ECMA's, and it is the host's lifetime that ends.
-    #[error("{aggregate} can never settle: the aggregate has no operand")]
+    #[error("{aggregate} can never settle: the aggregate had no members to settle")]
     AggregateAwaitUnsettled { aggregate: String },
     /// `await` was applied to a value that is not a process handle.
     #[error("`await` expects a process handle but found {found}; the value is already resolved")]
@@ -1610,7 +1610,7 @@ mod tests {
                     "resource operation batch reply does not fit its aggregate: selected leaf 5 is out of range for 3 leaves"
                 }
                 RuntimeError::AggregateAwaitUnsettled { .. } => {
-                    "Promise.race can never settle: the aggregate has no operand"
+                    "Promise.race can never settle: the aggregate had no members to settle"
                 }
                 RuntimeError::AwaitExpectsHandle { .. } => {
                     "`await` expects a process handle but found number; the value is already resolved"

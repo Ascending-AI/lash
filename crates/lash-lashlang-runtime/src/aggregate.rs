@@ -134,10 +134,12 @@ pub async fn settle_bridge_aggregate(
     }
 }
 
-/// The host-level message for a VM terminal that is a host lifetime contract
-/// rather than a program error: an await nothing can settle ends the
-/// execution with the typed [`lash_core::RuntimeErrorCode::AggregateAwaitUnsettled`]
-/// (ADR 0099 §11 clause 5). `None` for every other failure.
+/// The message for the VM terminal that ends an execution awaiting an
+/// aggregate nothing can settle: the typed
+/// [`lash_core::RuntimeErrorCode::AggregateAwaitUnsettled`], the cause, and
+/// the guard the empty aggregate needs. The host ends the execution
+/// uncatchably (ADR 0099 §11 clause 5), but the defect is the program's and
+/// the feedback says so (FIG-4547). `None` for every other failure.
 pub fn host_lifetime_failure_message(error: &lashlang::RuntimeError) -> Option<String> {
     matches!(
         error,
@@ -146,7 +148,7 @@ pub fn host_lifetime_failure_message(error: &lashlang::RuntimeError) -> Option<S
     .then(|| {
         lash_core::RuntimeError::new(
             lash_core::RuntimeErrorCode::AggregateAwaitUnsettled,
-            error.to_string(),
+            format!("{error}; guard the empty case before awaiting it"),
         )
         .to_string()
     })
