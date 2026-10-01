@@ -40,8 +40,8 @@ INPUT_SHA256 = {
 # Filled from the deterministic transform below.  These hashes make a second
 # invocation a full verification, rather than trusting an on-disk receipt.
 OUTPUT_SHA256 = {
-    "decls/rust_rules.bzl": "97769fd0b4afced56705a34fd4f3e8404f8da78997d57fa161678b79c4ed82bc",
-    "rust/build.bzl": "51f2f65902b39bb78ebe818d4484f959b6e6a95ce6a8f65ba1e844ebe34d28e6",
+    "decls/rust_rules.bzl": "89ee8309c0f24763adb0bc0276243c022640f489c17223f0597152e188c07885",
+    "rust/build.bzl": "ae4377e979bd1e6089016a87f2ee31bf7dc56c31ec6cad8c06220cfdfd9a4712",
     "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
     "rust/clippy_configuration.bzl": "9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2",
     "rust/failure_filter.bzl": "6ec035fcd09446d60560711c37532f8d749401c50e50767ac8eebcddcb2a9e03",
@@ -61,9 +61,13 @@ OUTPUT_SHA256 = {
 # a narrow upgrade path for existing private state; arbitrary modified prelude
 # files still fail closed.
 PREVIOUS_OUTPUT_SHA256 = {
+    "decls/rust_rules.bzl": {
+        "97769fd0b4afced56705a34fd4f3e8404f8da78997d57fa161678b79c4ed82bc",
+    },
     "rust/build.bzl": {
         "3bed58d24563a0e9c4274d5c5530a9c18c600ee1b3e8e7f6bcddd3a482be16fa",
         "ac1bbf9c1a7084a9756af83edf8dfbbedb47269010d54149187cf1b1b6f56b34",
+        "51f2f65902b39bb78ebe818d4484f959b6e6a95ce6a8f65ba1e844ebe34d28e6",
     },
     "rust/cargo_buildscript.bzl": {
         "49e261487744c64fda39e73f15a0c440fa4af8ae9a4cb6f4ec12bcb4257ff607",
@@ -93,6 +97,9 @@ def kiln_action_env(ctx, existing = {}, rust_identity = False):
 
 RESOURCE_ATTRS = '''            "kiln_action_cpu_count": attrs.string(default = "1"),
             "kiln_action_memory_kb": attrs.string(default = "1572864"),
+'''
+
+REPO_ROOTED_SRCS_ATTR = '''            "kiln_repo_rooted_srcs": attrs.bool(default = False),
 '''
 
 
@@ -370,6 +377,43 @@ def preserve_relative_manifest_dir(text: str) -> str:
     return text.replace(anchor, replacement, 1)
 
 
+def add_repo_rooted_srcs_attr(text: str) -> str:
+    if '"kiln_repo_rooted_srcs"' in text:
+        return text
+    anchor = '            "kiln_action_memory_kb": attrs.string(default = "1572864"),\n'
+    if text.count(anchor) != 1:
+        raise ValueError("Rust common resource attributes changed")
+    return text.replace(anchor, anchor + REPO_ROOTED_SRCS_ATTR, 1)
+
+
+STOCK_SOURCE_REMAP = '''            "=",
+            compile_ctx.symlinked_srcs.owner.path,
+            compile_ctx.path_sep,
+            delimiter = "",
+'''
+
+# Stock rules key `__srcs` by package-relative path and remap its root to the
+# owning package. Lash's cross-package source trees (tools/buck2/source_tree.bzl)
+# already key every file by its repository path, so their root remaps to the
+# action root: `file!()` and dependency metadata then name `<package>/<file>`
+# once, as Cargo does from the workspace root.
+REPO_ROOTED_SOURCE_REMAP = '''            "=",
+            [] if getattr(ctx.attrs, "kiln_repo_rooted_srcs", False) else [compile_ctx.symlinked_srcs.owner.path, compile_ctx.path_sep],
+            delimiter = "",
+'''
+
+
+def remap_repo_rooted_sources(text: str) -> str:
+    # Both the compiler and rustdoc-test remaps; they must stay identical.
+    if REPO_ROOTED_SOURCE_REMAP in text:
+        if STOCK_SOURCE_REMAP in text:
+            raise ValueError("Rust source remap partially overlaid")
+        return text
+    if text.count(STOCK_SOURCE_REMAP) != 2:
+        raise ValueError("Rust source remap sites changed")
+    return text.replace(STOCK_SOURCE_REMAP, REPO_ROOTED_SOURCE_REMAP)
+
+
 # Reindeer's generated package (tools/buck2/reindeer.toml `file_name`). Its
 # crates compile from extracted `<name>-<version>.crate` archive directories.
 THIRD_PARTY_PACKAGE = "third-party/rust"
@@ -438,7 +482,8 @@ def transform(relative: str, text: str) -> str:
     if relative == "rust/sources.bzl":
         return add_checkout_source_projection(text)
     if relative == "decls/rust_rules.bzl":
-        return add_attrs(text, '            "clippy_configuration": attrs.option(attrs.dep(providers = [ClippyConfiguration]), default = None),\n')
+        text = add_attrs(text, '            "clippy_configuration": attrs.option(attrs.dep(providers = [ClippyConfiguration]), default = None),\n')
+        return add_repo_rooted_srcs_attr(text)
     if relative in {"rust/rust_binary.bzl", "rust/rust_library.bzl"}:
         pattern = r'(emit = Emit\("clippy"\),(?:(?!\n\s*\)).)*?infallible_diagnostics = )True'
         text, count = re.subn(pattern, r"\g<1>False", text, flags=re.S)
@@ -502,6 +547,7 @@ def transform(relative: str, text: str) -> str:
     if relative == "rust/build.bzl":
         text = preserve_relative_manifest_dir(text)
         text = narrow_transitive_source_inputs(text)
+        text = remap_repo_rooted_sources(text)
         old = '''        _lintify("W", is_clippy, toolchain_info.warn_lints),
     )'''
         new = '''        _lintify("W", is_clippy, toolchain_info.warn_lints),
@@ -577,8 +623,10 @@ def clippy_configuration(name, **kwargs):
 
 
 def upgrade_previous(relative: str, text: str) -> str:
+    if relative == "decls/rust_rules.bzl":
+        return add_repo_rooted_srcs_attr(text)
     if relative == "rust/build.bzl":
-        return narrow_transitive_source_inputs(preserve_relative_manifest_dir(text))
+        return remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_manifest_dir(text)))
     if relative != "rust/cargo_buildscript.bzl":
         raise ValueError("no previous-overlay upgrade for {}".format(relative))
     encoded = '''        rust_toolchain_info.rustc_flags,

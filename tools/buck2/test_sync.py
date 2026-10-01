@@ -266,6 +266,56 @@ RustSourcesTSet = transitive_set(
     assert overlay.add_checkout_source_projection(projected) == projected
 
 
+def check_repo_rooted_source_remap() -> None:
+    spec = importlib.util.spec_from_file_location("buck2_prelude_overlay_remap", HERE / "prelude_overlay.py")
+    overlay = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(overlay)
+    # Cross-package source trees key files by repository path, so rustc must
+    # remap their root to the action root rather than prefix the owning
+    # package again: `file!()` and dependency metadata name `<package>/<file>`.
+    tree = (HERE / "source_tree.bzl").read_text(encoding="utf-8")
+    assert "_add(mapped, paths.join(ctx.attrs.package, source.short_path), source)" in tree
+    assert "paths.join(package, source.short_path): source" in tree
+    rules = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
+    assert rules.count('"srcs_filegroup": ":" + tree,') == 1
+    assert rules.count('"kiln_repo_rooted_srcs": True,') == 1
+    tree_attrs = rules[rules.index("    tree = name + \"__source_tree\""):]
+    tree_attrs = tree_attrs[: tree_attrs.index("    }\n") + 6]
+    assert '"kiln_repo_rooted_srcs": True,' in tree_attrs and '"srcs_filegroup"' in tree_attrs
+    # Third-party crates keep the stock package-relative `__srcs` remap,
+    # `third-party/rust/<name>-<version>.crate/<file>`.
+    third_party = (HERE / "third_party.bzl").read_text(encoding="utf-8")
+    assert "kiln_repo_rooted_srcs" not in third_party and "srcs_filegroup" not in third_party
+
+    site = '''        cmd_args(
+            "--remap-path-prefix=",
+            compile_ctx.symlinked_srcs,
+            compile_ctx.path_sep,
+            "=",
+            compile_ctx.symlinked_srcs.owner.path,
+            compile_ctx.path_sep,
+            delimiter = "",
+        ),
+'''
+    remapped = overlay.remap_repo_rooted_sources(site + site)
+    assert remapped.count('[] if getattr(ctx.attrs, "kiln_repo_rooted_srcs", False) else [') == 2
+    assert "compile_ctx.symlinked_srcs.owner.path,\n" not in remapped
+    assert overlay.remap_repo_rooted_sources(remapped) == remapped
+    for broken in (site, remapped + site):
+        try:
+            overlay.remap_repo_rooted_sources(broken)
+        except ValueError:
+            continue
+        raise AssertionError("source remap overlay accepted a changed prelude")
+    decls = '''            "kiln_action_cpu_count": attrs.string(default = "1"),
+            "kiln_action_memory_kb": attrs.string(default = "1572864"),
+'''
+    declared = overlay.add_repo_rooted_srcs_attr(decls)
+    assert declared.count('"kiln_repo_rooted_srcs": attrs.bool(default = False),') == 1
+    assert overlay.add_repo_rooted_srcs_attr(declared) == declared
+
+
 def check_measurement_filter() -> None:
     spec = importlib.util.spec_from_file_location("action_sizes", HERE / "action_sizes_from_log.py")
     module = importlib.util.module_from_spec(spec)
@@ -927,6 +977,7 @@ def main() -> int:
         check_ownership,
         check_action_bridge,
         check_transitive_source_inputs,
+        check_repo_rooted_source_remap,
         check_measurement_filter,
         check_native_inputs,
         check_dependency_and_profile_projection,

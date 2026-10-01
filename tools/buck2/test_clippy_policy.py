@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import re
 import tempfile
@@ -47,7 +48,12 @@ def repository_canonical() -> dict:
 class ClippyPolicyTests(unittest.TestCase):
     def test_repository_policy_covers_every_workspace_member(self) -> None:
         rendered = POLICY.render(repository_canonical(), ROOT)
-        self.assertIn("WORKSPACE_PACKAGE_COUNT = 54", rendered)
+        inventory = json.loads(
+            (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+        )
+        self.assertIn(
+            f"WORKSPACE_PACKAGE_COUNT = {len(inventory['packages'])}", rendered
+        )
         self.assertIn('"--deny=unsafe_code"', rendered)
         self.assertIn('"--deny=clippy::unwrap_used"', rendered)
         self.assertIn('"--warn=clippy::large_futures"', rendered)
@@ -153,9 +159,16 @@ class ClippyPolicyTests(unittest.TestCase):
             source,
         )
         self.assertEqual(source.count("resources = compile_data,"), 4)
-        self.assertEqual(source.count(" + compile_data,"), 4)
+        # Package compile data joins the sources; cross-package compile data
+        # selects the repository-rooted source tree.
+        self.assertEqual(
+            source.count(
+                " + package_compile_data,\n        extra_compile_data,\n    ))"
+            ),
+            4,
+        )
         self.assertIn(
-            "srcs = _srcs(crate_root, srcs_patterns) + package_data + extra_compile_data",
+            "_srcs(crate_root, srcs_patterns) + package_data,\n        extra_compile_data,\n    ))",
             source,
         )
         self.assertIn(
@@ -166,7 +179,7 @@ class ClippyPolicyTests(unittest.TestCase):
             "resources = package_files + extra_compile_data + extra_data", source
         )
         self.assertIn(
-            'srcs = _srcs("build.rs", ["build/**/*.rs"]) + data',
+            '_srcs("build.rs", ["build/**/*.rs"]) + data,\n        extra_srcs,\n    ))',
             source,
         )
         build_script = native_rules[0]

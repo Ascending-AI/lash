@@ -2354,3 +2354,16 @@ fn published_graph_schema_accepts_a_folded_snapshot_and_enforces_its_row() {
         );
     }
 }
+
+#[test]
+fn source_locations_are_workspace_relative() {
+    // Panic messages, `#[track_caller]` locations and backtraces name this file
+    // the way Cargo does from the workspace root. This target compiles with
+    // cross-package inputs, so it also pins the Buck2 repository-rooted
+    // source tree against reporting the package path twice.
+    assert_eq!(file!(), "crates/lash-trace/tests/schema.rs");
+    assert_eq!(
+        std::panic::Location::caller().file(),
+        "crates/lash-trace/tests/schema.rs"
+    );
+}

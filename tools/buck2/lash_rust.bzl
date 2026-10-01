@@ -109,6 +109,8 @@ def _source_attrs(name, manifest_dir, crate_root, package_srcs, workspace_srcs):
     )
     return {
         "crate_root": manifest_dir + "/" + crate_root,
+        # The tree is keyed by repository path; see prelude_overlay.py.
+        "kiln_repo_rooted_srcs": True,
         "srcs_filegroup": ":" + tree,
     }
 
