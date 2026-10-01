@@ -401,7 +401,12 @@ impl SqliteStore {
                             session_id: commit.session_id.clone(),
                         });
                     }
-                    super::drive_epoch::require_commit_fences_conn(tx, commit)?;
+                    // A successor's seal refuses the commit before anything
+                    // is written (ADR 0105 §2). A commit already stored still
+                    // answers from its receipt below, since a drive that runs
+                    // several roots in one journal replays an earlier root's
+                    // commit after a later root's seal (FIG-4498).
+                    let superseded = super::drive_epoch::commit_fence_superseded_conn(tx, commit)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
                     planner.validate_node_derivation()?;
@@ -409,7 +414,9 @@ impl SqliteStore {
                     // S7), in the commit's transaction, whichever of its
                     // physical turns committed; another root's commit
                     // leaves it.
-                    if let Some(turn_id) = commit.settled_park_root() {
+                    if let Some(turn_id) = commit.settled_park_root()
+                        && superseded.is_none()
+                    {
                         let released: Option<(String, i64)> = tx
                             .query_row(
                                 crate::turn_ingress::turn_ingress_sql()
@@ -485,7 +492,13 @@ impl SqliteStore {
                                 result,
                                 append_request_identity,
                             };
-                            if let Some(replay) = planner.decide_receipt(Some(prior))? {
+                            let replay = match planner.decide_receipt(Some(prior)) {
+                                Ok(replay) => replay,
+                                // Only the stored commit's exact replay answers under a
+                                // superseded fence.
+                                Err(conflict) => return Err(superseded.unwrap_or(conflict)),
+                            };
+                            if let Some(replay) = replay {
                                 if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
                         && settlement.authorization().session_id() == commit.session_id
                         && commit.interrupted_turn_input_turn_id.as_ref() == Some(settlement.authorization().turn_id())
@@ -499,6 +512,9 @@ impl SqliteStore {
                                 return Ok(replay.into_result());
                             }
                         }
+                    }
+                    if let Some(superseded) = superseded {
+                        return Err(superseded);
                     }
                     if commit.interrupted_turn_cancel_intent.is_some()
                         && commit.turn_cancel_closure_settlement.is_none()

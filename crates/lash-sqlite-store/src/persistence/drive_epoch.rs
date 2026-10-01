@@ -67,21 +67,28 @@ pub(super) fn require_fence_conn(
     require_current_drive_fence(session_id, fence, &current)
 }
 
-/// Refuse `commit` unless the fence it presents is current, in its own
-/// transaction before anything is read or written: the drive fence of the
-/// admission its root was sealed under, which a successor's seal makes stale
-/// (ADR 0105 §2). A commit that settles ingress must present one
+/// Whether a successor's seal superseded the drive fence `commit` presents:
+/// the fence of the admission its root was sealed under (ADR 0105 §2). A
+/// superseded fence writes nothing. The caller answers a commit it already
+/// stored from its receipt and refuses every other one with the returned
+/// [`StoreError::StaleDriveFence`]: a drive that runs several roots in one
+/// journal replays an earlier root's commit after a later root's seal
+/// (FIG-4498). A commit that settles ingress must present a fence
 /// ([`RuntimeCommit::validate_ingress_settlement`]).
 ///
 /// [`RuntimeCommit::validate_ingress_settlement`]: lash_core_execution::store::RuntimeCommit::validate_ingress_settlement
-pub(super) fn require_commit_fences_conn(
+pub(super) fn commit_fence_superseded_conn(
     conn: &Connection,
     commit: &lash_core_execution::store::RuntimeCommit,
-) -> Result<(), StoreError> {
+) -> Result<Option<StoreError>, StoreError> {
     commit.validate_ingress_settlement()?;
-    match commit.drive_fence.as_ref() {
-        Some(fence) => require_fence_conn(conn, &commit.session_id, fence),
-        None => Ok(()),
+    let Some(fence) = commit.drive_fence.as_ref() else {
+        return Ok(None);
+    };
+    match require_fence_conn(conn, &commit.session_id, fence) {
+        Ok(()) => Ok(None),
+        Err(superseded @ StoreError::StaleDriveFence { .. }) => Ok(Some(superseded)),
+        Err(error) => Err(error),
     }
 }
 

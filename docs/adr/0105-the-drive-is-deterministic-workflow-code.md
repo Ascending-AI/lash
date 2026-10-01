@@ -327,7 +327,13 @@ Core assembles the commit from recorded results and calls
 `commit_runtime_state_verified`. The store checks head, fence, operation
 identity and existing receipt, then writes the head, root terminal evidence,
 usage and ingress settlement together. Lost replies are checked against the
-stored commit. The drive can safely repeat the idempotent write.
+stored commit. The drive can safely repeat the idempotent write. An exact
+replay of a stored commit answers from its receipt even after a later
+admission superseded its fence, and writes nothing: a drive that runs several
+roots in one journal, such as a `SessionTurn` process that runs a root queued
+ahead of its own, replays the earlier root's commit after the later root's
+seal. A superseded fence still refuses every commit the store has no receipt
+for.
 
 A classified root park is an idempotent store write that cannot replace an
 existing terminal. Reconciliation can write the same park. A non-retryable

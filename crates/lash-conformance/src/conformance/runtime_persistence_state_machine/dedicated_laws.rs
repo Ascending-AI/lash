@@ -17,6 +17,10 @@ where
         law_a_resumed_root_keeps_its_admission_across_fences(store).await
     })
     .await?;
+    assert_on_fresh_store(make, seed + 3, |store| async move {
+        law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(store).await
+    })
+    .await?;
     assert_on_fresh_store(make, seed + 4, |store| async move {
         law_head_cas_serializes_competing_commits(store).await
     })
@@ -308,6 +312,135 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
         "the successor could not settle both rows"
     );
     let _ = second;
+    Ok(())
+}
+
+/// A drive that runs two roots in one journal replays the first root's final
+/// commit after the second root's seal superseded its fence (FIG-4498). The
+/// commit is already stored: its exact replay answers from its receipt and
+/// writes nothing, whichever fence is current. The superseded fence still
+/// authorizes no new write.
+async fn law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(
+    store: Arc<dyn RuntimeStore>,
+) -> Result<(), TestCaseError> {
+    // One row per root, as the default drain admits them (FIG-4457).
+    let ahead = store
+        .enqueue_pending_turn_input(turn_input_draft(0, 0))
+        .await
+        .map_err(fail)?;
+    let own = store
+        .enqueue_pending_turn_input(turn_input_draft(1, 1))
+        .await
+        .map_err(fail)?;
+    let admit_one = |fence: DriveFence, root: &'static str, input: crate::InputId| {
+        let store = Arc::clone(&store);
+        async move {
+            store
+                .admit_root(&admission_request(
+                    &fence,
+                    &TurnId::from(root),
+                    AdmittedHead::Input(input),
+                    1,
+                ))
+                .await
+                .map_err(fail)?
+                .ok_or_else(|| fail("the admission missed its head"))
+        }
+    };
+    let predecessor = seal(&store, 0).await?;
+    let admission = admit_one(predecessor.clone(), "settled-ahead", ahead.input_id).await?;
+    prop_assert_eq!(
+        admission.input_ids().len(),
+        1,
+        "the first root admitted the second root's row"
+    );
+    let mut state = state_with_tool_generation(41);
+    let commit = final_commit(
+        RuntimeCommit::persisted_state_for_test(&state),
+        &predecessor,
+        completing("settled-ahead", &admission),
+    );
+    let first = store
+        .commit_runtime_state(commit.clone())
+        .await
+        .map_err(fail)?;
+    prop_assert!(!first.receipt_replayed, "the first commit was a replay");
+
+    store
+        .supersede_drive_epoch_for_test(&predecessor)
+        .await
+        .map_err(fail)?;
+    let successor = seal(&store, 1).await?;
+    let own = admit_one(successor.clone(), "settled-own", own.input_id).await?;
+
+    let before = session_snapshot(store.as_ref())
+        .await
+        .map_err(TestCaseError::fail)?;
+    let replay = store.commit_runtime_state(commit).await;
+    let replay = match replay {
+        Ok(replay) => replay,
+        Err(error) => {
+            return Err(fail(format!(
+                "the stored commit's replay under its superseded fence was refused: {error:?}"
+            )));
+        }
+    };
+    prop_assert!(
+        replay.receipt_replayed,
+        "the replay under a superseded fence was not answered from its receipt"
+    );
+    prop_assert_eq!(
+        replay.head_revision,
+        first.head_revision,
+        "the replay under a superseded fence advanced the head"
+    );
+    prop_assert_eq!(
+        &replay.checkpoint_ref,
+        &first.checkpoint_ref,
+        "the replay under a superseded fence returned a different receipt"
+    );
+    assert_snapshot_unchanged(store.as_ref(), before, "superseded-fence receipt replay")
+        .await
+        .map_err(TestCaseError::fail)?;
+
+    // The superseded fence still writes nothing new: a commit the store has
+    // no receipt for is refused whole.
+    state.apply_persisted_commit_result(first);
+    let before = session_snapshot(store.as_ref())
+        .await
+        .map_err(TestCaseError::fail)?;
+    let stale_result = store
+        .commit_runtime_state(final_commit(
+            RuntimeCommit::persisted_state_for_test(&state_with_tool_generation(42)),
+            &predecessor,
+            completing("settled-own", &own),
+        ))
+        .await;
+    prop_assert!(
+        matches!(stale_result, Err(StoreError::StaleDriveFence { .. })),
+        "a new commit under the superseded fence was not refused: {stale_result:?}"
+    );
+    assert_snapshot_unchanged(store.as_ref(), before, "superseded-fence new commit")
+        .await
+        .map_err(TestCaseError::fail)?;
+
+    // The successor's own root settles under its fence.
+    store
+        .commit_runtime_state(final_commit(
+            RuntimeCommit::persisted_state_for_test(&state),
+            &successor,
+            completing("settled-own", &own),
+        ))
+        .await
+        .map_err(fail)?;
+    prop_assert!(
+        store
+            .list_pending_turn_inputs(&session_id())
+            .await
+            .map_err(fail)?
+            .is_empty(),
+        "the successor could not settle its own root"
+    );
     Ok(())
 }
 

@@ -460,9 +460,12 @@ impl PostgresStore {
             });
         }
         // A root's commit is fenced by the admission its root was sealed
-        // under: a successor's seal refuses it before anything is read or
-        // written (ADR 0105 §2).
-        super::drive_epoch::require_commit_fences_tx(&mut tx, commit).await?;
+        // under: a successor's seal refuses it before anything is written
+        // (ADR 0105 §2). A commit already stored still answers from its
+        // receipt below, since a drive that runs several roots in one journal
+        // replays an earlier root's commit after a later root's seal
+        // (FIG-4498).
+        let superseded = super::drive_epoch::commit_fence_superseded_tx(&mut tx, commit).await?;
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
@@ -472,7 +475,8 @@ impl PostgresStore {
         {
             // A root's commit settles its park (FIG-3586, FIG-3600 S7) in the
             // same round trip as its receipt read, whichever of its physical
-            // turns committed; another root's commit leaves it.
+            // turns committed; another root's commit leaves it, and so does a
+            // commit under a superseded fence.
             let prior = sqlx::query(
                 session_sql()
                     .turn_commits_postgres
@@ -481,7 +485,12 @@ impl PostgresStore {
             )
             .bind(commit.session_id.as_str())
             .bind(planner.operation_key())
-            .bind(commit.settled_park_root().map(|root| root.as_str()))
+            .bind(
+                commit
+                    .settled_park_root()
+                    .filter(|_| superseded.is_none())
+                    .map(|root| root.as_str()),
+            )
             .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -519,7 +528,13 @@ impl PostgresStore {
                     result,
                     append_request_identity,
                 };
-                if let Some(replay) = planner.decide_receipt(Some(prior))? {
+                let replay = match planner.decide_receipt(Some(prior)) {
+                    Ok(replay) => replay,
+                    // Only the stored commit's exact replay answers under a
+                    // superseded fence.
+                    Err(conflict) => return Err(superseded.unwrap_or(conflict)),
+                };
+                if let Some(replay) = replay {
                     if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
                         && settlement.authorization().session_id() == commit.session_id
                         && commit.interrupted_turn_input_turn_id.as_ref()
@@ -553,6 +568,9 @@ impl PostgresStore {
                     return Ok(Ok(replay.into_result()));
                 }
             }
+        }
+        if let Some(superseded) = superseded {
+            return Err(superseded);
         }
         // The bound turn owns the head (FIG-4202): a write outside every
         // drive is refused while a root, an owed follow-on or an open command
