@@ -89,7 +89,9 @@ macro_rules! admitted_head_redrive_tests {
 macro_rules! turn_config_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_committed_root_redriven_after_a_model_change_refuses_its_stale_epoch, "turn-config-stale-redrive"));
+            (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (an_input_sent_after_a_config_command_runs_on_the_new_model, "turn-config-after-command"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;

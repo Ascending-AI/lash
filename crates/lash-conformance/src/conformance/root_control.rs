@@ -501,7 +501,7 @@ impl Fixture {
 /// A commit of `root`'s physical turn `turn` over `state` that ends the root,
 /// as the runtime writes it: the root's terminal evidence in the head
 /// transaction.
-fn root_final_commit(
+pub(super) fn root_final_commit(
     state: &crate::RuntimeSessionState,
     root: &TurnId,
     turn: &TurnId,

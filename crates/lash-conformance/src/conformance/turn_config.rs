@@ -244,199 +244,340 @@ fn gated_recording_model(
 type TurnResultTx =
     tokio::sync::mpsc::UnboundedSender<Result<crate::AssembledTurn, crate::RuntimeError>>;
 
-/// A later model change raises the drive epoch and refuses an older
-/// admission's redrive (D24a), including one whose root already committed.
-///
-/// Root A commits on the first model. Before its reply reaches anyone, the
-/// session's next boundary applies a model change, and the execution dies.
-/// The tier redrives A: it must refuse the stale admission without another
-/// model call or head write. A root that follows runs on the second model.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_committed_root_redriven_after_a_model_change_refuses_its_stale_epoch(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let session_id = SessionId::from(format!("{prefix}-turn-config-replay-session"));
-    let calls = Arc::new(AtomicUsize::new(0));
-    let models = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
-    host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
-        recording_model(&calls, &models),
-    ));
-    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
-    let parts = ConfigParts {
-        session_id: session_id.clone(),
-        host,
-        store: Arc::clone(&store),
-        protocol: crate::testing::test_standard_protocol_factories(),
-        tools: Vec::new(),
-    };
-    let root = TurnId::from(format!("{prefix}-turn-config-replay-root"));
-    let (result_tx, mut result_rx) =
-        tokio::sync::mpsc::unbounded_channel::<Result<crate::AssembledTurn, crate::RuntimeError>>();
+/// Root A committed on the first model with its reply lost, and the model
+/// change that landed after it: where both stale-fence laws start.
+struct CommittedRootUnderAModelChange {
+    parts: ConfigParts,
+    root: TurnId,
+    /// The scope root A was admitted under, which its redrive runs on.
+    admitted: crate::AdmittedScope,
+    /// The drive fence root A's execution was sealed under. The model
+    /// change's seal made it stale.
+    fence: crate::store::DriveFence,
+    calls: Arc<AtomicUsize>,
+    models: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The durable head's revision once the model change applied.
+    revision_after_change: u64,
+}
 
-    // The first execution commits A and dies before its reply leaves it.
-    // The model change then lands at the session's next boundary.
-    let crash = crate::ConformanceCrash::new();
-    let crashing: crate::ConformanceTurnAttempt = {
-        let parts = parts.clone();
-        let root = root.clone();
-        let crash = crash.clone();
-        Arc::new(move |scope| {
+impl CommittedRootUnderAModelChange {
+    /// Root A commits on the first model and its execution dies before its
+    /// reply leaves it. The session's next boundary then applies the model
+    /// change, whose seal raises the drive epoch past A's fence.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
+    async fn new(
+        prefix: &str,
+        name: &str,
+        effect_host: &Arc<dyn crate::EffectHost>,
+        stores: &Arc<dyn crate::StoreSet>,
+        runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    ) -> Self {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let models = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let parts = law_session(
+            prefix,
+            name,
+            effect_host,
+            stores,
+            Arc::new(crate::SingleProviderResolver::new(recording_model(
+                &calls, &models,
+            ))),
+        )
+        .await;
+        let root = TurnId::from(format!("{prefix}-turn-config-{name}-root"));
+        let crash = crate::ConformanceCrash::new();
+        let crashing: crate::ConformanceTurnAttempt = {
             let parts = parts.clone();
             let root = root.clone();
             let crash = crash.clone();
-            Box::pin(async move {
-                let mut runtime = build_runtime(parts).await;
-                let turn = runtime
-                    .drive_turn(
-                        text_input(&root, "first question"),
-                        crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-                    )
-                    .await
-                    .unwrap_or_else(|error| panic!("root A commits on the first model: {error:?}"));
-                assert!(
-                    matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
-                    "root A finishes on its first execution: {:?}",
-                    turn.outcome
-                );
-                crash.fire();
-                std::future::pending().await
-            })
-        })
-    };
-    let redrive: crate::ConformanceTurnAttempt = {
-        let parts = parts.clone();
-        let root = root.clone();
-        let result_tx: TurnResultTx = result_tx.clone();
-        Arc::new(move |scope| {
-            let parts = parts.clone();
-            let root = root.clone();
-            let result_tx = result_tx.clone();
-            Box::pin(async move {
-                let mut runtime = build_runtime(parts).await;
-                let turn = runtime
-                    .drive_turn(
-                        text_input(&root, "first question"),
-                        crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-                    )
-                    .await;
-                let end = crate::ConformanceTurnEnd::of(&turn);
-                let _ = result_tx.send(turn);
-                end
-            })
-        })
-    };
-    let admitted = admit(crate::ExecutionScope::turn(&session_id, &root));
-    runner
-        .run_turn_until_crash(admitted.clone(), crashing, crash)
-        .await;
-    command_second_model(&runner, &parts).await;
-    runner.run_turn(admitted, redrive).await;
-    let committed = store
-        .load_session_head_meta(&session_id)
-        .await
-        .expect("read the head after the model change")
-        .expect("root A's commit and the model change are durable");
-    assert_eq!(
-        committed.config.model.id, SECOND_MODEL,
-        "precondition: the model change landed on the durable head before the redrive"
-    );
-    let revision_after_change = committed.head_revision;
-
-    let error = result_rx
-        .recv()
-        .await
-        .expect("the tier's runner ran the redriven root")
-        .expect_err("the older admission is fenced out after the config drive");
-    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitSuperseded);
-    assert!(
-        error.message.contains("drive fence epoch") && error.message.contains("is stale"),
-        "the refusal names the stale drive epoch: {error:?}"
-    );
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "the stale redrive makes no new model call"
-    );
-    assert!(
-        store
-            .load_turn_park(&session_id)
-            .await
-            .expect("read the session's park")
-            .is_none(),
-        "the stale redrive does not park as a replay divergence"
-    );
-    let head = store
-        .load_session_head_meta(&session_id)
-        .await
-        .expect("read the head after the redrive")
-        .expect("the head is durable");
-    assert_eq!(
-        head.head_revision, revision_after_change,
-        "the stale redrive commits nothing again"
-    );
-    assert_eq!(
-        head.config.model.id, SECOND_MODEL,
-        "the redrive leaves the model change on the durable head"
-    );
-
-    // A root that follows runs on the model the change moved the session to.
-    let next = TurnId::from(format!("{prefix}-turn-config-replay-next"));
-    let (next_tx, mut next_rx) = tokio::sync::mpsc::unbounded_channel();
-    runner
-        .run_turn(admit(crate::ExecutionScope::turn(&session_id, &next)), {
-            let parts = parts.clone();
-            let next = next.clone();
             Arc::new(move |scope| {
                 let parts = parts.clone();
-                let next = next.clone();
-                let next_tx = next_tx.clone();
+                let root = root.clone();
+                let crash = crash.clone();
                 Box::pin(async move {
                     let mut runtime = build_runtime(parts).await;
                     let turn = runtime
                         .drive_turn(
-                            text_input(&next, "second question"),
+                            text_input(&root, "first question"),
                             crate::TurnOptions::new(
                                 tokio_util::sync::CancellationToken::new(),
                                 scope,
                             ),
                         )
-                        .await;
-                    let end = crate::ConformanceTurnEnd::of(&turn);
-                    let _ = next_tx.send(turn);
-                    end
+                        .await
+                        .unwrap_or_else(|error| {
+                            panic!("root A commits on the first model: {error:?}")
+                        });
+                    assert!(
+                        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+                        "root A finishes on its first execution: {:?}",
+                        turn.outcome
+                    );
+                    crash.fire();
+                    std::future::pending().await
                 })
             })
-        })
+        };
+        let admitted = admit(crate::ExecutionScope::turn(&parts.session_id, &root));
+        runner
+            .run_turn_until_crash(admitted.clone(), crashing, crash)
+            .await;
+
+        // Root A's seal is still the session's: the same admission and start
+        // marker answer its stored fence and raise nothing (ADR 0105 §2).
+        let sealed = parts
+            .store
+            .drive_epoch(&parts.session_id)
+            .await
+            .expect("read the drive epoch root A sealed");
+        let seal = parts
+            .store
+            .seal_drive_epoch(
+                &parts.session_id,
+                sealed
+                    .admission
+                    .as_ref()
+                    .expect("root A's admission raised the epoch"),
+                sealed.epoch,
+                sealed
+                    .root_start
+                    .as_ref()
+                    .expect("root A's execution stored its start marker"),
+            )
+            .await
+            .expect("read root A's fence back");
+        let crate::store::DriveEpochSeal::Sealed(fence) = seal else {
+            panic!("root A's seal answers its stored fence: {seal:?}");
+        };
+
+        command_second_model(runner, &parts).await;
+        let committed = parts
+            .store
+            .load_session_head_meta(&parts.session_id)
+            .await
+            .expect("read the head after the model change")
+            .expect("root A's commit and the model change are durable");
+        assert_eq!(
+            committed.config.model.id, SECOND_MODEL,
+            "precondition: the model change landed on the durable head"
+        );
+        let epoch = parts
+            .store
+            .drive_epoch(&parts.session_id)
+            .await
+            .expect("read the drive epoch after the model change")
+            .epoch;
+        assert!(
+            epoch > fence.epoch(),
+            "precondition: the model change raised the drive epoch past root A's fence"
+        );
+        Self {
+            parts,
+            root,
+            admitted,
+            fence,
+            calls,
+            models,
+            revision_after_change: committed.head_revision,
+        }
+    }
+
+    /// Nothing ran or was written past the model change: root A's one model
+    /// call stands alone, no park was recorded, and the durable head is the
+    /// one the model change left.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the store reads its own head and park"
+    )]
+    async fn assert_nothing_moved(&self, what: &str) {
+        assert_eq!(
+            self.calls.load(Ordering::SeqCst),
+            1,
+            "{what} makes no new model call"
+        );
+        assert!(
+            self.parts
+                .store
+                .load_turn_park(&self.parts.session_id)
+                .await
+                .expect("read the session's park")
+                .is_none(),
+            "{what} records no park"
+        );
+        let head = self
+            .parts
+            .store
+            .load_session_head_meta(&self.parts.session_id)
+            .await
+            .expect("read the head")
+            .expect("the head is durable");
+        assert_eq!(
+            head.head_revision, self.revision_after_change,
+            "{what} writes no head"
+        );
+        assert_eq!(
+            head.config.model.id, SECOND_MODEL,
+            "{what} leaves the model change on the durable head"
+        );
+    }
+
+    /// A root that follows runs on the model the change moved the session to.
+    async fn assert_the_next_root_runs_on_the_second_model(
+        &self,
+        prefix: &str,
+        name: &str,
+        runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    ) {
+        let next = TurnId::from(format!("{prefix}-turn-config-{name}-next"));
+        let next_turn = run_text_turn(
+            runner,
+            &self.parts,
+            &next,
+            "second question",
+            BeforeSend::Nothing,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("the next root runs: {error:?}"));
+        assert!(
+            matches!(next_turn.outcome, crate::TurnOutcome::Finished(_)),
+            "the next root finishes: {:?}",
+            next_turn.outcome
+        );
+        assert_eq!(
+            recorded_models(&self.models),
+            vec![FIRST_MODEL.to_string(), SECOND_MODEL.to_string()],
+            "root A's one model call named the first model, and the next root's the second"
+        );
+    }
+}
+
+/// A committed root redriven after a later model change answers from what it
+/// stored, under the config it recorded (D3 §2.2, ADR 0105 §9).
+///
+/// Root A commits on the first model. Before its reply reaches anyone, the
+/// execution dies and the session's next boundary applies a model change,
+/// whose seal makes A's drive fence stale. The tier redrives A, and its
+/// journal repeats A's commit under that stale fence. The commit is the exact
+/// replay of one the store holds, so its receipt answers it: the redrive
+/// returns A's committed answer with no new model call, no head write and no
+/// park. A root that follows runs on the second model.
+///
+/// The other side of the boundary is
+/// [`an_older_admission_redriven_after_a_model_change_is_fenced_out`].
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_committed_root_redriven_after_a_model_change_answers_from_its_receipt(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let name = "replay";
+    let law =
+        CommittedRootUnderAModelChange::new(prefix, name, &effect_host, &stores, &runner).await;
+    let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
+    runner
+        .run_turn(
+            law.admitted.clone(),
+            text_attempt(&law.parts, &law.root, "first question", turn_tx),
+        )
         .await;
-    let next_turn = next_rx
+    let turn = turn_rx
         .recv()
         .await
-        .expect("the tier's runner ran the next root")
-        .unwrap_or_else(|error| panic!("the next root runs: {error:?}"));
+        .expect("the tier's runner ran the redriven root")
+        .unwrap_or_else(|error| {
+            panic!("the redrive of committed root A answers from its receipt: {error:?}")
+        });
     assert!(
-        matches!(next_turn.outcome, crate::TurnOutcome::Finished(_)),
-        "the next root finishes: {:?}",
-        next_turn.outcome
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "the redrive of root A finishes: {:?}; errors: {:?}",
+        turn.outcome,
+        turn.errors
     );
     assert_eq!(
-        models
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone(),
-        vec![FIRST_MODEL.to_string(), SECOND_MODEL.to_string()],
-        "root A's one model call named the first model, and the next root's the second"
+        turn.assistant_output.safe_text, "answer 1",
+        "the redrive answers with what root A committed"
     );
+    assert_eq!(
+        turn.state.policy.model.id, FIRST_MODEL,
+        "the redrive answers under the config root A recorded"
+    );
+    law.assert_nothing_moved("the redrive of a committed root")
+        .await;
+    law.assert_the_next_root_runs_on_the_second_model(prefix, name, &runner)
+        .await;
+}
+
+/// A later model change raises the drive epoch and fences out an older
+/// admission's redrive (D24a, ADR 0105 §2 and §9, ADR 0101 §7).
+///
+/// Root A commits on the first model, its execution dies, and the session's
+/// next boundary applies a model change. An execution of A's admission that
+/// does not repeat A's stored commit, as one that lost its journal and ran
+/// the root again would, presents A's stale fence with a commit the store
+/// holds no receipt for. It is refused whole as a stale drive fence, which
+/// the runtime classifies as a superseded commit, and the model change stands. A root that follows runs on the second model.
+///
+/// The other side of the boundary is
+/// [`a_committed_root_redriven_after_a_model_change_answers_from_its_receipt`].
+pub async fn an_older_admission_redriven_after_a_model_change_is_fenced_out(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let name = "fenced-out";
+    let law =
+        CommittedRootUnderAModelChange::new(prefix, name, &effect_host, &stores, &runner).await;
+    let mut policy = crate::testing::mock_session_policy();
+    policy.session_id = Some(law.parts.session_id.clone());
+    let rerun = crate::RuntimeSessionState {
+        session_id: law.parts.session_id.clone(),
+        policy,
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    // Root A's own final commit, with other content, and a commit of a turn
+    // the store never saw: neither is the stored commit's exact replay.
+    for (what, turn) in [
+        ("root A's final commit run again", law.root.clone()),
+        (
+            "a turn root A never committed",
+            TurnId::from(format!("{}-rerun", law.root)),
+        ),
+    ] {
+        let mut commit = super::root_control::root_final_commit(&rerun, &law.root, &turn, 0);
+        commit.drive_fence = Some(Box::new(law.fence.clone()));
+        let refused = law.parts.store.commit_runtime_state(commit).await;
+        let Err(refusal) = refused else {
+            panic!("{what} under the older admission's fence is refused: {refused:?}");
+        };
+        assert!(
+            matches!(
+                &refusal,
+                crate::StoreError::StaleDriveFence { fence_epoch, .. }
+                    if *fence_epoch == law.fence.epoch()
+            ),
+            "{what} under the older admission's fence is refused as stale: {refusal:?}"
+        );
+        // The runtime ends the run on it instead of retrying a fence that can
+        // never commit again (FIG-4512).
+        let error =
+            lash_core::testing::conformance_support::runtime_error_from_store_commit(refusal);
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::StoreCommitSuperseded,
+            "{what} is a superseded commit at the runtime boundary: {error:?}"
+        );
+        law.assert_nothing_moved(what).await;
+    }
+    law.assert_the_next_root_runs_on_the_second_model(prefix, name, &runner)
+        .await;
 }
 
 /// The parts of a turn-config law's session: a host whose resolver serves

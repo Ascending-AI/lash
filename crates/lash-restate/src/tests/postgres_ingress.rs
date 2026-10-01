@@ -439,6 +439,19 @@ mod recorded_termination {
         ] {
             super::harness(false).await
         }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
+
+        // FIG-4518's stale-fence boundary laws.
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(false).await
+        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(false).await
+        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
     }
 
     mod always_replay {
@@ -453,6 +466,19 @@ mod recorded_termination {
         ] {
             super::harness(true).await
         }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
+
+        // FIG-4518's stale-fence boundary laws.
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(true).await
+        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(true).await
+        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
     }
 }
 

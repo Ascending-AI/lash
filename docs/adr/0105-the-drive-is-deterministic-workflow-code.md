@@ -343,8 +343,11 @@ stored commit. The drive can safely repeat the idempotent write. An exact
 replay of a stored commit answers from its receipt even when its fence is
 stale, and writes nothing: a drive that runs several roots in one journal,
 such as a `SessionTurn` process that runs a root queued ahead of its own,
-replays the earlier root's commit after the later root's seal. A stale fence
-still refuses every commit the store has no receipt for.
+replays the earlier root's commit after the later root's seal, and a committed
+root whose reply was lost is redriven after a session command's seal, such as a
+model change's. The receipt is the whole boundary: who raised the epoch does not
+matter. A stale fence still refuses every commit the store has no receipt for,
+including one that reuses a stored commit's operation with other content.
 
 A classified root park is an idempotent store write that cannot replace an
 existing terminal. Reconciliation can write the same park. A non-retryable

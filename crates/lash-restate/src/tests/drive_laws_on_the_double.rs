@@ -144,7 +144,7 @@ mod recorded_termination {
     }
 
     /// The double over its own SQLite memory store set.
-    async fn memory_harness(
+    pub(super) async fn memory_harness(
         always_replay: bool,
     ) -> (
         LiveConformanceHarness,
@@ -169,7 +169,7 @@ mod recorded_termination {
     }
 
     /// The double with the law's runtime over a SQLite file store set.
-    async fn file_harness(
+    pub(super) async fn file_harness(
         always_replay: bool,
     ) -> (
         (LiveConformanceHarness, tempfile::TempDir),
@@ -235,6 +235,45 @@ mod recorded_termination {
         lash_conformance::turn_config_tests!(@law [] {
             super::file_harness(true).await
         }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
+    }
+}
+
+// FIG-4518's stale-fence boundary laws on the double's other legs. A committed
+// root redriven after a model change answers from its receipt, and any other
+// commit under its older admission is fenced out. The plain SQLite memory leg
+// runs with `turn_config_tests!` above; the PostgreSQL legs run with the
+// PostgreSQL ingress laws.
+mod stale_fence_boundary {
+    use super::recorded_termination::{file_harness, memory_harness};
+
+    mod sqlite_memory_always_replay {
+        lash_conformance::turn_config_tests!(@law [] {
+            super::memory_harness(true).await
+        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [] {
+            super::memory_harness(true).await
+        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+    }
+
+    mod sqlite_file {
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(false).await
+        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(false).await
+        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+    }
+
+    mod sqlite_file_always_replay {
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(true).await
+        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(true).await
+        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
     }
 }
 
