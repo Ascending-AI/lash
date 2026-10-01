@@ -322,6 +322,8 @@ control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 control.connect(os.environ['CONTROL_SOCKET'])
 output_lock = threading.Lock()
 event_lock = threading.Lock()
+read_after_close = threading.Event()
+stdin_eof = threading.Event()
 current = None
 
 def send(message):
@@ -342,11 +344,14 @@ def commands():
             send({'jsonrpc':'2.0','method':'notifications/progress','params':{
                 'progressToken':current['params']['_meta']['progressToken'],'progress':1}})
         elif command == 'close':
-            # Closing stdout can make the host close stdin immediately. Publish
-            # this transition before the stdin reader acknowledges EOF.
+            # Closing stdout makes the host close its stdin writer. Let the
+            # reader observe EOF; closing fd 0 here races its next read with
+            # EBADF. Publish close before the reader acknowledges EOF.
             with event_lock:
-                os.close(0)
                 os.close(1)
+                if behavior == 'close_before_stdin_read':
+                    read_after_close.set()
+                    stdin_eof.wait()
                 control.sendall((json.dumps({'event':'close'}) + '\n').encode())
             continue
         event(command)
@@ -361,6 +366,11 @@ for line in sys.stdin:
     elif method == 'tools/list':
         send({'jsonrpc':'2.0','id':message['id'],'result':{'tools':[{
             'name':'work','inputSchema':{'type':'object'}}]}})
+        if behavior == 'close_before_stdin_read':
+            # Force close to happen before the reader's next syscall. A
+            # cross-thread stdin close must not replace normal EOF with EBADF.
+            event('read_paused')
+            read_after_close.wait()
     elif method == 'tools/call':
         current = message
         event('call', id=message['id'])
@@ -378,6 +388,7 @@ for line in sys.stdin:
             send({'jsonrpc':'2.0','id':message['id'],'result':{}})
     elif method == 'notifications/cancelled':
         event('cancelled')
+stdin_eof.set()
 event('eof')
 if behavior in ('ignore_eof', 'silent_ping_ignore_eof'):
     threading.Event().wait()

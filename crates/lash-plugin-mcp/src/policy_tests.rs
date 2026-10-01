@@ -1989,12 +1989,15 @@ async fn idle_service_death_updates_status_without_a_tool_call() {
     let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
+            behavior: "close_before_stdin_read",
             reconnect_initial_ms: 5_000,
             ..MockOptions::default()
         },
     )
     .await;
+    mock.event("read_paused").await;
     mock.command("close").await;
+    mock.event("eof").await;
     unpublished(&entry(&pool)).await;
     let status = &pool.server_statuses()[0];
     assert!(!status.connected);
