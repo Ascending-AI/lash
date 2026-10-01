@@ -168,6 +168,33 @@ def confirm_daemon_absent(executable, root, isolation):
             os.close(lifecycle)
 
 
+def watch_aliases(root):
+    """Return the root's Bazel convenience links; refuse any other link back into the project.
+
+    Buck2's watcher follows directory symlinks when it starts. A link that
+    leads back into the project gives a source directory a second name under
+    one inotify watch: its changes are reported under the link, and removing
+    the link drops the watch. Either way the daemon keeps building the old
+    sources until it restarts.
+    """
+    project = root.resolve()
+
+    def inside(path):
+        target = path.resolve()
+        return target == project or project in target.parents
+
+    aliases = []
+    for entry in os.scandir(root):
+        if not entry.is_symlink() or not entry.is_dir():
+            continue
+        path = Path(entry.path)
+        if entry.name.startswith('bazel-'):
+            aliases.append(path)
+        elif inside(path) or any(child.is_symlink() and inside(child) for child in path.iterdir()):
+            raise ValueError(f'{entry.name} is a symlink leading back into the project, which makes Buck2 miss source changes; remove it')
+    return aliases
+
+
 def acquire(fd, mode, cancelled):
     while True:
         if cancelled():
@@ -191,7 +218,8 @@ def admission(root, executable, isolation, jobs, exclusive=False, cancelled=lamb
         acquire(gate, fcntl.LOCK_EX, cancelled)
         previous, desired, identity = configuration(root, jobs)
         receipt = json.loads(regular_file(receipt_path)) if receipt_path.exists() or receipt_path.is_symlink() else {}
-        transition = previous != desired or receipt.get('configuration') != identity
+        aliases = watch_aliases(root)
+        transition = previous != desired or receipt.get('configuration') != identity or bool(aliases)
         acquire(active, fcntl.LOCK_EX if transition or exclusive else fcntl.LOCK_SH, cancelled)
         if transition or exclusive:
             # A fork refresh may replace credentials while earlier clients drain.
@@ -202,6 +230,8 @@ def admission(root, executable, isolation, jobs, exclusive=False, cancelled=lamb
         if transition:
             if previous != desired:
                 atomic_write(local, desired)
+            for alias in aliases:
+                alias.unlink(missing_ok=True)
             if status is not None:
                 subprocess.run([str(executable), '--isolation-dir', isolation, 'kill'], cwd=root, check=True)
             atomic_write(receipt_path, json.dumps({'configuration': identity, 'jobs': jobs}) + '\n')

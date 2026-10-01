@@ -21,6 +21,15 @@ command is active, and restarts only that fork's requested isolation. `clean`
 also requires exclusive admission. The normal isolation remains `kiln` so
 changing concurrency does not change artifact paths or cache keys.
 
+Buck2's file watcher follows directory symlinks when its daemon starts. A link
+in the project root that leads back into the project, such as Bazel's
+`bazel-<fork>` convenience link in a fork adopted from Bazel, gives source
+directories a second name under one inotify watch. The daemon then records
+their changes under the link, or receives none once the link is removed, and
+keeps building the old sources. Admission therefore removes root `bazel-*`
+links as a restart transition, before any daemon can start beside them, and
+refuses any other root link that leads back into the project.
+
 Stock `status` reports "no buckd running" for connection failures as well as
 absence. Before accepting that result, the guard uses `root --kind daemon`,
 checks the owned metadata directory, and takes its lifecycle lock without

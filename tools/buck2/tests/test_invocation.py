@@ -222,6 +222,43 @@ class InvocationTests(unittest.TestCase):
         self.assertEqual(process.wait(timeout=10), 2)
         self.assertEqual(target.read_text(), 'original')
 
+    def test_links_back_into_the_project_never_survive_into_a_daemon(self):
+        # A daemon that started while such a link existed watches the linked
+        # source directories under the link's name and misses their changes.
+        (self.root / 'src').mkdir()
+        execroot = Path(self.temporary.name) / 'output-base/execroot'
+        execroot.mkdir(parents=True)
+        (execroot / 'src').symlink_to(self.root / 'src')
+        outside = Path(self.temporary.name) / 'elsewhere'
+        outside.mkdir()
+        (self.root / 'scratch').symlink_to(outside)
+        first = self.start('first', 2)
+        self.started('first')
+        self.release('first')
+        self.assertEqual(first.wait(timeout=10), 0)
+        self.assertFalse((self.root / 'kills').exists())
+        (self.root / 'bazel-one').symlink_to(execroot)
+        second = self.start('second', 2)
+        self.started('second')
+        self.assertFalse((self.root / 'bazel-one').is_symlink())
+        self.assertEqual((self.root / 'kills').read_text(), 'kill\n')
+        self.release('second')
+        self.assertEqual(second.wait(timeout=10), 0)
+        third = self.start('third', 2)
+        self.started('third')
+        self.release('third')
+        self.assertEqual(third.wait(timeout=10), 0)
+        self.assertEqual((self.root / 'kills').read_text(), 'kill\n')
+        self.assertTrue((self.root / 'scratch').is_symlink())
+        self.assertTrue((execroot / 'src').is_symlink())
+        for target in (self.root / 'src', execroot):
+            (self.root / 'alias').symlink_to(target)
+            refused = self.start('refused', 2)
+            self.assertEqual(refused.wait(timeout=10), 2)
+            self.assertFalse((self.root / 'refused.start').exists())
+            (self.root / 'alias').unlink()
+        self.assertEqual((self.root / 'kills').read_text(), 'kill\n')
+
     def test_interrupt_waiter_does_not_cancel_active_client(self):
         active = self.start('active', 2)
         self.started('active')
