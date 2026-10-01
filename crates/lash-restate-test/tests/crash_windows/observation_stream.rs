@@ -17,9 +17,9 @@ use super::*;
 /// observations outgrew the decode bounds about three times over.
 const ITERATIONS: f64 = 5_000.0;
 
-/// How long the body may take. The parent folds every observation into its
-/// live process graph, at a few milliseconds each on a loaded host, so the
-/// loop's observations alone take tens of seconds to observe.
+/// How long the body may take. The parent publishes every observation to its
+/// live process graph and folds them in batches (FIG-4499): a fold apiece
+/// cost tens of seconds an execution, on every replay of the body.
 const LONG_LOOP_BOUND: Duration = Duration::from_secs(300);
 
 /// ```text

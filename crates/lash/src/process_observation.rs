@@ -373,12 +373,27 @@ enum PublishedNotification {
     Replaced(ProcessObservationGapReason),
 }
 
+/// The live records one graph fold takes at most. A fold rebuilds the whole
+/// bounded snapshot, so its cost does not depend on how many records it
+/// takes: folding each record as it arrives made a loop's observations cost
+/// one snapshot rebuild apiece, on every replay of the body (FIG-4499).
+const LIVE_FOLD_BATCH: usize = 256;
+
 struct ProcessState {
     epoch: String,
     position: u64,
     base_position: u64,
-    base_graph: Option<TraceLashlangGraph>,
+    /// The key of the graph this route publishes, set by its first record.
+    graph_key: Option<String>,
+    /// The live graph through every published record but `unfolded`.
     current_graph: Option<TraceLashlangGraph>,
+    /// Published records the graph has not folded yet, at most
+    /// `LIVE_FOLD_BATCH`. Folding partitions equals folding their
+    /// concatenation, so the graph a capture reads is the one a fold per
+    /// record would have built.
+    unfolded: Vec<TraceRecord>,
+    #[cfg(test)]
+    folds: usize,
     joined_at_start: bool,
     terminal: bool,
     last_published: Instant,
@@ -394,8 +409,11 @@ impl ProcessState {
             epoch: uuid::Uuid::new_v4().simple().to_string(),
             position: 0,
             base_position: 0,
-            base_graph: None,
+            graph_key: None,
             current_graph: None,
+            unfolded: Vec::new(),
+            #[cfg(test)]
+            folds: 0,
             joined_at_start: false,
             terminal: false,
             last_published: Instant::now(),
@@ -406,7 +424,6 @@ impl ProcessState {
     }
 
     fn trim(&mut self, now: Instant, config: ProcessObservationConfig) {
-        let mut evicted = Vec::new();
         while self.ring.len() > config.capacity.max(1)
             || self
                 .ring
@@ -419,9 +436,6 @@ impl ProcessState {
                 .is_some_and(|item| now.duration_since(item.at) > config.ttl);
             if let Some(old) = self.ring.pop_front() {
                 self.base_position = old.position;
-                if let PublishedItem::Live(record) = old.item {
-                    evicted.push(*record);
-                }
                 self.trim_reason = if expired {
                     ProcessObservationGapReason::Expired
                 } else {
@@ -429,13 +443,36 @@ impl ProcessState {
                 };
             }
         }
-        if !evicted.is_empty() {
-            self.base_graph =
-                TraceLashlangGraphStore::fold(self.base_graph.as_ref(), &evicted).ok();
+    }
+
+    /// Take one live record into the graph's pending batch.
+    fn observe(&mut self, record: &TraceRecord) {
+        self.unfolded.push(record.clone());
+        if self.unfolded.len() >= LIVE_FOLD_BATCH {
+            self.fold_unfolded();
         }
     }
 
-    fn live_projection(&self) -> ProcessObservationProjection {
+    /// Fold the pending batch into the live graph.
+    fn fold_unfolded(&mut self) {
+        if self.unfolded.is_empty() {
+            return;
+        }
+        let records = std::mem::take(&mut self.unfolded);
+        #[cfg(test)]
+        {
+            self.folds += 1;
+        }
+        // Every record of a route carries the route's graph key, so the fold
+        // has no refusal left to make; a refused batch leaves the graph as
+        // it was.
+        if let Ok(graph) = TraceLashlangGraphStore::fold(self.current_graph.as_ref(), &records) {
+            self.current_graph = Some(graph);
+        }
+    }
+
+    fn live_projection(&mut self) -> ProcessObservationProjection {
+        self.fold_unfolded();
         let Some(graph) = self.current_graph.clone() else {
             return ProcessObservationProjection {
                 graph: None,
@@ -503,9 +540,9 @@ struct Capture {
 ///
 /// Lock order: the `states` map lock is taken before a per-process state lock
 /// and only for lookup, insertion and release; graph folds run under the
-/// per-process lock alone. A process's state is released once no subscription
-/// holds it and it has either published `ExecutionFinished` or published
-/// nothing for `ttl`.
+/// per-process lock alone, one per `LIVE_FOLD_BATCH` records or per capture.
+/// A process's state is released once no subscription holds it and it has
+/// either published `ExecutionFinished` or published nothing for `ttl`.
 pub struct ProcessObservationHub {
     config: ProcessObservationConfig,
     states: Mutex<HashMap<ProcessId, Arc<Mutex<ProcessState>>>>,
@@ -847,10 +884,11 @@ impl TraceSink for ProcessObservationHub {
         if event.identity.attempt().is_none() {
             return Ok(());
         }
+        let graph_key = event.identity.graph_key();
         let (state, _) = self.state_for(process_id);
         let mut publisher = state.lock_recover();
-        let replaced = if publisher.current_graph.as_ref().is_some_and(|graph| {
-            graph.graph_key != event.identity.graph_key()
+        let replaced = if publisher.graph_key.as_ref().is_some_and(|current| {
+            *current != graph_key
                 || matches!(
                     &event.payload,
                     TraceLanguageExecutionPayload::ExecutionStarted { .. }
@@ -863,23 +901,18 @@ impl TraceSink for ProcessObservationHub {
         if let Some(reason) = replaced {
             publisher.replace(reason, self.config.capacity);
         }
-        let Ok(graph) = TraceLashlangGraphStore::fold(
-            publisher.current_graph.as_ref(),
-            std::slice::from_ref(record),
-        ) else {
-            return Ok(());
-        };
-        if publisher.current_graph.is_none() {
+        if publisher.graph_key.is_none() {
             publisher.joined_at_start = matches!(
                 &event.payload,
                 TraceLanguageExecutionPayload::ExecutionStarted { .. }
             );
+            publisher.graph_key = Some(graph_key);
         }
         publisher.terminal = matches!(
             &event.payload,
             TraceLanguageExecutionPayload::ExecutionFinished { .. }
         );
-        publisher.current_graph = Some(graph);
+        publisher.observe(record);
         publisher.publish(PublishedItem::Live(Box::new(record.clone())), self.config);
         let terminal = publisher.terminal;
         drop(publisher);

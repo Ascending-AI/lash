@@ -816,6 +816,51 @@ async fn publisher_joined_mid_run_never_claims_a_complete_live_graph() {
     );
 }
 
+/// A loop's observations reach the hub one record at a time, and a fold
+/// rebuilds the whole bounded snapshot. The hub folds them in batches, so a
+/// long loop costs a fold per batch rather than a fold per observation
+/// (FIG-4499), and a capture still reads the graph of every record published.
+#[tokio::test]
+async fn a_long_loops_observations_fold_in_batches_into_the_same_live_graph() {
+    const RECORDS: u64 = 10_000;
+    let fixture = Fixture::new("fig-4499-long-loop", false).await;
+    let records: Vec<_> = (0..=RECORDS)
+        .map(|occurrence| record(&fixture.process_id, 1, occurrence))
+        .collect();
+    let (seen, rest) = records.split_at(records.len() / 2 + 7);
+    for record in seen {
+        fixture.hub.append(record).expect("publish");
+    }
+    assert_eq!(
+        fixture.hub.capture(&fixture.process_id, None).live.graph,
+        Some(TraceLashlangGraphStore::fold(None, seen).expect("fold")),
+        "a capture mid-loop reads every record published so far"
+    );
+    for record in rest {
+        fixture.hub.append(record).expect("publish");
+    }
+    let capture = fixture.hub.capture(&fixture.process_id, None);
+    assert_eq!(
+        capture.live.graph,
+        Some(TraceLashlangGraphStore::fold(None, &records).expect("fold")),
+        "the live graph is the fold of every record"
+    );
+    assert_eq!(
+        capture.live.completeness,
+        ProcessObservationCompleteness::Incomplete {
+            reason: ProcessObservationGapReason::ProjectionTruncated
+        }
+    );
+    let state = capture.state.lock_recover();
+    assert!(
+        state.folds * 100 <= records.len(),
+        "{} records took {} folds",
+        records.len(),
+        state.folds
+    );
+    assert!(state.unfolded.is_empty());
+}
+
 #[tokio::test]
 async fn finished_processes_release_their_hub_entries_without_subscribers() {
     let hub = Arc::new(ProcessObservationHub::default());
