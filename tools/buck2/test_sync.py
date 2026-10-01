@@ -337,6 +337,40 @@ def check_repo_rooted_source_remap() -> None:
     assert overlay.add_repo_rooted_srcs_attr(declared) == declared
 
 
+def check_failure_filter_runs_in_daemon() -> None:
+    spec = importlib.util.spec_from_file_location("buck2_prelude_overlay_filter", HERE / "prelude_overlay.py")
+    overlay = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(overlay)
+    # A passing compile's output is re-exposed by a declared copy chosen from
+    # the build status; only a failing compile runs the stock action, with the
+    # same category, identifier, error handler and environment.
+    filtered = overlay.filter_failures_in_daemon(overlay.STOCK_FAILURE_FILTER)
+    assert filtered.count("ctx.actions.dynamic_output(") == 1
+    assert "dynamic = [build_status]," in filtered
+    assert 'if required.short_path in artifacts[build_status].read_json()["files"]:' in filtered
+    assert "ctx.actions.copy_file(outputs[output].as_output(), required)" in filtered
+    assert filtered.count("ctx.actions.run(") == 1
+    for kept in ('category = "failure_filter",', "identifier = identifier,", "error_handler = toolchain_info.rust_error_handler,", "env = env,", '"--stderr",', '"--build-status",'):
+        assert kept in filtered, kept
+    assert "prefer_local" not in filtered and "local_only" not in filtered
+    assert overlay.filter_failures_in_daemon(filtered) == filtered
+    try:
+        overlay.filter_failures_in_daemon(overlay.STOCK_FAILURE_FILTER.replace('"--stderr",', '"--diagnostics",'))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("failure filter overlay accepted a changed prelude")
+    # The upgrade from the previous overlay output and the stock transform agree.
+    assert "rust/failure_filter.bzl" in overlay.PREVIOUS_OUTPUT_SHA256
+    assert overlay.upgrade_previous("rust/failure_filter.bzl", overlay.STOCK_FAILURE_FILTER) == filtered
+    # Shared platforms stay remote-only: a hybrid executor would run the stock
+    # toolchain's locally-preferred links and archives on the developer host.
+    platforms = (HERE / "platforms.bzl").read_text(encoding="utf-8")
+    assert "local_enabled = local,\n                remote_enabled = not local," in platforms
+    assert "use_limited_hybrid" not in platforms
+
+
 def check_measurement_filter() -> None:
     spec = importlib.util.spec_from_file_location("action_sizes", HERE / "action_sizes_from_log.py")
     module = importlib.util.module_from_spec(spec)
@@ -1285,6 +1319,7 @@ def main() -> int:
         check_action_bridge,
         check_transitive_source_inputs,
         check_repo_rooted_source_remap,
+        check_failure_filter_runs_in_daemon,
         check_measurement_filter,
         check_native_inputs,
         check_dependency_and_profile_projection,

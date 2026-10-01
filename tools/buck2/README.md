@@ -38,6 +38,12 @@ requests use their respective sizing tables. The checksum-pinned Starlark
 prelude overlay attaches this environment through the documented action API;
 it does not modify or rebuild the Buck2 executable.
 
+All actions stay remote: the shared platforms are remote-only. The overlay
+replaces the prelude's remote `failure_filter` round trip with a daemon-side
+decision read from the compile's build status. A passing compile's output is a
+declared copy; a failing compile still runs the stock remote action and reports
+the same error. See [local and remote actions](../../docs/agents/hermetic-build.md#execution-and-resource-accounting).
+
 The external test runner uses Buck2's Execute2 API. Its Python wheels and
 upstream protocol definitions are checksum-pinned and private to the checkout.
 `--test-report PATH` records actual verdicts and action/cache metadata.

@@ -241,6 +241,20 @@ lint, documentation and helper actions. Build-script and test environments
 carry their own requests.
 Rust's inner `rustc_env` alone would occur too late to size the cgroup.
 
+Every compiler, lint, documentation, build-script and helper action runs on the
+pool; the shared execution platforms are remote-only, so an action's
+`prefer_local` is ignored and `local_only` is refused. Do not make them hybrid:
+the stock C++ toolchain prefers local binary links and archives, which would
+then run on the developer host. The one step that leaves the pool is the
+prelude's `failure_filter`, which follows each metadata compile whose
+diagnostics must not fail dependents. The overlay decides it in the daemon from
+the compile's build status: a passing compile's output is re-exposed by a
+declared copy, with no second remote action and nothing materialized, and a
+failing compile runs the stock remote `failure_filter`, so the error names the
+same action and diagnostics. Source trees, argument files and that copy are
+daemon-internal actions. The transitive-dependency symlink tree (`deps`) remains
+a remote action; it reruns only when a target's dependency set changes.
+
 The executable remains the official release. Pinned Starlark rule changes are
 repository build logic with explicit source/version checks and a coverage audit.
 A prelude update requires reviewing every action-registration site. This cutover

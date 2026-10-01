@@ -6,7 +6,8 @@ NativeLink schedules from those values, while its worker-side cgroup bridge
 reads the same canonical values from ``Command.env``.  This overlay threads
 the two resource attributes carried by repository Rust rules to every action
 created by the pinned Rust prelude.  It also makes requested Clippy subtargets
-fail when Clippy reports an error, matching the previous gate contract.
+fail when Clippy reports an error, matching the previous gate contract, and
+decides the prelude's failure filter in the daemon instead of a remote action.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ OUTPUT_SHA256 = {
     "rust/build.bzl": "1d3247772f5cc9bda40326086dedd78692307066f369d984a120d0ba0055a74d",
     "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
     "rust/clippy_configuration.bzl": "9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2",
-    "rust/failure_filter.bzl": "6ec035fcd09446d60560711c37532f8d749401c50e50767ac8eebcddcb2a9e03",
+    "rust/failure_filter.bzl": "a4b818d0f799a4a32d5ffd3aab5753cd61956e3471e0faa687cc2e46470bd0a3",
     "rust/link_info.bzl": "3ac50277c98282863c8be30a8fee1d9fc3fa294e363cc4374578ba2c97f46eec",
     "rust/named_deps.bzl": "894b0f405b7dfbe9380b3c671999efb70ac2209747ab87b8b2322d621c8f35d9",
     "rust/profile.bzl": "c76bcbf08bf1e2f9cf295c619504ff2d398f790dfc68abbe96bcfb35ed4c1e14",
@@ -73,6 +74,9 @@ PREVIOUS_OUTPUT_SHA256 = {
     },
     "rust/rust_library.bzl": {
         "16e64e3a0326a8f9e373a037b5a51d99e1851e05a7dd3e1194c67877f103c6a0",
+    },
+    "rust/failure_filter.bzl": {
+        "6ec035fcd09446d60560711c37532f8d749401c50e50767ac8eebcddcb2a9e03",
     },
     "rust/cargo_buildscript.bzl": {
         "49e261487744c64fda39e73f15a0c440fa4af8ae9a4cb6f4ec12bcb4257ff607",
@@ -597,6 +601,81 @@ def add_rustdoc_json_subtarget(text: str) -> str:
     )
 
 
+# `failure_filter` re-exposes one rustc output once the build status lists it,
+# and otherwise replays rustc's diagnostics and fails with rustc's status. The
+# stock rule spends a remote action on that decision after every compile whose
+# diagnostics must not fail dependents: a second serial round trip, and a
+# scheduler queue slot, for a hard link. Lash's execution platforms are remote-only, so `prefer_local` is ignored
+# and `local_only` is refused; making them hybrid would also move binary links
+# and archives local, which the stock C++ toolchain prefers. The decision is
+# instead taken in the daemon from the build status: the passing case is a
+# declared copy that executes nothing and fetches only the build status, and the
+# failing case runs the stock action unchanged, so a compile error reads as
+# before.
+STOCK_FAILURE_FILTER = '''    cmd = cmd_args(
+        failure_filter_action,
+        "--stderr",
+        stderr,
+        "--required-file",
+        required.short_path,
+        required,
+        output.as_output(),
+        "--build-status",
+        build_status,
+    )
+
+    toolchain_info = compile_ctx.toolchain_info
+    ctx.actions.run(
+        cmd,
+        category = "failure_filter",
+        identifier = identifier,
+        error_handler = toolchain_info.rust_error_handler,
+    env = kiln_action_env(ctx),
+    )
+
+    return output
+'''
+
+DAEMON_FAILURE_FILTER = '''    toolchain_info = compile_ctx.toolchain_info
+    env = kiln_action_env(ctx)
+
+    def filter_from_build_status(ctx, artifacts, outputs):
+        if required.short_path in artifacts[build_status].read_json()["files"]:
+            ctx.actions.copy_file(outputs[output].as_output(), required)
+            return
+        ctx.actions.run(
+            cmd_args(
+                failure_filter_action,
+                "--stderr",
+                stderr,
+                "--required-file",
+                required.short_path,
+                required,
+                outputs[output].as_output(),
+                "--build-status",
+                build_status,
+            ),
+            category = "failure_filter",
+            identifier = identifier,
+            error_handler = toolchain_info.rust_error_handler,
+            env = env,
+        )
+
+    ctx.actions.dynamic_output(
+        dynamic = [build_status],
+        inputs = [],
+        outputs = [output.as_output()],
+        f = filter_from_build_status,
+    )
+
+    return output
+'''
+
+
+def filter_failures_in_daemon(text: str) -> str:
+    return replace_once(text, STOCK_FAILURE_FILTER, DAEMON_FAILURE_FILTER, "failure filter action")
+
+
 def transform(relative: str, text: str) -> str:
     if relative == "rust/sources.bzl":
         return add_checkout_source_projection(text)
@@ -665,6 +744,8 @@ def transform(relative: str, text: str) -> str:
         return text.replace(old, new, 1)
     text = add_load(text, relative)
     text = wrap_actions(text)
+    if relative == "rust/failure_filter.bzl":
+        text = filter_failures_in_daemon(text)
     if relative == "rust/build.bzl":
         text = preserve_relative_binary_env(preserve_relative_manifest_dir(text))
         text = narrow_transitive_source_inputs(text)
@@ -751,6 +832,8 @@ def upgrade_previous(relative: str, text: str) -> str:
         return add_rustdoc_json_action(remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_binary_env(preserve_relative_manifest_dir(text)))))
     if relative == "rust/rust_library.bzl":
         return add_rustdoc_json_subtarget(text)
+    if relative == "rust/failure_filter.bzl":
+        return filter_failures_in_daemon(text)
     if relative != "rust/cargo_buildscript.bzl":
         raise ValueError("no previous-overlay upgrade for {}".format(relative))
     encoded = '''        rust_toolchain_info.rustc_flags,
