@@ -985,9 +985,12 @@ pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String 
 
 /// Constant producer-selected merge key for process wakes.
 ///
-/// The key says only that wake rows are eligible to share a turn. Work kind,
-/// delivery boundary, authority, elevation, row count, age, and rendered size
-/// remain independent admission gates.
+/// The key says only that wake rows are eligible to share a turn; it is
+/// per-item data for the host's `QueuedDrainPolicy`, never a kernel admission
+/// rule. A turn-lane composition still takes only batchable turn work sharing
+/// the queue head's delivery policy (ADR 0101 §5.2); which principals,
+/// elevations or merge-key groups actually share a turn is the policy's
+/// choice.
 pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
 
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {

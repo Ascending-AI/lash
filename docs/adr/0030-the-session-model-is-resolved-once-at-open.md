@@ -25,8 +25,8 @@ provider is refused with `ProviderMismatch`.
 
 `effective_policy()` reads session policy directly. `FrameOpen` assignments
 are immutable history and retain the model recorded when the frame opens.
-Later configuration changes are typed config commands in a durable,
-revision-checked transaction (ADR 0126). The core owner's commands cover
+Later configuration changes are typed config commands applied through a
+durable, revision-checked `ConfigTransaction` (ADR 0126). The core owner's commands cover
 provider, model, prompt, generation, attachment acceptance, the execution
 controls and tool access; each plugin's commands cover its own namespace.
 
@@ -52,13 +52,18 @@ fact. A session-turn process's worker names the configuration that process's
 session is created with; there is no implicit default.
 
 Input admission does not select a model. Child-session execution and direct
-LLM requests have explicit model selection at their own boundaries. The
-runtime has no turn-level model overlay.
+LLM requests have explicit model selection at their own boundaries. An input
+may carry a `RunSpec` whose recorded overrides — route, model, generation,
+prompt layer, protocol turn options — run that input's root under them without
+changing the session's recorded configuration (ADR 0101 §A5): the override is
+durable input data the root's admission fixes, not a mutable overlay on
+session policy.
 
 ## Bypass surfaces
 
 Testing-only state replacement is tooling, not a product configuration path.
-A product host changes configuration through a patch. Opening a persisted,
+A product host changes configuration only through a typed `ConfigTransaction`
+submitted under `ConfigWrite { id, expected_revision }` (ADR 0126). Opening a persisted,
 non-current Agent Frame fails with `HistoricalAgentFrameSwitchUnsupported`;
 reopening the current frame is idempotent. A protocol outcome cannot select
 an old frame to overwrite current policy.
@@ -68,13 +73,17 @@ an old frame to overwrite current policy.
 Reopening a session uses its durable configuration, including before its
 first turn. One engine runs sessions with different turn budgets or other
 execution controls, each as it recorded them. Hosts that need different
-configurations create distinct sessions or submit explicit patches. A frame's
+configurations create distinct sessions or submit typed `ConfigTransaction`s.
+A frame's
 recorded model explains its history; it does not override the session's
 current model.
 
-A turn-level overlay, host-wins reopen merging, per-open overrides of the
-execution controls and a plugin hook that rewrites the whole policy are
-rejected because each adds a second configuration authority. Structured child
+An overlay that lets a turn rewrite the recorded policy, host-wins reopen
+merging, per-open overrides of the execution controls and a plugin hook that
+rewrites the whole policy are rejected because each adds a second
+configuration authority. A `RunSpec`'s per-root overrides are not one: they
+are recorded input data fixed at admission that shape only their own root
+(ADR 0101 §A5). Structured child
 or direct requests remain explicit and do not change the parent session
 policy.
 
@@ -84,4 +93,4 @@ policy.
 - [Creation head contract](../../crates/lash-core-store/src/session_identity.rs).
 - [Session policy and immutable frames](../../crates/lash-core-store/src/session_state.rs).
 - [Durable configuration application and the per-root snapshot](../../crates/lash-core/src/runtime/drive/turn_config.rs).
-- [Recorded configuration and its patch](../../crates/lash-core-store/src/session_policy.rs).
+- [Recorded configuration and its typed commands](../../crates/lash-core-store/src/session_policy.rs).

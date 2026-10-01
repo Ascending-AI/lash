@@ -109,11 +109,18 @@ command as a barrier.
 Commands are not admitted turn rows. The drive selects the leading command run
 and settles it in the applying commit. The drive's fenced read of the run is
 the commands' admission: it delivers each row's obligation, and a withdrawal
-reaches a command only before that read. Adjacent config patches coalesce within the command bound. Other commands
-apply alone. Each turn retains its recorded config snapshot through checkpoints
+reaches a command only before that read. Every command applies alone, with its
+own revision check, recorded resolution and receipt; adjacent commands never
+merge into one admission. A config change is one such command: a typed
+`ConfigTransaction` submitted under `ConfigWrite { id, expected_revision }`
+through `SessionConfigAdmin`
+([ADR 0126](0126-session-config-changes-are-typed-owner-commands.md)), whose
+recorded resolution — including the route check for a changed core route —
+settles `Applied`, `Stale` or `Refused` as §12 records, and a refusal
+publishes no config and reaches no queued turn. Each turn retains its recorded config snapshot through checkpoints
 and follow-ons. A command can therefore change the config used by an input
 queued before it. A host requiring an earlier config waits for the input's
-answer before submitting the patch.
+answer before submitting the transaction.
 
 `CompactContext { instructions }` is a command. It applies under its command
 root's sealed fence, journals its summary, opens the frame and records usage
