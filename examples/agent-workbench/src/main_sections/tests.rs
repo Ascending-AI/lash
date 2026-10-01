@@ -210,6 +210,125 @@ pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::L
 
 const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
+#[test]
+fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
+    run_async_test_on_stack_budget("accounts-context-law", || async {
+        use lash::persistence::QueuedWorkStore as _;
+        let requests = Arc::new(Mutex::new(Vec::<lash::provider::LlmRequest>::new()));
+        let double = test_double_backend(0).await;
+        let live_world = Arc::new(Mutex::new(None::<mail::MailWorld>));
+        let provider = lash::testing::TestProvider::builder()
+            .kind("accounts-context-law")
+            .complete({
+                let requests = Arc::clone(&requests);
+                let double = double.clone();
+                let live_world = Arc::clone(&live_world);
+                move |request| {
+                    let mut seen = requests.lock_recover();
+                    seen.push(request);
+                    if seen.len() == 1 {
+                        live_world
+                            .lock_recover()
+                            .as_ref()
+                            .expect("host world")
+                            .add_account("unrecorded")
+                            .expect("change live data before replay");
+                        double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResult {
+                            name: None,
+                        });
+                    }
+                    async {
+                        Ok(text_response(
+                            "<typescript>finish(\"observed\");</typescript>",
+                        ))
+                    }
+                }
+            })
+            .build()
+            .into_handle();
+        let state = recoverable_chat_tests::recoverable_chat_test_state_with_provider(
+            &double, 16, provider,
+        )
+        .await;
+        *live_world.lock_recover() = Some(state.mail_world.clone());
+        let session_id = state.current_session_id();
+        let _ = add_account(
+            State(state.clone()),
+            Json(AddAccountRequest {
+                name: "fresh".to_string(),
+            }),
+        )
+        .await
+        .expect("connect account after creation");
+        double.settle_session_drive(&session_id).await;
+        let expected = connected_accounts_prompt(&state.mail_world);
+        let crashes = double.server().stats().crashes;
+        for sequence in 1..=2 {
+            if sequence == 2 {
+                let _ = delete_account(AxumPath("fresh".to_string()), State(state.clone()))
+                    .await
+                    .expect("remove account through host");
+                let _ = add_account(
+                    State(state.clone()),
+                    Json(AddAccountRequest {
+                        name: "later".to_string(),
+                    }),
+                )
+                .await
+                .expect("connect another account through host");
+            }
+            double
+                .stores()
+                .session_store_factory()
+                .enqueue_queued_work(queued_work_tests::queued_work_test_draft(
+                    &session_id,
+                    &format!("accounts-context-process:{sequence}"),
+                ))
+                .await
+                .expect("enqueue process wake");
+            tokio::time::timeout(
+                Duration::from_secs(20),
+                double.attach_drive(
+                    &session_id,
+                    lash::restate::DriveRequestId::new(format!(
+                        "accounts-context-drive:{sequence}"
+                    )),
+                ),
+            )
+            .await
+            .expect("drive answers")
+            .expect("drive wake");
+        }
+        assert_eq!(
+            double.server().stats().crashes,
+            crashes + 1,
+            "one root attempt crashed"
+        );
+        let seen = requests.lock_recover();
+        assert_eq!(seen.len(), 3, "first call, redrive, and next wake");
+        assert!(
+            seen[0]
+                .instructions
+                .as_deref()
+                .unwrap_or_default()
+                .contains(&expected),
+            "non-user turn must render fresh accounts context"
+        );
+        assert_eq!(
+            seen[0].instructions, seen[1].instructions,
+            "redrive must reuse its recorded render after live data changed"
+        );
+        assert!(
+            seen[2]
+                .instructions
+                .as_deref()
+                .unwrap_or_default()
+                .contains(&connected_accounts_prompt(&state.mail_world)),
+            "next wake must see the host's changed accounts"
+        );
+    });
+}
+
 fn test_graph(
     graph_key: &str,
     session_id: &SessionId,

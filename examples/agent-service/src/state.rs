@@ -15,7 +15,7 @@ pub(crate) type AppResult<T> = Result<T, AppError>;
 
 #[derive(Clone)]
 pub(crate) struct AppStateData {
-    core: LashCore,
+    core: Arc<LashCore>,
     turn_work_driver: TurnWorkDriver,
     db: Arc<Mutex<AppDb>>,
     default_model: String,
@@ -31,6 +31,8 @@ impl AppStateData {
         default_model_variant: Option<String>,
         restate: lash_restate::RestateConnection,
     ) -> Self {
+        let core = Arc::new(core);
+        db.lock_recover().context_core = Arc::downgrade(&core);
         Self {
             turn_work_driver: core.turn_work_driver(),
             core,
@@ -44,6 +46,40 @@ impl AppStateData {
     /// The core, retained for the shutdown drain (trace flush).
     pub(crate) fn core(&self) -> &LashCore {
         &self.core
+    }
+
+    pub(crate) async fn record_board_context(&self, session: &LashSession) -> AppResult<()> {
+        let config = session.admin().config();
+        loop {
+            let chat_id = session.session_id().to_string();
+            let board = self.with_db(move |db| db.chat_board(&chat_id)).await?;
+            let revision = config.revision().await?;
+            let outcome = config
+                .apply(
+                    lash::config::ConfigWrite::new(
+                        format!("board-context:{}", uuid::Uuid::new_v4()),
+                        revision,
+                    ),
+                    lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext {
+                        context: vec![crate::board::board_prompt(&board)],
+                    }),
+                )
+                .await?;
+            match outcome {
+                lash::config::ConfigTransactionOutcome::Applied { .. } => return Ok(()),
+                lash::config::ConfigTransactionOutcome::Stale { .. } => continue,
+                outcome => {
+                    return Err(AppError::internal(format!(
+                        "the board context did not apply: {outcome:?}"
+                    )));
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn record_board_context_for_chat(&self, chat_id: &str) -> AppResult<()> {
+        let session = self.core.session(chat_id).open().await?;
+        self.record_board_context(&session).await
     }
 
     pub(crate) fn turn_work_driver(&self) -> &TurnWorkDriver {
@@ -79,13 +115,30 @@ impl AppStateData {
         // (FIG-4112), so the create-or-use arm is written out: an existing
         // session keeps its recorded model, and a chat whose model changed
         // since moves its session with a config transaction.
+        let board = self
+            .with_db({
+                let chat_id = chat_id.to_string();
+                move |db| db.chat_board(&chat_id)
+            })
+            .await?;
         match self
             .core
             .session(chat_id)
             .create(lash::SessionCreation {
                 spec: lash::SessionSpec::inherit()
                     .model(model.key.clone())
-                    .reasoning(model.reasoning.clone()),
+                    .reasoning(model.reasoning.clone())
+                    .plugin(
+                        lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                        lash::rlm::RlmCreateExtras {
+                            prompt: Some(lash::rlm::RlmPrompt {
+                                context: vec![crate::board::board_prompt(&board)],
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    )
+                    .map_err(lash::EmbedError::from)?,
                 ..Default::default()
             })
             .await

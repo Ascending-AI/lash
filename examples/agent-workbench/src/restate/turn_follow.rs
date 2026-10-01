@@ -111,7 +111,6 @@ pub(crate) async fn start_user_turn(
         .await
         .map_err(AppError::session_open)?;
     apply_model_selection_to_session(state, &session, turn_model, "user_turn").await?;
-    crate::refresh_prompt_context(state, &session).await?;
     watch_session_roots(state, &request.session_id).await;
     // Claimed before the send, so the session's watch leaves this root to
     // the follower below.

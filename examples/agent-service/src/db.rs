@@ -143,6 +143,8 @@ pub(crate) struct ChatModelSelection {
 
 pub(crate) struct AppDb {
     conn: Connection,
+    // Board tools submit context changes without retaining their owning core.
+    pub(crate) context_core: std::sync::Weak<lash::LashCore>,
 }
 
 impl AppDb {
@@ -228,7 +230,10 @@ impl AppDb {
                 )),
             ));
         }
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            context_core: std::sync::Weak::new(),
+        })
     }
 
     pub(crate) fn list_chats(&mut self) -> AppResult<Vec<ChatSummary>> {

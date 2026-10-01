@@ -11,17 +11,6 @@ impl AppState {
         self.core.session(session_id.into())
     }
 
-    /// What the workbench creates a session with: the host's model selection
-    /// at the moment of creation.
-    pub(crate) fn session_creation(&self) -> lash::SessionCreation {
-        lash::SessionCreation {
-            spec: lash::SessionSpec::new()
-                .model(self.selected_model().key())
-                .reasoning(self.selected_model().reasoning()),
-            ..Default::default()
-        }
-    }
-
     /// Create `session_id` with [`Self::session_creation`] unless the catalog
     /// already holds it.
     ///
@@ -38,7 +27,7 @@ impl AppState {
         match self
             .core
             .session(session_id.clone())
-            .create(self.session_creation())
+            .create(self.session_creation()?)
             .await
         {
             Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => Ok(()),

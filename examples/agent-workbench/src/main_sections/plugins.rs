@@ -555,19 +555,36 @@ pub(crate) fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {
     }
 }
 
-/// Live, per-turn prompt line naming the inbox authorities that actually exist,
-/// so the agent never assumes the illustrative `inbox.work`/`inbox.personal`
-/// names from the static guidance are real.
+impl AppState {
+    /// What the workbench creates a session with: the host's model selection
+    /// and connected accounts at the moment of creation.
+    pub(crate) fn session_creation(&self) -> Result<lash::SessionCreation, serde_json::Error> {
+        Ok(lash::SessionCreation {
+            spec: lash::SessionSpec::new()
+                .model(self.selected_model().key())
+                .reasoning(self.selected_model().reasoning())
+                .plugin(
+                    lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    lash::rlm::RlmCreateExtras {
+                        prompt: Some(workbench_rlm_prompt(&self.mail_world)),
+                        ..Default::default()
+                    },
+                )?,
+            ..Default::default()
+        })
+    }
+}
+
 /// The workbench's RLM prompt, stated in the core's default session spec: the
 /// standing instructions (ADR 0063: worked examples in the session's own
 /// language, and TypeScript is the sole RLM language, ADR 0096) with the
 /// deferred catalogue's advertisement, and the connected accounts as context.
-pub(crate) fn workbench_rlm_prompt(
-    mail_world: &mail::MailWorld,
-    deferred_tools: &deferred_tools::WorkbenchDeferredTools,
-) -> lash::rlm::RlmPrompt {
+pub(crate) fn workbench_rlm_prompt(mail_world: &mail::MailWorld) -> lash::rlm::RlmPrompt {
     lash::rlm::RlmPrompt {
-        instructions: vec![workbench_prompt().to_string(), deferred_tools.preview()],
+        instructions: vec![
+            workbench_prompt().to_string(),
+            deferred_tools::prompt_preview(),
+        ],
         context: workbench_prompt_context(mail_world),
         ..lash::rlm::RlmPrompt::default()
     }
@@ -578,40 +595,62 @@ pub(crate) fn workbench_prompt_context(mail_world: &mail::MailWorld) -> Vec<Stri
     vec![connected_accounts_prompt(mail_world)]
 }
 
-/// Bring `session`'s recorded prompt context up to the accounts connected
-/// now, for the roots after this. A session whose context already says so is
-/// left alone.
-pub(crate) async fn refresh_prompt_context(
+/// Record an account change for every live session, including child sessions.
+pub(crate) async fn record_accounts_context(state: &AppState) -> Result<(), AppError> {
+    for view in state
+        .core
+        .sessions_filtered(lash::SessionListFilter {
+            deleted: Some(false),
+            ..Default::default()
+        })
+        .await
+        .map_err(AppError::internal)?
+    {
+        let session = state
+            .core
+            .session(view.session_id.clone())
+            .open()
+            .await
+            .map_err(|error| {
+                state.session_admission_error(&view.session_id, "accounts.context", error)
+            })?;
+        record_accounts_context_for_session(state, &session).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn record_accounts_context_for_session(
     state: &AppState,
     session: &lash::LashSession,
 ) -> Result<(), AppError> {
-    let context = workbench_prompt_context(&state.mail_world);
-    let recorded = session
-        .read_view()
-        .protocol_turn_options()
-        .decode::<lash::rlm::RlmRecordedConfig>()
-        .map_err(AppError::internal)?;
-    if recorded.prompt.context == context {
-        return Ok(());
-    }
     let config = session.admin().config();
-    let revision = config.revision().await.map_err(AppError::internal)?;
-    let outcome = config
-        .apply(
-            lash::config::ConfigWrite::new(format!("prompt-context:{revision}"), revision),
-            lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext { context }),
-        )
-        .await
-        .map_err(AppError::internal)?;
-    if !matches!(
-        outcome,
-        lash::config::ConfigTransactionOutcome::Applied { .. }
-    ) {
-        return Err(AppError::internal(format!(
-            "the prompt context did not apply: {outcome:?}"
-        )));
+    loop {
+        let context = workbench_prompt_context(&state.mail_world);
+        let revision = config.revision().await.map_err(|error| {
+            state.session_admission_error(&session.session_id(), "accounts.context", error)
+        })?;
+        let outcome = config
+            .apply(
+                lash::config::ConfigWrite::new(
+                    format!("accounts-context:{}", uuid::Uuid::new_v4()),
+                    revision,
+                ),
+                lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext { context }),
+            )
+            .await
+            .map_err(|error| {
+                state.session_admission_error(&session.session_id(), "accounts.context", error)
+            })?;
+        match outcome {
+            lash::config::ConfigTransactionOutcome::Applied { .. } => return Ok(()),
+            lash::config::ConfigTransactionOutcome::Stale { .. } => continue,
+            outcome => {
+                return Err(AppError::internal(format!(
+                    "the prompt context did not apply: {outcome:?}"
+                )));
+            }
+        }
     }
-    Ok(())
 }
 
 pub(crate) fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String {

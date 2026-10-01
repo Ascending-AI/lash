@@ -630,6 +630,7 @@ pub(crate) async fn add_account(
         "api.accounts.add",
         json!({ "slug": summary.slug, "authority": summary.authority }),
     );
+    record_accounts_context(&state).await?;
     Box::pin(enqueue_tool_catalog_refresh(&state, "account_added")).await?;
     state.push_message(
         "event",
@@ -647,6 +648,7 @@ pub(crate) async fn delete_account(
         .remove_account(&slug)
         .map_err(AppError::not_found)?;
     state.trace("api.accounts.remove", json!({ "slug": slug }));
+    record_accounts_context(&state).await?;
     Box::pin(enqueue_tool_catalog_refresh(&state, "account_removed")).await?;
     state.push_message("event", format!("removed mock account `inbox.{slug}`"));
     Ok(Json(CommandAccepted { accepted: true }))
@@ -688,7 +690,10 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
 ) -> Result<lash::SessionCommandReceipt, AppError> {
     let session_id = state.current_session_id();
     let session = state
-        .open_session(&session_id, "mail.tool_catalog.refresh")
+        .core
+        .session(session_id.clone())
+        .enqueue_only()
+        .open()
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
@@ -704,10 +709,7 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     ))
     .await
     .map_err(AppError::runtime)?;
-    session
-        .close()
-        .await
-        .map_err(|refused| AppError::session_open(refused.into()))?;
+    drop(session);
     state.trace_for_session(
         &session_id,
         "mail.tool_catalog.refresh_enqueued",
@@ -854,16 +856,16 @@ pub(crate) async fn reset_chat(
             "replaced_current": replaced_current,
         }),
     );
-    // The new id is fresh: creation records the current model selection.
-    let session = state
-        .create_or_open_session(&new_session_id, "api.reset")
-        .await
-        .map_err(AppError::session_open)?;
     if replaced_current {
         state.messages.lock_recover().clear();
         state.lashlang_execution.clear();
         state.mail_world.clear();
+        record_accounts_context(&state).await?;
     }
+    let session = state
+        .create_or_open_session(&new_session_id, "api.reset")
+        .await
+        .map_err(AppError::session_open)?;
     Ok(Json(StateSnapshot {
         settings: state.settings_for_session(new_session_id.clone()),
         messages: Vec::new(),

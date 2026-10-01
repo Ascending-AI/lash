@@ -322,7 +322,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     .session_plugin(
         lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
         lash::rlm::RlmCreateExtras {
-            prompt: Some(workbench_rlm_prompt(&mail_world, &deferred_tools)),
+            prompt: Some(workbench_rlm_prompt(&mail_world)),
             ..Default::default()
         },
     )

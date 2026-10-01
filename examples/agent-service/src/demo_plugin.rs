@@ -114,10 +114,15 @@ impl StaticToolExecute for DemoTools {
                     let Some(cell) = call.args.get("cell").and_then(|value| value.as_u64()) else {
                         return ToolOutcome::err_fmt("missing integer cell");
                     };
-                    match apply_agent_move_for_tool(&self.db, session_id, cell as usize) {
-                        Ok(output) => ToolOutcome::ok(output),
-                        Err(err) => ToolOutcome::err_fmt(err),
+                    let output =
+                        match apply_agent_move_for_tool(&self.db, session_id, cell as usize) {
+                            Ok(output) => output,
+                            Err(err) => return ToolOutcome::err_fmt(err),
+                        };
+                    if let Err(error) = record_board_context_for_tool(&self.db, session_id).await {
+                        return ToolOutcome::err_fmt(error);
                     }
+                    ToolOutcome::ok(output)
                 }
                 other => ToolOutcome::err_fmt(format!("unknown demo tool `{other}`")),
             }
@@ -177,6 +182,37 @@ fn apply_agent_move_for_tool(
         .map_err(|err| err.to_string())
 }
 
+async fn record_board_context_for_tool(
+    db: &Arc<Mutex<AppDb>>,
+    chat_id: &str,
+) -> crate::state::AppResult<()> {
+    let (core, board) = {
+        let mut db = db.lock_recover();
+        let core = db.context_core.upgrade().ok_or_else(|| {
+            crate::state::AppError::internal("the board context host is unavailable")
+        })?;
+        (core, db.chat_board(chat_id)?)
+    };
+    let session = core.session(chat_id).enqueue_only().open().await?;
+    let config = session.admin().config();
+    let revision = config.revision().await?;
+    // The move runs inside its root, so submission must not wait for the
+    // command lane. The root keeps its render; the command precedes later work.
+    config
+        .submit(
+            lash::config::ConfigWrite::new(
+                format!("board-context:{}", uuid::Uuid::new_v4()),
+                revision,
+            ),
+            lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext {
+                context: vec![crate::board::board_prompt(&board)],
+            }),
+        )
+        .await?;
+    drop(session);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +220,180 @@ mod tests {
     use lash::ToolCallId;
     use lash::process::ProcessOriginator;
     use lash::tools::{ToolId, ToolPrepareContext};
+
+    #[tokio::test]
+    async fn a_non_user_turn_records_fresh_board_context_and_replays_it() {
+        use axum::Json;
+        use axum::extract::{Path as AxumPath, State};
+        use lash::persistence::QueuedWorkStore as _;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db = Arc::new(Mutex::new(
+            AppDb::open(&temp.path().join("app.db")).expect("app db"),
+        ));
+        let chat = db
+            .lock_recover()
+            .create_chat("context law", "mock-model", None)
+            .expect("chat");
+        let session_id = lash::SessionId::from(chat.id.clone());
+        let first = BoardState {
+            cells: vec![None; 9],
+            turn: "O".to_string(),
+        };
+        let mut moved = first.clone();
+        moved.cells[4] = Some("O".to_string());
+        moved.turn = "X".to_string();
+        let requests = Arc::new(Mutex::new(Vec::<lash::provider::LlmRequest>::new()));
+        let double = crate::state::test_support::test_double().await;
+        let provider = lash::testing::TestProvider::builder()
+            .kind("board-context-law")
+            .complete({
+                let requests = Arc::clone(&requests);
+                let double = double.clone();
+                let db = Arc::clone(&db);
+                let chat_id = chat.id.clone();
+                move |request| {
+                    let mut seen = requests.lock_recover();
+                    seen.push(request);
+                    let answer = if seen.len() == 1 {
+                        "<typescript>await board.play({ cell: 4 }); finish(\"moved\");</typescript>"
+                    } else {
+                        if seen.len() == 2 {
+                            db.lock_recover()
+                                .upsert_chat_board(&chat_id, &crate::board::default_board())
+                                .expect("change live data before replay");
+                            double.crash_turn_drive(
+                                lash_restate_test::CrashPoint::BeforeRunResult { name: None },
+                            );
+                        }
+                        "<typescript>finish(\"observed\");</typescript>"
+                    };
+                    async move {
+                        Ok(lash::provider::LlmResponse {
+                            parts: vec![lash::direct::LlmOutputPart::Text {
+                                text: answer.to_string(),
+                                response_meta: None,
+                            }],
+                            ..Default::default()
+                        })
+                    }
+                }
+            })
+            .build()
+            .into_handle();
+        let core = crate::state::test_support::test_core_with_board(&double, provider, &db).await;
+        let state = crate::state::AppStateData::new(
+            core,
+            Arc::clone(&db),
+            "mock-model".to_string(),
+            None,
+            double.connection(),
+        );
+        let response = crate::routes::send_message(
+            State(state.clone()),
+            AxumPath(chat.id.clone()),
+            crate::remote_protocol::test_remote_headers(),
+            Json(
+                serde_json::from_value(
+                    json!({ "text": "play", "board": first, "model": null, "model_variant": null }),
+                )
+                .expect("send request"),
+            ),
+        )
+        .await
+        .expect("user board update");
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("user turn ends");
+        double.settle_session_drive(&session_id).await;
+        assert_eq!(
+            db.lock_recover().chat_board(&chat.id).expect("board"),
+            moved,
+            "the tool mutated the board"
+        );
+        let crashes = double.server().stats().crashes;
+        let process_id = lash::ProcessId::fixture("board-context-process");
+        let wake = lash::process::ProcessWakeDelivery {
+            version: lash::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            wake_id: "board-context-wake".to_string(),
+            target_session_id: session_id.clone(),
+            process_id: process_id.clone(),
+            sequence: 1,
+            event_type: "process.wake".to_string(),
+            event_invocation: lash::runtime::RuntimeInvocation {
+                attribution: lash::runtime::RuntimeAttribution::for_session(session_id.clone()),
+                subject: lash::durability::RuntimeSubject::ProcessEvent {
+                    process_id: process_id.clone(),
+                    sequence: 1,
+                    event_type: "process.wake".to_string(),
+                },
+                caused_by: None,
+                replay: None,
+            },
+            process_caused_by: None,
+            authority: Default::default(),
+            input: "observe the board".to_string(),
+            created_at_ms: 1,
+        };
+        double
+            .stores()
+            .session_store_factory()
+            .enqueue_queued_work(
+                lash::persistence::QueuedWorkBatchDraft::new(
+                    session_id.clone(),
+                    lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
+                    lash::persistence::TurnWorkPayload::process_wake(wake),
+                )
+                .with_source_key(lash::process::process_wake_source_key(&process_id, 1))
+                .with_process_wake_source(process_id, 1),
+            )
+            .await
+            .expect("enqueue process wake");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            double.attach_drive(
+                &session_id,
+                lash::restate::DriveRequestId::new("board-context-drive"),
+            ),
+        )
+        .await
+        .expect("drive answers")
+        .expect("drive wake");
+        assert_eq!(
+            double.server().stats().crashes,
+            crashes + 1,
+            "one root attempt crashed"
+        );
+        let seen = requests.lock_recover();
+        assert_eq!(seen.len(), 3, "user call, non-user call, and redrive");
+        assert!(
+            seen[0]
+                .instructions
+                .as_deref()
+                .unwrap_or_default()
+                .contains(&crate::board::board_prompt(&first)),
+            "user board update must set recorded prompt context"
+        );
+        assert!(
+            seen[1]
+                .instructions
+                .as_deref()
+                .unwrap_or_default()
+                .contains(&crate::board::board_prompt(&moved)),
+            "non-user turn must render the tool's fresh board context"
+        );
+        assert_eq!(
+            seen[1].instructions, seen[2].instructions,
+            "redrive must reuse its recorded render after live data changed"
+        );
+        assert!(
+            !seen[0]
+                .messages
+                .iter()
+                .any(|message| format!("{message:?}").contains("## Tic Tac Toe Board")),
+            "board context belongs to recorded config"
+        );
+    }
 
     fn pending() -> PendingToolCall {
         PendingToolCall {

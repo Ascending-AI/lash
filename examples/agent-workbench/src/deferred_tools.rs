@@ -78,31 +78,10 @@ impl WorkbenchDeferredTools {
             definitions: self.catalogue.definitions.clone(),
         })
     }
+}
 
-    #[expect(
-        clippy::expect_used,
-        reason = "workbench_deferred_definitions() always returns at least one tool, so the \
-                  preview builder's empty-catalogue refusal cannot fire"
-    )]
-    pub(crate) fn preview(&self) -> String {
-        lash::tools::catalogue_preview(
-            lash::tools::catalogue_preview_entries_from_manifests(
-                self.catalogue
-                    .definitions
-                    .values()
-                    .map(ToolDefinition::manifest)
-                    .collect::<Vec<_>>()
-                    .iter(),
-            ),
-            &CataloguePreviewOptions {
-                title: "Deferred workbench utilities".to_string(),
-                search_call_path: SEARCH_CALL_PATH.to_string(),
-                module_limit: PREVIEW_MODULE_LIMIT,
-                call_name_limit: PREVIEW_CALL_NAME_LIMIT,
-            },
-        )
-        .expect("workbench deferred catalogue is not empty")
-    }
+pub(crate) fn prompt_preview() -> String {
+    DeferredCatalogue::new(workbench_deferred_definitions()).preview()
 }
 
 #[derive(Clone)]
@@ -219,6 +198,30 @@ struct DeferredCatalogue {
 }
 
 impl DeferredCatalogue {
+    #[expect(
+        clippy::expect_used,
+        reason = "workbench_deferred_definitions() always returns at least one tool, so the \
+                  preview builder's empty-catalogue refusal cannot fire"
+    )]
+    fn preview(&self) -> String {
+        lash::tools::catalogue_preview(
+            lash::tools::catalogue_preview_entries_from_manifests(
+                self.definitions
+                    .values()
+                    .map(ToolDefinition::manifest)
+                    .collect::<Vec<_>>()
+                    .iter(),
+            ),
+            &CataloguePreviewOptions {
+                title: "Deferred workbench utilities".to_string(),
+                search_call_path: SEARCH_CALL_PATH.to_string(),
+                module_limit: PREVIEW_MODULE_LIMIT,
+                call_name_limit: PREVIEW_CALL_NAME_LIMIT,
+            },
+        )
+        .expect("workbench deferred catalogue is not empty")
+    }
+
     fn new(definitions: Vec<ToolDefinition>) -> Self {
         let definitions = definitions
             .into_iter()
@@ -802,8 +805,8 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let preview = tools.preview();
-        let repeated = tools.preview();
+        let preview = prompt_preview();
+        let repeated = prompt_preview();
         assert_eq!(preview, repeated);
         assert!(preview.contains("Modules: 3 total"), "{preview}");
         assert!(!preview.contains("Catalogued calls:"));
@@ -830,7 +833,7 @@ mod tests {
             .compact_contract()
             .render_markdown()
             .len()
-            + tools.preview().len();
+            + prompt_preview().len();
         assert!(
             deferred_bytes < resident_bytes,
             "deferred surface {deferred_bytes} bytes must be smaller than resident {resident_bytes} bytes"
