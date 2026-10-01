@@ -623,6 +623,9 @@ macro_rules! tool_child_unroutable_tests {
         $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
             (a_child_whose_opener_is_live_on_another_worker_retries_until_routed_there,
              "tool-child-placed"));
+        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
+            (a_lent_child_is_cancelled_by_its_openers_durable_end,
+             "tool-child-lent-end"));
     };
 }
 

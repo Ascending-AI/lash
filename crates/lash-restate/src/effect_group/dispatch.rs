@@ -569,6 +569,30 @@ impl EffectGroupDispatchImpl {
         terminal: ToolChildTerminal,
     ) -> HandlerResult<()> {
         let Some(executor) = self.executors.executor_for(&request.envelope) else {
+            // Admission and the route may replay answers from before the
+            // opener's durable end. Read the index's monotonic cancel fact
+            // outside the journal on this miss: it already seated the child,
+            // so this invocation only ends, without executing or seating it.
+            // A committed drain has no cancel decision and keeps retrying.
+            let cancel = self
+                .ingress
+                .call_lash_object::<_, Option<EffectGroupNotification>>(
+                    &self
+                        .route
+                        .namespace()
+                        .stable(crate::LashService::EffectGroupState)
+                        .name(),
+                    &request.group_key,
+                    "child_cancel",
+                    &EffectGroupChildCancelRequest {
+                        position: request.position,
+                    },
+                )
+                .await
+                .map_err(|error| ingress_group_error("EffectGroupIndex/child_cancel", error))?;
+            if cancel.is_some_and(|notice| notice.is_child_cancel()) {
+                return Ok(());
+            }
             return Err(std::io::Error::other(format!(
                 "no executor currently routes effect group {} tool child {}; retry on a carrying deployment",
                 request.group_key, request.position

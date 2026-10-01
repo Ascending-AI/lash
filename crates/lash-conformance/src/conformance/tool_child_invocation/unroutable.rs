@@ -12,6 +12,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
+
 use super::*;
 
 /// How long either half may take. The permanent half settles in a few engine
@@ -450,5 +452,164 @@ pub async fn a_child_whose_opener_is_live_on_another_worker_retries_until_routed
         scenario.observation.executions_of("law_plain").len(),
         1,
         "the leaf body ran exactly once, on the worker its opener is live on"
+    );
+}
+
+/// A lost lending worker does not end its durable opener (FIG-4604). With no
+/// context source, its child retries until the opener recovers or durably
+/// ends. The production end closes its outstanding groups before committing
+/// the terminal, and the index seats the uncommitted child as cancelled
+/// without needing an executor. No permanent routing verdict is needed.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_lent_child_is_cancelled_by_its_openers_durable_end(
+    fixture: &ToolChildLawFixture,
+    prefix: &str,
+) {
+    let session_id = crate::SessionId::from(format!("{prefix}-lent-end"));
+    let scope = crate::ExecutionScope::turn(
+        session_id.clone(),
+        crate::TurnId::from(format!("{prefix}-lent-end-turn")),
+    );
+    let admitted = crate::admit(scope.clone());
+    let opener = crate::EffectOpener::for_scope(&admitted).expect("a turn scope derives an opener");
+    let group_key = format!("{prefix}-lent-end-group");
+    let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
+    let host = (fixture.make_world)(ToolChildWorldSpec {
+        lease_ttl_ms: LIVE_LEASE_MS,
+    })
+    .await
+    .host;
+    let lender = crate::runtime::effect::ToolChildHost::new(
+        &host,
+        Arc::clone(&scenario.process_env_store),
+        Arc::new(crate::facade_support::SystemClock),
+    );
+    let live = register_opener_on(
+        &lender,
+        &host,
+        &scope,
+        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
+        None,
+        Some(Arc::clone(&scenario.registry)),
+        Arc::clone(&scenario.process_env_store),
+        opener.clone(),
+        tokio_util::sync::CancellationToken::new(),
+        OpenerExtras::default(),
+    );
+    let opener_context = lender.pin_open_tool_group(&group_key, &opener, [0]);
+    assert_eq!(
+        opener_context,
+        crate::runtime::effect::ToolChildOpenerContext::Lent
+    );
+    let group = single_leaf_group_opened_with(
+        &scope,
+        &session_id,
+        &group_key,
+        &scenario.env_ref,
+        LEAF_PLAIN,
+        ToolChildCompletionRouting::Inline,
+        recorded_cancellation_authority(&host, &admitted).await,
+        opener_context,
+    );
+    let placement = Arc::new(OpenerWorker {
+        worker: lender,
+        routed_here: AtomicBool::new(false),
+        misses_elsewhere: AtomicUsize::new(0),
+    });
+    install_child_host(&host, &scenario.process_env_store)
+        .with_law_fallback(Arc::clone(&placement) as Arc<dyn crate::GroupExecutors>);
+    // Lose the worker's registration after lending, with no pin or source
+    // on the surviving worker. This does not close the durable opener.
+    drop(live);
+
+    let attempt: crate::ConformanceTurnAttempt = {
+        let host = Arc::clone(&host);
+        let process_env_store = Arc::clone(&scenario.process_env_store);
+        let session_id = session_id.clone();
+        let group_key = group_key.clone();
+        let placement = Arc::clone(&placement);
+        Arc::new(move |scoped| {
+            let host = Arc::clone(&host);
+            let process_env_store = Arc::clone(&process_env_store);
+            let session_id = session_id.clone();
+            let group = group.clone();
+            let group_key = group_key.clone();
+            let placement = Arc::clone(&placement);
+            Box::pin(async move {
+                let handle = scoped
+                    .controller()
+                    .open_effect_group(group)
+                    .await
+                    .expect("the endpoint serves the recorded child");
+                while placement.misses_elsewhere.load(Ordering::SeqCst) < UNCARRIED_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                assert!(
+                    scoped
+                        .controller()
+                        .read_group_settlement(&group_key, 1)
+                        .await
+                        .expect("the live opener's rank is readable")
+                        .is_none(),
+                    "worker loss leaves the non-terminal opener's child accepted"
+                );
+                let context = crate::testing::TestExecutionContextBuilder::new(
+                    crate::testing::TestExecutionPorts::over_host(host, process_env_store),
+                )
+                .session_id(session_id)
+                .borrowed_effect_controller(scoped)
+                .build()
+                .into_runtime()
+                .with_opener_state(crate::session::OpenerState::default());
+                context.restore_outstanding_groups(vec![handle]);
+                let closed = context
+                    .close_opener_groups()
+                    .await
+                    .expect("the production opener end needs no executor for an uncommitted child");
+                assert_eq!(closed.groups, vec![group_key]);
+                assert!(closed.pending.is_empty());
+                crate::ConformanceTurnEnd::Settled
+            })
+        })
+    };
+    tokio::time::timeout(
+        ROUTE_BUDGET,
+        fixture.turn_runner.run_turn(admitted.clone(), attempt),
+    )
+    .await
+    .expect("the opener ends without waiting for its lost lending worker");
+
+    let scoped = host
+        .scoped(admitted)
+        .expect("the terminal opener's scope binds");
+    let rank = scoped
+        .controller()
+        .read_group_settlement(&group_key, 1)
+        .await
+        .expect("the terminal opener's durable rank is readable")
+        .expect("the opener's end seated its child before committing its terminal");
+    assert_eq!(rank.sequence, 1);
+    let refusal = rank
+        .outcome
+        .expect_err("the uncommitted child is cancelled by its opener's end");
+    assert_eq!(
+        refusal.code,
+        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+        "the durable end cancels, rather than fabricating a permanent routing refusal"
+    );
+    let attempts_at_end = placement.misses_elsewhere.load(Ordering::SeqCst);
+    tokio::time::sleep(ABSENCE_BUDGET).await;
+    let attempts_after_end = placement.misses_elsewhere.load(Ordering::SeqCst);
+    assert!(
+        attempts_after_end <= attempts_at_end + 1,
+        "at most one final delivery observes the durable cancel, then the child stops; \
+         attempts grew from {attempts_at_end} to {attempts_after_end}"
+    );
+    assert!(
+        scenario.observation.executions_of("law_plain").is_empty(),
+        "neither worker ran the child"
     );
 }

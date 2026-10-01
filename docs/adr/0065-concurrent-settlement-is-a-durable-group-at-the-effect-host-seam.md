@@ -74,6 +74,16 @@ runs on the worker that holds it; landing on another worker of the same
 deployment is a miss of placement, and stays a retry whether or not the
 deployment installs a context source.
 
+Losing the lending worker does not make the child permanently unroutable:
+the durable opener can redrive and register its context again. Its durable
+end closes its groups under `Cancel` before committing its terminal, and the
+index seats an uncommitted child as `RuntimeEffectGroupChildCancelled`
+without resolving an executor. This also holds on deployments with no
+context source. A tool-child routing miss reads the index's durable cancel
+decision through ingress before retrying: cancellation or retirement ends
+the invocation without executing or seating anything. A committed drain
+keeps retrying, because close cannot cancel its committed final (FIG-4604).
+
 A handler-driven engine records the answer once, in the child's own journal,
 so every replay takes the same branch on whichever worker retries it. A child
 recorded as unroutable settles `Failed` with the terminal
