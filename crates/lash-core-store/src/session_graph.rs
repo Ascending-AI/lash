@@ -329,8 +329,13 @@ pub struct SessionNodeRecord {
 ///             "impl<'de> serde::Deserialize<'de> for SessionPolicy",
 ///         ),
 ///     ),
-///     items(path = "crates/lash-core-store/src/execution_state.rs", PluginOptions),
-///     items(path = "crates/lash-core-llm/src/model.rs", ModelLimits),
+///     items(
+///         path = "crates/lash-core-store/src/execution_state.rs", PluginOptions, PluginConfig,
+///     ),
+///     items(
+///         path = "crates/lash-core-llm/src/model.rs", ModelConfig, RecordedModel, ModelKey,
+///         ModelMetadata, ModelLimits,
+///     ),
 ///     shapes(
 ///         path = "crates/lash-sansio/src/llm/capability.rs",
 ///         cover(

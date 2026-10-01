@@ -224,6 +224,7 @@ fn default_root_session_id() -> SessionId {
 /// version_guard(
 ///     items(SessionHeadPayload),
 ///     items(path = "crates/lash-core-store/src/session_graph.rs", PersistedSessionConfig),
+///     items(path = "crates/lash-core-store/src/execution_state.rs", PluginConfig),
 ///     items(path = "crates/lash-sansio/src/llm/capability.rs", ModelCapability, InstructionRole),
 ///     items(
 ///         path = "crates/lash-core-store/src/session_identity.rs", SessionToolAccess,

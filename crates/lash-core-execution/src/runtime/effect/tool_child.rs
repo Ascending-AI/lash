@@ -163,6 +163,7 @@ use super::executor::RuntimeEffectControllerError;
 ///     items(
 ///         path = "crates/lash-core-execution/src/runtime/effect/tool_child.rs",
 ///         path = "crates/lash-core-execution/src/runtime/effect/tool_child/session_facts.rs",
+///         path = "crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs",
 ///         path = "crates/lash-core-execution/src/tool_provider.rs",
 ///         path = "crates/lash-core-store/src/effect_opener.rs",
 ///         path = "crates/lash-core-store/src/turn_control_binding.rs",
@@ -175,8 +176,10 @@ use super::executor::RuntimeEffectControllerError;
 ///         path = "crates/lash-sansio/src/schema_contract.rs",
 ///         path = "crates/lash-sansio/src/llm/types.rs",
 ///         path = "crates/lash-sansio/src/effect_identity.rs",
-///         path = "crates/lash-sansio/src/causal.rs", ToolChildRequest, ToolChildScope,
-///         ToolChildAdmission, ToolChildCompletionRouting, ToolChildSessionFacts,
+///         path = "crates/lash-sansio/src/causal.rs",
+///         path = "crates/lash-sansio/src/tool_call_id.rs", ToolChildRequest, ToolChildScope,
+///         ToolAttemptLineage, ToolCallId, ToolChildAdmission, ToolChildCompletionRouting,
+///         ToolChildSessionFacts,
 ///         UnrecordedSessionSources, ToolDefinition, SessionToolAccessWire, SubagentSessionContext,
 ///         EffectOpener, AdmittedScope, AdmittedScopeWire, TurnControlBindingId, PreparedToolCall,
 ///         ToolExecutionGrant, RuntimeInvocation, RuntimeAttribution, RuntimeSubject, RuntimeReplay,
@@ -185,6 +188,10 @@ use super::executor::RuntimeEffectControllerError;
 ///         ToolOutputContract, CompactToolContract, SchemaContract, SchemaProjectionPolicy,
 ///         SchemaProjectionOverride, ProjectionMode, ProviderReplayMeta, ProviderRouteIdentity,
 ///         ExecutionScope, EffectAddress, CausalRef,
+///     ),
+///     impls(
+///         path = "crates/lash-sansio/src/tool_call_id.rs", "Serialize for ToolCallId",
+///         "Deserialize for ToolCallId",
 ///     ),
 ///     file(
 ///         path = "crates/lash-sansio/src/identity.rs",

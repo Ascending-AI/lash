@@ -13,6 +13,7 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -97,6 +98,55 @@ pub const RECORD_UPCASTERS: &[RecordUpcaster] = super::synthetic_next::RECORD_UP
 """
 
 WIDER_RECORD = LIB.replace("pub id: String,", "pub id: String,\n    pub owner: String,")
+
+DDL_SURFACE = """
+[[surface]]
+constant = "SCHEMA_VERSION"
+constant_path = "crates/demo/src/store.rs"
+upgrade = "migrate"
+unguarded = "catalog DDL stamp"
+description = "fixture store DDL"
+"""
+
+STORE = """
+/// version_guard(
+///     file(path = "crates/demo/schema.sql", cover("CREATE TABLE demo")),
+///     catalog(path = "crates/demo/src/migrate.rs", MIGRATIONS),
+/// )
+const SCHEMA_VERSION: i32 = 7;
+"""
+
+SCHEMA = "CREATE TABLE demo (id TEXT);\n"
+WIDER_SCHEMA = "CREATE TABLE demo (id TEXT, note TEXT);\n"
+
+# The one shipped step ends at the base version. Its statement text and the
+# synthetic-next row both spell a step from 7, and neither is one.
+MIGRATIONS = """
+static MIGRATIONS: &[Migration] = &[
+    Migration {
+        id: "0007-demo",
+        from_version: 6,
+        to_version: 7,
+        statements: "CREATE TABLE demo (id TEXT); -- from_version: 7, to_version: 8,",
+    },
+    #[cfg(feature = "synthetic-next")]
+    Migration {
+        id: "synthetic-next",
+        from_version: 7,
+        to_version: 8,
+        statements: SYNTHETIC_NEXT_DDL,
+    },
+];
+"""
+
+STEP_FROM_7 = """    Migration {
+        id: "0008-note",
+        from_version: 7,
+        to_version: 8,
+        statements: "ALTER TABLE demo ADD COLUMN note TEXT",
+    },
+    #[cfg(feature = "synthetic-next")]
+"""
 
 
 class Fixture(unittest.TestCase):
@@ -240,6 +290,139 @@ class BumpAndEvidence(Fixture):
         self.assertIn("WIRE_VERSION is 3 on both sides", output)
 
 
+class DdlCatalogEvidence(Fixture):
+    """A DDL stamp's bump owes a step of its migration catalog."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write(gate.REGISTRY, REGISTRY + DDL_SURFACE)
+        self.write("crates/demo/src/store.rs", STORE)
+        self.write("crates/demo/schema.sql", SCHEMA)
+        self.write("crates/demo/src/migrate.rs", MIGRATIONS)
+        self.base = self.commit("a DDL stamp")
+
+    def bump(self, to: int) -> None:
+        self.write("crates/demo/schema.sql", WIDER_SCHEMA)
+        self.write("crates/demo/src/store.rs", STORE.replace("i32 = 7;", f"i32 = {to};"))
+
+    def test_a_ddl_change_without_the_bump_fails(self) -> None:
+        self.write("crates/demo/schema.sql", WIDER_SCHEMA)
+        code, output = self.verdict(self.commit("column, no bump"))
+        self.assertEqual(code, 1, output)
+        self.assertIn("SCHEMA_VERSION is 7 on both sides", output)
+
+    def test_a_ddl_bump_without_its_catalog_step_fails(self) -> None:
+        self.bump(8)
+        result = self.run_command(self.base, self.commit("bump, no step"))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("SCHEMA_VERSION moved 7 to 8 without its upgrade evidence", result.stderr)
+        self.assertIn(
+            "add a step to MIGRATIONS (crates/demo/src/migrate.rs) from version 7",
+            result.stderr,
+        )
+
+    def test_a_ddl_bump_with_its_catalog_step_passes(self) -> None:
+        self.bump(8)
+        self.write(
+            "crates/demo/src/migrate.rs",
+            MIGRATIONS.replace('    #[cfg(feature = "synthetic-next")]\n', STEP_FROM_7),
+        )
+        result = self.run_command(self.base, self.commit("bump with its step"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("SCHEMA_VERSION 7 to 8 (catalog steps registered)", result.stdout)
+
+    def test_a_bump_over_two_versions_owes_the_whole_chain(self) -> None:
+        self.bump(9)
+        self.write(
+            "crates/demo/src/migrate.rs",
+            MIGRATIONS.replace('    #[cfg(feature = "synthetic-next")]\n', STEP_FROM_7),
+        )
+        code, output = self.verdict(self.commit("skips 8"))
+        self.assertEqual(code, 1, output)
+        self.assertIn("from version 8", output)
+
+    def test_a_step_that_overshoots_the_head_is_not_its_evidence(self) -> None:
+        self.bump(8)
+        self.write(
+            "crates/demo/src/migrate.rs",
+            MIGRATIONS.replace(
+                '    #[cfg(feature = "synthetic-next")]\n',
+                STEP_FROM_7.replace("to_version: 8", "to_version: 9"),
+            ),
+        )
+        code, output = self.verdict(self.commit("step to 9"))
+        self.assertEqual(code, 1, output)
+        self.assertIn("from version 7", output)
+
+    def test_dropping_the_catalog_does_not_excuse_the_step(self) -> None:
+        self.write("crates/demo/schema.sql", WIDER_SCHEMA)
+        self.write(
+            "crates/demo/src/store.rs",
+            '/// version_guard(unshaped = "no longer a stamp")\n'
+            "const SCHEMA_VERSION: i32 = 8;\n",
+        )
+        code, output = self.verdict(self.commit("drop the catalog and bump"))
+        self.assertEqual(code, 1, output)
+        self.assertIn("add a step to MIGRATIONS", output)
+
+    def test_a_ddl_guard_without_a_catalog_cannot_be_evaluated(self) -> None:
+        self.write(
+            "crates/demo/src/store.rs",
+            STORE.replace(
+                '///     catalog(path = "crates/demo/src/migrate.rs", MIGRATIONS),\n', ""
+            ),
+        )
+        code, output = self.verdict(self.commit("no catalog"))
+        self.assertEqual(code, 2, output)
+        self.assertIn("guards SQL DDL and declares no migration catalog", output)
+
+    def test_a_catalog_that_cannot_be_read_is_an_error(self) -> None:
+        for text, reason in (
+            ("static MIGRATIONS: &[Migration] = elsewhere::ROWS;\n", "inline array"),
+            ("static OTHER: &[Migration] = &[];\n", "found 0"),
+            (
+                'static MIGRATIONS: &[Migration] = &[Migration { id: "x" }];\n',
+                "keep each row as",
+            ),
+        ):
+            with self.subTest(reason=reason):
+                self.write("crates/demo/src/migrate.rs", text)
+                code, output = self.verdict(self.commit(reason))
+                self.assertEqual(code, 2, output)
+                self.assertIn(reason, output)
+
+    def test_rows_selects_one_stamps_steps_of_a_shared_table(self) -> None:
+        shared = """
+        pub(crate) const CATALOG: &[Step] = &[
+            Step { database: Database::Other, from: 7, to: 8, ddl: OTHER_DDL },
+        ];
+        """
+        self.write("crates/demo/src/migrate.rs", shared)
+        self.write(
+            "crates/demo/src/store.rs",
+            STORE.replace("MIGRATIONS", 'CATALOG, rows = "Database::Core"'),
+        )
+        base = self.commit("a shared table")
+        self.write("crates/demo/schema.sql", WIDER_SCHEMA)
+        self.write(
+            "crates/demo/src/store.rs",
+            STORE.replace("MIGRATIONS", 'CATALOG, rows = "Database::Core"').replace(
+                "i32 = 7;", "i32 = 8;"
+            ),
+        )
+        code, output = self.verdict(self.commit("another database's step"), base)
+        self.assertEqual(code, 1, output)
+        self.assertIn("add a step to CATALOG", output)
+        self.write(
+            "crates/demo/src/migrate.rs",
+            shared.replace(
+                "];", "    Step { database: Database::Core, from: 7, to: 8, ddl: DDL },\n];"
+            ),
+        )
+        code, output = self.verdict(self.commit("its own step"), base)
+        self.assertEqual(code, 0, output)
+
+
 class Projection(Fixture):
     def test_comments_formatting_and_non_wire_derives_are_not_a_shape_change(self) -> None:
         self.write(
@@ -301,10 +484,12 @@ class Projection(Fixture):
             marker,
             marker
             + ', file(path = "crates/demo/schema.sql", cover("CREATE TABLE demo"),'
-            ' elide = "sql_idempotent_index")',
+            ' elide = "sql_idempotent_index"),'
+            ' catalog(path = "crates/demo/src/migrate.rs", MIGRATIONS)',
         )
         self.write("crates/demo/src/lib.rs", guarded)
         self.write("crates/demo/schema.sql", schema)
+        self.write("crates/demo/src/migrate.rs", "static MIGRATIONS: &[Migration] = &[];\n")
         base = self.commit("schema")
         self.write(
             "crates/demo/schema.sql",
@@ -449,7 +634,164 @@ class RegistryMoves(Fixture):
                 self.assertEqual(refused.exception.code, 2)
 
 
+class PlantedView(gate.TreeView):
+    """A tree with some files replaced: what committing a change to them
+    would be."""
+
+    def __init__(self, inner: gate.TreeView, files: dict[str, str]) -> None:
+        super().__init__()
+        self.inner = inner
+        self.files = files
+        self.label = f"{inner.label} with {', '.join(sorted(files))} changed"
+
+    def matching_paths(self, patterns):
+        return self.inner.matching_paths(patterns)
+
+    def content(self, path: str) -> str | None:
+        return self.files[path] if path in self.files else self.inner.content(path)
+
+    def projected(self, path: str) -> str | None:
+        return super().projected(path) if path in self.files else self.inner.projected(path)
+
+
+def planted_change(view: gate.TreeView, guard: gate.Guard) -> PlantedView | None:
+    """`view` with one entry `guard` projects changed, and nothing else."""
+    signature = gate.guard_signature(view, guard, enforce_presence=True)
+    for path, name, _ in signature:
+        text = view.content(path)
+        assert text is not None
+        bare = name.partition("#")[0]
+        if guard.kind == "file":
+            candidates = [text + "\n-- a planted change\n"]
+        elif guard.kind == "impls":
+            trait, _, target = bare.partition(" for ")
+            candidates = [
+                text[: opening + 1] + " const PLANTED: () = (); " + text[opening + 1 :]
+                for match in gate.RUST_SERDE_IMPL.finditer(text)
+                if match.group(2) == target and trait in match.group(1)
+                and (opening := text.find("{", match.end())) >= 0
+            ]
+        else:
+            pattern = gate.RUST_DECLARATION if guard.kind == "items" else gate.RUST_SERDE_SHAPE
+            candidates = [
+                text[: match.start()] + "#[planted_change]\n" + text[match.start() :]
+                for match in pattern.finditer(text)
+                if match.group(1) == bare
+            ]
+        for candidate in candidates:
+            changed = PlantedView(view, {path: candidate})
+            after = gate.guard_signature(changed, guard, enforce_presence=False)
+            if gate.comparable(after) != gate.comparable(signature):
+                return changed
+    return None
+
+
+# What the guard-completeness audit (FIG-4566) found unguarded, by the surface
+# that owes the bump: the successors of symbols the old guard inventory named
+# and the tree renamed, moved or replaced, and the serialized shapes reachable
+# from the newer surfaces' formats.
+AUDITED_GUARDS = {
+    "crates/lash-core-execution/src/tool_dispatch/context.rs:TOOL_CHILD_REBIND_VERSION": (
+        "RebindSource",
+    ),
+    "crates/lashlang/src/artifact.rs:LASHLANG_VM_ABI_VERSION": (
+        "AbilityOutcome", "ResourceOperationOutcome", "ResourceOperationBatchOutcome",
+    ),
+    "crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION": ("TurnCancelUndeliveredInputPolicy",),
+    "crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION": (
+        "TurnCancelUndeliveredInputPolicy", "SESSION_INGRESS_TABLE", "SESSION_ROOTS_TABLES",
+    ),
+    "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
+        "TraceAttemptUsageOutcome", "TraceLashlangNodeTerminalRecord", "TraceLashlangNodeReport",
+    ),
+    "crates/lash-core-execution/src/runtime/process/effect_summary.rs:PROCESS_EVENT_VOCABULARY_VERSION": (
+        "struct ProcessEffectOccurrence",
+    ),
+    "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
+        "ToolAttemptLineage", "ToolCallId", "Serialize for ToolCallId",
+    ),
+    "crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
+        "ModelConfig", "RecordedModel", "ModelKey", "ModelMetadata", "PluginConfig",
+    ),
+    "crates/lash-core-store/src/store/mod.rs:SESSION_HEAD_META_SCHEMA_VERSION": ("PluginConfig",),
+    "crates/lashctl/src/main.rs:LASHCTL_JSON_SCHEMA_VERSION": (
+        "output", "error_json", "run", "CompatRefusal", "FinalizeRefusal", "MigrationRefusal",
+        "ObjectUpgradeError", "PostgresConnectionBudgetReport",
+    ),
+    "crates/lash-sqlite-store/src/codec.rs:SQLITE_BLOB_ENVELOPE_VERSION": (
+        "StoredBlobEnvelope", "BlobCompression", "blob_envelope_admits", "encode_msgpack",
+    ),
+    "crates/lashlang/src/artifact.rs:MODULE_ARTIFACT_ENVELOPE_VERSION": (
+        "ModuleArtifact", "ModuleRef", "HostRequirements", "ModuleExports", "Program", "Expr",
+        "IrNumber", "AstString", "LashlangHostCatalog", "Serialize for ProcessType",
+    ),
+    "crates/lash-core-store/src/artifact_referrer.rs:ARTIFACT_REFERRER_KINDS_VERSION": (
+        "HostArtifactPin", "AttachmentUploadId", "FrameEnvironmentId", "StartKey",
+        "Serialize for ArtifactReferrer", "Deserialize for ArtifactReferrer",
+    ),
+    "crates/lash-core-store/src/store/obligation.rs:OBLIGATION_LEDGER_VOCABULARY_VERSION": (
+        "ControlIntentId", "ArtifactReferrer", "canonical_id",
+    ),
+    "crates/lash-sansio/src/process_cursor.rs:PROCESS_CURSOR_VERSION": ("ProcessId",),
+    "crates/lash-core-store/src/usage_accounting.rs:USAGE_PAYLOAD_FAMILY_VERSION": (
+        "PayloadAttribution", "UsageAttemptFact", "AttemptFactOutcome",
+    ),
+    "crates/lash-restate/src/compat.rs:RESTATE_WIRE_VERSION": (
+        "VersionRange", "RestateCompatError", "EffectGroupOpenRequest",
+        "EffectGroupCommitChildResponse", "EffectGroupChildRequest", "EffectGroupNotice",
+        "RestateDurableWaitAwaitRequest", "RestateProcessWorkflowInput",
+        "RestateSessionDriveRequest", "UsageAccountingSettle", "ObjectUpgradeResponse",
+        "BuildGeneration", "AwaitEventKey",
+    ),
+    "crates/lash-restate/src/session_driver.rs:LASH_TURN_OUTCOME_FORMAT_VERSION": (
+        "SealVerdict", "DriveFence", "AdmissionId", "TurnOutcome", "TurnStop", "FailureCode",
+    ),
+    "crates/lash-restate/src/usage_accounting.rs:USAGE_ACCOUNTING_WIRE_VERSION": (
+        "UsageSettlement", "UsageAttemptFact", "RunAccounting", "ModelKey", "TokenUsage",
+    ),
+    "crates/lash-vm-protocol/src/version.rs:WORKER_PROTOCOL_VERSION": (
+        "StateDigest", "Serialize for StateDigest", "FRAME_MAGIC", "encode_parent", "WorkerLimit",
+        "ProcessDefinitionId", "VersionRange",
+    ),
+}
+
+# Each DDL stamp, and a row of its catalog that steps `{at}` to `{to}`.
+DDL_STAMPS = {
+    "crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION": (
+        'ExpandMigration {{ id: "planted", from_version: {at}, to_version: {to}, statements: "" }},'
+    ),
+    "crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION": (
+        "SqliteMigration {{ database: SqliteDatabase::DurableCore, from: {at}, to: {to}, "
+        'ddl: "" }},'
+    ),
+    "crates/lash-sqlite-store/src/schema.rs:PROCESS_SCHEMA_VERSION": (
+        "SqliteMigration {{ database: SqliteDatabase::ProcessRegistry, from: {at}, to: {to}, "
+        'ddl: "" }},'
+    ),
+    "crates/lash-sqlite-store/src/schema.rs:TRIGGER_SCHEMA_VERSION": (
+        "SqliteMigration {{ database: SqliteDatabase::Triggers, from: {at}, to: {to}, "
+        'ddl: "" }},'
+    ),
+}
+
+
 class RealRepository(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.view = gate.WorktreeView(gate.ROOT)
+        registry = cls.view.content(gate.REGISTRY)
+        assert registry is not None
+        cls.surfaces = {
+            surface.key: surface for surface in gate.load_surfaces(registry, gate.REGISTRY)
+        }
+
+    def declaration(self, key: str) -> gate.Declaration:
+        declaration = gate.declaration_in(
+            self.view.content(self.surfaces[key].constant_path), self.surfaces[key]
+        )
+        assert declaration is not None, key
+        return declaration
+
     def test_every_registered_surface_is_evaluated_at_head(self) -> None:
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
@@ -457,6 +799,92 @@ class RealRepository(unittest.TestCase):
         self.assertEqual(code, 0, output.getvalue())
         self.assertRegex(output.getvalue(), r"(\d+) of \1 surfaces evaluated")
         self.assertIn("0 not evaluated", output.getvalue())
+
+    def test_the_working_tree_against_itself_passes(self) -> None:
+        result = gate.check_views(self.view, self.view)
+        self.assertEqual(((), ()), (result.errors, result.failures))
+        self.assertEqual(len(self.surfaces), len(result.evaluated))
+
+    def test_a_planted_unbumped_change_to_any_guard_fails_its_surface(self) -> None:
+        """Every guard of every surface: change one entry it projects, leave
+        the constant alone, and the gate fails that surface."""
+        planted = 0
+        for key in self.surfaces:
+            for guard in self.declaration(key).guards:
+                with self.subTest(surface=key, guard=guard.label):
+                    changed = planted_change(self.view, guard)
+                    self.assertIsNotNone(changed, "no entry of the guard could be changed")
+                    result = gate.check_views(self.view, changed, only=frozenset({key}))
+                    self.assertEqual((), result.errors)
+                    self.assertEqual([key], [finding.surface.key for finding in result.failures])
+                    self.assertIn("its guarded shape changed", result.failures[0].detail)
+                    planted += 1
+        self.assertGreaterEqual(planted, len(self.surfaces))
+
+    def test_the_audited_shapes_are_guarded(self) -> None:
+        for key, names in AUDITED_GUARDS.items():
+            with self.subTest(surface=key):
+                guarded: set[str] = set()
+                for guard in self.declaration(key).guards:
+                    guarded.update(guard.must_cover)
+                    guarded.update(
+                        name.partition("#")[0]
+                        for _, name, _ in gate.guard_signature(
+                            self.view, guard, enforce_presence=True
+                        )
+                    )
+                self.assertEqual([], sorted(set(names) - guarded))
+
+    def test_the_ddl_stamps_are_the_surfaces_that_guard_ddl(self) -> None:
+        stamps = {key for key in self.surfaces if self.declaration(key).catalogs}
+        self.assertEqual(set(DDL_STAMPS), stamps)
+
+    def test_a_planted_ddl_bump_owes_its_catalog_step(self) -> None:
+        for key, row in DDL_STAMPS.items():
+            with self.subTest(surface=key):
+                surface = self.surfaces[key]
+                declaration = self.declaration(key)
+                (catalog,) = declaration.catalogs
+                at = gate.version_at(self.view, surface)
+                ddl = planted_change(self.view, declaration.guards[0])
+                assert ddl is not None
+                constant_file = ddl.content(surface.constant_path)
+                bumped_file, bumps = re.subn(
+                    rf"(const (?:BASE_)?{surface.constant}\s*:[^=;]+=\s*){at};",
+                    rf"\g<1>{at + 1};",
+                    constant_file,
+                )
+                self.assertEqual(1, bumps)
+                bumped = PlantedView(ddl, {surface.constant_path: bumped_file})
+                result = gate.check_views(self.view, bumped, only=frozenset({key}))
+                self.assertEqual((), result.errors)
+                self.assertEqual(1, len(result.failures), result)
+                self.assertIn(
+                    f"add a step to {catalog.label} from version {at}",
+                    result.failures[0].detail,
+                )
+
+                table = bumped.content(catalog.path)
+                opening = re.search(
+                    rf"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:const|static)[ \t]+"
+                    rf"{catalog.table}\b",
+                    table,
+                )
+                closing = gate.rust_item_end(table, opening.start()) - len("];")
+                stepped = PlantedView(
+                    bumped,
+                    {
+                        catalog.path: table[:closing]
+                        + row.format(at=at, to=at + 1)
+                        + table[closing:]
+                    },
+                )
+                result = gate.check_views(self.view, stepped, only=frozenset({key}))
+                self.assertEqual(((), ()), (result.errors, result.failures))
+                self.assertEqual(
+                    [f"{at} to {at + 1} (catalog steps registered)"],
+                    [finding.detail for finding in result.bumped],
+                )
 
 
 if __name__ == "__main__":

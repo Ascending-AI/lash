@@ -12,6 +12,25 @@ use thiserror::Error;
 ///             ParentFrame, WorkerFrame, VmContract,
 ///         ),
 ///     ),
+///     items(path = "crates/lash-vm-protocol/src/state.rs", StateDigest),
+///     impls(
+///         path = "crates/lash-vm-protocol/src/state.rs", "Serialize for StateDigest",
+///         "Deserialize for StateDigest",
+///     ),
+///     items(
+///         path = "crates/lash-vm-protocol/src/codec.rs", FRAME_MAGIC, FRAME_HEADER_BYTES,
+///         encode_parent, encode_worker, decode_parent, decode_worker, frame_len,
+///     ),
+///     shapes(
+///         path = "crates/lash-sansio/src/worker_limit.rs",
+///         cover(WorkerLimit, WorkerFrameKind),
+///     ),
+///     items(path = "crates/lash-sansio/src/definition_id.rs", ProcessDefinitionId),
+///     impls(
+///         path = "crates/lash-sansio/src/definition_id.rs", "Serialize for ProcessDefinitionId",
+///         "Deserialize for ProcessDefinitionId",
+///     ),
+///     items(path = "crates/lash-sansio/src/compat.rs", VersionRange, RawVersionRange),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const WORKER_PROTOCOL_VERSION: u32 = 1;

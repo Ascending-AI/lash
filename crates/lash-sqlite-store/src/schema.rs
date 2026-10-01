@@ -1140,6 +1140,10 @@ const BASE_SCHEMA_VERSION: i32 = 99;
 /// version_guard(
 ///     items(SCHEMA, elide = "sql_idempotent_index"),
 ///     items(
+///         path = "crates/lash-sqlite-store/src/schema_fragments.rs", SESSION_INGRESS_TABLE,
+///         SESSION_ROOTS_TABLES, elide = "sql_idempotent_index",
+///     ),
+///     items(
 ///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope, BlobArtifactDescriptor,
 ///         BlobStorageHint, BlobCompression,
 ///     ),
@@ -1149,7 +1153,12 @@ const BASE_SCHEMA_VERSION: i32 = 99;
 ///     items(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
 ///     items(
 ///         path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, TurnFinish, TurnStop,
-///         TurnCancellationEvidence, TurnCancelMode, SessionAppendNode, ErrorEnvelope,
+///         TurnCancellationEvidence, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
+///         SessionAppendNode, ErrorEnvelope,
+///     ),
+///     catalog(
+///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,
+///         rows = "SqliteDatabase::DurableCore",
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
@@ -1661,6 +1670,10 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;
 /// version_guard(
 ///     items(PROCESS_SCHEMA, elide = "sql_idempotent_index"),
+///     catalog(
+///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,
+///         rows = "SqliteDatabase::ProcessRegistry",
+///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION;
@@ -1713,6 +1726,10 @@ const BASE_TRIGGER_SCHEMA_VERSION: i32 = 12;
 ///     items(
 ///         path = "crates/lash-sqlite-store/src/trigger_schema.rs", TRIGGER_SCHEMA,
 ///         elide = "sql_idempotent_index",
+///     ),
+///     catalog(
+///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,
+///         rows = "SqliteDatabase::Triggers",
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

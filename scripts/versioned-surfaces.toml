@@ -18,7 +18,9 @@
 # it in code, with a `/// version_guard(..)` marker in its doc comment, and scripts/check_version_bumps.py reads the markers from the
 # tree: given `--base <sha> --head <sha>` it fails when a guarded shape changed
 # without its constant bumping, when a decoder-law surface bumped without its
-# RECORD_UPCASTERS lift, and when a guard cannot be evaluated. A surface whose
+# RECORD_UPCASTERS lift, when a DDL stamp bumped without the step of the
+# migration catalog its marker names, and when a guard cannot be evaluated. A
+# surface that guards SQL DDL names that catalog (`catalog(..)`). A surface whose
 # constant carries no marker, and no `version_guard(unshaped = "<reason>")`,
 # fails check_format_registry.py.
 

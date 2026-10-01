@@ -13,6 +13,7 @@ import argparse
 import ast
 from dataclasses import dataclass, replace
 import enum
+import fnmatch
 from functools import lru_cache
 import json
 import os
@@ -1101,14 +1102,12 @@ def _is_restate_suite_path(
     )
 
 
-# `rolling_upgrade` selects Phase A's rolling-upgrade gate (ADR 0115 §6,
-# FIG-3805): `just e2e-rolling` rolls two builds of the diff's tree, N and the
-# `synthetic-next` N+1, over live stores and a live Restate server. ADR 0115
-# requires it on every change to a registered versioned surface, so the rule
-# is the registry's: a diff selects the gate when it touches a file that
-# declares a `[[surface]]` constant of `scripts/versioned-surfaces.toml`, or
-# the harness, lashctl and the runbook.
-VERSIONED_SURFACES_REGISTRY = "scripts/versioned-surfaces.toml"
+# A registered versioned surface is more than the file that defines its
+# constant: the constant's `version_guard` marker names the shapes it guards,
+# wherever they live. So the files of a surface are read from the markers, by
+# the strict version-bump gate's own reader, and the three jobs that run on a
+# change to a surface select on that one set: the gate (FIG-4494), the
+# rolling-upgrade gate and the release-journal replay (FIG-4097).
 ROLLING_UPGRADE_PACKAGES = frozenset(
     {"crates/lash-upgrade-harness", "crates/lashctl", "runbooks/rolling-upgrade"}
 )
@@ -1116,25 +1115,40 @@ ROLLING_UPGRADE_PACKAGES = frozenset(
 
 @lru_cache(maxsize=None)
 def versioned_surface_paths(root: str | None = None) -> frozenset[str]:
-    """The files that declare a registered versioned surface's constant."""
+    """The path patterns of every registered versioned surface: the registry,
+    each constant's file, each file a guard reads (globs included) and each
+    migration catalog."""
 
-    base = Path(root) if root is not None else REPO_ROOT
-    with (base / VERSIONED_SURFACES_REGISTRY).open("rb") as handle:
-        registry = tomllib.load(handle)
-    return frozenset(surface["constant_path"] for surface in registry["surface"])
+    scripts = str(Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import check_version_bumps
+
+    try:
+        return check_version_bumps.guarded_path_patterns(
+            Path(root) if root is not None else REPO_ROOT
+        )
+    except check_version_bumps.CheckError as error:
+        raise ValueError(str(error)) from error
 
 
-def _is_rolling_upgrade_path(path: str, surface_paths: frozenset[str]) -> bool:
+def _is_versioned_surface_path(path: str, surface_paths: frozenset[str]) -> bool:
     return path in surface_paths or any(
+        fnmatch.fnmatchcase(path, pattern) for pattern in surface_paths
+    )
+
+
+# `rolling_upgrade` selects Phase A's rolling-upgrade gate (ADR 0115 §6,
+# FIG-3805): `just e2e-rolling` rolls two builds of the diff's tree, N and the
+# `synthetic-next` N+1, over live stores and a live Restate server. ADR 0115
+# requires it on every change to a registered versioned surface, and the
+# harness, lashctl and the runbook select it too.
+def _is_rolling_upgrade_path(path: str, surface_paths: frozenset[str]) -> bool:
+    return _is_versioned_surface_path(path, surface_paths) or any(
         path.startswith(f"{package}/") for package in ROLLING_UPGRADE_PACKAGES
     )
 
 
-# The strict version-bump gate (FIG-4494) runs on a change to a registered
-# versioned surface, and the release-journal replay (FIG-4097) keys on the
-# same rule. A surface is more than the file that defines its constant: the
-# constant's `version_guard` marker names the shapes it guards, wherever they
-# live, so the rule is read from the markers rather than kept as a path list.
 VERSION_BUMP_GATE_PATHS = frozenset(
     {"scripts/check_version_bumps.py", ".github/workflows/version-bumps.yml"}
 )
@@ -1144,16 +1158,10 @@ def touches_versioned_surface(paths: list[str], root: Path | None = None) -> boo
     """Whether any of `paths` is a registered surface's constant file, a file
     one of its guards reads, the registry, or the gate itself."""
 
-    import fnmatch
-
-    import check_version_bumps
-
-    patterns = VERSION_BUMP_GATE_PATHS | check_version_bumps.guarded_path_patterns(
-        root if root is not None else REPO_ROOT
+    patterns = VERSION_BUMP_GATE_PATHS | versioned_surface_paths(
+        None if root is None else str(root)
     )
-    return any(
-        fnmatch.fnmatchcase(path, pattern) for path in paths for pattern in patterns
-    )
+    return any(_is_versioned_surface_path(path, patterns) for path in paths)
 
 
 # `facade` gates the untrusted Cargo seal lane: only the facade crate's public
@@ -1783,7 +1791,7 @@ def classify(
     if surface_paths is None:
         try:
             surface_paths = versioned_surface_paths()
-        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as error:
+        except (OSError, KeyError, TypeError, ValueError) as error:
             return fail_open(f"versioned surface registry is underivable: {error}")
     if lane_dirs is None:
         try:
@@ -1829,7 +1837,7 @@ def classify(
             event_name in {"push", "workflow_dispatch"}
             or run_everything
             or any(
-                path in surface_paths
+                _is_versioned_surface_path(path, surface_paths)
                 or path.startswith("crates/lash-restate/testdata/replay-corpus/")
                 or path.startswith(("fixtures/release/", "fixtures/release-rehearsal/"))
                 or path in {

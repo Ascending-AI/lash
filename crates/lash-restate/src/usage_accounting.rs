@@ -44,6 +44,17 @@ use crate::compat::{Call, Reply};
 ///             UsageOwnerRetiredWire,
 ///         ),
 ///     ),
+///     shapes(
+///         path = "crates/lash-core-store/src/usage_accounting.rs",
+///         cover(UsageSettlement, UsageAttemptFact, AttemptFactOutcome, RunAccounting),
+///     ),
+///     items(path = "crates/lash-core-llm/src/model.rs", ModelKey),
+///     items(path = "crates/lash-sansio/src/llm/types.rs", LlmCallId),
+///     items(path = "crates/lash-sansio/src/session_model/mod.rs", TokenUsage),
+///     file(
+///         path = "crates/lash-sansio/src/identity.rs",
+///         cover("string_identity!", RuntimeOwner, SessionId, ProcessId),
+///     ),
 /// )
 pub const USAGE_ACCOUNTING_WIRE_VERSION: u32 = 1;
 

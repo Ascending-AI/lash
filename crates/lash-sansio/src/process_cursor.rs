@@ -28,6 +28,7 @@ use crate::{ProcessId, VersionRange};
 ///         RETIRED_PROCESS_CURSOR_VERSIONS,
 ///     ),
 ///     impls("Serialize for ProcessCursor", "Deserialize for ProcessCursor"),
+///     file(path = "crates/lash-sansio/src/identity.rs", cover("string_identity!", ProcessId)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_CURSOR_VERSION: u32 = 3;

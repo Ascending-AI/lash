@@ -405,7 +405,8 @@ pub struct UsageRunPage {
 /// version_guard(
 ///     items(
 ///         usage_fact_payload_hash, usage_correction_payload_hash, attempt_payload_bytes,
-///         correction_payload_bytes, payload_bytes,
+///         correction_payload_bytes, payload_bytes, PayloadAttribution, UsageAttemptFact,
+///         AttemptFactOutcome, UsageCorrection, UsageFactRecord, UsageFactKind, UsageRunId, as_str,
 ///     ),
 /// )
 pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;

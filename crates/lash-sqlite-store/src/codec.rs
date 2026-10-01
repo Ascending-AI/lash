@@ -7,8 +7,12 @@ use lash_sansio::SessionId;
 ///
 /// version_guard(
 ///     items(
-///         should_compress_blob, compress_blob, decompress_blob, encode_artifact_blob,
-///         decode_artifact_blob,
+///         blob_envelope_admits, should_compress_blob, compress_blob, decompress_blob,
+///         encode_artifact_blob, decode_artifact_blob, encode_msgpack,
+///     ),
+///     items(
+///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope, BlobCompression,
+///         BlobStorageHint, BlobArtifactDescriptor,
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

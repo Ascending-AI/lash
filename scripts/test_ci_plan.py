@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 
@@ -1539,22 +1540,67 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
     return needs
 
 
+# Files a registered surface guards without defining its constant in them: a
+# whole-file DDL guard, a guarded handler body, a guarded DDL fragment, a file
+# a glob guard matches, and a DDL stamp's migration catalog.
+GUARDED_SURFACE_FILES = (
+    "crates/lash-postgres-store/schema.sql",
+    "crates/lash-restate/src/durable_wait/messages.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lashlang/src/runtime/compiler/expr.rs",
+    "crates/lash-postgres-store/src/postgres/migrate.rs",
+)
+
+
 class RollingUpgradeSelectionTests(unittest.TestCase):
     """`rolling_upgrade` selects Phase A's two-build gate (ADR 0115 §6).
 
     ADR 0115 requires `just e2e-rolling` on every pull request that touches a
-    registered versioned surface, so the selector reads the surface registry
-    rather than a second table.
+    registered versioned surface, so the selector reads the surfaces' own
+    `version_guard` markers through the version-bump gate's reader rather
+    than a second table.
     """
 
     def plan(self, *paths: str) -> dict[str, str]:
         return ci_plan.classify([("M", path) for path in paths])
 
-    def test_the_registry_derives_the_surface_files(self) -> None:
+    def test_the_markers_derive_the_surface_files(self) -> None:
         paths = ci_plan.versioned_surface_paths()
         self.assertIn("crates/lash-restate/src/process/admission.rs", paths)
         self.assertIn("crates/lash-postgres-store/src/lib.rs", paths)
         self.assertIn("crates/lash-sqlite-store/src/schema.rs", paths)
+        self.assertIn("crates/lash-postgres-store/schema.sql", paths)
+        self.assertIn("crates/lash-sqlite-store/src/migration.rs", paths)
+
+    def test_the_selector_is_the_gates_own_guard_set(self) -> None:
+        import check_version_bumps
+
+        self.assertEqual(
+            check_version_bumps.guarded_path_patterns(ROOT),
+            ci_plan.versioned_surface_paths(),
+        )
+
+    def test_a_guarded_file_selects_the_gate(self) -> None:
+        for path in GUARDED_SURFACE_FILES:
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file(), path)
+                self.assertEqual("true", self.plan(path)["rolling_upgrade"])
+
+    def test_a_marker_that_cannot_be_read_fails_open(self) -> None:
+        import check_version_bumps
+
+        ci_plan.versioned_surface_paths.cache_clear()
+        self.addCleanup(ci_plan.versioned_surface_paths.cache_clear)
+        with mock.patch.object(
+            check_version_bumps,
+            "guarded_path_patterns",
+            side_effect=check_version_bumps.CheckError("marker ends early"),
+        ):
+            plan = self.plan("crates/lash-core/src/runtime/assembly.rs")
+        self.assertEqual("true", plan["fail_open"])
+        self.assertEqual("true", plan["rolling_upgrade"])
+        self.assertEqual("true", plan["release_journal_replay"])
+        self.assertIn("marker ends early", plan["reason"])
 
     def test_a_surface_file_or_the_harness_selects_the_gate(self) -> None:
         for path in (
@@ -1603,7 +1649,16 @@ class ReleaseJournalReplaySelectionTests(unittest.TestCase):
         self.assertNotIn("release-journal-replay", aggregator["needs"])
 
     def test_every_registered_constant_selects_release_journal_replay(self):
-        for path in ci_plan.versioned_surface_paths():
+        registry = tomllib.loads((ROOT / "scripts/versioned-surfaces.toml").read_text())
+        constant_files = {surface["constant_path"] for surface in registry["surface"]}
+        self.assertLessEqual(constant_files, ci_plan.versioned_surface_paths())
+        for path in sorted(constant_files):
+            with self.subTest(path=path):
+                plan = ci_plan.classify([("M", path)], event_name="pull_request")
+                self.assertEqual("true", plan.get("release_journal_replay"))
+
+    def test_a_guarded_file_selects_release_journal_replay(self):
+        for path in GUARDED_SURFACE_FILES:
             with self.subTest(path=path):
                 plan = ci_plan.classify([("M", path)], event_name="pull_request")
                 self.assertEqual("true", plan.get("release_journal_replay"))

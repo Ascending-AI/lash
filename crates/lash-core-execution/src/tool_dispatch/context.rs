@@ -213,7 +213,7 @@ impl ToolDispatchContext<'_> {
 /// a child can inherit under the wrong opener's authority.
 ///
 /// version_guard(
-///     items(ToolDispatchContext, RebindField, REBIND_FIELDS),
+///     items(ToolDispatchContext, RebindField, RebindSource, REBIND_FIELDS),
 /// )
 pub const TOOL_CHILD_REBIND_VERSION: u16 = 7;
 

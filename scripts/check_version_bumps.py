@@ -13,6 +13,7 @@ constant itself, by a marker in its doc comment::
     ///     shapes(path = "crates/demo/src/dto/*.rs", cover(Reply)),
     ///     impls("Serialize for Request"),
     ///     file(path = "crates/demo/schema.sql", cover("CREATE TABLE demo")),
+    ///     catalog(path = "crates/demo/src/migrate.rs", MIGRATIONS),
     /// )
     pub const DEMO_VERSION: u32 = 3;
 
@@ -28,7 +29,10 @@ block and the ``const``.
   and ``cover(..)`` names shapes that must be among them;
 - ``impls`` guards hand-written ``Serialize for T`` / ``Deserialize for T``
   impls;
-- ``file`` guards whole files, and ``cover(..)`` names text they must contain.
+- ``file`` guards whole files, and ``cover(..)`` names text they must contain;
+- ``catalog`` guards nothing: it names the migration catalog a DDL stamp's bump
+  must extend (below), and ``rows = ".."`` keeps only the rows that contain that
+  text when one table serves several stamps.
 
 A guard without ``path`` reads the file that defines the constant. A path is
 repository-relative and may be a glob. A surface that versions no shape the
@@ -36,12 +40,22 @@ tree can project says so instead: ``version_guard(unshaped = "<reason>")``.
 
 The gate compares two commits. For each surface it projects the guarded
 shapes at ``--base`` and at ``--head``; when they differ, the head's constant
-must be strictly greater than the base's, and a surface held to the decoder
-laws (``upgrade = "migrate"`` without ``unguarded``) must register a
-``RecordUpcaster`` row for every version it steps over. The shapes are
-projected under the head's markers and under the base's, so dropping a shape
-from a marker does not excuse changing it, and a constant that disappears
-does not excuse the shapes it guarded.
+must be strictly greater than the base's, and the bump must carry its upgrade
+evidence:
+
+- a surface held to the decoder laws (``upgrade = "migrate"`` without
+  ``unguarded``) registers a ``RecordUpcaster`` row for every version it steps
+  over;
+- a DDL stamp, a surface that declares a ``catalog``, has in that catalog's
+  default build a chain of steps from the base's version to the head's, in
+  the constant's own numbers. The 1.0 cut resets every stamp to 1 and empties
+  the catalogs, so from the cut on a stamp's value is its catalog's version;
+- for every other surface the bump is the evidence.
+
+The shapes are projected under the head's markers and under the base's, so
+dropping a shape from a marker does not excuse changing it, a constant that
+disappears does not excuse the shapes it guarded, and dropping a ``catalog``
+does not excuse the step.
 
 There is no report-only mode. A changed shape without its bump, a bump
 without its evidence, and a guard that cannot be evaluated all exit nonzero.
@@ -1092,11 +1106,25 @@ class Guard:
 
 
 @dataclass(frozen=True)
+class Catalog:
+    """The migration catalog a DDL stamp's bump must extend."""
+
+    path: str
+    table: str
+    rows: str | None = None
+
+    @property
+    def label(self) -> str:
+        return f"{self.table} ({self.path})"
+
+
+@dataclass(frozen=True)
 class Declaration:
     """What one surface's constant declares it guards."""
 
     guards: tuple[Guard, ...] = ()
     unshaped: str | None = None
+    catalogs: tuple[Catalog, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1237,6 +1265,7 @@ class _MarkerParser:
     def parse(self) -> Declaration:
         self.take("ident", MARKER)
         guards: list[Guard] = []
+        catalogs: list[Catalog] = []
         reasons: list[str] = []
 
         def entry() -> None:
@@ -1249,23 +1278,53 @@ class _MarkerParser:
                 reasons.append(reason)
             elif name in GUARD_KINDS:
                 guards.append(self.guard(name))
+            elif name == "catalog":
+                catalogs.append(self.catalog())
             else:
                 raise CheckError(
                     f"{MARKER} marker has unknown entry {name!r}; known: "
-                    + ", ".join((*GUARD_KINDS, "unshaped"))
+                    + ", ".join((*GUARD_KINDS, "catalog", "unshaped"))
                 )
 
         self.list_items(entry)
         if self.index != len(self.tokens):
             raise CheckError(f"{MARKER} marker has trailing tokens")
-        if len(reasons) > 1 or (reasons and guards):
+        if len(reasons) > 1 or (reasons and (guards or catalogs)):
             raise CheckError(
                 f"{MARKER} marker states unshaped beside other entries; a surface "
                 "either declares guards or says why it has none"
             )
         if not reasons and not guards:
             raise CheckError(f"{MARKER} marker declares nothing")
-        return Declaration(tuple(guards), reasons[0] if reasons else None)
+        return Declaration(
+            tuple(guards), reasons[0] if reasons else None, tuple(catalogs)
+        )
+
+    def catalog(self) -> Catalog:
+        paths: list[str] = []
+        rows: list[str] = []
+        tables: list[str] = []
+
+        def argument() -> None:
+            value = self.take("ident")
+            if value in {"path", "rows"} and self.at("punct", "="):
+                self.take("punct", "=")
+                (paths if value == "path" else rows).append(self.take("string"))
+            else:
+                tables.append(value)
+
+        self.list_items(argument)
+        if len(tables) != 1:
+            raise CheckError(f"{MARKER} catalog(..) names exactly one table")
+        if len(paths) > 1 or len(rows) > 1 or not all((*paths, *rows)):
+            raise CheckError(
+                f"{MARKER} catalog(..) takes at most one non-empty path and rows"
+            )
+        return Catalog(
+            paths[0] if paths else self.constant_path,
+            tables[0],
+            rows[0] if rows else None,
+        )
 
     def guard(self, kind: str) -> Guard:
         paths: list[str] = []
@@ -1362,6 +1421,7 @@ def declaration_in(text: str, surface: Surface) -> Declaration | None:
             f"{surface.constant_path} defines no constant {surface.constant}"
         )
     guards: list[Guard] = []
+    catalogs: list[Catalog] = []
     reasons: list[str] = []
     for block, _ in definitions:
         try:
@@ -1370,17 +1430,20 @@ def declaration_in(text: str, surface: Surface) -> Declaration | None:
                     _marker_tokens(body), surface.constant_path
                 ).parse()
                 guards.extend(parsed.guards)
+                catalogs.extend(parsed.catalogs)
                 if parsed.unshaped is not None:
                     reasons.append(parsed.unshaped)
         except CheckError as error:
             raise CheckError(f"{surface.key}: {error}") from error
     if not guards and not reasons:
         return None
-    if len(reasons) > 1 or (reasons and guards):
+    if len(reasons) > 1 or (reasons and (guards or catalogs)):
         raise CheckError(
             f"{surface.key}: states unshaped beside other {MARKER} entries"
         )
-    return Declaration(tuple(guards), reasons[0] if reasons else None)
+    return Declaration(
+        tuple(guards), reasons[0] if reasons else None, tuple(catalogs)
+    )
 
 
 def guard_signature(
@@ -1580,6 +1643,108 @@ def registered_lifts(view: TreeView) -> set[tuple[str, int]]:
     return {(constant, int(version.replace("_", ""))) for constant, version in rows}
 
 
+CATALOG_TABLE = (
+    r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:const|static)[ \t]+{name}\b"
+)
+RUST_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+CATALOG_STEP = re.compile(
+    r"\bfrom(?:_version)?:([0-9_]+),.*?\bto(?:_version)?:([0-9_]+)[,}]"
+)
+
+
+def catalog_steps(view: TreeView, catalog: Catalog) -> set[tuple[int, int]]:
+    """`(from, to)` for every row of the default build's migration catalog.
+
+    A row is a struct literal with `from` and `to` (or `from_version` and
+    `to_version`) integer fields, in that order. Rows under the
+    `synthetic-next` cfg are the upgrade harness's and are left out, and
+    `rows` keeps only the rows that contain its text.
+    """
+    where = f"{view.label}: {catalog.label}"
+    content = view.content(catalog.path)
+    if content is None:
+        raise CheckError(f"{where} cannot be read")
+    attribute_ranges = rust_outer_attribute_ranges(content)
+    excluded = test_only_module_ranges(content, attribute_ranges)
+    tables: list[str] = []
+    for match in re.finditer(
+        CATALOG_TABLE.format(name=re.escape(catalog.table)), content
+    ):
+        if any(start <= match.start() < end for start, end in excluded):
+            continue
+        start = rust_item_start_with_attributes(content, match.start(), attribute_ranges)
+        if SYNTHETIC_NEXT_CFG in strip_rust_trivia(content[start : match.start()]):
+            continue
+        item = content[match.start() : rust_item_end(content, match.start())]
+        tables.append(strip_rust_trivia(item))
+    if len(tables) != 1:
+        raise CheckError(
+            f"{where}: expected one default-build definition, found {len(tables)}"
+        )
+    table = tables[0]
+    opening = table.find("=&[")
+    if opening < 0 or not table.endswith("];"):
+        raise CheckError(
+            f"{where} must be an inline array of migration rows so its steps "
+            "can be read"
+        )
+    elements = _rust_top_level_items(table, opening + 3, len(table) - 2)
+    if elements is None:
+        raise CheckError(f"{where} has unbalanced rows")
+    selector = None if catalog.rows is None else strip_rust_trivia(catalog.rows)
+    steps: set[tuple[int, int]] = set()
+    for start, end in elements:
+        row = table[start:end]
+        if not row or row.startswith(SYNTHETIC_NEXT_CFG):
+            continue
+        # A step is read from the row's own fields, never from text inside
+        # one of its string literals.
+        step = CATALOG_STEP.search(RUST_STRING.sub('""', row))
+        if row.startswith("#[") or step is None:
+            raise CheckError(
+                f"{where}: keep each row as {{ from: N, to: N, .. }} (or "
+                "from_version and to_version), under no cfg but synthetic-next"
+            )
+        if selector is None or selector in row:
+            steps.add(
+                (int(step.group(1).replace("_", "")), int(step.group(2).replace("_", "")))
+            )
+    return steps
+
+
+def require_catalog(surface: Surface, declaration: Declaration) -> None:
+    """A surface that guards SQL DDL is a DDL stamp, and names its catalog.
+
+    The guard itself says so: a whole-file guard over a `.sql` file, or a
+    guard that elides idempotent index statements. Without the catalog a
+    stamp's bump would be its own evidence.
+    """
+    guards_ddl = any(
+        guard.elide == "sql_idempotent_index"
+        or (guard.kind == "file" and any(path.endswith(".sql") for path in guard.paths))
+        for guard in declaration.guards
+    )
+    if guards_ddl and not declaration.catalogs:
+        raise CheckError(
+            f"{surface.constant} guards SQL DDL and declares no migration "
+            f"catalog: add catalog(path = \"<file>\", <TABLE>) to its {MARKER} marker"
+        )
+
+
+def missing_catalog_step(
+    steps: set[tuple[int, int]], base_version: int, head_version: int
+) -> int | None:
+    """The first version the catalog has no step forward from, walking from
+    the base's version to the head's as a migrator would."""
+    at = base_version
+    while at < head_version:
+        reached = [to for start, to in steps if start == at and at < to <= head_version]
+        if not reached:
+            return at
+        at = max(reached)
+    return None
+
+
 @dataclass(frozen=True)
 class Finding:
     surface: Surface
@@ -1652,8 +1817,17 @@ def _base_surface(
 
 
 def check_surfaces(repo: Path, base: str, head: str) -> CheckResult:
-    base_view = RevisionView(repo, resolve_revision(repo, base))
-    head_view = RevisionView(repo, resolve_revision(repo, head))
+    return check_views(
+        RevisionView(repo, resolve_revision(repo, base)),
+        RevisionView(repo, resolve_revision(repo, head)),
+    )
+
+
+def check_views(
+    base_view: TreeView, head_view: TreeView, only: frozenset[str] | None = None
+) -> CheckResult:
+    """Compare two trees. `only` names the surface keys to evaluate; the
+    command evaluates every surface."""
     head_registry = head_view.content(REGISTRY)
     if head_registry is None:
         raise CheckError(f"{head_view.label}: cannot read {REGISTRY}")
@@ -1679,6 +1853,8 @@ def check_surfaces(repo: Path, base: str, head: str) -> CheckResult:
     lifts: set[tuple[str, int]] | None = None
 
     for surface in surfaces:
+        if only is not None and surface.key not in only:
+            continue
         try:
             declaration = _declaration(head_view, surface)
             if declaration is None:
@@ -1688,6 +1864,13 @@ def check_surfaces(repo: Path, base: str, head: str) -> CheckResult:
                     f'{MARKER}(unshaped = "<reason>")'
                 )
             head_version = version_at(head_view, surface)
+            require_catalog(surface, declaration)
+            # A catalog that cannot be read is an error whether or not this
+            # change bumps: the evidence it would owe could not be checked.
+            catalogs = {
+                catalog: catalog_steps(head_view, catalog)
+                for catalog in declaration.catalogs
+            }
             previous = _base_surface(surface, base_surfaces, head_keys)
             base_declaration = None
             if previous is not None:
@@ -1735,6 +1918,22 @@ def check_surfaces(repo: Path, base: str, head: str) -> CheckResult:
                             for version in range(base_version, head_version)
                             if (surface.constant, version) not in lifts
                         ]
+                    # The base's catalogs bind too: dropping the declaration
+                    # in the commit that bumps does not excuse the step.
+                    if base_declaration is not None:
+                        for catalog in base_declaration.catalogs:
+                            if catalog not in catalogs:
+                                catalogs[catalog] = catalog_steps(head_view, catalog)
+                    unstepped = [
+                        (catalog, version)
+                        for catalog, steps in catalogs.items()
+                        if (
+                            version := missing_catalog_step(
+                                steps, base_version, head_version
+                            )
+                        )
+                        is not None
+                    ]
                     if missing:
                         failures.append(
                             Finding(
@@ -1746,10 +1945,25 @@ def check_surfaces(repo: Path, base: str, head: str) -> CheckResult:
                                 + ", ".join(str(version) for version in missing),
                             )
                         )
+                    elif unstepped:
+                        failures.append(
+                            Finding(
+                                surface,
+                                f"{surface.constant} moved {base_version} to "
+                                f"{head_version} without its upgrade evidence: "
+                                + "; ".join(
+                                    f"add a step to {catalog.label} from version "
+                                    f"{version}"
+                                    for catalog, version in unstepped
+                                ),
+                            )
+                        )
                     else:
                         evidence = (
                             "lift rows registered"
                             if surface.decoder_laws
+                            else "catalog steps registered"
+                            if catalogs
                             else f"{surface.upgrade} surface, the bump is the evidence"
                         )
                         bumped.append(
@@ -1767,7 +1981,7 @@ def check_surfaces(repo: Path, base: str, head: str) -> CheckResult:
 
     # A constant that disappears does not take its shapes' obligations with it.
     for key, surface in base_surfaces.items():
-        if key in head_keys or key in continued:
+        if key in head_keys or key in continued or only is not None:
             continue
         try:
             declaration = _declaration(base_view, surface)
@@ -1838,8 +2052,11 @@ def worktree_problems(repo: Path, surfaces: Iterable[Surface]) -> list[str]:
                 )
                 continue
             version_at(view, surface)
+            require_catalog(surface, declaration)
             for guard in declaration.guards:
                 guard_signature(view, guard, enforce_presence=True)
+            for catalog in declaration.catalogs:
+                catalog_steps(view, catalog)
         except CheckError as error:
             problems.append(f"{surface.key} has a guard that cannot be evaluated: {error}")
     return problems
@@ -1847,8 +2064,9 @@ def worktree_problems(repo: Path, surfaces: Iterable[Surface]) -> list[str]:
 
 def guarded_path_patterns(repo: Path) -> frozenset[str]:
     """Every path a change to a registered surface can touch, as the working
-    tree declares it: the registry, each constant's file, and each guard's
-    paths (globs included). CI selects the gate with it."""
+    tree declares it: the registry, each constant's file, each guard's paths
+    (globs included) and each catalog's file. CI selects the gate, the
+    rolling-upgrade gate and the release-journal replay with it."""
     view = WorktreeView(repo)
     registry = view.content(REGISTRY)
     if registry is None:
@@ -1860,6 +2078,7 @@ def guarded_path_patterns(repo: Path) -> frozenset[str]:
         if declaration is not None:
             for guard in declaration.guards:
                 patterns.update(guard.paths)
+            patterns.update(catalog.path for catalog in declaration.catalogs)
     return frozenset(patterns)
 
 

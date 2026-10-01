@@ -22,6 +22,15 @@ use super::control_intent::ControlIntentId;
 ///         ObligationKind, ALL, from_label, label, key_column_types, KeyColumnType, ObligationKey,
 ///         decode_label, columns, decode, ObligationState, as_str, StallReason,
 ///     ),
+///     items(path = "crates/lash-core-store/src/store/control_intent.rs", ControlIntentId),
+///     items(
+///         path = "crates/lash-core-store/src/artifact_referrer.rs", ArtifactReferrerKind,
+///         ArtifactReferrer, canonical_id, decode, as_str, parse,
+///     ),
+///     file(
+///         path = "crates/lash-sansio/src/identity.rs",
+///         cover("string_identity!", SessionId, ProcessId, TurnId),
+///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 1;

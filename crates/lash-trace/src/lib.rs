@@ -172,7 +172,7 @@ pub use lashlang_graph::{
 ///             TraceLashlangGraph, TraceNodeWaitKind, TraceNodeAwaited, TraceNodeWaitResolution,
 ///             TraceLashlangNodeObservation, TraceLashlangGraphNode,
 ///             TraceLashlangNodeTerminalStatus, TraceLanguageExecutionMapNode,
-///             TraceLashlangEventIdentity, TraceBranchMembership,
+///             TraceLashlangEventIdentity, TraceBranchMembership, TraceAttemptUsageOutcome,
 ///         ),
 ///     ),
 ///     items(
@@ -184,7 +184,10 @@ pub use lashlang_graph::{
 ///     items(path = "crates/lash-trace/src/lashlang_graph.rs", fold_lashlang_graph),
 ///     shapes(
 ///         path = "crates/lash-trace/src/lashlang_graph/model.rs",
-///         cover(TraceLashlangNodeObservation),
+///         cover(
+///             TraceLashlangNodeObservation, TraceLashlangNodeReport,
+///             TraceLashlangNodeTerminalRecord,
+///         ),
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-trace/src/language_execution_failure.rs",

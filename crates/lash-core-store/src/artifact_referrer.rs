@@ -29,7 +29,17 @@ use crate::{ProcessId, SessionId};
 /// version_guard(
 ///     items(
 ///         ArtifactReferrerKind, ALL, as_str, parse, ArtifactReferrer, canonical_id, decode,
-///         StoredReferrer, HOST_PIN_PREFIX, UPLOAD_PREFIX,
+///         StoredReferrer, FrameEnvironmentId, SubscriptionRevisionId, HostArtifactPin,
+///         UploadReferrerId, AttachmentUploadId, HOST_PIN_PREFIX, HOST_PIN_HEX_LEN, UPLOAD_PREFIX,
+///         UPLOAD_HEX_LEN, try_from, decode_journal_identity, json_text, json_parse,
+///     ),
+///     impls("Serialize for ArtifactReferrer", "Deserialize for ArtifactReferrer"),
+///     items(path = "crates/lash-core-store/src/process_identity.rs", StartKey, parse_rendered),
+///     items(path = "crates/lash-core-store/src/session_identity.rs", FrameNodeId),
+///     items(path = "crates/lash-sansio/src/effect_identity.rs", EffectJournalIdentity),
+///     file(
+///         path = "crates/lash-sansio/src/identity.rs",
+///         cover("string_identity!", SessionId, ProcessId),
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

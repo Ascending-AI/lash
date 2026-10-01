@@ -675,8 +675,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 ///     items(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
 ///     items(
 ///         path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, TurnFinish, TurnStop,
-///         TurnCancellationEvidence, TurnCancelMode, SessionAppendNode, ErrorEnvelope,
+///         TurnCancellationEvidence, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
+///         SessionAppendNode, ErrorEnvelope,
 ///     ),
+///     catalog(path = "crates/lash-postgres-store/src/postgres/migrate.rs", EXPAND_MIGRATIONS),
 /// )
 const SCHEMA_VERSION: i32 = 141;
 

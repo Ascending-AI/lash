@@ -212,6 +212,40 @@ const TURN_OUTCOME_STATE: &str = "outcome";
 /// version_guard(
 ///     items(TURN_OUTCOME_STATE, TURN_OUTCOME_FORMATS),
 ///     items(path = "crates/lash-core-execution/src/engine/drive.rs", RootOutcome),
+///     items(path = "crates/lash-core-execution/src/engine/admission.rs", SealVerdict),
+///     items(path = "crates/lash-core-store/src/store/drive_fence.rs", DriveFence, AdmissionId),
+///     items(
+///         path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, TurnFinish, TurnStop,
+///         TurnCancellationEvidence, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
+///         SessionAppendNode, ErrorEnvelope,
+///     ),
+///     items(path = "crates/lash-sansio/src/session_model/failure.rs", FailureCode),
+///     items(path = "crates/lash-sansio/src/frame_key.rs", FrameKey),
+///     items(path = "crates/lash-sansio/src/retained_output.rs", RetainedOutput),
+///     items(
+///         path = "crates/lash-sansio/src/session_model/mod.rs",
+///         path = "crates/lash-sansio/src/plugin.rs",
+///         path = "crates/lash-sansio/src/session_model/message.rs",
+///         path = "crates/lash-sansio/src/llm/types.rs",
+///         path = "crates/lash-sansio/src/attachment.rs",
+///         path = "crates/lash-sansio/src/tool_output.rs",
+///         path = "crates/lash-sansio/src/effect_identity.rs",
+///         path = "crates/lash-sansio/src/tool_call_id.rs",
+///         path = "crates/lash-sansio/src/causal.rs", ProtocolEvent, PluginMessage, MessageRole,
+///         MessageOrigin, TurnOutputSource, Part, FlatPart, FlatPartRef, PartAttachment, PartKind,
+///         AttachmentSource, ProviderFileScope, ProviderReplayMeta, ProviderReasoningReplay,
+///         ProviderRouteIdentity, ProviderFailureKind, LlmTerminalReason, ResponsePhase,
+///         ResponseTextMeta, AttachmentRef, AttachmentId, AttachmentTypeMetadata, MediaType,
+///         ModelToolReturnPart, EffectAddress, ExecutionScope, ToolCallId, CausalRef,
+///     ),
+///     impls(
+///         path = "crates/lash-sansio/src/tool_call_id.rs", "Serialize for ToolCallId",
+///         "Deserialize for ToolCallId",
+///     ),
+///     file(
+///         path = "crates/lash-sansio/src/identity.rs",
+///         cover("string_identity!", SessionId, ProcessId, TurnId),
+///     ),
 ///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

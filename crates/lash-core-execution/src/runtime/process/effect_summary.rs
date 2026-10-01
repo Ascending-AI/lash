@@ -17,7 +17,8 @@ use super::events::ProcessEventAppendRequest;
 ///     file(
 ///         cover(
 ///             PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-///             PROCESS_EFFECT_OCCURRENCE_CAP, "struct ProcessEffectOmissions", "fn append_request",
+///             PROCESS_EFFECT_OCCURRENCE_CAP, "struct ProcessEffectOccurrence",
+///             "struct ProcessEffectOmissions", "fn append_request",
 ///             "fn decode", "fn tool_failure_code", "fn effect_outcome_payload_schema",
 ///             "fn effect_omissions_payload_schema",
 ///         ),

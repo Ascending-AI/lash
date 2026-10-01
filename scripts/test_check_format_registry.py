@@ -396,6 +396,23 @@ class FormatRegistryTests(unittest.TestCase):
         self.assertIn("has a guard that cannot be evaluated", problems[0])
         self.assertIn("does not find Gone", problems[0])
 
+    def test_a_ddl_guard_without_its_catalog_fails(self) -> None:
+        self.write("crates/demo/schema.sql", "CREATE TABLE demo (id TEXT);\n")
+        ddl = 'items(WireRecord), file(path = "crates/demo/schema.sql")'
+        self.write("crates/demo/src/lib.rs", SOURCE.replace("items(WireRecord)", ddl))
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("guards SQL DDL and declares no migration catalog", problems[0])
+
+        named = ddl + ', catalog(path = "crates/demo/src/migrate.rs", MIGRATIONS)'
+        self.write("crates/demo/src/lib.rs", SOURCE.replace("items(WireRecord)", named))
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("MIGRATIONS (crates/demo/src/migrate.rs) cannot be read", problems[0])
+
+        self.write("crates/demo/src/migrate.rs", "static MIGRATIONS: &[Step] = &[];\n")
+        self.assertEqual(self.problems(), [])
+
     def test_a_malformed_marker_fails(self) -> None:
         self.write(
             "crates/demo/src/lib.rs",
