@@ -233,7 +233,7 @@ fn llm_completion(text: &str) -> lash_core::plugin::DirectLlmCompletion {
 struct RecordingLlmCompletions {
     requests: Mutex<Vec<lash_core::LlmRequest>>,
     summary: String,
-    error: Option<String>,
+    error: Option<PluginError>,
     terminal_reason: lash_sansio::llm::types::LlmTerminalReason,
 }
 
@@ -255,7 +255,7 @@ impl RecordingLlmCompletions {
             move |request: lash_core::LlmRequest, _source: String| {
                 captured.requests.lock_recover().push(request.clone());
                 if let Some(error) = &captured.error {
-                    return Err(PluginError::Session(error.clone()));
+                    return Err(error.clone());
                 }
                 let mut completion = llm_completion(&captured.summary);
                 completion.response.terminal_reason = captured.terminal_reason;
@@ -816,7 +816,9 @@ async fn standard_compactor_records_zero_node_completion_before_error() {
         ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
     };
     let captured = Arc::new(RecordingLlmCompletions {
-        error: Some("scripted compaction-session failure".to_string()),
+        error: Some(PluginError::Session(
+            "scripted compaction-session failure".to_string(),
+        )),
         ..Default::default()
     });
     let ctx = build_compaction_ctx(
@@ -843,6 +845,102 @@ async fn standard_compactor_records_zero_node_completion_before_error() {
 }
 
 // ---- context-overflow recovery (FIG-2950) ----
+
+#[tokio::test]
+async fn recovery_invocation_faults_preserve_their_typed_cause_without_spending_attempts() {
+    for code in [
+        lash_core::RuntimeErrorCode::RuntimeStore,
+        lash_core::RuntimeErrorCode::LashlangCellReplayDivergence,
+    ] {
+        let direct = recovered_direct();
+        let traces = Arc::new(RecordingTraces::default());
+        let (_, state) = recovery_history(true);
+        let mut ctx = recovery_ctx(state, &direct, &traces, 200_000);
+        let injected = code.clone();
+        ctx.direct_completions =
+            lash_core::facade_support::DirectCompletionClient::from_llm_fn(move |_, _| {
+                Err(PluginError::Runtime(lash_core::RuntimeError::new(
+                    injected.clone(),
+                    "injected summarizer fault",
+                )))
+            });
+        for _ in 0..OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+            let error = StandardCompactionPressureHook::new(StandardCompactionConfig)
+                .decide(&ctx)
+                .await
+                .expect_err("an invocation fault returns no durable decision");
+            let ContextError::Plugin(PluginError::Runtime(error)) = error else {
+                panic!("the typed runtime cause survives: {error:?}");
+            };
+            assert_eq!(error.code, code);
+            assert!(!traces.events().iter().any(|(_, event)| matches!(event,
+                lash_core::TraceEvent::Custom { name, .. } if name == TRACE_OVERFLOW_RECOVERY_OUTCOME
+            )));
+        }
+        ctx.direct_completions = RecordingLlmCompletions::client(&direct);
+        assert!(matches!(
+            decide_recovery(&ctx).await,
+            ContextPressureDecision::OpenFrame { .. }
+        ));
+        assert_eq!(direct.requests().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn recovery_refusal_causes_are_distinct_durable_values() {
+    for cause in [
+        "nothing_to_summarize",
+        "request_exceeds_window",
+        "empty_summary",
+        "summarizer_refused",
+    ] {
+        let direct = empty_direct();
+        let traces = Arc::new(RecordingTraces::default());
+        let (_, mut state) = recovery_history(true);
+        if cause == "nothing_to_summarize" {
+            state = snapshot_with_nodes(&[
+                conversation_node(text_message("s", MessageRole::System, "policy")),
+                recovery_record_node(OverflowRecoveryRecord::Pending {}).expect("pending record"),
+            ]);
+        }
+        let mut ctx = recovery_ctx(
+            state,
+            &direct,
+            &traces,
+            if cause == "request_exceeds_window" {
+                1024
+            } else {
+                200_000
+            },
+        );
+        if cause == "summarizer_refused" {
+            ctx.direct_completions =
+                lash_core::facade_support::DirectCompletionClient::from_llm_fn(|_, _| {
+                    Err(PluginError::Runtime(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::AttachmentSourcePolicyDenied,
+                        "summary refused",
+                    )))
+                });
+        }
+        let ContextPressureDecision::Record { nodes } = decide_recovery(&ctx).await else {
+            panic!("a deterministic refusal records one attempt");
+        };
+        let mut expected = json!({"kind": cause});
+        if cause == "summarizer_refused" {
+            expected["code"] =
+                serde_json::to_value(lash_core::RuntimeErrorCode::AttachmentSourcePolicyDenied)
+                    .unwrap();
+        }
+        assert_eq!(
+            serde_json::to_value(&nodes).unwrap(),
+            json!([{
+                "kind": "plugin", "plugin_type": "standard_compaction.overflow_recovery",
+                "body": {"kind": "failed", "attempt": 1, "cause": expected},
+            }]),
+            "{cause}"
+        );
+    }
+}
 
 fn overflow_turn_report(
     outcome: lash_core::facade_support::TurnOutcome,
@@ -879,7 +977,7 @@ async fn decide_recovery(ctx: &ContextPressureContext<'_>) -> ContextPressureDec
     StandardCompactionPressureHook::new(StandardCompactionConfig)
         .decide(ctx)
         .await
-        .expect("a recovery decision never fails the turn")
+        .expect("the recovery decides over these journaled inputs")
 }
 
 /// The recovery record kinds a decision's nodes carry, in order.
@@ -887,17 +985,11 @@ fn decided_record_kinds(nodes: &[lash_core::SessionAppendNode]) -> Vec<OverflowR
     nodes
         .iter()
         .map(|node| {
-            let lash_core::SessionAppendNode::Message { message } = node else {
-                panic!("a recovery record is a message node: {node:?}");
+            let lash_core::SessionAppendNode::Plugin { plugin_type, body } = node else {
+                panic!("a recovery record is a plugin node: {node:?}");
             };
-            recovery_record_kind(&Message {
-                id: "probe".to_string(),
-                role: message.role,
-                parts: message.parts.clone().into(),
-                origin: message.origin.clone(),
-            })
-            .expect("a decided recovery record parses")
-            .expect("the node is a recovery record")
+            assert_eq!(plugin_type, OVERFLOW_RECOVERY_PLUGIN_TYPE);
+            serde_json::from_value(body.clone()).expect("a decided recovery record parses")
         })
         .collect()
 }
@@ -920,58 +1012,68 @@ fn recovered_direct() -> Arc<RecordingLlmCompletions> {
 }
 
 /// A summarizer that always returns an empty completion — the
-/// `insufficient_reduction` failure path.
+/// `EmptySummary` failure path.
 fn empty_direct() -> Arc<RecordingLlmCompletions> {
     Arc::new(RecordingLlmCompletions::default())
 }
 
-fn recovery_record_node_message(record: OverflowRecoveryRecord) -> Message {
-    let plugin_message = recovery_record_message(record);
-    Message {
-        id: "m_recover_record".into(),
-        role: MessageRole::System,
-        parts: plugin_message.parts.into(),
-        origin: plugin_message.origin,
-    }
+fn conversation_node(message: Message) -> lash_core::SessionAppendNode {
+    lash_core::SessionAppendNode::message(lash_core::PluginMessage {
+        id: Some(message.id),
+        role: message.role,
+        parts: message.parts.to_vec(),
+        origin: message.origin,
+    })
 }
 
-fn recovery_history(big_part: bool) -> (Vec<Message>, SessionSnapshot) {
+fn snapshot_with_nodes(nodes: &[lash_core::SessionAppendNode]) -> SessionSnapshot {
+    let mut state = snapshot_with_messages(&[]);
+    for (ordinal, node) in nodes.iter().enumerate() {
+        match node {
+            lash_core::SessionAppendNode::Message { message } => {
+                state.session_graph.append_message(Message {
+                    id: format!("m-recovery-{ordinal}"),
+                    role: message.role,
+                    parts: message.parts.clone().into(),
+                    origin: message.origin.clone(),
+                });
+            }
+            lash_core::SessionAppendNode::Plugin { plugin_type, body } => {
+                state
+                    .session_graph
+                    .append_plugin(plugin_type.clone(), body.clone());
+            }
+            lash_core::SessionAppendNode::ProtocolEvent { .. } => {
+                panic!("fixture has no protocol events");
+            }
+        }
+    }
+    state
+}
+
+fn recovery_history(pending: bool) -> (Vec<lash_core::SessionAppendNode>, SessionSnapshot) {
     let oversized = "x".repeat(OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS * 4);
-    let mut messages = vec![
-        text_message("s1", MessageRole::System, "session policy"),
-        text_message("u1", MessageRole::User, "summarize the attached report"),
-        text_message("t1", MessageRole::User, &oversized),
+    let mut nodes = vec![
+        conversation_node(text_message("s1", MessageRole::System, "session policy")),
+        conversation_node(text_message(
+            "u1",
+            MessageRole::User,
+            "summarize the attached report",
+        )),
+        conversation_node(text_message("t1", MessageRole::User, &oversized)),
     ];
-    if big_part {
-        messages.push(recovery_record_node_message(
-            OverflowRecoveryRecord::Pending,
-        ));
+    if pending {
+        nodes.push(recovery_record_node(OverflowRecoveryRecord::Pending {}).expect("pending node"));
     }
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: lash_core::testing::mock_session_policy(),
-        session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
-    };
-    (messages, state)
+    let state = snapshot_with_nodes(&nodes);
+    (nodes, state)
 }
 
-/// The test mutates its durable history between drives so each attempt
-/// reads the record the previous one appended, like a restore would. The
-/// still-open pending marker survives; terminal records are replaced by
-/// the next attempt's result.
-fn history_with_record(messages: &mut Vec<Message>, record: OverflowRecoveryRecord) {
-    messages.retain(|message| {
-        !matches!(
-            recovery_record_kind(message),
-            Ok(Some(
-                OverflowRecoveryRecord::Failed { .. }
-                    | OverflowRecoveryRecord::Completed
-                    | OverflowRecoveryRecord::Exhausted
-            ))
-        )
-    });
-    messages.push(recovery_record_node_message(record));
+fn history_with_record(
+    nodes: &mut Vec<lash_core::SessionAppendNode>,
+    record: OverflowRecoveryRecord,
+) {
+    nodes.push(recovery_record_node(record).expect("recovery node"));
 }
 
 #[tokio::test]
@@ -991,20 +1093,13 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         .await
         .expect("hook runs");
     assert_eq!(directives.len(), 2);
-    let marker = match &directives[1] {
-        lash_core::plugin::AfterTurnPluginDirective::EnqueueMessages(directive) => {
-            &directive.messages[0]
-        }
-        other => panic!("expected enqueue directive, got {other:?}"),
+    let lash_core::plugin::AfterTurnPluginDirective::AppendPluginNode { plugin_type, body } =
+        &directives[1]
+    else {
+        panic!("expected plugin-node append: {:?}", directives[1]);
     };
-    assert!(
-        marker
-            .parts
-            .first()
-            .map(Part::content)
-            .unwrap()
-            .starts_with(OVERFLOW_RECOVERY_MARKER)
-    );
+    assert_eq!(plugin_type, OVERFLOW_RECOVERY_PLUGIN_TYPE);
+    assert_eq!(body, &json!({"kind": "pending"}));
 
     // The control row: a plain provider error names no recovery trigger.
     let provider_error = lash_core::plugin::TurnResultHookContext {
@@ -1046,23 +1141,32 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
 
 #[test]
 fn recovery_state_derivation_is_bounded_and_durable() {
-    let pending = || vec![OverflowRecoveryRecord::Pending];
+    let pending = || vec![OverflowRecoveryRecord::Pending {}];
     assert_eq!(
         OverflowRecoveryState::derive(pending()),
         OverflowRecoveryState::Pending { attempts: 0 }
     );
 
     let failing = OverflowRecoveryState::derive(vec![
-        OverflowRecoveryRecord::Pending,
-        OverflowRecoveryRecord::Failed { attempt: 2 },
+        OverflowRecoveryRecord::Pending {},
+        OverflowRecoveryRecord::Failed {
+            attempt: 2,
+            cause: RecoveryFailureCause::EmptySummary,
+        },
     ]);
     assert_eq!(failing, OverflowRecoveryState::Pending { attempts: 2 });
     assert!(!failing.exhausted());
 
     let exhausted = OverflowRecoveryState::derive(vec![
-        OverflowRecoveryRecord::Pending,
-        OverflowRecoveryRecord::Failed { attempt: 2 },
-        OverflowRecoveryRecord::Failed { attempt: 3 },
+        OverflowRecoveryRecord::Pending {},
+        OverflowRecoveryRecord::Failed {
+            attempt: 2,
+            cause: RecoveryFailureCause::EmptySummary,
+        },
+        OverflowRecoveryRecord::Failed {
+            attempt: 3,
+            cause: RecoveryFailureCause::EmptySummary,
+        },
     ]);
     assert_eq!(
         exhausted,
@@ -1073,50 +1177,47 @@ fn recovery_state_derivation_is_bounded_and_durable() {
     assert!(exhausted.exhausted());
 
     let done = OverflowRecoveryState::derive(vec![
-        OverflowRecoveryRecord::Pending,
-        OverflowRecoveryRecord::Failed { attempt: 1 },
-        OverflowRecoveryRecord::Completed,
+        OverflowRecoveryRecord::Pending {},
+        OverflowRecoveryRecord::Failed {
+            attempt: 1,
+            cause: RecoveryFailureCause::EmptySummary,
+        },
+        OverflowRecoveryRecord::Completed {},
     ]);
     assert_eq!(done, OverflowRecoveryState::Idle);
 }
 
-/// The prose title only marks a message as a recovery record; the record is
-/// always read back from its serde payload. A corrupt payload is an error —
-/// never an `Exhausted` guess from the title.
 #[test]
-fn recovery_record_reads_its_serde_payload_only() {
-    let record_message = |text: String| Message {
-        id: "m".to_string(),
-        role: MessageRole::System,
-        parts: vec![Part::text("m.p0".to_string(), text, None)].into(),
-        origin: Some(MessageOrigin::Plugin {
-            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
-            transient: false,
-        }),
-    };
-
-    let written = recovery_record_node_message(OverflowRecoveryRecord::Failed { attempt: 2 });
-    assert_eq!(
-        recovery_record_kind(&written).expect("written record parses"),
-        Some(OverflowRecoveryRecord::Failed { attempt: 2 })
-    );
-
-    for payload in ["{not json", "{\"kind\":\"bogus\"}", ""] {
-        let corrupt = record_message(format!("{OVERFLOW_RECOVERY_FAILED}\n{payload}"));
-        assert!(
-            recovery_record_kind(&corrupt).is_err(),
-            "malformed payload {payload:?} must error, not guess a record"
+fn recovery_records_roundtrip_and_refuse_missing_or_corrupt_causes() {
+    for record in [
+        OverflowRecoveryRecord::Pending {},
+        OverflowRecoveryRecord::Completed {},
+        OverflowRecoveryRecord::Failed {
+            attempt: 2,
+            cause: RecoveryFailureCause::EmptySummary,
+        },
+        OverflowRecoveryRecord::Exhausted {},
+    ] {
+        let state =
+            snapshot_with_nodes(&[recovery_record_node(record.clone()).expect("typed node")]);
+        assert!(state.read_view().messages().is_empty());
+        assert_eq!(
+            history_recovery_records(&state.read_view()).expect("record parses"),
+            [record]
         );
     }
-
-    // A title with another record's payload is read as the payload's kind.
-    let relabeled = record_message(format!(
-        "{OVERFLOW_RECOVERY_EXHAUSTED}\n{{\"kind\":\"pending\"}}"
-    ));
-    assert_eq!(
-        recovery_record_kind(&relabeled).expect("payload deserializes"),
-        Some(OverflowRecoveryRecord::Pending)
-    );
+    for body in [
+        json!({"kind": "bogus"}),
+        json!({"kind": "failed", "attempt": 1}),
+        json!({"kind": "failed", "attempt": 1, "cause": {"kind": "bogus"}}),
+        json!({"kind": "pending", "title": "completed"}),
+    ] {
+        let state = snapshot_with_nodes(&[lash_core::SessionAppendNode::plugin(
+            OVERFLOW_RECOVERY_PLUGIN_TYPE,
+            body,
+        )]);
+        assert!(history_recovery_records(&state.read_view()).is_err());
+    }
 }
 
 /// FIG-4110: a pending overflow recovery summarizes the committed history
@@ -1174,7 +1275,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_decides_a_recovery_fr
     };
     assert_eq!(
         decided_record_kinds(&records),
-        [OverflowRecoveryRecord::Completed],
+        [OverflowRecoveryRecord::Completed {}],
         "the completed record closes the recovery in the frame it leaves"
     );
     assert_eq!(task, "context-overflow recovery");
@@ -1218,7 +1319,7 @@ async fn recovery_summarizer_request_does_not_carry_the_pending_marker() {
     assert_eq!(requests.len(), 1, "exactly one summarizer call ran");
     let request_text = RecordingLlmCompletions::request_text(&requests[0]);
     assert!(
-        !request_text.contains(OVERFLOW_RECOVERY_MARKER.trim_end_matches(':')),
+        !request_text.contains(OVERFLOW_RECOVERY_PLUGIN_TYPE),
         "the summarizer request must not carry the pending recovery marker it is recovering from"
     );
 }
@@ -1234,7 +1335,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
     for attempt in 1..=OVERFLOW_RECOVERY_MAX_ATTEMPTS {
         let traces = Arc::new(RecordingTraces::default());
         let decision = decide_recovery(&recovery_ctx(
-            snapshot_with_messages(&history),
+            snapshot_with_nodes(&history),
             &empty,
             &traces,
             200_000,
@@ -1245,9 +1346,10 @@ async fn recovery_failure_is_bounded_and_explicit() {
         };
         let mut expected = vec![OverflowRecoveryRecord::Failed {
             attempt: attempt as u32,
+            cause: RecoveryFailureCause::EmptySummary,
         }];
         if attempt == OVERFLOW_RECOVERY_MAX_ATTEMPTS {
-            expected.push(OverflowRecoveryRecord::Exhausted);
+            expected.push(OverflowRecoveryRecord::Exhausted {});
         }
         assert_eq!(decided_record_kinds(&nodes), expected, "attempt {attempt}");
 
@@ -1255,6 +1357,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
             &mut history,
             OverflowRecoveryRecord::Failed {
                 attempt: attempt as u32,
+                cause: RecoveryFailureCause::EmptySummary,
             },
         );
     }
@@ -1264,7 +1367,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
     let traces = Arc::new(RecordingTraces::default());
     assert_eq!(
         decide_recovery(&recovery_ctx(
-            snapshot_with_messages(&history),
+            snapshot_with_nodes(&history),
             &captured,
             &traces,
             200_000,
@@ -1293,12 +1396,14 @@ async fn recovery_failure_is_bounded_and_explicit() {
     assert_eq!(outcomes, ["exhausted:recoverable_failure"]);
 }
 
-/// A summarizer that fails outright records the attempt as `Failed`, names
-/// the failure in its trace, and opens no frame.
+/// A deterministic summarizer refusal records its typed code and opens no frame.
 #[tokio::test]
 async fn recovery_summarizer_failure_records_failed_without_a_frame() {
     let failing = Arc::new(RecordingLlmCompletions {
-        error: Some("scripted summarizer failure".to_string()),
+        error: Some(PluginError::Runtime(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::ContextCompaction,
+            "scripted summarizer refusal",
+        ))),
         ..Default::default()
     });
     let traces = Arc::new(RecordingTraces::default());
@@ -1310,7 +1415,12 @@ async fn recovery_summarizer_failure_records_failed_without_a_frame() {
     };
     assert_eq!(
         decided_record_kinds(&nodes),
-        [OverflowRecoveryRecord::Failed { attempt: 1 }]
+        [OverflowRecoveryRecord::Failed {
+            attempt: 1,
+            cause: RecoveryFailureCause::SummarizerRefused {
+                code: lash_core::RuntimeErrorCode::ContextCompaction
+            }
+        }]
     );
     assert_eq!(failing.requests().len(), 1);
     assert!(
@@ -1319,8 +1429,7 @@ async fn recovery_summarizer_failure_records_failed_without_a_frame() {
             lash_core::TraceEvent::Custom { name, payload }
                 if name == TRACE_OVERFLOW_RECOVERY_OUTCOME
                     && payload.get("outcome").and_then(|value| value.as_str()).is_some_and(
-                        |outcome| outcome.starts_with("failed:summarizer_failed")
-                            && outcome.contains("scripted summarizer failure")
+                        |outcome| outcome.starts_with("failed:SummarizerRefused")
                     )
         )),
         "{:?}",
@@ -1331,20 +1440,20 @@ async fn recovery_summarizer_failure_records_failed_without_a_frame() {
 #[tokio::test]
 async fn recovery_does_not_restart_after_completion_or_exhaustion() {
     for terminal in [
-        OverflowRecoveryRecord::Completed,
-        OverflowRecoveryRecord::Exhausted,
+        OverflowRecoveryRecord::Completed {},
+        OverflowRecoveryRecord::Exhausted {},
     ] {
         let traces = Arc::new(RecordingTraces::default());
         let captured = Arc::new(RecordingLlmCompletions::default());
         let (mut messages, _) = recovery_history(false);
-        messages.push(recovery_record_node_message(
-            OverflowRecoveryRecord::Pending,
-        ));
-        messages.push(recovery_record_node_message(terminal));
+        messages.push(
+            recovery_record_node(OverflowRecoveryRecord::Pending {}).expect("pending record"),
+        );
+        messages.push(recovery_record_node(terminal.clone()).expect("terminal record"));
 
         assert_eq!(
             decide_recovery(&recovery_ctx(
-                snapshot_with_messages(&messages),
+                snapshot_with_nodes(&messages),
                 &captured,
                 &traces,
                 200_000,

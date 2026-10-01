@@ -453,7 +453,7 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
     assert_eq!(
         records
             .iter()
-            .map(|(kind, _)| kind.as_str())
+            .map(|(kind, _, _)| kind.as_str())
             .collect::<Vec<_>>(),
         ["pending", "completed"]
     );
@@ -471,7 +471,7 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
 fn sqlite_recovery_records(
     store_factory: &lash_sqlite_store::SqliteStoreSet,
     session_id: &str,
-) -> Vec<(String, String)> {
+) -> Vec<(String, String, serde_json::Value)> {
     let conn = rusqlite::Connection::open(
         store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
     )
@@ -496,17 +496,15 @@ fn sqlite_recovery_records(
         let node =
             lash_core::SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &node_json)
                 .expect("decode stored graph node");
-        let text = message_text(&node.message()?);
-        let payload = text
-            .strip_prefix("Standard-compaction context-overflow recovery")?
-            .split_once('\n')?
-            .1;
-        let kind = serde_json::from_str::<serde_json::Value>(payload)
-            .expect("a recovery record carries its serde payload")["kind"]
+        let (plugin_type, body) = node.plugin()?;
+        if plugin_type != "standard_compaction.overflow_recovery" {
+            return None;
+        }
+        let kind = body["kind"]
             .as_str()
-            .expect("a recovery record names its kind")
+            .expect("typed recovery record kind")
             .to_string();
-        Some((kind, frame))
+        Some((kind, frame, body.clone()))
     })
     .collect()
 }
@@ -546,7 +544,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         response_metadata: Default::default(),
         ..LlmResponse::default()
     }];
-    // Each recovering turn: an empty summary (insufficient reduction), then
+    // Each recovering turn: an empty summary, then
     // the turn's own answer on the frame it stayed in.
     for attempt in 1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS {
         responses.push(response_with_usage("", 1));
@@ -608,10 +606,22 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     assert_eq!(
         records
             .iter()
-            .map(|(kind, _)| kind.as_str())
+            .map(|(kind, _, _)| kind.as_str())
             .collect::<Vec<_>>(),
         ["pending", "failed", "failed", "failed", "exhausted"]
     );
+    for (attempt, (_, _, body)) in records
+        [1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(
+            body,
+            &serde_json::json!({
+                "kind": "failed", "attempt": attempt + 1, "cause": {"kind": "empty_summary"},
+            })
+        );
+    }
     assert_eq!(
         sqlite_frame_opens(store_factory.as_ref(), session_id).len(),
         1,

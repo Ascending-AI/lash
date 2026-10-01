@@ -200,6 +200,11 @@ pub enum TurnPluginDirective {
 pub enum AfterTurnPluginDirective {
     Ambient(PluginDirective),
     EnqueueMessages(EnqueueMessagesDirective),
+    /// Append a durable plugin record to the turn's graph, outside conversation.
+    AppendPluginNode {
+        plugin_type: String,
+        body: serde_json::Value,
+    },
 }
 
 /// Directives legal from `before_tool_call` hooks.

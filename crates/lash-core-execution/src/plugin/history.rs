@@ -185,12 +185,23 @@ impl From<PluginError> for ContextError {
 }
 
 impl ContextError {
+    /// Whether this fault aborts without recording a context decision. Session
+    /// retirement also aborts, even when its runtime code is terminal.
+    pub fn aborts_invocation(&self) -> bool {
+        let error = self
+            .clone()
+            .into_turn_failure(crate::RuntimeErrorCode::ContextCompaction);
+        error.turn_failure_cause().aborts_invocation() || error.is_session_retirement()
+    }
+
     /// Settles a context step's failure by its cause (FIG-3575): a plugin
-    /// failure settles as [`PluginError::into_turn_failure`] does, and the
-    /// context step's own pipeline or session refusal is an outcome spelled as
-    /// `refusal`.
+    /// failure keeps a carried runtime code and cause, or settles as
+    /// [`PluginError::into_turn_failure`] does. The context step's own pipeline
+    /// or session refusal is an outcome spelled as `refusal`.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
         match self {
+            Self::Plugin(PluginError::Runtime(error)) => error,
+            Self::Plugin(PluginError::RuntimeEffectController(error)) => error.into_runtime_error(),
             Self::Plugin(error) => error.into_turn_failure(refusal),
             other @ (Self::Pipeline(_) | Self::Session(_)) => {
                 crate::RuntimeError::new(refusal, other.to_string())

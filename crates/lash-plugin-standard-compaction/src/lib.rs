@@ -21,7 +21,7 @@ mod recovery;
 
 pub(crate) use recovery::{
     OverflowRecoveryState, history_recovery_records, overflow_recovery_after_turn,
-    overflow_recovery_decision, recovery_record_payload,
+    overflow_recovery_decision,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -49,8 +49,8 @@ const COMPACTED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted during compa
 
 /// Maximum summarization attempts one open context-overflow recovery may
 /// spend before the third context policy records an explicit recoverable
-/// failure. Recovery never loops: every attempt is settled by a durable
-/// plugin record.
+/// failure. Only deterministic refusals spend attempts; invocation faults
+/// leave recovery pending for a healthy drive.
 pub const OVERFLOW_RECOVERY_MAX_ATTEMPTS: usize = 3;
 /// Approximate token size above which a single part is elided before an
 /// out-of-band summarization request so the summarizer prompt itself fits the
@@ -60,13 +60,6 @@ pub const OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS: usize = 16_000;
 /// name what it dropped.
 pub const OVERFLOW_RECOVERY_ELIDED_RETAINED_CHARS: usize = 400;
 
-const OVERFLOW_RECOVERY_MARKER: &str =
-    "Standard-compaction context-overflow recovery marker (pending):";
-const OVERFLOW_RECOVERY_COMPLETED: &str =
-    "Standard-compaction context-overflow recovery completed:";
-const OVERFLOW_RECOVERY_FAILED: &str = "Standard-compaction context-overflow recovery failure:";
-const OVERFLOW_RECOVERY_EXHAUSTED: &str =
-    "Standard-compaction context-overflow recovery exhausted (recoverable failure):";
 const OVERFLOW_RECOVERY_INSTRUCTIONS: &str = "Recover a task whose turn stopped because the provider refused the request as too long. The oversized tool result has been elided from the history below.\n\nSummarize precisely what the user asked for, what was already accomplished, and what remains, so a fresh continuation can finish the task without re-running any tool.";
 const OVERFLOW_ELIDED_PART_PLACEHOLDER: &str =
     "[oversized part elided before context-overflow summarization]";
@@ -465,15 +458,6 @@ pub(crate) fn prepare_compaction_request(
 ) -> Result<(SessionSnapshot, String), ContextError> {
     let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
-    // The plugin's own overflow-recovery records are control state, not
-    // conversation, and they must never ride into the summarizer request's
-    // read state. A request that still derived a pending recovery from them
-    // would feed a recovery marker back into the summarizer instead of
-    // answering the recovery it came from (FIG-3107). Durable history keeps
-    // every record; only the summarizer's read state drops them, and the
-    // prefix a cut point hands the ordinary compaction policy cannot
-    // resurrect a marker its terminal record closed.
-    prefix_messages.retain(|message| recovery_record_payload(message).is_none());
     strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
     snapshot.set_execution_state_snapshot(None);
     snapshot.last_prompt_usage = None;
@@ -770,7 +754,7 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         // terminal records say whether recovery is pending; a completed or
         // exhausted record below the marker closes it.
         let recovery_state = OverflowRecoveryState::derive(
-            history_recovery_records(ctx.state.messages())
+            history_recovery_records(&ctx.state)
                 .map_err(|error| ContextError::Session(error.to_string()))?,
         );
         if recovery_state.pending() {

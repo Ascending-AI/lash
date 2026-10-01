@@ -177,6 +177,7 @@ impl PluginSession {
         session_graph: Arc<dyn SessionGraphService>,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
         turn_scope_id: &str,
+        clock: &dyn crate::Clock,
     ) -> Result<TurnFinalization, PluginError> {
         let session_id = turn.state.session_id.clone();
         let directives = if self.contributions.after_turn_hooks.is_empty() {
@@ -196,6 +197,7 @@ impl PluginSession {
         let mut events = Vec::new();
         let mut updated_messages: Option<crate::MessageSequence> = None;
         let mut next_message_ordinal = 0usize;
+        let mut next_plugin_ordinal = 0usize;
         for emitted in directives {
             let PluginOwned { plugin_id, value } = emitted;
             match value {
@@ -220,6 +222,22 @@ impl PluginSession {
                         }
                         crate::plugin::AmbientDirectiveAction::None => {}
                     }
+                }
+                AfterTurnPluginDirective::AppendPluginNode { plugin_type, body } => {
+                    if let Some(messages) = updated_messages.take() {
+                        turn.state.replace_active_read_state(messages.as_slice());
+                    }
+                    turn.state.session_graph.append_node_drafts_at(
+                        &format!(
+                            "{turn_scope_id}:after_turn:{plugin_id}:plugin:{next_plugin_ordinal}"
+                        ),
+                        [crate::session_graph::SessionNodeDraft::plugin(
+                            plugin_type,
+                            body,
+                        )],
+                        clock.timestamp_rfc3339(),
+                    );
+                    next_plugin_ordinal += 1;
                 }
                 AfterTurnPluginDirective::EnqueueMessages(directive) => {
                     if updated_messages.is_none() {

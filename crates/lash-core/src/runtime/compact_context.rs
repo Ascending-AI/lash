@@ -46,14 +46,9 @@ impl CompactionRun {
     /// Only a compaction refusal settles Failed. Invocation faults keep the
     /// command open for redrive or an operator, with their original cause.
     fn failure(error: crate::plugin::ContextError) -> Result<Self, RuntimeError> {
-        let error = match error {
-            crate::plugin::ContextError::Plugin(crate::PluginError::Runtime(error)) => error,
-            crate::plugin::ContextError::Plugin(crate::PluginError::RuntimeEffectController(
-                error,
-            )) => error.into_runtime_error(),
-            error => error.into_turn_failure(RuntimeErrorCode::ContextCompaction),
-        };
-        if error.turn_failure_cause().aborts_invocation() || error.is_session_retirement() {
+        let aborts_invocation = error.aborts_invocation();
+        let error = error.into_turn_failure(RuntimeErrorCode::ContextCompaction);
+        if aborts_invocation {
             Err(error)
         } else {
             Ok(Self::Failed(error))

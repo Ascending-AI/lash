@@ -1818,6 +1818,7 @@ macro_rules! frame_open_redrive_tests {
             a_commanded_compaction_redriven_on_another_worker_replays_its_recorded_prompt,
             a_pressure_compaction_redriven_on_another_worker_replays_its_recorded_prompt,
             an_overflow_recovery_redriven_on_another_worker_replays_its_recorded_prompt,
+            an_overflow_recovery_summarizer_fault_aborts_without_a_record,
             compact_with_production_compactor_crash_matrix,
             a_session_deleted_during_an_open_keeps_nothing_of_it,
             a_fork_made_during_an_open_never_sees_its_seed,

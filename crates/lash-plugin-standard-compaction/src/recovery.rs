@@ -26,65 +26,38 @@ use super::*;
 // plugin-owned durable facts; the terminal exhausted record is what keeps a
 // failed recovery from turning into a compact/retry loop.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) const OVERFLOW_RECOVERY_PLUGIN_TYPE: &str = "standard_compaction.overflow_recovery";
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum RecoveryFailureCause {
+    NothingToSummarize,
+    RequestExceedsWindow,
+    EmptySummary,
+    SummarizerRefused { code: lash_core::RuntimeErrorCode },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum OverflowRecoveryRecord {
-    Pending,
-    Completed,
-    Failed { attempt: u32 },
-    Exhausted,
+    Pending {},
+    Completed {},
+    Failed {
+        attempt: u32,
+        cause: RecoveryFailureCause,
+    },
+    Exhausted {},
 }
 
-pub(crate) fn recovery_record_message(record: OverflowRecoveryRecord) -> lash_core::PluginMessage {
-    let title = match record {
-        OverflowRecoveryRecord::Pending => OVERFLOW_RECOVERY_MARKER,
-        OverflowRecoveryRecord::Completed => OVERFLOW_RECOVERY_COMPLETED,
-        OverflowRecoveryRecord::Failed { .. } => OVERFLOW_RECOVERY_FAILED,
-        OverflowRecoveryRecord::Exhausted => OVERFLOW_RECOVERY_EXHAUSTED,
-    };
-    let payload = serde_json::to_string(&record).unwrap_or_else(|_| "{}".to_string());
-    lash_core::PluginMessage::text(MessageRole::System, format!("{title}\n{payload}")).with_origin(
-        MessageOrigin::Plugin {
-            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
-            transient: false,
-        },
-    )
-}
-
-/// The prose title selects which plugin messages are recovery records; the
-/// record itself is always read back from the serde payload that follows it.
-/// Returns the payload of the first record part, or `None` when the message
-/// is not a recovery record.
-pub(crate) fn recovery_record_payload(message: &Message) -> Option<&str> {
-    if !matches!(
-        message.origin,
-        Some(MessageOrigin::Plugin { ref plugin_id, .. })
-            if plugin_id == STANDARD_COMPACTION_PLUGIN_ID
-    ) {
-        return None;
-    }
-    message.parts.iter().find_map(|part| {
-        let text = part.text_content()?;
-        [
-            OVERFLOW_RECOVERY_MARKER,
-            OVERFLOW_RECOVERY_COMPLETED,
-            OVERFLOW_RECOVERY_FAILED,
-            OVERFLOW_RECOVERY_EXHAUSTED,
-        ]
-        .iter()
-        .find_map(|marker| text.strip_prefix(marker).map(str::trim))
-    })
-}
-
-/// Read a recovery record back from its serialized form. A message carrying a
-/// recovery title whose payload does not deserialize is an error, never a
-/// record guessed from the title.
-pub(crate) fn recovery_record_kind(
-    message: &Message,
-) -> Result<Option<OverflowRecoveryRecord>, serde_json::Error> {
-    recovery_record_payload(message)
-        .map(serde_json::from_str)
-        .transpose()
+pub(crate) fn recovery_record_node(
+    record: OverflowRecoveryRecord,
+) -> Result<lash_core::SessionAppendNode, ContextError> {
+    let body =
+        serde_json::to_value(record).map_err(|error| ContextError::Session(error.to_string()))?;
+    Ok(lash_core::SessionAppendNode::plugin(
+        OVERFLOW_RECOVERY_PLUGIN_TYPE,
+        body,
+    ))
 }
 
 /// Recovery state derived purely from committed history. Nothing else carries
@@ -106,11 +79,11 @@ impl OverflowRecoveryState {
         let mut state = Self::Idle;
         for record in records {
             match record {
-                OverflowRecoveryRecord::Pending => state = Self::Pending { attempts: 0 },
-                OverflowRecoveryRecord::Completed | OverflowRecoveryRecord::Exhausted => {
+                OverflowRecoveryRecord::Pending {} => state = Self::Pending { attempts: 0 },
+                OverflowRecoveryRecord::Completed {} | OverflowRecoveryRecord::Exhausted {} => {
                     state = Self::Idle;
                 }
-                OverflowRecoveryRecord::Failed { attempt } => {
+                OverflowRecoveryRecord::Failed { attempt, .. } => {
                     if let Self::Pending { attempts } = &mut state {
                         *attempts = attempt as usize;
                     }
@@ -138,12 +111,18 @@ impl OverflowRecoveryState {
 }
 
 pub(crate) fn history_recovery_records(
-    messages: &[Message],
+    state: &lash_core::plugin::SessionReadView,
 ) -> Result<Vec<OverflowRecoveryRecord>, serde_json::Error> {
-    messages
-        .iter()
-        .map(recovery_record_kind)
-        .filter_map(Result::transpose)
+    use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
+    state
+        .session_graph()
+        .active_path_nodes()
+        .into_iter()
+        .filter_map(|node| {
+            let (plugin_type, body) = node.plugin()?;
+            (plugin_type == OVERFLOW_RECOVERY_PLUGIN_TYPE)
+                .then(|| serde_json::from_value(body.clone()))
+        })
         .collect()
 }
 
@@ -225,27 +204,19 @@ pub(crate) fn emit_recovery_trace(
     );
 }
 
-pub(crate) fn recovery_pending_marker() -> lash_core::PluginMessage {
-    recovery_record_message(OverflowRecoveryRecord::Pending)
-}
-
-fn recovery_record_node(record: OverflowRecoveryRecord) -> lash_core::SessionAppendNode {
-    lash_core::SessionAppendNode::message(recovery_record_message(record))
-}
-
 /// A settled failed attempt: its `Failed` record and, at the cap, the
 /// `Exhausted` record that closes the recovery with no frame.
 fn recovery_failure_decision(
     traces: &lash_core::plugin::PluginTraceEmitter,
     trace_context: lash_core::TraceContext,
     attempt_no: usize,
-    reason: &str,
-) -> ContextPressureDecision {
+    cause: RecoveryFailureCause,
+) -> Result<ContextPressureDecision, ContextError> {
     let exhausted = attempt_no >= OVERFLOW_RECOVERY_MAX_ATTEMPTS;
     let outcome = if exhausted {
         "exhausted:recoverable_failure".to_string()
     } else {
-        format!("failed:{reason}")
+        format!("failed:{cause:?}")
     };
     emit_recovery_trace(
         traces,
@@ -256,11 +227,12 @@ fn recovery_failure_decision(
     );
     let mut nodes = vec![recovery_record_node(OverflowRecoveryRecord::Failed {
         attempt: attempt_no as u32,
-    })];
+        cause,
+    })?];
     if exhausted {
-        nodes.push(recovery_record_node(OverflowRecoveryRecord::Exhausted));
+        nodes.push(recovery_record_node(OverflowRecoveryRecord::Exhausted {})?);
     }
-    ContextPressureDecision::Record { nodes }
+    Ok(ContextPressureDecision::Record { nodes })
 }
 
 /// One bounded recovery attempt, decided from committed history.
@@ -308,12 +280,12 @@ pub(crate) async fn overflow_recovery_decision(
     );
 
     if summary_prefix.is_empty() {
-        return Ok(recovery_failure_decision(
+        return recovery_failure_decision(
             &ctx.traces,
             trace_context,
             attempt_no,
-            "insufficient_reduction",
-        ));
+            RecoveryFailureCause::NothingToSummarize,
+        );
     }
 
     // Elide first: the summarizer request itself must fit its window, and it
@@ -344,12 +316,12 @@ pub(crate) async fn overflow_recovery_decision(
     )?;
     let request_tokens = projected_tokens + approx_token_count(&prompt_text);
     if request_tokens > summarizer_budget_tokens {
-        return Ok(recovery_failure_decision(
+        return recovery_failure_decision(
             &ctx.traces,
             trace_context,
             attempt_no,
-            "summarizer_request_exceeds_window",
-        ));
+            RecoveryFailureCause::RequestExceedsWindow,
+        );
     }
 
     // The summarizer is one direct completion on the same seam the ordinary
@@ -373,20 +345,25 @@ pub(crate) async fn overflow_recovery_decision(
     {
         Ok(Some(summary)) => summary,
         Ok(None) => {
-            return Ok(recovery_failure_decision(
+            return recovery_failure_decision(
                 &ctx.traces,
                 trace_context,
                 attempt_no,
-                "insufficient_reduction",
-            ));
+                RecoveryFailureCause::EmptySummary,
+            );
         }
+        Err(error) if error.aborts_invocation() => return Err(error),
         Err(error) => {
-            return Ok(recovery_failure_decision(
+            return recovery_failure_decision(
                 &ctx.traces,
                 trace_context,
                 attempt_no,
-                &format!("summarizer_failed: {error}"),
-            ));
+                RecoveryFailureCause::SummarizerRefused {
+                    code: error
+                        .into_turn_failure(lash_core::RuntimeErrorCode::ContextCompaction)
+                        .code,
+                },
+            );
         }
     };
 
@@ -401,49 +378,34 @@ pub(crate) async fn overflow_recovery_decision(
     // summary seeds the recovery frame, a compaction frame core opens before
     // this turn runs and commits with it.
     Ok(ContextPressureDecision::OpenFrame {
-        records: vec![recovery_record_node(OverflowRecoveryRecord::Completed)],
+        records: vec![recovery_record_node(OverflowRecoveryRecord::Completed {})?],
         task: OVERFLOW_RECOVERY_TASK.to_string(),
         seed: vec![compaction_summary_seed(&summary)],
     })
 }
 
-/// Marker directive the `after_turn` hook queues for a persisted overflow.
-use lash_core::facade_support::{TurnOutcome, TurnStop};
-pub async fn overflow_recovery_marker(
-    turn: &lash_core::plugin::TurnHookReport,
-) -> Option<lash_core::plugin::EnqueueMessagesDirective> {
-    if matches!(
-        turn.outcome,
-        TurnOutcome::Stopped(TurnStop::ContextOverflow)
-    ) {
-        Some(lash_core::plugin::EnqueueMessagesDirective {
-            messages: vec![recovery_pending_marker()],
-        })
-    } else {
-        None
-    }
-}
-
-/// The `after_turn` trigger. Best-effort fire, after the durable commit: no
-/// error propagates into the turn; a lost marker is only a lost *attempt*,
-/// never a duplicated one, and restore re-derives from the state appended
-/// together with the overflow outcome.
+/// Appends the pending recovery node with the overflowing turn's commit.
 pub(crate) async fn overflow_recovery_after_turn(
     ctx: &lash_core::plugin::TurnResultHookContext,
-) -> Result<Vec<lash_core::plugin::AfterTurnPluginDirective>, lash_core::plugin::PluginError> {
-    match overflow_recovery_marker(&ctx.turn).await {
-        Some(messages) => Ok(vec![
-            lash_core::plugin::AfterTurnPluginDirective::Ambient(
-                lash_core::plugin::PluginDirective::emit_trace(
-                    TRACE_OVERFLOW_RECOVERY_TRIGGER,
-                    serde_json::json!({
-                        "trigger": "persisted_context_overflow",
-                        "marker": "queued",
-                    }),
-                ),
-            ),
-            lash_core::plugin::AfterTurnPluginDirective::EnqueueMessages(messages),
-        ]),
-        None => Ok(vec![]),
+) -> Result<Vec<lash_core::plugin::AfterTurnPluginDirective>, PluginError> {
+    use lash_core::facade_support::{TurnOutcome, TurnStop};
+    use lash_core::plugin::{AfterTurnPluginDirective, PluginDirective};
+    if !matches!(
+        ctx.turn.outcome,
+        TurnOutcome::Stopped(TurnStop::ContextOverflow)
+    ) {
+        return Ok(Vec::new());
     }
+    let body = serde_json::to_value(OverflowRecoveryRecord::Pending {})
+        .map_err(|error| PluginError::Invoke(error.to_string()))?;
+    Ok(vec![
+        AfterTurnPluginDirective::Ambient(PluginDirective::emit_trace(
+            TRACE_OVERFLOW_RECOVERY_TRIGGER,
+            serde_json::json!({ "trigger": "persisted_context_overflow", "marker": "queued" }),
+        )),
+        AfterTurnPluginDirective::AppendPluginNode {
+            plugin_type: OVERFLOW_RECOVERY_PLUGIN_TYPE.to_string(),
+            body,
+        },
+    ])
 }

@@ -579,6 +579,7 @@ impl LashRuntime {
                 manager.graph_service(),
                 self.turn_phase_probe.clone(),
                 &trace_turn_id,
+                self.services.clock.as_ref(),
             )
             .await
         {

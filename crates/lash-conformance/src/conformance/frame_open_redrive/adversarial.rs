@@ -34,10 +34,19 @@ use crate::admit;
 /// Prompt usage over the standard compactor's pressure threshold on the
 /// laws' model (a 200k window less its 20k buffer).
 pub(super) const STANDARD_PRESSURE_TOKENS: i64 = 190_000;
-const OVERFLOW_RECOVERY_PENDING: &str =
-    "Standard-compaction context-overflow recovery marker (pending):";
-const OVERFLOW_RECOVERY_COMPLETED: &str =
-    "Standard-compaction context-overflow recovery completed:";
+const OVERFLOW_RECOVERY_PLUGIN_TYPE: &str = "standard_compaction.overflow_recovery";
+
+fn recovery_records(head: &super::LawHead) -> Vec<serde_json::Value> {
+    use crate::facade_support::SessionNodeProjection as _;
+    head.graph
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let (plugin_type, body) = node.plugin()?;
+            (plugin_type == OVERFLOW_RECOVERY_PLUGIN_TYPE).then(|| body.clone())
+        })
+        .collect()
+}
 
 type DriveResult =
     Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>;
@@ -352,10 +361,14 @@ pub(super) async fn overflow_recovery_crash_case(
         .clone()
         .expect("the session stands in its first frame");
     assert_eq!(
-        count(&every_message(&overflowed), |text| text
-            .starts_with(OVERFLOW_RECOVERY_PENDING)),
-        1,
-        "the refused root leaves its recovery marker"
+        recovery_records(&overflowed),
+        [serde_json::json!({"kind": "pending"})],
+        "the refused root leaves a typed recovery node outside conversation"
+    );
+    assert!(
+        !every_message(&overflowed)
+            .iter()
+            .any(|text| text.contains("context-overflow recovery marker"))
     );
     law.enqueue("second question").await;
     let before = overflowed.head_revision;
@@ -363,20 +376,112 @@ pub(super) async fn overflow_recovery_crash_case(
 
     assert_standard_frame_opened_once(&law, &model, crash, before, &first_frame).await;
     let head = law.head().await;
-    let messages = every_message(&head);
     assert_eq!(
-        count(&messages, |text| text
-            .starts_with(OVERFLOW_RECOVERY_PENDING)),
-        1,
-        "{messages:?}"
+        recovery_records(&head),
+        [
+            serde_json::json!({"kind": "pending"}),
+            serde_json::json!({"kind": "completed"}),
+        ],
+        "recovery records commit once and store each kind once"
     );
-    assert_eq!(
-        count(&messages, |text| text
-            .starts_with(OVERFLOW_RECOVERY_COMPLETED)),
-        1,
-        "the recovery records Completed once: {messages:?}"
+    assert!(
+        !every_message(&head)
+            .iter()
+            .any(|text| text.contains("context-overflow recovery marker"))
     );
     model
+}
+
+/// A failed summarizer invocation leaves the stored recovery pending. Repeated
+/// live faults and replay divergences spend no attempt and keep their typed cause;
+/// the next healthy drive can still complete the recovery.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: setup establishes each result"
+)]
+pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let protocol = StandardFrameLawProtocol::shared();
+    let model = law_model(ModelScript {
+        turns: vec![context_overflow(), (protocol.answer("recovered answer"), 1)],
+    });
+    let mut law = LawSession::open(
+        prefix,
+        "recovery-fault",
+        effect_host,
+        stores,
+        runner,
+        protocol,
+        model.provider.clone(),
+    )
+    .await;
+    law.parts.compaction.compactor = LawCompactor::Standard;
+    law.enqueue("first question").await;
+    law.run_root("overflow").await;
+    let before = law.head().await;
+    for code in [
+        crate::RuntimeErrorCode::RuntimeStore,
+        crate::RuntimeErrorCode::LashlangCellReplayDivergence,
+    ] {
+        for _ in 0..lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+            let runtime = build_runtime(&law.parts, None).await;
+            let state = crate::conformance::helpers::load_window_state(&law.store, &law.session_id)
+                .await
+                .expect("read stored pending recovery")
+                .expect("the overflow committed");
+            let injected = code.clone();
+            let ctx = crate::plugin::ContextPressureContext {
+                session_id: law.session_id.clone(),
+                plugin_config: state.admitted_plugin_config(),
+                state: state.read_view(),
+                prompt_usage: None,
+                max_context_tokens: Some(200_000),
+                traces: crate::plugin::PluginTraceEmitter::discard(),
+                scoped_effect_controller: crate::ScopedEffectController::shared(
+                    Arc::new(crate::testing::UnavailableEffectController),
+                    crate::AdmittedScope::runtime_operation("recovery-fault-law"),
+                )
+                .expect("scoped faulting completion"),
+                direct_completions: crate::DirectCompletionClient::from_llm_fn(move |_, _| {
+                    Err(crate::PluginError::Runtime(crate::RuntimeError::new(
+                        injected.clone(),
+                        "injected summarizer journal fault",
+                    )))
+                }),
+                system_prompt: None,
+            };
+            let error = runtime
+                .services
+                .plugins
+                .decide_context_pressure(&ctx, None)
+                .await
+                .expect_err("a fault must raise instead of deciding a failed recovery record");
+            let crate::plugin::ContextError::Plugin(crate::PluginError::Runtime(error)) = error
+            else {
+                panic!("the summarizer fault keeps its runtime cause: {error:?}");
+            };
+            assert_eq!(error.code, code);
+            assert_eq!(
+                law.head().await.head_revision,
+                before.head_revision,
+                "an aborted recovery writes nothing"
+            );
+        }
+    }
+    law.enqueue("continue after the journal recovers").await;
+    law.run_root("healthy").await;
+    assert_eq!(model.summary_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        recovery_records(&law.head().await),
+        [
+            serde_json::json!({"kind": "pending"}),
+            serde_json::json!({"kind": "completed"}),
+        ]
+    );
 }
 
 /// An administrative compaction queued before an input applies before it
