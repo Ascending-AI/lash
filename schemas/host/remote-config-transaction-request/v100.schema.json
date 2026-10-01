@@ -1,11 +1,8 @@
 {
-  "$id": "https://lash.dev/schemas/remote-config-transaction-request/v100",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "RemoteConfigCommandEntry": {
       "additionalProperties": false,
-      "description": "One command of a config transaction: the owner whose namespace it changes, the command's registered name and its arguments.",
+      "description": "One command of a config transaction: the owner whose namespace it\nchanges, the command's registered name and its arguments.",
       "properties": {
         "args": true,
         "command": {
@@ -16,30 +13,33 @@
         }
       },
       "required": [
-        "args",
+        "owner",
         "command",
-        "owner"
+        "args"
       ],
       "type": "object"
     }
   },
+  "$id": "https://lash.dev/schemas/remote-config-transaction-request/v100",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "A config transaction a remote caller submits to one session.",
   "properties": {
     "entries": {
       "description": "The commands, applied in order, all or none.",
       "items": {
-        "$ref": "#/definitions/RemoteConfigCommandEntry"
+        "$ref": "#/$defs/RemoteConfigCommandEntry"
       },
       "type": "array"
     },
     "expected_revision": {
       "description": "The session config revision the caller wrote the transaction against.",
       "format": "uint64",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "id": {
-      "description": "The caller's stable id for the transaction; a resubmission with the same content reuses it, and one with other content is refused.",
+      "description": "The caller's stable id for the transaction; a resubmission with the\nsame content reuses it, and one with other content is refused.",
       "type": "string"
     },
     "session_id": {
@@ -47,10 +47,10 @@
     }
   },
   "required": [
-    "entries",
-    "expected_revision",
+    "session_id",
     "id",
-    "session_id"
+    "expected_revision",
+    "entries"
   ],
   "title": "RemoteConfigTransactionRequest",
   "type": "object",

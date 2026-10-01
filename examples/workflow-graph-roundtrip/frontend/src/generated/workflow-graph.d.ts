@@ -5,7 +5,7 @@ export type WorkflowDeclaration =
       body: WorkflowSubgraph;
       description?: string | null;
       display_name: string;
-      id: string;
+      id: WorkflowNodeId;
       kind: 'process';
       name: string;
       name_source: WorkflowNodeNameSource;
@@ -17,14 +17,14 @@ export type WorkflowDeclaration =
       return_ty?: TypeExpr | null;
       signals?: ProcessSignalDecl[];
     }
-  | {
-      body: Expr;
+  | (FunctionDecl & {
       kind: 'function';
-      name: string;
-      params?: FunctionParam[];
-      return_ty: TypeExpr;
       [k: string]: unknown;
-    };
+    });
+/**
+ * A deterministic node identifier minted from structural owner and AST path.
+ */
+export type WorkflowNodeId = string;
 export type WorkflowEdgeKind =
   | {
       kind: 'data_dependency';
@@ -37,7 +37,10 @@ export type WorkflowEdgeKind =
 /**
  * Closed vocabulary of executable workflow sites.
  *
- * This describes the site, not its current observation. A workflow node may expose more than one site kind. Declaration order is the canonical order: a node's execution sites sort by it, so reordering the variants changes the serialized workflow graph and needs a graph schema bump.
+ * This describes the site, not its current observation. A workflow node may
+ * expose more than one site kind. Declaration order is the canonical order:
+ * a node's execution sites sort by it, so reordering the variants changes
+ * the serialized workflow graph and needs a graph schema bump.
  */
 export type ExecutionNodeKind =
   'resource_operation' | 'sleep' | 'wait' | 'terminal' | 'process_event' | 'branch' | 'loop' | 'call' | 'step';
@@ -69,7 +72,8 @@ export type WorkflowNodeKind =
     }
   | {
       /**
-       * The assigned value, or with `update`, the operand the update applies to the target's current value (`target op= expression`).
+       * The assigned value, or with `update`, the operand the update applies
+       * to the target's current value (`target op= expression`).
        */
       expression: Expr;
       kind: 'state_update';
@@ -175,7 +179,8 @@ export type Expr =
   | {
       For: {
         /**
-         * The authored name of a renamed lexical element binding. Display metadata only; `binding` and `bind` retain their linker identities.
+         * The authored name of a renamed lexical element binding. Display
+         * metadata only; `binding` and `bind` retain their linker identities.
          */
         authored_binding?: string | null;
         bind?: Expr | null;
@@ -354,7 +359,9 @@ export type NonFiniteNumber = 'NaN' | 'Infinity' | '-Infinity';
 /**
  * The structural roles a front end marks its generated IR with.
  *
- * Each role is language-neutral: it names what a shape does, not the source construct that produced it, and each front end chooses which of its constructs lower to which role.
+ * Each role is language-neutral: it names what a shape does, not the source
+ * construct that produced it, and each front end chooses which of its
+ * constructs lower to which role.
  */
 export type StructuralRole =
   | {
@@ -379,7 +386,9 @@ export type StructuralRole =
 /**
  * A serialized value-type expression.
  *
- * Host decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.
+ * Host decoders must refuse unknown variants. `TypeExpr` is decoded only
+ * after its graph or facet carrier version is accepted; adding a variant
+ * therefore requires the owning carrier version to advance.
  */
 export type TypeExpr =
   | ('Any' | 'Str' | 'Int' | 'Float' | 'Bool' | 'Dict')
@@ -453,7 +462,10 @@ export type JavaScriptLogicalOp = 'And' | 'Or' | 'NullishCoalesce';
 /**
  * One call or effect argument in graph order.
  *
- * Type facets address these values with a serialized [`WorkflowSlotPath`]. Its typed call, argument, field, and index segments cannot collide when a field contains punctuation. Nodes with several nested receiver calls add a call segment in depth-first IR walk order.
+ * Type facets address these values with a serialized [`WorkflowSlotPath`].
+ * Its typed call, argument, field, and index segments cannot collide when a
+ * field contains punctuation. Nodes with several nested receiver calls add a
+ * call segment in depth-first IR walk order.
  */
 export type WorkflowArgument =
   | {
@@ -470,13 +482,16 @@ export type WorkflowArgument =
 export type WorkflowResultStep = 'await' | 'unwrap_result';
 export type WorkflowEffectKind = 'await_join' | 'wait_signal' | 'sleep_for' | 'print' | 'break' | 'continue';
 /**
- * An arithmetic operator a compound attribute assignment applies to the attribute's current value. Named neutrally: a front end's IR decides whether the operation is Lashlang's or ECMA-262's.
+ * An arithmetic operator a compound attribute assignment applies to the
+ * attribute's current value. Named neutrally: a front end's IR decides
+ * whether the operation is Lashlang's or ECMA-262's.
  */
 export type UpdateOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'remainder';
 export type WorkflowTerminalKind = 'finish' | 'fail';
 export type WorkflowNodeNameSource = 'label' | 'derived';
 /**
- * Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.
+ * Whether a diagnostic establishes an admission failure for the analyzed
+ * program and host environment or gives advice without establishing a failure.
  */
 export type WorkflowDiagnosticClassification = 'definite' | 'advisory';
 /**
@@ -550,6 +565,14 @@ export type WorkflowSlotPathSegment =
       index: number;
     };
 /**
+ * An unambiguous address for one input location inside a workflow node.
+ *
+ * The serialized list is authoritative. [`Display`](std::fmt::Display) is a
+ * derived spelling for text-only host contracts; field names use JSON string
+ * quoting so they cannot collide with structural indexes or separators.
+ */
+export type WorkflowSlotPath = WorkflowSlotPathSegment[];
+/**
  * The origin of a [`super::ProcessDecl`].
  */
 export type ProcessOrigin =
@@ -558,7 +581,9 @@ export type ProcessOrigin =
     }
   | {
       /**
-       * The authored settled output annotation. An inferred output remains on the declaration, so rendering can infer it again without inventing an annotation the source never declared.
+       * The authored settled output annotation. An inferred output remains
+       * on the declaration, so rendering can infer it again without
+       * inventing an annotation the source never declared.
        */
       declared_return_ty?: TypeExpr | null;
       hidden_params: number;
@@ -566,7 +591,8 @@ export type ProcessOrigin =
       site: AstPath;
     };
 /**
- * Which tree an [`AstPath`] walks down: `Program::main`, or one entry of `Program::declarations`.
+ * Which tree an [`AstPath`] walks down: `Program::main`, or one entry of
+ * `Program::declarations`.
  */
 export type AstRoot =
   | 'main'
@@ -583,7 +609,12 @@ export interface WorkflowGraph {
   main: WorkflowSubgraph;
   schema_version: 21;
   /**
-   * The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.
+   * The definition identity of the admitted module artifact this graph
+   * projects ([`crate::ModuleArtifact::source_identity`]), which the
+   * module's traces carry too. A draft projected from source that has not
+   * been admitted claims no runtime identity and carries `None`.
+   * [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape,
+   * `facet_schema_version` identifies optional derived facts.
    */
   source_identity?: string | null;
 }
@@ -592,10 +623,10 @@ export interface WorkflowSubgraph {
   nodes?: WorkflowNode[];
 }
 export interface WorkflowEdge {
-  from: string;
+  from: WorkflowNodeId;
   id: string;
   kind: WorkflowEdgeKind;
-  to: string;
+  to: WorkflowNodeId;
 }
 export interface WorkflowNode {
   /**
@@ -604,7 +635,7 @@ export interface WorkflowNode {
   available_variables?: string[];
   description?: string | null;
   execution_sites?: WorkflowExecutionSite[];
-  id: string;
+  id: WorkflowNodeId;
   kind: WorkflowNodeKind;
   name: string;
   name_source: WorkflowNodeNameSource;
@@ -645,13 +676,21 @@ export interface FunctionExpr {
   body: Expr;
   captures?: string[];
   /**
-   * The ECMA-262 `name` own property the closure value carries: the function's own binding name, or the name a `NamedEvaluation` / `SetFunctionName` context assigned it. `None` is the anonymous `""` ECMA reports for a function no naming context reached.
+   * The ECMA-262 `name` own property the closure value carries: the
+   * function's own binding name, or the name a `NamedEvaluation` /
+   * `SetFunctionName` context assigned it. `None` is the anonymous `""`
+   * ECMA reports for a function no naming context reached.
    */
   js_name?: string | null;
   name?: string | null;
   params?: string[];
   /**
-   * The slot the call's receiver is bound to, for a function that reads it. A call through [`Expr::MethodCall`] or [`Expr::ThisCall`] binds the receiver it names; every other call binds `undefined`. A function without one (an arrow, or one that never reads its receiver) ignores the receiver entirely; an arrow reads its enclosing function's slot as an ordinary capture.
+   * The slot the call's receiver is bound to, for a function that reads
+   * it. A call through [`Expr::MethodCall`] or [`Expr::ThisCall`] binds the
+   * receiver it names; every other call binds `undefined`. A function
+   * without one (an arrow, or one that never reads its receiver) ignores
+   * the receiver entirely; an arrow reads its enclosing function's slot as
+   * an ordinary capture.
    */
   receiver?: string | null;
   [k: string]: unknown;
@@ -659,12 +698,18 @@ export interface FunctionExpr {
 /**
  * The authored shape of an inline process body, as a dialect lowers it.
  *
- * `params` carries the parameter names and their declared types, so a TypeScript arrow's annotations reach the lifted declaration's signature instead of widening to `Any`. `body` is the same wrapper a process literal run lowers to: the authored statements inside the process-failure wrapper, with the params passed through by name.
+ * `params` carries the parameter names and their declared types, so a
+ * TypeScript arrow's annotations reach the lifted declaration's signature
+ * instead of widening to `Any`. `body` is the same wrapper a process literal
+ * run lowers to: the authored statements inside the process-failure wrapper,
+ * with the params passed through by name.
  */
 export interface ProcessLiteralExpr {
   body: Expr;
   /**
-   * Immutable, durably representable cell locals the body reads; each becomes a hidden start argument carrying the value the variable had when the process started (FIG-2998).
+   * Immutable, durably representable cell locals the body reads; each
+   * becomes a hidden start argument carrying the value the variable had
+   * when the process started (FIG-2998).
    */
   hidden_args?: ProcessParam[];
   params: ProcessParam[];
@@ -723,18 +768,19 @@ export interface WorkflowTypeDiagnostic {
   classification: WorkflowDiagnosticClassification;
   kind: WorkflowDiagnosticKind;
   message: string;
-  node_id: string;
-  slot?: WorkflowSlotPathSegment[] | null;
+  node_id: WorkflowNodeId;
+  slot?: WorkflowSlotPath | null;
   span?: Span | null;
   [k: string]: unknown;
 }
 export interface WorkflowExpectedArgument {
-  slot: WorkflowSlotPathSegment[];
+  slot: WorkflowSlotPath;
   ty: TypeExpr;
   [k: string]: unknown;
 }
 /**
- * A node's address in a `Program`: the root it hangs from plus the `Expr::children()` index chain that reaches it.
+ * A node's address in a `Program`: the root it hangs from plus the
+ * `Expr::children()` index chain that reaches it.
  */
 export interface AstPath {
   root: AstRoot;
@@ -744,6 +790,24 @@ export interface AstPath {
 export interface ProcessSignalDecl {
   name: string;
   ty: TypeExpr;
+  [k: string]: unknown;
+}
+/**
+ * A user-defined pure synchronous function.
+ *
+ * A function is the language's only reusable *synchronous* abstraction:
+ * `process` is durable and asynchronous, so shared pure logic previously had
+ * to be inlined at every use. The declaration is deliberately narrower than
+ * `process`: parameters and the return type are both mandatory, and the linker
+ * rejects every effect inside the body. That ban is what keeps effect identity
+ * untouched — every effect stays at a stable top-level syntactic site, so
+ * call-site exactly-once identity and continuation snapshots see no new shape.
+ */
+export interface FunctionDecl {
+  body: Expr;
+  name: string;
+  params?: FunctionParam[];
+  return_ty: TypeExpr;
   [k: string]: unknown;
 }
 export interface FunctionParam {

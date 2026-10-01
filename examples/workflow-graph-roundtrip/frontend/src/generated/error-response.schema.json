@@ -1,7 +1,5 @@
 {
-  "$id": "https://lash.dev/examples/workflow-graph-roundtrip/error-response",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "ErrorDetail": {
       "properties": {
         "code": {
@@ -14,15 +12,17 @@
       },
       "required": [
         "code",
-        "details",
-        "message"
+        "message",
+        "details"
       ],
       "type": "object"
     }
   },
+  "$id": "https://lash.dev/examples/workflow-graph-roundtrip/error-response",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "error": {
-      "$ref": "#/definitions/ErrorDetail"
+      "$ref": "#/$defs/ErrorDetail"
     }
   },
   "required": [

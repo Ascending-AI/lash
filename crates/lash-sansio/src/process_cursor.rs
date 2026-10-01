@@ -278,26 +278,16 @@ impl<'de> Deserialize<'de> for ProcessCursor {
 }
 
 impl schemars::JsonSchema for ProcessCursor {
-    fn schema_name() -> String {
-        "ProcessCursor".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ProcessCursor".into()
     }
 
-    fn json_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(format!("^lashpc{}:[^:]+:p_[0-9a-f]{{32}}:[0-9]+:[0-9]+$", schema_versions())),
-                ..Default::default()
-            })),
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                description: Some(
-                    format!("Opaque process cursor: `lashpc{PROCESS_CURSOR_VERSION}:<epoch>:<process-reference>:<position>:<sequence>`."),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": format!("^lashpc{}:[^:]+:p_[0-9a-f]{{32}}:[0-9]+:[0-9]+$", schema_versions()),
+            "description": format!("Opaque process cursor: `lashpc{PROCESS_CURSOR_VERSION}:<epoch>:<process-reference>:<position>:<sequence>`.")
+        })
     }
 }
 

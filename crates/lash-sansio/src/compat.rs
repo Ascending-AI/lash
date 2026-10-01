@@ -139,11 +139,11 @@ impl From<VersionRange> for RawVersionRange {
 }
 
 impl schemars::JsonSchema for VersionRange {
-    fn schema_name() -> String {
-        "VersionRange".to_owned()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "VersionRange".into()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         RawVersionRange::json_schema(generator)
     }
 }

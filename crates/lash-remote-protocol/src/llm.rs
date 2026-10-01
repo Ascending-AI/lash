@@ -374,6 +374,7 @@ pub struct RemoteNormalizedError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<lash_sansio::FailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(transform = crate::omit_schema_integer_maximum)]
     pub http_status: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_request_id: Option<String>,

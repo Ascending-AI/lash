@@ -1,7 +1,5 @@
 {
-  "$id": "https://lash.dev/examples/workflow-graph-roundtrip/workflow-document",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "ChildGroup": {
       "properties": {
         "nodeIds": {
@@ -18,9 +16,9 @@
         }
       },
       "required": [
-        "nodeIds",
+        "slot",
         "scope",
-        "slot"
+        "nodeIds"
       ],
       "type": "object"
     },
@@ -40,7 +38,7 @@
         },
         "version": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -69,15 +67,13 @@
       "type": "object"
     },
     "EditableValue": {
-      "description": "An editable field carries its authored kind at every depth. Literal keys are data, including `$expr`, `kind` and `value`.",
+      "description": "An editable field carries its authored kind at every depth. Literal keys\nare data, including `$expr`, `kind` and `value`.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "null"
-              ],
+              "const": "null",
               "type": "string"
             },
             "value": {
@@ -94,9 +90,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "bool"
-              ],
+              "const": "bool",
               "type": "string"
             },
             "value": {
@@ -113,9 +107,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "number"
-              ],
+              "const": "number",
               "type": "string"
             },
             "value": {
@@ -133,9 +125,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "string"
-              ],
+              "const": "string",
               "type": "string"
             },
             "value": {
@@ -152,14 +142,12 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "list"
-              ],
+              "const": "list",
               "type": "string"
             },
             "value": {
               "items": {
-                "$ref": "#/definitions/EditableValue"
+                "$ref": "#/$defs/EditableValue"
               },
               "type": "array"
             }
@@ -174,9 +162,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "expr"
-              ],
+              "const": "expr",
               "type": "string"
             },
             "value": {
@@ -193,14 +179,12 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "object"
-              ],
+              "const": "object",
               "type": "string"
             },
             "value": {
               "additionalProperties": {
-                "$ref": "#/definitions/EditableValue"
+                "$ref": "#/$defs/EditableValue"
               },
               "type": "object"
             }
@@ -231,7 +215,7 @@
     "FlowEdge": {
       "properties": {
         "data": {
-          "$ref": "#/definitions/EdgeData"
+          "$ref": "#/$defs/EdgeData"
         },
         "id": {
           "type": "string"
@@ -244,17 +228,17 @@
         }
       },
       "required": [
-        "data",
         "id",
         "source",
-        "target"
+        "target",
+        "data"
       ],
       "type": "object"
     },
     "FlowNode": {
       "properties": {
         "data": {
-          "$ref": "#/definitions/NodeData"
+          "$ref": "#/$defs/NodeData"
         },
         "id": {
           "type": "string"
@@ -270,9 +254,9 @@
         }
       },
       "required": [
-        "data",
         "id",
-        "type"
+        "type",
+        "data"
       ],
       "type": "object"
     },
@@ -298,10 +282,10 @@
       "type": "object"
     },
     "NodeData": {
-      "description": "A node's display name together with the one fact that decides whether the host may throw it away: who chose it.\n\nRendering emits an `@label` annotation only for an authored name, so a payload that carries a title without saying where the name came from is a rename waiting to evaporate. The tag is therefore mandatory and carries the title inside the variant: \"title present, tag absent\" is unrepresentable, and an unknown tag is a decode error rather than a silent `derived`. The wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the browser client already writes on every node.",
+      "description": "A node's display name together with the one fact that decides whether the\nhost may throw it away: who chose it.\n\nRendering emits an `@label` annotation only for an authored name, so a\npayload that carries a title without saying where the name came from is a\nrename waiting to evaporate. The tag is therefore mandatory and carries the\ntitle inside the variant: \"title present, tag absent\" is unrepresentable,\nand an unknown tag is a decode error rather than a silent `derived`. The\nwire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the\nbrowser client already writes on every node.",
       "oneOf": [
         {
-          "description": "The author named this node: the title and its optional description are theirs, and the save path renders them back as an `@label` annotation.",
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
           "properties": {
             "description": {
               "type": [
@@ -310,9 +294,7 @@
               ]
             },
             "nameSource": {
-              "enum": [
-                "label"
-              ],
+              "const": "label",
               "type": "string"
             },
             "title": {
@@ -326,12 +308,10 @@
           "type": "object"
         },
         {
-          "description": "The name is a rendering of the node's own expression. The title is output, not input: the save path recomputes it and it carries no description.",
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
           "properties": {
             "nameSource": {
-              "enum": [
-                "derived"
-              ],
+              "const": "derived",
               "type": "string"
             },
             "title": {
@@ -349,7 +329,7 @@
         "availableVars": {
           "default": [],
           "items": {
-            "$ref": "#/definitions/TypedVariable"
+            "$ref": "#/$defs/TypedVariable"
           },
           "type": "array"
         },
@@ -361,7 +341,7 @@
         },
         "children": {
           "items": {
-            "$ref": "#/definitions/ChildGroup"
+            "$ref": "#/$defs/ChildGroup"
           },
           "type": "array"
         },
@@ -373,7 +353,7 @@
         },
         "diagnostics": {
           "items": {
-            "$ref": "#/definitions/TypeDiagnostic"
+            "$ref": "#/$defs/TypeDiagnostic"
           },
           "type": "array"
         },
@@ -385,7 +365,7 @@
         },
         "expectedArgTypes": {
           "items": {
-            "$ref": "#/definitions/ExpectedArgumentType"
+            "$ref": "#/$defs/ExpectedArgumentType"
           },
           "type": "array"
         },
@@ -397,7 +377,7 @@
         },
         "fields": {
           "additionalProperties": {
-            "$ref": "#/definitions/EditableValue"
+            "$ref": "#/$defs/EditableValue"
           },
           "default": {},
           "type": "object"
@@ -425,12 +405,12 @@
         },
         "params": {
           "items": {
-            "$ref": "#/definitions/EditableProcessField"
+            "$ref": "#/$defs/EditableProcessField"
           },
           "type": "array"
         },
         "receiver": {
-          "description": "The receiver the catalog entry this node came from belongs to, carried so a call node posted with no `expression` can be synthesized against the receiver it actually names (FIG-3178).",
+          "description": "The receiver the catalog entry this node came from belongs to, carried\nso a call node posted with no `expression` can be synthesized against\nthe receiver it actually names (FIG-3178).",
           "type": [
             "string",
             "null"
@@ -438,7 +418,7 @@
         },
         "signals": {
           "items": {
-            "$ref": "#/definitions/EditableProcessField"
+            "$ref": "#/$defs/EditableProcessField"
           },
           "type": "array"
         },
@@ -476,25 +456,25 @@
       "properties": {
         "end": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "start": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "end",
-        "start"
+        "start",
+        "end"
       ],
       "type": "object"
     },
     "TypeDiagnostic": {
       "properties": {
         "classification": {
-          "$ref": "#/definitions/WorkflowDiagnosticClassification"
+          "$ref": "#/$defs/WorkflowDiagnosticClassification"
         },
         "kind": {
           "type": "string"
@@ -514,7 +494,7 @@
         "span": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Span"
+              "$ref": "#/$defs/Span"
             },
             {
               "type": "null"
@@ -523,10 +503,10 @@
         }
       },
       "required": [
-        "classification",
+        "nodeId",
         "kind",
-        "message",
-        "nodeId"
+        "classification",
+        "message"
       ],
       "type": "object"
     },
@@ -546,7 +526,7 @@
       "type": "object"
     },
     "WorkflowDiagnosticClassification": {
-      "description": "Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.",
+      "description": "Whether a diagnostic establishes an admission failure for the analyzed\nprogram and host environment or gives advice without establishing a failure.",
       "enum": [
         "definite",
         "advisory"
@@ -554,9 +534,11 @@
       "type": "string"
     }
   },
+  "$id": "https://lash.dev/examples/workflow-graph-roundtrip/workflow-document",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "definition": {
-      "description": "The source identity of the admitted artifact this document's graph is the view of; absent for a draft whose source does not admit. A run overlay shows a run's events only when their `definition` is this one.",
+      "description": "The source identity of the admitted artifact this document's graph\nis the view of; absent for a draft whose source does not admit. A run\noverlay shows a run's events only when their `definition` is this one.",
       "type": [
         "string",
         "null"
@@ -564,13 +546,13 @@
     },
     "edges": {
       "items": {
-        "$ref": "#/definitions/FlowEdge"
+        "$ref": "#/$defs/FlowEdge"
       },
       "type": "array"
     },
     "facetSchemaVersion": {
       "format": "uint32",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": [
         "integer",
         "null"
@@ -578,16 +560,16 @@
     },
     "nodes": {
       "items": {
-        "$ref": "#/definitions/FlowNode"
+        "$ref": "#/$defs/FlowNode"
       },
       "type": "array"
     },
     "roots": {
-      "$ref": "#/definitions/GraphRoots"
+      "$ref": "#/$defs/GraphRoots"
     },
     "schemaVersion": {
       "format": "uint32",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "source": {
@@ -595,17 +577,17 @@
     },
     "version": {
       "format": "uint64",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     }
   },
   "required": [
-    "edges",
-    "nodes",
-    "roots",
     "schemaVersion",
+    "version",
     "source",
-    "version"
+    "nodes",
+    "edges",
+    "roots"
   ],
   "title": "WorkflowDocument",
   "type": "object"

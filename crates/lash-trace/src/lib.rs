@@ -331,11 +331,11 @@ pub struct TraceRecord {
 /// RFC 3339 string, and the event's `type` tag and fields sit beside the
 /// envelope fields.
 impl schemars::JsonSchema for TraceRecord {
-    fn schema_name() -> String {
-        "TraceRecord".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TraceRecord".into()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         // Schema-only mirror of the serialized record; Serde never reads it.
         /// One durable trace record: the envelope fields plus the flattened
         /// event, whose `type` tag names the variant.
@@ -355,15 +355,8 @@ impl schemars::JsonSchema for TraceRecord {
     }
 }
 
-fn rfc3339_timestamp_schema(
-    _generator: &mut schemars::r#gen::SchemaGenerator,
-) -> schemars::schema::Schema {
-    schemars::schema::SchemaObject {
-        instance_type: Some(schemars::schema::InstanceType::String.into()),
-        format: Some("date-time".to_string()),
-        ..Default::default()
-    }
-    .into()
+fn rfc3339_timestamp_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "string", "format": "date-time" })
 }
 
 #[derive(Deserialize)]
@@ -774,6 +767,7 @@ pub enum TraceChargeSafetyDecision {
         /// Provider-reported tokens billed for the abandoned generation.
         tokens_at_stake: u64,
         /// One-based unsafe retry number within the logical LLM call.
+        #[schemars(transform = crate::omit_schema_integer_maximum)]
         attempt_number: u8,
     },
     /// Host policy refuses this otherwise unsafe retry.
@@ -781,6 +775,7 @@ pub enum TraceChargeSafetyDecision {
         /// Provider-reported tokens billed for the abandoned generation.
         tokens_at_stake: u64,
         /// One-based unsafe retry number within the logical LLM call.
+        #[schemars(transform = crate::omit_schema_integer_maximum)]
         attempt_number: u8,
         /// Typed policy bound that refused the retry.
         reason: TraceChargeSafetyDenialReason,
@@ -1966,3 +1961,7 @@ pub fn json_hash(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests;
+
+fn omit_schema_integer_maximum(schema: &mut schemars::Schema) {
+    schema.remove("maximum");
+}

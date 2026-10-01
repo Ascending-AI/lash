@@ -1136,16 +1136,13 @@ pub enum TypeExpr {
 pub struct UnionMembers(Vec<TypeExpr>);
 
 impl JsonSchema for UnionMembers {
-    fn schema_name() -> String {
-        "UnionMembers".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "UnionMembers".into()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         let mut schema = generator.subschema_for::<Vec<TypeExpr>>();
-        let schemars::schema::Schema::Object(object) = &mut schema else {
-            return schema;
-        };
-        object.array.get_or_insert_with(Default::default).min_items = Some(2);
+        schema.insert("minItems".to_string(), serde_json::json!(2));
         schema
     }
 }
@@ -1376,11 +1373,11 @@ enum ProcessTypeWire {
 }
 
 impl JsonSchema for ProcessType {
-    fn schema_name() -> String {
-        "ProcessType".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ProcessType".into()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         ProcessTypeWire::json_schema(generator)
     }
 }

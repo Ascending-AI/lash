@@ -49,13 +49,13 @@ error[E0277]: the trait bound `lash::rlm::lang::ModuleArtifact: serde::Deseriali
    = note: for types from other crates check whether the crate offers a `serde` feature flag
    = help: the following other types implement trait `serde_core::de::Deserialize<'de>`:
              &'a Path
-             &'a RawValue
              &'a [u8]
              &'a serde_bytes::bytearray::ByteArray<N>
              &'a serde_bytes::bytes::Bytes
              &'a str
              ()
              (T,)
+             (T0, T1)
            and $N others
 note: required by a bound in `from_slice`
   --> $CARGO/serde_json-$VERSION/src/de.rs

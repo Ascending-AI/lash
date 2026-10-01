@@ -1,8 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-events-request/v100",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "ProcessCursor": {
       "description": "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.",
       "pattern": "^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$",
@@ -12,27 +9,26 @@
       "description": "Payload projection selected for a bounded process-event page.",
       "oneOf": [
         {
+          "const": "full",
           "description": "Return the complete durable event, including its JSON payload.",
-          "enum": [
-            "full"
-          ],
           "type": "string"
         },
         {
+          "const": "lite",
           "description": "Return only the event ordering position and type.",
-          "enum": [
-            "lite"
-          ],
           "type": "string"
         }
       ]
     }
   },
+  "$id": "https://lash.dev/schemas/remote-process-events-request/v100",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "properties": {
     "cursor": {
       "anyOf": [
         {
-          "$ref": "#/definitions/ProcessCursor"
+          "$ref": "#/$defs/ProcessCursor"
         },
         {
           "type": "null"
@@ -42,20 +38,20 @@
     },
     "limit": {
       "format": "uint",
-      "minimum": 1.0,
+      "minimum": 1,
       "type": "integer"
     },
     "mode": {
-      "$ref": "#/definitions/ProcessEventQueryMode"
+      "$ref": "#/$defs/ProcessEventQueryMode"
     },
     "process_id": {
       "type": "string"
     }
   },
   "required": [
+    "process_id",
     "limit",
-    "mode",
-    "process_id"
+    "mode"
   ],
   "title": "RemoteProcessEventsRequest",
   "type": "object",

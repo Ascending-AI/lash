@@ -81,14 +81,11 @@ fn stamp_schema<T: JsonSchema>(
     Ok(schema)
 }
 
-/// Schemars represents `WorkflowNodeKind::Container(WorkflowContainer)` as an
-/// object carrying `kind`, intersected with a second closed object carrying
-/// the container fields. Draft 7 evaluates `additionalProperties` within each
-/// object, so that representation rejects every serialized container. Replace
-/// it with one closed object per container alternative.
+/// Merge the node's `kind` tag into each container alternative and retain
+/// its closed-object rule so unknown container fields remain invalid.
 fn merge_container_node_schemas(root: &mut Map<String, Value>) -> Result<(), String> {
     let Some(node_kind) = root
-        .get_mut("definitions")
+        .get_mut("$defs")
         .and_then(Value::as_object_mut)
         .and_then(|definitions| definitions.get_mut("WorkflowNodeKind"))
     else {
@@ -100,7 +97,7 @@ fn merge_container_node_schemas(root: &mut Map<String, Value>) -> Result<(), Str
         .ok_or_else(|| "WorkflowNodeKind schema has no alternatives".to_string())?;
     let container_index = alternatives
         .iter()
-        .position(|alternative| alternative["properties"]["kind"]["enum"] == json!(["container"]))
+        .position(|alternative| alternative["properties"]["kind"]["const"] == json!("container"))
         .ok_or_else(|| "WorkflowNodeKind schema has no container alternative".to_string())?;
     let container = alternatives.remove(container_index);
     let variants = container
@@ -113,6 +110,7 @@ fn merge_container_node_schemas(root: &mut Map<String, Value>) -> Result<(), Str
         let object = variant
             .as_object_mut()
             .ok_or_else(|| "container variant schema is not an object".to_string())?;
+        object.insert("additionalProperties".to_string(), json!(false));
         object
             .entry("properties")
             .or_insert_with(|| json!({}))
@@ -120,7 +118,7 @@ fn merge_container_node_schemas(root: &mut Map<String, Value>) -> Result<(), Str
             .ok_or_else(|| "container variant properties are not an object".to_string())?
             .insert(
                 "kind".to_string(),
-                json!({ "enum": ["container"], "type": "string" }),
+                json!({ "const": "container", "type": "string" }),
             );
         let required = object
             .entry("required")
@@ -179,16 +177,16 @@ mod tests {
             json!([WORKFLOW_GRAPH_SCHEMA_VERSION])
         );
         assert!(
-            graph.schema["definitions"]["WorkflowNodeTypeFacets"]
+            graph.schema["$defs"]["WorkflowNodeTypeFacets"]
                 .get("additionalProperties")
                 .is_none()
         );
-        let node_variants = graph.schema["definitions"]["WorkflowNodeKind"]["oneOf"]
+        let node_variants = graph.schema["$defs"]["WorkflowNodeKind"]["oneOf"]
             .as_array()
             .expect("node variants");
         let containers = node_variants
             .iter()
-            .filter(|variant| variant["properties"]["kind"]["enum"] == json!(["container"]))
+            .filter(|variant| variant["properties"]["kind"]["const"] == json!("container"))
             .collect::<Vec<_>>();
         assert_eq!(containers.len(), 3);
         assert!(containers.iter().all(|variant| {

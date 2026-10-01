@@ -250,7 +250,7 @@ rmp-serde = "1.3.1"
 ryu-js = "=1.0.3"
 rmcp = { version = "1.6", default-features = false }
 restate-sdk = { version = "0.11", default-features = false, features = ["http_server"] }
-schemars = "0.8"
+schemars = "1.2.2"
 serde = "1"
 serde_bytes = "0.11"
 # `float_roundtrip`: without it serde_json's fast float parser lands one ULP

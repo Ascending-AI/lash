@@ -1,8 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-config-command-catalog/v100",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "RemoteConfigCommandDescriptor": {
       "additionalProperties": false,
       "description": "One registered config command and its generated schemas.",
@@ -18,32 +15,35 @@
         "refusal_schema": true
       },
       "required": [
+        "owner",
         "command",
         "input_schema",
         "output_schema",
-        "owner",
         "refusal_schema"
       ],
       "type": "object"
     }
   },
-  "description": "Every config command a session admits, describing its config at `revision`. Discovery only: an owner can still refuse arguments its schema admits.",
+  "$id": "https://lash.dev/schemas/remote-config-command-catalog/v100",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Every config command a session admits, describing its config at\n`revision`. Discovery only: an owner can still refuse arguments its\nschema admits.",
   "properties": {
     "commands": {
       "items": {
-        "$ref": "#/definitions/RemoteConfigCommandDescriptor"
+        "$ref": "#/$defs/RemoteConfigCommandDescriptor"
       },
       "type": "array"
     },
     "revision": {
       "format": "uint64",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     }
   },
   "required": [
-    "commands",
-    "revision"
+    "revision",
+    "commands"
   ],
   "title": "RemoteConfigCommandCatalog",
   "type": "object",

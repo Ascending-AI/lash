@@ -1,7 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-type-facets/v4",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "ProcessParamWire": {
       "additionalProperties": false,
       "properties": {
@@ -9,7 +7,7 @@
           "type": "string"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -24,9 +22,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "unknown"
-              ],
+              "const": "unknown",
               "type": "string"
             }
           },
@@ -39,25 +35,23 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "known"
-              ],
+              "const": "known",
               "type": "string"
             },
             "output": {
-              "$ref": "#/definitions/TypeExpr"
+              "$ref": "#/$defs/TypeExpr"
             },
             "params": {
               "items": {
-                "$ref": "#/definitions/ProcessParamWire"
+                "$ref": "#/$defs/ProcessParamWire"
               },
               "type": "array"
             }
           },
           "required": [
             "kind",
-            "output",
-            "params"
+            "params",
+            "output"
           ],
           "type": "object"
         }
@@ -67,23 +61,23 @@
       "properties": {
         "end": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "start": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "end",
-        "start"
+        "start",
+        "end"
       ],
       "type": "object"
     },
     "TypeExpr": {
-      "description": "A serialized value-type expression.\n\nHost decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.",
+      "description": "A serialized value-type expression.\n\nHost decoders must refuse unknown variants. `TypeExpr` is decoded only\nafter its graph or facet carrier version is accepted; adding a variant\ntherefore requires the owning carrier version to advance.",
       "oneOf": [
         {
           "enum": [
@@ -97,10 +91,8 @@
           "type": "string"
         },
         {
-          "description": "The literal `null` type; usually only useful as part of a `Union` (e.g. `str | null` for a nullable field).",
-          "enum": [
-            "Null"
-          ],
+          "const": "Null",
+          "description": "The literal `null` type; usually only useful as part of a\n`Union` (e.g. `str | null` for a nullable field).",
           "type": "string"
         },
         {
@@ -122,7 +114,7 @@
           "additionalProperties": false,
           "properties": {
             "List": {
-              "$ref": "#/definitions/TypeExpr"
+              "$ref": "#/$defs/TypeExpr"
             }
           },
           "required": [
@@ -135,7 +127,7 @@
           "properties": {
             "Object": {
               "items": {
-                "$ref": "#/definitions/TypeField"
+                "$ref": "#/$defs/TypeField"
               },
               "type": "array"
             }
@@ -161,7 +153,7 @@
           "additionalProperties": false,
           "properties": {
             "Process": {
-              "$ref": "#/definitions/ProcessType"
+              "$ref": "#/$defs/ProcessType"
             }
           },
           "required": [
@@ -173,7 +165,7 @@
           "additionalProperties": false,
           "properties": {
             "TriggerHandle": {
-              "$ref": "#/definitions/TypeExpr"
+              "$ref": "#/$defs/TypeExpr"
             }
           },
           "required": [
@@ -186,7 +178,7 @@
           "description": "Union of alternative type shapes, e.g. `str | int | null`.",
           "properties": {
             "Union": {
-              "$ref": "#/definitions/UnionMembers"
+              "$ref": "#/$defs/UnionMembers"
             }
           },
           "required": [
@@ -206,25 +198,25 @@
           "type": "boolean"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
         "name",
-        "optional",
-        "ty"
+        "ty",
+        "optional"
       ],
       "type": "object"
     },
     "UnionMembers": {
       "items": {
-        "$ref": "#/definitions/TypeExpr"
+        "$ref": "#/$defs/TypeExpr"
       },
       "minItems": 2,
       "type": "array"
     },
     "WorkflowDiagnosticClassification": {
-      "description": "Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.",
+      "description": "Whether a diagnostic establishes an admission failure for the analyzed\nprogram and host environment or gives advice without establishing a failure.",
       "enum": [
         "definite",
         "advisory"
@@ -290,13 +282,10 @@
     "WorkflowExpectedArgument": {
       "properties": {
         "slot": {
-          "items": {
-            "$ref": "#/definitions/WorkflowSlotPathSegment"
-          },
-          "type": "array"
+          "$ref": "#/$defs/WorkflowSlotPath"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -304,6 +293,17 @@
         "ty"
       ],
       "type": "object"
+    },
+    "WorkflowNodeId": {
+      "description": "A deterministic node identifier minted from structural owner and AST path.",
+      "type": "string"
+    },
+    "WorkflowSlotPath": {
+      "description": "An unambiguous address for one input location inside a workflow node.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
+      "items": {
+        "$ref": "#/$defs/WorkflowSlotPathSegment"
+      },
+      "type": "array"
     },
     "WorkflowSlotPathSegment": {
       "description": "One structural step in a [`WorkflowSlotPath`].",
@@ -313,7 +313,7 @@
           "properties": {
             "call": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -327,7 +327,7 @@
           "properties": {
             "arg": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -353,7 +353,7 @@
           "properties": {
             "index": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -367,30 +367,31 @@
     "WorkflowTypeDiagnostic": {
       "properties": {
         "classification": {
-          "$ref": "#/definitions/WorkflowDiagnosticClassification"
+          "$ref": "#/$defs/WorkflowDiagnosticClassification"
         },
         "kind": {
-          "$ref": "#/definitions/WorkflowDiagnosticKind"
+          "$ref": "#/$defs/WorkflowDiagnosticKind"
         },
         "message": {
           "type": "string"
         },
         "node_id": {
-          "type": "string"
+          "$ref": "#/$defs/WorkflowNodeId"
         },
         "slot": {
-          "items": {
-            "$ref": "#/definitions/WorkflowSlotPathSegment"
-          },
-          "type": [
-            "array",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowSlotPath"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "span": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Span"
+              "$ref": "#/$defs/Span"
             },
             {
               "type": "null"
@@ -399,10 +400,10 @@
         }
       },
       "required": [
-        "classification",
+        "node_id",
         "kind",
-        "message",
-        "node_id"
+        "classification",
+        "message"
       ],
       "type": "object"
     },
@@ -412,7 +413,7 @@
           "type": "string"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -422,22 +423,24 @@
       "type": "object"
     }
   },
+  "$id": "https://lash.dev/schemas/workflow-type-facets/v4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "available_variables": {
       "items": {
-        "$ref": "#/definitions/WorkflowTypedVariable"
+        "$ref": "#/$defs/WorkflowTypedVariable"
       },
       "type": "array"
     },
     "diagnostics": {
       "items": {
-        "$ref": "#/definitions/WorkflowTypeDiagnostic"
+        "$ref": "#/$defs/WorkflowTypeDiagnostic"
       },
       "type": "array"
     },
     "expected_arguments": {
       "items": {
-        "$ref": "#/definitions/WorkflowExpectedArgument"
+        "$ref": "#/$defs/WorkflowExpectedArgument"
       },
       "type": "array"
     }

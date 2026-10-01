@@ -40,15 +40,15 @@ pub struct FrameNodeId(String);
 /// The wire shape is the validated identity string; `FrameNodeId::new`'s
 /// emptiness refusal cannot be expressed as a schema assertion.
 impl schemars::JsonSchema for FrameNodeId {
-    fn is_referenceable() -> bool {
-        false
+    fn inline_schema() -> bool {
+        true
     }
 
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <String as schemars::JsonSchema>::schema_name()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         <String as schemars::JsonSchema>::json_schema(generator)
     }
 }
@@ -529,11 +529,11 @@ impl Serialize for SessionToolAccess {
 /// (`validate_restricted_tools`, hidden-name rules) are post-decode refusals
 /// no schema assertion can express.
 impl schemars::JsonSchema for SessionToolAccess {
-    fn schema_name() -> String {
-        "SessionToolAccess".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SessionToolAccess".into()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         SessionToolAccessWire::json_schema(generator)
     }
 }

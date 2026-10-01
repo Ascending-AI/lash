@@ -211,15 +211,15 @@ pub struct ToolId(String);
 /// The wire shape is the non-empty string; `ToolId::new`'s emptiness refusal
 /// cannot be expressed as a schema assertion.
 impl schemars::JsonSchema for ToolId {
-    fn is_referenceable() -> bool {
-        false
+    fn inline_schema() -> bool {
+        true
     }
 
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <String as schemars::JsonSchema>::schema_name()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         <String as schemars::JsonSchema>::json_schema(generator)
     }
 }

@@ -1,12 +1,10 @@
 {
-  "$id": "https://lash.dev/schemas/remote-session-observation-event/v100",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
         "execution_scope": {
-          "$ref": "#/definitions/ExecutionScope"
+          "$ref": "#/$defs/ExecutionScope"
         },
         "replay_key": {
           "type": "string"
@@ -19,7 +17,7 @@
       "type": "object"
     },
     "ExecutionScope": {
-      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic work begins. Its journal encoding is an existing durable contract; effect addresses compose it with a replay key without changing those bytes.",
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
       "oneOf": [
         {
           "properties": {
@@ -30,16 +28,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "turn"
-              ],
+              "const": "turn",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "session_id",
-            "turn_id",
-            "type"
+            "turn_id"
           ],
           "type": "object"
         },
@@ -49,15 +45,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "process_id",
-            "type"
+            "type",
+            "process_id"
           ],
           "type": "object"
         },
@@ -70,16 +64,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "queue_drain"
-              ],
+              "const": "queue_drain",
               "type": "string"
             }
           },
           "required": [
-            "drain_id",
+            "type",
             "session_id",
-            "type"
+            "drain_id"
           ],
           "type": "object"
         },
@@ -89,15 +81,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "session_delete"
-              ],
+              "const": "session_delete",
               "type": "string"
             }
           },
           "required": [
-            "session_id",
-            "type"
+            "type",
+            "session_id"
           ],
           "type": "object"
         },
@@ -107,15 +97,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "runtime_operation"
-              ],
+              "const": "runtime_operation",
               "type": "string"
             }
           },
           "required": [
-            "operation_id",
-            "type"
+            "type",
+            "operation_id"
           ],
           "type": "object"
         }
@@ -135,7 +123,7 @@
       "properties": {
         "byte_len": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "id": {
@@ -153,7 +141,7 @@
         "type_metadata": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteAttachmentTypeMetadata"
+              "$ref": "#/$defs/RemoteAttachmentTypeMetadata"
             },
             {
               "type": "null"
@@ -162,9 +150,9 @@
         }
       },
       "required": [
-        "byte_len",
         "id",
-        "media_type"
+        "media_type",
+        "byte_len"
       ],
       "type": "object"
     },
@@ -180,16 +168,14 @@
               "type": "string"
             },
             "source": {
-              "enum": [
-                "inline"
-              ],
+              "const": "inline",
               "type": "string"
             }
           },
           "required": [
-            "data_base64",
+            "source",
             "media_type",
-            "source"
+            "data_base64"
           ],
           "type": "object"
         },
@@ -197,18 +183,16 @@
           "additionalProperties": false,
           "properties": {
             "attachment_ref": {
-              "$ref": "#/definitions/RemoteAttachmentRef"
+              "$ref": "#/$defs/RemoteAttachmentRef"
             },
             "source": {
-              "enum": [
-                "stored"
-              ],
+              "const": "stored",
               "type": "string"
             }
           },
           "required": [
-            "attachment_ref",
-            "source"
+            "source",
+            "attachment_ref"
           ],
           "type": "object"
         },
@@ -219,9 +203,7 @@
               "type": "string"
             },
             "source": {
-              "enum": [
-                "external_url"
-              ],
+              "const": "external_url",
               "type": "string"
             },
             "url": {
@@ -229,8 +211,8 @@
             }
           },
           "required": [
-            "media_type",
             "source",
+            "media_type",
             "url"
           ],
           "type": "object"
@@ -248,19 +230,17 @@
               ]
             },
             "provider_scope": {
-              "$ref": "#/definitions/RemoteProviderFileScope"
+              "$ref": "#/$defs/RemoteProviderFileScope"
             },
             "source": {
-              "enum": [
-                "provider_file"
-              ],
+              "const": "provider_file",
               "type": "string"
             }
           },
           "required": [
-            "id",
+            "source",
             "provider_scope",
-            "source"
+            "id"
           ],
           "type": "object"
         }
@@ -273,21 +253,19 @@
           "properties": {
             "height": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "image"
-              ],
+              "const": "image",
               "type": "string"
             },
             "width": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
@@ -315,7 +293,7 @@
         "error": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteNormalizedError"
+              "$ref": "#/$defs/RemoteNormalizedError"
             },
             {
               "type": "null"
@@ -325,7 +303,7 @@
         "evidence": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteExecutionEvidence"
+              "$ref": "#/$defs/RemoteExecutionEvidence"
             },
             {
               "type": "null"
@@ -335,7 +313,7 @@
         "generation_disposition": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteGenerationReceipt"
+              "$ref": "#/$defs/RemoteGenerationReceipt"
             },
             {
               "type": "null"
@@ -344,14 +322,14 @@
         },
         "ordinal": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "outcome": {
-          "$ref": "#/definitions/RemoteAttemptOutcome"
+          "$ref": "#/$defs/RemoteAttemptOutcome"
         },
         "protocol_position": {
-          "$ref": "#/definitions/RemoteProtocolPosition"
+          "$ref": "#/$defs/RemoteProtocolPosition"
         },
         "retry_budget_consumed": {
           "type": "boolean"
@@ -359,7 +337,7 @@
         "retry_decision": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteRetryDecision"
+              "$ref": "#/$defs/RemoteRetryDecision"
             },
             {
               "type": "null"
@@ -369,7 +347,7 @@
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteUsage"
+              "$ref": "#/$defs/RemoteUsage"
             },
             {
               "type": "null"
@@ -377,12 +355,8 @@
           ]
         },
         "usage_disposition": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteAttemptUsageOutcome"
-            }
-          ],
-          "description": "Whether `usage` was provider-reported or the attempt ended before the provider's usage arrived (ADR 0031). Absent means reported."
+          "$ref": "#/$defs/RemoteAttemptUsageOutcome",
+          "description": "Whether `usage` was provider-reported or the attempt ended before the\nprovider's usage arrived (ADR 0031). Absent means reported."
         }
       },
       "required": [
@@ -414,34 +388,30 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "turn"
-              ],
+              "const": "turn",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "session_id",
-            "turn_id",
-            "type"
+            "turn_id"
           ],
           "type": "object"
         },
         {
           "properties": {
             "address": {
-              "$ref": "#/definitions/EffectAddress"
+              "$ref": "#/$defs/EffectAddress"
             },
             "type": {
-              "enum": [
-                "effect"
-              ],
+              "const": "effect",
               "type": "string"
             }
           },
           "required": [
-            "address",
-            "type"
+            "type",
+            "address"
           ],
           "type": "object"
         },
@@ -454,16 +424,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "tool_call"
-              ],
+              "const": "tool_call",
               "type": "string"
             }
           },
           "required": [
-            "call_id",
+            "type",
             "session_id",
-            "type"
+            "call_id"
           ],
           "type": "object"
         },
@@ -473,15 +441,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "process_id",
-            "type"
+            "type",
+            "process_id"
           ],
           "type": "object"
         },
@@ -492,20 +458,18 @@
             },
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "process_event"
-              ],
+              "const": "process_event",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "process_id",
-            "sequence",
-            "type"
+            "sequence"
           ],
           "type": "object"
         },
@@ -528,22 +492,20 @@
             },
             "subscription_revision": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "trigger_occurrence"
-              ],
+              "const": "trigger_occurrence",
               "type": "string"
             }
           },
           "required": [
-            "occurrence_id",
-            "type"
+            "type",
+            "occurrence_id"
           ],
           "type": "object"
         },
@@ -556,16 +518,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "session_node"
-              ],
+              "const": "session_node",
               "type": "string"
             }
           },
           "required": [
-            "node_id",
+            "type",
             "session_id",
-            "type"
+            "node_id"
           ],
           "type": "object"
         }
@@ -574,7 +534,7 @@
     "RemoteCellFailure": {
       "properties": {
         "kind": {
-          "$ref": "#/definitions/RemoteCellFailureKind"
+          "$ref": "#/$defs/RemoteCellFailureKind"
         },
         "message": {
           "type": "string"
@@ -599,7 +559,7 @@
         "collection_interruption": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteExecutionEvidenceCollectionInterruption"
+              "$ref": "#/$defs/RemoteExecutionEvidenceCollectionInterruption"
             },
             {
               "type": "null"
@@ -626,7 +586,7 @@
         },
         "reasoning_output_tokens": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -660,94 +620,50 @@
     },
     "RemoteGenerationReceipt": {
       "additionalProperties": false,
-      "description": "Mirror of the core `GenerationReceipt`: the adapter-reported fate of a request's generation and prompt-cache intent, so a remote host can tell an honored repeatability request from a silently dropped one.",
+      "description": "Mirror of the core `GenerationReceipt`: the adapter-reported fate of a\nrequest's generation and prompt-cache intent, so a remote host can tell an\nhonored repeatability request from a silently dropped one.",
       "properties": {
         "cache": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "output_token_cap": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "parallel_tool_calls": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "passthrough": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "reasoning": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "reasoning_retention": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "seed": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "stop_sequences": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "temperature": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "thinking_summary": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         },
         "thinking_visibility": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/RemoteGenerationOptionOutcome",
           "default": "not_requested"
         }
       },
@@ -758,7 +674,7 @@
       "properties": {
         "attempts": {
           "items": {
-            "$ref": "#/definitions/RemoteAttemptRecord"
+            "$ref": "#/$defs/RemoteAttemptRecord"
           },
           "type": "array"
         },
@@ -773,14 +689,14 @@
         },
         "replay_drops": {
           "items": {
-            "$ref": "#/definitions/RemoteProviderReplayDrop"
+            "$ref": "#/$defs/RemoteProviderReplayDrop"
           },
           "type": "array"
         }
       },
       "required": [
-        "attempts",
-        "call_id"
+        "call_id",
+        "attempts"
       ],
       "type": "object"
     },
@@ -789,9 +705,7 @@
         {
           "properties": {
             "kind": {
-              "enum": [
-                "plugin"
-              ],
+              "const": "plugin",
               "type": "string"
             },
             "plugin_id": {
@@ -812,7 +726,7 @@
             "caused_by": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/RemoteCausalRef"
+                  "$ref": "#/$defs/RemoteCausalRef"
                 },
                 {
                   "type": "null"
@@ -823,9 +737,7 @@
               "type": "string"
             },
             "kind": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             },
             "process_id": {
@@ -833,7 +745,7 @@
             },
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "wake_id": {
@@ -844,9 +756,9 @@
             }
           },
           "required": [
-            "event_type",
             "kind",
             "process_id",
+            "event_type",
             "sequence"
           ],
           "type": "object"
@@ -860,9 +772,7 @@
               ]
             },
             "kind": {
-              "enum": [
-                "turn_input"
-              ],
+              "const": "turn_input",
               "type": "string"
             },
             "turn_id": {
@@ -878,13 +788,11 @@
         {
           "properties": {
             "kind": {
-              "enum": [
-                "turn_output"
-              ],
+              "const": "turn_output",
               "type": "string"
             },
             "source": {
-              "$ref": "#/definitions/RemoteTurnOutputSource"
+              "$ref": "#/$defs/RemoteTurnOutputSource"
             },
             "turn_id": {
               "type": "string"
@@ -892,8 +800,8 @@
           },
           "required": [
             "kind",
-            "source",
-            "turn_id"
+            "turn_id",
+            "source"
           ],
           "type": "object"
         }
@@ -916,17 +824,17 @@
         "code": {
           "anyOf": [
             {
-              "$ref": "#/definitions/FailureCode"
+              "$ref": "#/$defs/FailureCode"
             },
             {
               "type": "null"
             }
           ],
-          "description": "The attempt's namespaced failure code (`<namespace>:<spelling>`). Pre-cutover rows carried `provider_code`/`adapter_code`/`refusal_code` columns instead; they decode with `code: None`."
+          "description": "The attempt's namespaced failure code (`<namespace>:<spelling>`).\nPre-cutover rows carried `provider_code`/`adapter_code`/`refusal_code`\ncolumns instead; they decode with `code: None`."
         },
         "http_status": {
           "format": "uint16",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -940,7 +848,7 @@
         },
         "retry_after_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -958,7 +866,7 @@
         "attachment": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemotePartAttachment"
+              "$ref": "#/$defs/RemotePartAttachment"
             },
             {
               "type": "null"
@@ -968,7 +876,7 @@
         "blocks": {
           "description": "A tool result's ordered text and attachment blocks.",
           "items": {
-            "$ref": "#/definitions/RemoteToolResultBlock"
+            "$ref": "#/$defs/RemoteToolResultBlock"
           },
           "type": [
             "array",
@@ -992,7 +900,7 @@
           "type": "string"
         },
         "kind": {
-          "$ref": "#/definitions/RemotePartKind"
+          "$ref": "#/$defs/RemotePartKind"
         },
         "provider_call_id": {
           "type": [
@@ -1003,7 +911,7 @@
         "reasoning_meta": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProviderReasoningReplay"
+              "$ref": "#/$defs/RemoteProviderReasoningReplay"
             },
             {
               "type": "null"
@@ -1013,7 +921,7 @@
         "response_meta": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteResponseTextMeta"
+              "$ref": "#/$defs/RemoteResponseTextMeta"
             },
             {
               "type": "null"
@@ -1029,7 +937,7 @@
         "tool_replay": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProviderReplayMeta"
+              "$ref": "#/$defs/RemoteProviderReplayMeta"
             },
             {
               "type": "null"
@@ -1046,7 +954,7 @@
     "RemotePartAttachment": {
       "properties": {
         "source": {
-          "$ref": "#/definitions/RemoteAttachmentSource"
+          "$ref": "#/$defs/RemoteAttachmentSource"
         }
       },
       "required": [
@@ -1080,7 +988,7 @@
         "origin": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteMessageOrigin"
+              "$ref": "#/$defs/RemoteMessageOrigin"
             },
             {
               "type": "null"
@@ -1089,17 +997,17 @@
         },
         "parts": {
           "items": {
-            "$ref": "#/definitions/RemotePart"
+            "$ref": "#/$defs/RemotePart"
           },
           "type": "array"
         },
         "role": {
-          "$ref": "#/definitions/RemoteMessageRole"
+          "$ref": "#/$defs/RemoteMessageRole"
         }
       },
       "required": [
-        "parts",
-        "role"
+        "role",
+        "parts"
       ],
       "type": "object"
     },
@@ -1122,8 +1030,8 @@
         }
       },
       "required": [
-        "credential_scope",
-        "provider"
+        "provider",
+        "credential_scope"
       ],
       "type": "object"
     },
@@ -1144,7 +1052,7 @@
         "origin": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+              "$ref": "#/$defs/RemoteProviderRouteIdentity"
             },
             {
               "type": "null"
@@ -1173,12 +1081,12 @@
     "RemoteProviderReplayDrop": {
       "properties": {
         "kind": {
-          "$ref": "#/definitions/RemoteProviderReplayKind"
+          "$ref": "#/$defs/RemoteProviderReplayKind"
         },
         "minting_route": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+              "$ref": "#/$defs/RemoteProviderRouteIdentity"
             },
             {
               "type": "null"
@@ -1186,10 +1094,10 @@
           ]
         },
         "reason": {
-          "$ref": "#/definitions/RemoteProviderReplayDropReason"
+          "$ref": "#/$defs/RemoteProviderReplayDropReason"
         },
         "serving_route": {
-          "$ref": "#/definitions/RemoteProviderRouteIdentity"
+          "$ref": "#/$defs/RemoteProviderRouteIdentity"
         }
       },
       "required": [
@@ -1231,7 +1139,7 @@
         "origin": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+              "$ref": "#/$defs/RemoteProviderRouteIdentity"
             },
             {
               "type": "null"
@@ -1246,7 +1154,7 @@
       "description": "Exact configured LLM Provider route that owns opaque replay state.",
       "properties": {
         "endpoint": {
-          "description": "Stable routing metadata, not a secret-bearing URL. LLM Provider endpoints reject URL userinfo; paths and query strings remain visible in remote envelopes and traces and therefore must not carry secrets.",
+          "description": "Stable routing metadata, not a secret-bearing URL. LLM Provider\nendpoints reject URL userinfo; paths and query strings remain visible\nin remote envelopes and traces and therefore must not carry secrets.",
           "type": "string"
         },
         "model": {
@@ -1257,9 +1165,9 @@
         }
       },
       "required": [
+        "provider",
         "endpoint",
-        "model",
-        "provider"
+        "model"
       ],
       "type": "object"
     },
@@ -1274,7 +1182,7 @@
         "origin": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+              "$ref": "#/$defs/RemoteProviderRouteIdentity"
             },
             {
               "type": "null"
@@ -1306,7 +1214,7 @@
       "properties": {
         "delay_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -1334,19 +1242,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "started"
-              ],
+              "const": "started",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1355,19 +1261,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "waiting"
-              ],
+              "const": "waiting",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1376,19 +1280,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "resumed"
-              ],
+              "const": "resumed",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1397,19 +1299,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "cancel_requested"
-              ],
+              "const": "cancel_requested",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1418,19 +1318,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "caller_departed"
-              ],
+              "const": "caller_departed",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1439,19 +1337,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "completed"
-              ],
+              "const": "completed",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1460,19 +1356,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "failed"
-              ],
+              "const": "failed",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1481,19 +1375,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "cancelled"
-              ],
+              "const": "cancelled",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         },
@@ -1502,19 +1394,17 @@
           "properties": {
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "abandoned"
-              ],
+              "const": "abandoned",
               "type": "string"
             }
           },
           "required": [
-            "sequence",
-            "type"
+            "type",
+            "sequence"
           ],
           "type": "object"
         }
@@ -1532,24 +1422,22 @@
         {
           "properties": {
             "identity": {
-              "$ref": "#/definitions/RemoteToolIntentIdentity"
+              "$ref": "#/$defs/RemoteToolIntentIdentity"
             },
             "kind": {
-              "$ref": "#/definitions/RemoteToolIntentKind"
+              "$ref": "#/$defs/RemoteToolIntentKind"
             },
             "result": true,
             "status": {
-              "enum": [
-                "executed"
-              ],
+              "const": "executed",
               "type": "string"
             }
           },
           "required": [
+            "status",
             "identity",
             "kind",
-            "result",
-            "status"
+            "result"
           ],
           "type": "object"
         },
@@ -1558,7 +1446,7 @@
             "identity": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/RemoteToolIntentIdentity"
+                  "$ref": "#/$defs/RemoteToolIntentIdentity"
                 },
                 {
                   "type": "null"
@@ -1567,45 +1455,41 @@
             },
             "intent_index": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "kind": {
-              "$ref": "#/definitions/RemoteToolIntentKind"
+              "$ref": "#/$defs/RemoteToolIntentKind"
             },
             "refusal": {
-              "$ref": "#/definitions/RemoteToolIntentRefusalReason"
+              "$ref": "#/$defs/RemoteToolIntentRefusalReason"
             },
             "status": {
-              "enum": [
-                "refused"
-              ],
+              "const": "refused",
               "type": "string"
             }
           },
           "required": [
+            "status",
             "intent_index",
             "kind",
-            "refusal",
-            "status"
+            "refusal"
           ],
           "type": "object"
         },
         {
           "properties": {
             "refusal": {
-              "$ref": "#/definitions/RemoteToolIntentRefusalReason"
+              "$ref": "#/$defs/RemoteToolIntentRefusalReason"
             },
             "status": {
-              "enum": [
-                "protocol_refused"
-              ],
+              "const": "protocol_refused",
               "type": "string"
             }
           },
           "required": [
-            "refusal",
-            "status"
+            "status",
+            "refusal"
           ],
           "type": "object"
         }
@@ -1618,7 +1502,7 @@
         },
         "intent_index": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "minting_emission_replay_key": {
@@ -1628,11 +1512,7 @@
           ]
         },
         "owner": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RuntimeOwner"
-            }
-          ],
+          "$ref": "#/$defs/RuntimeOwner",
           "description": "Who the intent was declared under: a session, or a process."
         },
         "replay_key": {
@@ -1643,16 +1523,16 @@
         }
       },
       "required": [
-        "execution_scope_id",
-        "intent_index",
         "owner",
-        "replay_key",
-        "tool_call_id"
+        "execution_scope_id",
+        "tool_call_id",
+        "intent_index",
+        "replay_key"
       ],
       "type": "object"
     },
     "RemoteToolIntentKind": {
-      "description": "Wire mirror of the core tool-intent kind set.\n\nDeliberately spelled out rather than generated from `lash_sansio::tool_intent_variants!`: the version-bump gate projects this enum's literal text, so generating it would move the variant list out of the `REMOTE_PROTOCOL_VERSION` guard's sight. The two `From` impls in `core_conversions::turn_result` are generated from that list instead, so a variant added to the core set fails to compile until it is added here and the wire version is bumped (FIG-2994).",
+      "description": "Wire mirror of the core tool-intent kind set.\n\nDeliberately spelled out rather than generated from\n`lash_sansio::tool_intent_variants!`: the version-bump gate projects this\nenum's literal text, so generating it would move the variant list out of\nthe `REMOTE_PROTOCOL_VERSION` guard's sight. The two `From` impls in\n`core_conversions::turn_result` are generated from that list instead, so a\nvariant added to the core set fails to compile until it is added here and\nthe wire version is bumped (FIG-2994).",
       "enum": [
         "start_process",
         "signal_process",
@@ -1670,14 +1550,12 @@
         {
           "properties": {
             "reason": {
-              "enum": [
-                "unsupported_protocol_version"
-              ],
+              "const": "unsupported_protocol_version",
               "type": "string"
             },
             "recorded": {
               "format": "uint16",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -1690,9 +1568,7 @@
         {
           "properties": {
             "reason": {
-              "enum": [
-                "intent_index_overflow"
-              ],
+              "const": "intent_index_overflow",
               "type": "string"
             }
           },
@@ -1705,25 +1581,23 @@
           "properties": {
             "actual": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "maximum": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "reason": {
-              "enum": [
-                "count_budget_exceeded"
-              ],
+              "const": "count_budget_exceeded",
               "type": "string"
             }
           },
           "required": [
+            "reason",
             "actual",
-            "maximum",
-            "reason"
+            "maximum"
           ],
           "type": "object"
         },
@@ -1731,25 +1605,23 @@
           "properties": {
             "actual": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "maximum": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "reason": {
-              "enum": [
-                "canonical_byte_budget_exceeded"
-              ],
+              "const": "canonical_byte_budget_exceeded",
               "type": "string"
             }
           },
           "required": [
+            "reason",
             "actual",
-            "maximum",
-            "reason"
+            "maximum"
           ],
           "type": "object"
         },
@@ -1757,29 +1629,27 @@
           "properties": {
             "actual": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "kind": {
-              "$ref": "#/definitions/RemoteToolIntentKind"
+              "$ref": "#/$defs/RemoteToolIntentKind"
             },
             "maximum": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "reason": {
-              "enum": [
-                "per_kind_budget_exceeded"
-              ],
+              "const": "per_kind_budget_exceeded",
               "type": "string"
             }
           },
           "required": [
-            "actual",
+            "reason",
             "kind",
-            "maximum",
-            "reason"
+            "actual",
+            "maximum"
           ],
           "type": "object"
         },
@@ -1789,9 +1659,7 @@
               "type": "string"
             },
             "reason": {
-              "enum": [
-                "owner_mismatch"
-              ],
+              "const": "owner_mismatch",
               "type": "string"
             },
             "recorded": {
@@ -1799,8 +1667,8 @@
             }
           },
           "required": [
-            "expected",
             "reason",
+            "expected",
             "recorded"
           ],
           "type": "object"
@@ -1811,9 +1679,7 @@
               "type": "string"
             },
             "reason": {
-              "enum": [
-                "foreign_trigger_owner_scope"
-              ],
+              "const": "foreign_trigger_owner_scope",
               "type": "string"
             },
             "recorded": {
@@ -1821,8 +1687,8 @@
             }
           },
           "required": [
-            "expected",
             "reason",
+            "expected",
             "recorded"
           ],
           "type": "object"
@@ -1833,9 +1699,7 @@
               "type": "string"
             },
             "reason": {
-              "enum": [
-                "foreign_trigger_actor"
-              ],
+              "const": "foreign_trigger_actor",
               "type": "string"
             },
             "recorded": {
@@ -1843,8 +1707,8 @@
             }
           },
           "required": [
-            "expected",
             "reason",
+            "expected",
             "recorded"
           ],
           "type": "object"
@@ -1858,25 +1722,21 @@
               "type": "string"
             },
             "reason": {
-              "enum": [
-                "command_failed"
-              ],
+              "const": "command_failed",
               "type": "string"
             }
           },
           "required": [
+            "reason",
             "code",
-            "message",
-            "reason"
+            "message"
           ],
           "type": "object"
         },
         {
           "properties": {
             "reason": {
-              "enum": [
-                "minting_group_child_cancelled"
-              ],
+              "const": "minting_group_child_cancelled",
               "type": "string"
             }
           },
@@ -1888,21 +1748,19 @@
         {
           "properties": {
             "expected": {
-              "$ref": "#/definitions/RemoteToolIntentIdentity"
+              "$ref": "#/$defs/RemoteToolIntentIdentity"
             },
             "reason": {
-              "enum": [
-                "declared_start_identity_mismatch"
-              ],
+              "const": "declared_start_identity_mismatch",
               "type": "string"
             },
             "recorded": {
-              "$ref": "#/definitions/RemoteToolIntentIdentity"
+              "$ref": "#/$defs/RemoteToolIntentIdentity"
             }
           },
           "required": [
-            "expected",
             "reason",
+            "expected",
             "recorded"
           ],
           "type": "object"
@@ -1910,7 +1768,7 @@
       ]
     },
     "RemoteToolResultBlock": {
-      "description": "One ordered block of a tool result: text, an attachment at the position the tool's value placed it, or output retained out of history: the bounded witness shown in its place and the attachment holding it whole.",
+      "description": "One ordered block of a tool result: text, an attachment at the position\nthe tool's value placed it, or output retained out of history: the\nbounded witness shown in its place and the attachment holding it whole.",
       "oneOf": [
         {
           "properties": {
@@ -1918,45 +1776,39 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "text"
-              ],
+              "const": "text",
               "type": "string"
             }
           },
           "required": [
-            "text",
-            "type"
+            "type",
+            "text"
           ],
           "type": "object"
         },
         {
           "properties": {
             "source": {
-              "$ref": "#/definitions/RemoteAttachmentSource"
+              "$ref": "#/$defs/RemoteAttachmentSource"
             },
             "type": {
-              "enum": [
-                "attachment"
-              ],
+              "const": "attachment",
               "type": "string"
             }
           },
           "required": [
-            "source",
-            "type"
+            "type",
+            "source"
           ],
           "type": "object"
         },
         {
           "properties": {
             "reference": {
-              "$ref": "#/definitions/RemoteAttachmentRef"
+              "$ref": "#/$defs/RemoteAttachmentRef"
             },
             "type": {
-              "enum": [
-                "retained"
-              ],
+              "const": "retained",
               "type": "string"
             },
             "witness": {
@@ -1964,9 +1816,9 @@
             }
           },
           "required": [
-            "reference",
             "type",
-            "witness"
+            "witness",
+            "reference"
           ],
           "type": "object"
         }
@@ -1980,15 +1832,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "turn_started"
-              ],
+              "const": "turn_started",
               "type": "string"
             }
           },
           "required": [
-            "turn_id",
-            "type"
+            "type",
+            "turn_id"
           ],
           "type": "object"
         },
@@ -1996,19 +1846,17 @@
           "properties": {
             "protocol_iteration": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "model_request_started"
-              ],
+              "const": "model_request_started",
               "type": "string"
             }
           },
           "required": [
-            "protocol_iteration",
-            "type"
+            "type",
+            "protocol_iteration"
           ],
           "type": "object"
         },
@@ -2016,111 +1864,101 @@
           "properties": {
             "protocol_iteration": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "checkpoint_recorded"
-              ],
+              "const": "checkpoint_recorded",
               "type": "string"
             }
           },
           "required": [
-            "protocol_iteration",
-            "type"
+            "type",
+            "protocol_iteration"
           ],
           "type": "object"
         },
         {
           "properties": {
             "block": {
-              "$ref": "#/definitions/StreamBlockIdentity"
+              "$ref": "#/$defs/StreamBlockIdentity"
             },
             "text": {
               "type": "string"
             },
             "type": {
-              "enum": [
-                "assistant_prose_delta"
-              ],
+              "const": "assistant_prose_delta",
               "type": "string"
             }
           },
           "required": [
-            "block",
+            "type",
             "text",
-            "type"
+            "block"
           ],
           "type": "object"
         },
         {
           "properties": {
             "block": {
-              "$ref": "#/definitions/StreamBlockIdentity"
+              "$ref": "#/$defs/StreamBlockIdentity"
             },
             "text": {
               "type": "string"
             },
             "type": {
-              "enum": [
-                "reasoning_delta"
-              ],
+              "const": "reasoning_delta",
               "type": "string"
             }
           },
           "required": [
-            "block",
+            "type",
             "text",
-            "type"
+            "block"
           ],
           "type": "object"
         },
         {
           "properties": {
             "block": {
-              "$ref": "#/definitions/StreamBlockIdentity"
+              "$ref": "#/$defs/StreamBlockIdentity"
             },
             "kind": {
-              "$ref": "#/definitions/StreamBlockKind"
+              "$ref": "#/$defs/StreamBlockKind"
             },
             "type": {
-              "enum": [
-                "stream_block_started"
-              ],
+              "const": "stream_block_started",
               "type": "string"
             }
           },
           "required": [
-            "block",
+            "type",
             "kind",
-            "type"
+            "block"
           ],
           "type": "object"
         },
         {
           "properties": {
             "block": {
-              "$ref": "#/definitions/StreamBlockIdentity"
+              "$ref": "#/$defs/StreamBlockIdentity"
             },
             "kind": {
-              "$ref": "#/definitions/StreamBlockKind"
+              "$ref": "#/$defs/StreamBlockKind"
             },
             "text": {
               "type": "string"
             },
             "type": {
-              "enum": [
-                "stream_block_completed"
-              ],
+              "const": "stream_block_completed",
               "type": "string"
             }
           },
           "required": [
-            "block",
+            "type",
             "kind",
-            "text",
-            "type"
+            "block",
+            "text"
           ],
           "type": "object"
         },
@@ -2139,34 +1977,30 @@
               "type": "array"
             },
             "type": {
-              "enum": [
-                "model_attempt_reset"
-              ],
+              "const": "model_attempt_reset",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "assistant_prose_correlation_ids",
-            "reasoning_correlation_ids",
-            "type"
+            "reasoning_correlation_ids"
           ],
           "type": "object"
         },
         {
           "properties": {
             "record": {
-              "$ref": "#/definitions/RemoteLlmCallRecord"
+              "$ref": "#/$defs/RemoteLlmCallRecord"
             },
             "type": {
-              "enum": [
-                "model_call_recorded"
-              ],
+              "const": "model_call_recorded",
               "type": "string"
             }
           },
           "required": [
-            "record",
-            "type"
+            "type",
+            "record"
           ],
           "type": "object"
         },
@@ -2185,16 +2019,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "code_block_started"
-              ],
+              "const": "code_block_started",
               "type": "string"
             }
           },
           "required": [
-            "code",
+            "type",
             "language",
-            "type"
+            "code"
           ],
           "type": "object"
         },
@@ -2202,13 +2034,13 @@
           "properties": {
             "duration_ms": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "error": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/RemoteCellFailure"
+                  "$ref": "#/$defs/RemoteCellFailure"
                 },
                 {
                   "type": "null"
@@ -2237,24 +2069,22 @@
               "type": "array"
             },
             "type": {
-              "enum": [
-                "code_block_completed"
-              ],
+              "const": "code_block_completed",
               "type": "string"
             }
           },
           "required": [
-            "duration_ms",
+            "type",
             "language",
             "output",
             "success",
-            "tool_call_ids",
-            "type"
+            "duration_ms",
+            "tool_call_ids"
           ],
           "type": "object"
         },
         {
-          "description": "A tool call started. `call_id` is lash's identity for the call; `provider_call_id` is the model provider's correlation, when a model issued the call.",
+          "description": "A tool call started. `call_id` is lash's identity for the call;\n`provider_call_id` is the model provider's correlation, when a model\nissued the call.",
           "properties": {
             "args": true,
             "call_id": {
@@ -2276,17 +2106,15 @@
               ]
             },
             "type": {
-              "enum": [
-                "tool_call_started"
-              ],
+              "const": "tool_call_started",
               "type": "string"
             }
           },
           "required": [
-            "args",
+            "type",
             "call_id",
             "name",
-            "type"
+            "args"
           ],
           "type": "object"
         },
@@ -2298,7 +2126,7 @@
             },
             "duration_ms": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "graph_key": {
@@ -2318,19 +2146,17 @@
               ]
             },
             "type": {
-              "enum": [
-                "tool_call_completed"
-              ],
+              "const": "tool_call_completed",
               "type": "string"
             }
           },
           "required": [
-            "args",
+            "type",
             "call_id",
-            "duration_ms",
             "name",
+            "args",
             "output",
-            "type"
+            "duration_ms"
           ],
           "type": "object"
         },
@@ -2340,28 +2166,24 @@
               "type": "string"
             },
             "outcome": {
-              "$ref": "#/definitions/RemoteToolIntentExecutionOutcome"
+              "$ref": "#/$defs/RemoteToolIntentExecutionOutcome"
             },
             "type": {
-              "enum": [
-                "tool_intent_outcome"
-              ],
+              "const": "tool_intent_outcome",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "call_id",
-            "outcome",
-            "type"
+            "outcome"
           ],
           "type": "object"
         },
         {
           "properties": {
             "type": {
-              "enum": [
-                "final_value"
-              ],
+              "const": "final_value",
               "type": "string"
             },
             "value": true
@@ -2378,16 +2200,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "tool_value"
-              ],
+              "const": "tool_value",
               "type": "string"
             },
             "value": true
           },
           "required": [
-            "tool_name",
             "type",
+            "tool_name",
             "value"
           ],
           "type": "object"
@@ -2395,28 +2215,26 @@
         {
           "properties": {
             "cumulative": {
-              "$ref": "#/definitions/RemoteUsage"
+              "$ref": "#/$defs/RemoteUsage"
             },
             "protocol_iteration": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "usage"
-              ],
+              "const": "usage",
               "type": "string"
             },
             "usage": {
-              "$ref": "#/definitions/RemoteUsage"
+              "$ref": "#/$defs/RemoteUsage"
             }
           },
           "required": [
-            "cumulative",
-            "protocol_iteration",
             "type",
-            "usage"
+            "protocol_iteration",
+            "usage",
+            "cumulative"
           ],
           "type": "object"
         },
@@ -2424,35 +2242,33 @@
           "properties": {
             "attempt": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "max_attempts": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "reason": {
               "type": "string"
             },
             "type": {
-              "enum": [
-                "retry_status"
-              ],
+              "const": "retry_status",
               "type": "string"
             },
             "wait_seconds": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
+            "type",
+            "wait_seconds",
             "attempt",
             "max_attempts",
-            "reason",
-            "type",
-            "wait_seconds"
+            "reason"
           ],
           "type": "object"
         },
@@ -2460,20 +2276,18 @@
           "properties": {
             "applications": {
               "items": {
-                "$ref": "#/definitions/RemoteTurnInputApplication"
+                "$ref": "#/$defs/RemoteTurnInputApplication"
               },
               "type": "array"
             },
             "type": {
-              "enum": [
-                "turn_input_applied"
-              ],
+              "const": "turn_input_applied",
               "type": "string"
             }
           },
           "required": [
-            "applications",
-            "type"
+            "type",
+            "applications"
           ],
           "type": "object"
         },
@@ -2486,51 +2300,47 @@
               "type": "array"
             },
             "boundary": {
-              "$ref": "#/definitions/RemoteAdmissionBoundary"
+              "$ref": "#/$defs/RemoteAdmissionBoundary"
             },
             "causes": {
               "items": {
-                "$ref": "#/definitions/RemoteTurnCause"
+                "$ref": "#/$defs/RemoteTurnCause"
               },
               "type": "array"
             },
             "type": {
-              "enum": [
-                "queued_work_started"
-              ],
+              "const": "queued_work_started",
               "type": "string"
             }
           },
           "required": [
-            "batch_ids",
+            "type",
             "boundary",
-            "causes",
-            "type"
+            "batch_ids",
+            "causes"
           ],
           "type": "object"
         },
         {
           "properties": {
             "checkpoint": {
-              "$ref": "#/definitions/RemoteTurnInputCheckpoint"
+              "$ref": "#/$defs/RemoteTurnInputCheckpoint"
             },
             "messages": {
               "items": {
-                "$ref": "#/definitions/RemotePluginMessage"
+                "$ref": "#/$defs/RemotePluginMessage"
               },
               "type": "array"
             },
             "type": {
-              "enum": [
-                "queued_messages_committed"
-              ],
+              "const": "queued_messages_committed",
               "type": "string"
             }
           },
           "required": [
-            "checkpoint",
+            "type",
             "messages",
-            "type"
+            "checkpoint"
           ],
           "type": "object"
         },
@@ -2541,16 +2351,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "plugin_runtime"
-              ],
+              "const": "plugin_runtime",
               "type": "string"
             }
           },
           "required": [
-            "event",
+            "type",
             "plugin_id",
-            "type"
+            "event"
           ],
           "type": "object"
         },
@@ -2560,15 +2368,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "error"
-              ],
+              "const": "error",
               "type": "string"
             }
           },
           "required": [
-            "message",
-            "type"
+            "type",
+            "message"
           ],
           "type": "object"
         }
@@ -2582,14 +2388,14 @@
         },
         "sequence": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "correlation_id",
+        "sequence",
         "id",
-        "sequence"
+        "correlation_id"
       ],
       "type": "object"
     },
@@ -2602,27 +2408,27 @@
           "type": "string"
         },
         "origin": {
-          "$ref": "#/definitions/RemoteMessageOrigin"
+          "$ref": "#/$defs/RemoteMessageOrigin"
         },
         "text": {
           "type": "string"
         }
       },
       "required": [
-        "event_type",
         "id",
+        "event_type",
         "origin",
         "text"
       ],
       "type": "object"
     },
     "RemoteTurnInputApplication": {
-      "description": "Stable identity proving an admitted input became canonical turn input.\n\nThis wire DTO intentionally contains no display text. `input_id` and `source_key` correlate to the admission receipt, while `turn_id` and `committed_message_id` identify the canonical conversation application.",
+      "description": "Stable identity proving an admitted input became canonical turn input.\n\nThis wire DTO intentionally contains no display text. `input_id` and\n`source_key` correlate to the admission receipt, while `turn_id` and\n`committed_message_id` identify the canonical conversation application.",
       "properties": {
         "checkpoint": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteTurnInputCheckpoint"
+              "$ref": "#/$defs/RemoteTurnInputCheckpoint"
             },
             {
               "type": "null"
@@ -2646,9 +2452,9 @@
         }
       },
       "required": [
-        "committed_message_id",
         "input_id",
-        "turn_id"
+        "turn_id",
+        "committed_message_id"
       ],
       "type": "object"
     },
@@ -2664,9 +2470,7 @@
         {
           "properties": {
             "kind": {
-              "enum": [
-                "runtime"
-              ],
+              "const": "runtime",
               "type": "string"
             }
           },
@@ -2678,9 +2482,7 @@
         {
           "properties": {
             "kind": {
-              "enum": [
-                "plugin"
-              ],
+              "const": "plugin",
               "type": "string"
             },
             "plugin_id": {
@@ -2719,16 +2521,16 @@
         }
       },
       "required": [
-        "cache_read_input_tokens",
-        "cache_write_input_tokens",
         "input_tokens",
         "output_tokens",
+        "cache_read_input_tokens",
+        "cache_write_input_tokens",
         "reasoning_output_tokens"
       ],
       "type": "object"
     },
     "RuntimeOwner": {
-      "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the plugin session, the tool catalog, the attachment facade, the authority a tool intent is declared under \u2014 and those interfaces take a `RuntimeOwner`. A process runtime is never handed a session id as a stand-in for its own identity.",
+      "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the\nplugin session, the tool catalog, the attachment facade, the authority a\ntool intent is declared under \u2014 and those interfaces take a\n`RuntimeOwner`. A process runtime is never handed a session id as a\nstand-in for its own identity.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -2757,14 +2559,14 @@
       ]
     },
     "StreamBlockIdentity": {
-      "description": "Provider-minted identity of one streamed output block.\n\nMinted by the provider adapter from provider facts: OpenAI `(item_id, summary_index)`, Anthropic content-block index, or a deterministic per-attempt ordinal for providers with no native notion. The id is opaque to hosts; ordering comes from `ordinal`, never from parsing `id`. Live and replayed streams emit identical identities.",
+      "description": "Provider-minted identity of one streamed output block.\n\nMinted by the provider adapter from provider facts: OpenAI\n`(item_id, summary_index)`, Anthropic content-block index, or a\ndeterministic per-attempt ordinal for providers with no native notion.\nThe id is opaque to hosts; ordering comes from `ordinal`, never from\nparsing `id`. Live and replayed streams emit identical identities.",
       "properties": {
         "id": {
           "description": "Opaque provider-minted block key, stable within one response attempt.",
           "type": "string"
         },
         "item_id": {
-          "description": "The reasoning or message item this block belongs to, when the provider has one. N blocks may share one item's replay material.",
+          "description": "The reasoning or message item this block belongs to, when the provider\nhas one. N blocks may share one item's replay material.",
           "type": [
             "string",
             "null"
@@ -2773,7 +2575,7 @@
         "ordinal": {
           "description": "Per-attempt block ordinal assigned by the provider adapter.",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
@@ -2784,52 +2586,44 @@
       "type": "object"
     },
     "StreamBlockKind": {
-      "description": "Which render lane a streamed output block belongs to.\n\nA *block* is the unit a host renders: one OpenAI reasoning summary part, one Anthropic `thinking`/`text` content block, or one ordinal run of thought/text for providers with no native notion. Blocks name their owning reasoning item or message item when the provider has one; several blocks may share one item's replay material.",
+      "description": "Which render lane a streamed output block belongs to.\n\nA *block* is the unit a host renders: one OpenAI reasoning summary part,\none Anthropic `thinking`/`text` content block, or one ordinal run of\nthought/text for providers with no native notion. Blocks name their owning\nreasoning item or message item when the provider has one; several blocks\nmay share one item's replay material.",
       "oneOf": [
         {
+          "const": "assistant_text",
           "description": "Visible assistant prose.",
-          "enum": [
-            "assistant_text"
-          ],
           "type": "string"
         },
         {
-          "description": "Reasoning summary (\"thinking\") text, kept separate from assistant response text.",
-          "enum": [
-            "reasoning"
-          ],
+          "const": "reasoning",
+          "description": "Reasoning summary (\"thinking\") text, kept separate from assistant\nresponse text.",
           "type": "string"
         }
       ]
     }
   },
+  "$id": "https://lash.dev/schemas/remote-session-observation-event/v100",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "oneOf": [
     {
-      "additionalProperties": false,
       "properties": {
         "activity": {
-          "$ref": "#/definitions/RemoteTurnActivity"
+          "$ref": "#/$defs/RemoteTurnActivity"
         },
         "type": {
-          "enum": [
-            "turn_activity"
-          ],
+          "const": "turn_activity",
           "type": "string"
         }
       },
       "required": [
-        "activity",
-        "type"
+        "type",
+        "activity"
       ],
       "type": "object"
     },
     {
-      "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": [
-            "committed"
-          ],
+          "const": "committed",
           "type": "string"
         }
       },
@@ -2839,12 +2633,9 @@
       "type": "object"
     },
     {
-      "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": [
-            "resident_changed"
-          ],
+          "const": "resident_changed",
           "type": "string"
         }
       },
@@ -2854,26 +2645,22 @@
       "type": "object"
     },
     {
-      "additionalProperties": false,
       "properties": {
         "frame_id": {
           "type": "string"
         },
         "type": {
-          "enum": [
-            "agent_frame_switched"
-          ],
+          "const": "agent_frame_switched",
           "type": "string"
         }
       },
       "required": [
-        "frame_id",
-        "type"
+        "type",
+        "frame_id"
       ],
       "type": "object"
     },
     {
-      "additionalProperties": false,
       "properties": {
         "batch_ids": {
           "items": {
@@ -2882,27 +2669,24 @@
           "type": "array"
         },
         "kind": {
-          "$ref": "#/definitions/RemoteSessionQueueEventKind"
+          "$ref": "#/$defs/RemoteSessionQueueEventKind"
         },
         "type": {
-          "enum": [
-            "queue_changed"
-          ],
+          "const": "queue_changed",
           "type": "string"
         }
       },
       "required": [
-        "batch_ids",
+        "type",
         "kind",
-        "type"
+        "batch_ids"
       ],
       "type": "object"
     },
     {
-      "additionalProperties": false,
       "properties": {
         "kind": {
-          "$ref": "#/definitions/RemoteSessionProcessEventKind"
+          "$ref": "#/$defs/RemoteSessionProcessEventKind"
         },
         "process_ids": {
           "items": {
@@ -2911,16 +2695,14 @@
           "type": "array"
         },
         "type": {
-          "enum": [
-            "process_changed"
-          ],
+          "const": "process_changed",
           "type": "string"
         }
       },
       "required": [
+        "type",
         "kind",
-        "process_ids",
-        "type"
+        "process_ids"
       ],
       "type": "object"
     }
@@ -2934,7 +2716,7 @@
     },
     "revision": {
       "format": "uint64",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "session_id": {
@@ -2948,13 +2730,14 @@
     }
   },
   "required": [
-    "cursor",
+    "session_id",
     "replay_incarnation_id",
     "revision",
-    "session_id"
+    "cursor"
   ],
   "title": "RemoteSessionObservationEvent",
   "type": "object",
+  "unevaluatedProperties": false,
   "x-lash-schema-version": 100,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

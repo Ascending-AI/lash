@@ -44,7 +44,7 @@ pub const SMOKE_TURNS_PER_SESSION: u64 = 6;
 /// The checked-in workloads a load run can name.
 pub const WORKLOAD_NAMES: [&str; 2] = ["figments-v1", "smoke-v1"];
 
-pub fn schema() -> schemars::schema::RootSchema {
+pub fn schema() -> schemars::Schema {
     schema::generate()
 }
 

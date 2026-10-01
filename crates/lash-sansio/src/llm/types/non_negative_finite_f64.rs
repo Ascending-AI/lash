@@ -35,17 +35,13 @@ pub struct NonNegativeFiniteF64(serde_json::Number);
 /// negative or non-finite values, so the decode shape is a number with a
 /// zero lower bound.
 impl JsonSchema for NonNegativeFiniteF64 {
-    fn schema_name() -> String {
-        "NonNegativeFiniteF64".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "NonNegativeFiniteF64".into()
     }
-    fn json_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::Number.into()),
-            number: Some(Box::new(schemars::schema::NumberValidation {
-                minimum: Some(0.0),
-                ..Default::default()
-            })),
-            ..Default::default()
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "number",
+            "minimum": 0.0
         })
     }
 }

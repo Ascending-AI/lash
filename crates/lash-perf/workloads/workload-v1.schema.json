@@ -1,216 +1,173 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "WorkloadSpec",
   "type": "object",
-  "required": [
-    "arrival",
-    "attachments",
-    "collection",
-    "compact_every_turns",
-    "cron",
-    "delete_per_turn",
-    "drain_timeout_s",
-    "external_occurrences_per_turn",
-    "fault_window_s",
-    "faults",
-    "format_version",
-    "generator",
-    "history_prefill_turns",
-    "host_process_starts_per_turn",
-    "input_bytes",
-    "inventory",
-    "llm_requests_per_turn",
-    "minimum_completed_turns",
-    "model_code_pool",
-    "observation",
-    "processes",
-    "promotion_reads_per_turn",
-    "prompt_bytes",
-    "provenance",
-    "provider",
-    "provider_output_bytes",
-    "queued",
-    "rotate_after_turns",
-    "saturation_rates_per_session_s",
-    "saturation_step_s",
-    "seed",
-    "sessions",
-    "steady_s",
-    "tool_argument_bytes",
-    "tool_result_bytes",
-    "tools",
-    "topology",
-    "trigger_edits_per_turn",
-    "turn_cancel_share",
-    "turns_per_session_s",
-    "warmup_s"
-  ],
   "properties": {
     "arrival": {
       "type": "string",
       "pattern": "^poisson_open_loop$"
     },
     "attachments": {
-      "$ref": "#/definitions/Attachments"
+      "$ref": "#/$defs/Attachments"
     },
     "collection": {
-      "$ref": "#/definitions/Collection"
+      "$ref": "#/$defs/Collection"
     },
     "compact_every_turns": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "cron": {
-      "$ref": "#/definitions/Cron"
+      "$ref": "#/$defs/Cron"
     },
     "delete_per_turn": {
       "type": "number",
       "format": "double",
-      "minimum": 0.0
+      "minimum": 0
     },
     "drain_timeout_s": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "external_occurrences_per_turn": {
       "type": "number",
       "format": "double",
-      "minimum": 0.0
+      "minimum": 0
     },
     "fault_window_s": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "faults": {
-      "$ref": "#/definitions/Faults"
+      "$ref": "#/$defs/Faults"
     },
     "format_version": {
       "type": "integer",
       "format": "uint32",
-      "maximum": 1.0,
-      "minimum": 1.0
+      "maximum": 1,
+      "minimum": 1
     },
     "generator": {
-      "$ref": "#/definitions/GeneratorVersion"
+      "$ref": "#/$defs/GeneratorVersion"
     },
     "history_prefill_turns": {
       "type": "array",
       "items": {
         "type": "array",
-        "items": [
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
           {
             "type": "integer",
             "format": "uint32",
-            "minimum": 0.0
+            "minimum": 0
           },
           {
-            "$ref": "#/definitions/Probability"
+            "$ref": "#/$defs/Probability"
           }
-        ],
-        "maxItems": 2,
-        "minItems": 2
+        ]
       },
       "minItems": 1
     },
     "host_process_starts_per_turn": {
       "type": "number",
       "format": "double",
-      "minimum": 0.0
+      "minimum": 0
     },
     "input_bytes": {
       "type": "array",
       "items": {
         "type": "array",
-        "items": [
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
           {
-            "$ref": "#/definitions/ByteSize"
+            "$ref": "#/$defs/ByteSize"
           },
           {
-            "$ref": "#/definitions/Probability"
+            "$ref": "#/$defs/Probability"
           }
-        ],
-        "maxItems": 2,
-        "minItems": 2
+        ]
       },
       "minItems": 1
     },
     "inventory": {
-      "$ref": "#/definitions/Inventory"
+      "$ref": "#/$defs/Inventory"
     },
     "llm_requests_per_turn": {
       "type": "number",
       "format": "double",
-      "minimum": 0.0
+      "minimum": 0
     },
     "minimum_completed_turns": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "model_code_pool": {
-      "$ref": "#/definitions/ModelCodePool"
+      "$ref": "#/$defs/ModelCodePool"
     },
     "observation": {
-      "$ref": "#/definitions/Observation"
+      "$ref": "#/$defs/Observation"
     },
     "processes": {
-      "$ref": "#/definitions/Processes"
+      "$ref": "#/$defs/Processes"
     },
     "promotion_reads_per_turn": {
       "type": "number",
       "format": "double",
-      "minimum": 0.0
+      "minimum": 0
     },
     "prompt_bytes": {
       "type": "array",
       "items": {
         "type": "array",
-        "items": [
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
           {
-            "$ref": "#/definitions/ByteSize"
+            "$ref": "#/$defs/ByteSize"
           },
           {
-            "$ref": "#/definitions/Probability"
+            "$ref": "#/$defs/Probability"
           }
-        ],
-        "maxItems": 2,
-        "minItems": 2
+        ]
       },
       "minItems": 1
     },
     "provenance": {
-      "$ref": "#/definitions/Provenance"
+      "$ref": "#/$defs/Provenance"
     },
     "provider": {
-      "$ref": "#/definitions/Provider"
+      "$ref": "#/$defs/Provider"
     },
     "provider_output_bytes": {
       "type": "array",
       "items": {
         "type": "array",
-        "items": [
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
           {
-            "$ref": "#/definitions/ByteSize"
+            "$ref": "#/$defs/ByteSize"
           },
           {
-            "$ref": "#/definitions/Probability"
+            "$ref": "#/$defs/Probability"
           }
-        ],
-        "maxItems": 2,
-        "minItems": 2
+        ]
       },
       "minItems": 1
     },
     "queued": {
-      "$ref": "#/definitions/Queued"
+      "$ref": "#/$defs/Queued"
     },
     "rotate_after_turns": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "saturation_rates_per_session_s": {
       "type": "array",
@@ -224,37 +181,37 @@
     "saturation_step_s": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "seed": {
       "type": "integer",
       "format": "uint64",
-      "minimum": 0.0
+      "minimum": 0
     },
     "sessions": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "steady_s": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "tool_argument_bytes": {
       "type": "array",
       "items": {
         "type": "array",
-        "items": [
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
           {
-            "$ref": "#/definitions/ByteSize"
+            "$ref": "#/$defs/ByteSize"
           },
           {
-            "$ref": "#/definitions/Probability"
+            "$ref": "#/$defs/Probability"
           }
-        ],
-        "maxItems": 2,
-        "minItems": 2
+        ]
       },
       "minItems": 1
     },
@@ -262,35 +219,35 @@
       "type": "array",
       "items": {
         "type": "array",
-        "items": [
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
           {
-            "$ref": "#/definitions/ByteSize"
+            "$ref": "#/$defs/ByteSize"
           },
           {
-            "$ref": "#/definitions/Probability"
+            "$ref": "#/$defs/Probability"
           }
-        ],
-        "maxItems": 2,
-        "minItems": 2
+        ]
       },
       "minItems": 1
     },
     "tools": {
-      "$ref": "#/definitions/Tools"
+      "$ref": "#/$defs/Tools"
     },
     "topology": {
-      "$ref": "#/definitions/Topology"
+      "$ref": "#/$defs/Topology"
     },
     "trigger_edits_per_turn": {
       "type": "number",
       "format": "double",
-      "minimum": 0.0
+      "minimum": 0
     },
     "turn_cancel_share": {
       "type": "number",
       "format": "double",
-      "maximum": 1.0,
-      "minimum": 0.0
+      "maximum": 1,
+      "minimum": 0
     },
     "turns_per_session_s": {
       "type": "number",
@@ -300,80 +257,114 @@
     "warmup_s": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     }
   },
   "additionalProperties": false,
-  "definitions": {
+  "required": [
+    "format_version",
+    "seed",
+    "generator",
+    "sessions",
+    "turns_per_session_s",
+    "arrival",
+    "rotate_after_turns",
+    "history_prefill_turns",
+    "compact_every_turns",
+    "warmup_s",
+    "steady_s",
+    "fault_window_s",
+    "saturation_rates_per_session_s",
+    "saturation_step_s",
+    "drain_timeout_s",
+    "minimum_completed_turns",
+    "llm_requests_per_turn",
+    "host_process_starts_per_turn",
+    "external_occurrences_per_turn",
+    "trigger_edits_per_turn",
+    "promotion_reads_per_turn",
+    "prompt_bytes",
+    "input_bytes",
+    "tool_argument_bytes",
+    "tool_result_bytes",
+    "provider_output_bytes",
+    "tools",
+    "processes",
+    "attachments",
+    "queued",
+    "cron",
+    "turn_cancel_share",
+    "delete_per_turn",
+    "observation",
+    "provider",
+    "faults",
+    "topology",
+    "model_code_pool",
+    "collection",
+    "provenance",
+    "inventory"
+  ],
+  "$defs": {
     "Attachments": {
       "type": "object",
-      "required": [
-        "aggregate_bytes",
-        "count",
-        "explicit_reads_per_blob",
-        "turn_share"
-      ],
       "properties": {
         "aggregate_bytes": {
           "type": "array",
           "items": {
             "type": "array",
-            "items": [
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
               {
-                "$ref": "#/definitions/ByteSize"
+                "$ref": "#/$defs/ByteSize"
               },
               {
-                "$ref": "#/definitions/Probability"
+                "$ref": "#/$defs/Probability"
               }
-            ],
-            "maxItems": 2,
-            "minItems": 2
+            ]
           },
           "minItems": 1
         },
         "count": {
-          "$ref": "#/definitions/Distribution"
+          "$ref": "#/$defs/Distribution"
         },
         "explicit_reads_per_blob": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "turn_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "turn_share",
+        "count",
+        "aggregate_bytes",
+        "explicit_reads_per_blob"
+      ]
     },
     "ByteSize": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 128.0
+      "minimum": 128
     },
     "Collection": {
       "type": "object",
-      "required": [
-        "bootstrap_resamples",
-        "comparison_repetitions",
-        "confidence",
-        "journal_sample_s",
-        "recovery_stable_s",
-        "retention_s",
-        "scrape_s"
-      ],
       "properties": {
         "bootstrap_resamples": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "comparison_repetitions": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "confidence": {
           "type": "number",
@@ -384,38 +375,42 @@
         "journal_sample_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "recovery_stable_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "retention_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "scrape_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "scrape_s",
+        "journal_sample_s",
+        "retention_s",
+        "recovery_stable_s",
+        "comparison_repetitions",
+        "bootstrap_resamples",
+        "confidence"
+      ]
     },
     "Cron": {
       "type": "object",
-      "required": [
-        "cadence_s",
-        "jitter",
-        "subscriptions"
-      ],
       "properties": {
         "cadence_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "jitter": {
           "type": "string",
@@ -424,78 +419,79 @@
         "subscriptions": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "subscriptions",
+        "cadence_s",
+        "jitter"
+      ]
     },
     "Distribution": {
       "type": "array",
       "items": {
         "type": "array",
-        "items": [
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
           {
-            "$ref": "#/definitions/Positive"
+            "$ref": "#/$defs/Positive"
           },
           {
-            "$ref": "#/definitions/Probability"
+            "$ref": "#/$defs/Probability"
           }
-        ],
-        "maxItems": 2,
-        "minItems": 2
+        ]
       },
       "minItems": 1
     },
     "Faults": {
       "type": "object",
-      "required": [
-        "restate_restart_delay_s",
-        "restate_restart_s",
-        "rolling_deploy_s",
-        "rolling_worker_pause_s",
-        "worker_kill_s",
-        "worker_restart_delay_s"
-      ],
       "properties": {
         "restate_restart_delay_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "restate_restart_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "rolling_deploy_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "rolling_worker_pause_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "worker_kill_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "worker_restart_delay_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "worker_kill_s",
+        "worker_restart_delay_s",
+        "restate_restart_s",
+        "restate_restart_delay_s",
+        "rolling_deploy_s",
+        "rolling_worker_pause_s"
+      ]
     },
     "GeneratorVersion": {
       "type": "object",
-      "required": [
-        "algorithm",
-        "version"
-      ],
       "properties": {
         "algorithm": {
           "type": "string",
@@ -504,18 +500,18 @@
         "version": {
           "type": "integer",
           "format": "uint32",
-          "maximum": 1.0,
-          "minimum": 1.0
+          "maximum": 1,
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "version"
+      ]
     },
     "Inventory": {
       "type": "object",
-      "required": [
-        "figments_sha",
-        "lash_sha"
-      ],
       "properties": {
         "figments_sha": {
           "type": "string",
@@ -526,174 +522,167 @@
           "pattern": "^[0-9a-f]{40}$"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "lash_sha",
+        "figments_sha"
+      ]
     },
     "ModelCodePool": {
       "type": "object",
-      "required": [
-        "execution_memory_mib",
-        "queue_limit",
-        "workers_per_lash_worker"
-      ],
       "properties": {
         "execution_memory_mib": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "queue_limit": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "workers_per_lash_worker": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "workers_per_lash_worker",
+        "queue_limit",
+        "execution_memory_mib"
+      ]
     },
     "Observation": {
       "type": "object",
-      "required": [
-        "pending_reads_per_turn",
-        "poll_ms",
-        "process_prune_s",
-        "projector_idle_s",
-        "projector_poll_s",
-        "reconnect_share",
-        "streams_per_turn",
-        "subscription_reconcile_s",
-        "workflow_read_sets_per_start"
-      ],
       "properties": {
         "pending_reads_per_turn": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "poll_ms": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "process_prune_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "projector_idle_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "projector_poll_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "reconnect_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "streams_per_turn": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "subscription_reconcile_s": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "workflow_read_sets_per_start": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "streams_per_turn",
+        "reconnect_share",
+        "poll_ms",
+        "pending_reads_per_turn",
+        "workflow_read_sets_per_start",
+        "projector_poll_s",
+        "projector_idle_s",
+        "subscription_reconcile_s",
+        "process_prune_s"
+      ]
     },
     "Positive": {
       "type": "integer",
       "format": "uint32",
-      "minimum": 1.0
+      "minimum": 1
     },
     "Probability": {
       "type": "number",
       "format": "double",
-      "maximum": 1.0,
-      "minimum": 0.0
+      "maximum": 1,
+      "minimum": 0
     },
     "Processes": {
       "type": "object",
-      "required": [
-        "await_share",
-        "cancel_share",
-        "fanout",
-        "park_share",
-        "signal_share",
-        "turn_share",
-        "wake_delay_ms"
-      ],
       "properties": {
         "await_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "cancel_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "fanout": {
-          "$ref": "#/definitions/Distribution"
+          "$ref": "#/$defs/Distribution"
         },
         "park_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "signal_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "turn_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "wake_delay_ms": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "turn_share",
+        "fanout",
+        "await_share",
+        "signal_share",
+        "park_share",
+        "wake_delay_ms",
+        "cancel_share"
+      ]
     },
     "Provenance": {
       "type": "object",
-      "required": [
-        "attachment_max",
-        "default",
-        "fields",
-        "maximum_drain_batch",
-        "pg_connections",
-        "polling",
-        "process_prune",
-        "restate_partitions",
-        "worker_shape"
-      ],
       "properties": {
         "attachment_max": {
           "type": "string",
@@ -705,108 +694,6 @@
         },
         "fields": {
           "type": "object",
-          "required": [
-            "/arrival",
-            "/attachments/aggregate_bytes",
-            "/attachments/count",
-            "/attachments/explicit_reads_per_blob",
-            "/attachments/turn_share",
-            "/collection/bootstrap_resamples",
-            "/collection/comparison_repetitions",
-            "/collection/confidence",
-            "/collection/journal_sample_s",
-            "/collection/recovery_stable_s",
-            "/collection/retention_s",
-            "/collection/scrape_s",
-            "/compact_every_turns",
-            "/cron/cadence_s",
-            "/cron/jitter",
-            "/cron/subscriptions",
-            "/delete_per_turn",
-            "/drain_timeout_s",
-            "/external_occurrences_per_turn",
-            "/fault_window_s",
-            "/faults/restate_restart_delay_s",
-            "/faults/restate_restart_s",
-            "/faults/rolling_deploy_s",
-            "/faults/rolling_worker_pause_s",
-            "/faults/worker_kill_s",
-            "/faults/worker_restart_delay_s",
-            "/format_version",
-            "/generator/algorithm",
-            "/generator/version",
-            "/history_prefill_turns",
-            "/host_process_starts_per_turn",
-            "/input_bytes",
-            "/inventory/figments_sha",
-            "/inventory/lash_sha",
-            "/llm_requests_per_turn",
-            "/minimum_completed_turns",
-            "/model_code_pool/execution_memory_mib",
-            "/model_code_pool/queue_limit",
-            "/model_code_pool/workers_per_lash_worker",
-            "/observation/pending_reads_per_turn",
-            "/observation/poll_ms",
-            "/observation/process_prune_s",
-            "/observation/projector_idle_s",
-            "/observation/projector_poll_s",
-            "/observation/reconnect_share",
-            "/observation/streams_per_turn",
-            "/observation/subscription_reconcile_s",
-            "/observation/workflow_read_sets_per_start",
-            "/processes/await_share",
-            "/processes/cancel_share",
-            "/processes/fanout",
-            "/processes/park_share",
-            "/processes/signal_share",
-            "/processes/turn_share",
-            "/processes/wake_delay_ms",
-            "/promotion_reads_per_turn",
-            "/prompt_bytes",
-            "/provider/chunks",
-            "/provider/latency_ms",
-            "/provider/max_concurrent",
-            "/provider/retryable_first_attempt_share",
-            "/provider/stream_share",
-            "/provider_output_bytes",
-            "/queued/active_turn_share",
-            "/queued/cancel_share",
-            "/queued/inputs_per_turn",
-            "/queued/maximum_drain_batch",
-            "/rotate_after_turns",
-            "/saturation_rates_per_session_s",
-            "/saturation_step_s",
-            "/seed",
-            "/sessions",
-            "/steady_s",
-            "/tool_argument_bytes",
-            "/tool_result_bytes",
-            "/tools/batches",
-            "/tools/callback_ms",
-            "/tools/fanout",
-            "/tools/parallel_share",
-            "/tools/turn_share",
-            "/topology/bandwidth_mbps",
-            "/topology/garage_cpu",
-            "/topology/garage_memory_mib",
-            "/topology/network_jitter_ms",
-            "/topology/one_way_delay_ms",
-            "/topology/pg_connections_per_worker",
-            "/topology/pg_cpu",
-            "/topology/pg_memory_mib",
-            "/topology/replication",
-            "/topology/restate_cpu",
-            "/topology/restate_memory_mib",
-            "/topology/restate_nodes",
-            "/topology/restate_partitions",
-            "/topology/worker_cpu",
-            "/topology/worker_memory_mib",
-            "/topology/workers",
-            "/trigger_edits_per_turn",
-            "/turn_cancel_share",
-            "/turns_per_session_s",
-            "/warmup_s"
-          ],
           "properties": {
             "/arrival": {
               "type": "string",
@@ -1209,7 +1096,109 @@
               "pattern": "^[IV](: .+)?$"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "required": [
+            "/arrival",
+            "/attachments/aggregate_bytes",
+            "/attachments/count",
+            "/attachments/explicit_reads_per_blob",
+            "/attachments/turn_share",
+            "/collection/bootstrap_resamples",
+            "/collection/comparison_repetitions",
+            "/collection/confidence",
+            "/collection/journal_sample_s",
+            "/collection/recovery_stable_s",
+            "/collection/retention_s",
+            "/collection/scrape_s",
+            "/compact_every_turns",
+            "/cron/cadence_s",
+            "/cron/jitter",
+            "/cron/subscriptions",
+            "/delete_per_turn",
+            "/drain_timeout_s",
+            "/external_occurrences_per_turn",
+            "/fault_window_s",
+            "/faults/restate_restart_delay_s",
+            "/faults/restate_restart_s",
+            "/faults/rolling_deploy_s",
+            "/faults/rolling_worker_pause_s",
+            "/faults/worker_kill_s",
+            "/faults/worker_restart_delay_s",
+            "/format_version",
+            "/generator/algorithm",
+            "/generator/version",
+            "/history_prefill_turns",
+            "/host_process_starts_per_turn",
+            "/input_bytes",
+            "/inventory/figments_sha",
+            "/inventory/lash_sha",
+            "/llm_requests_per_turn",
+            "/minimum_completed_turns",
+            "/model_code_pool/execution_memory_mib",
+            "/model_code_pool/queue_limit",
+            "/model_code_pool/workers_per_lash_worker",
+            "/observation/pending_reads_per_turn",
+            "/observation/poll_ms",
+            "/observation/process_prune_s",
+            "/observation/projector_idle_s",
+            "/observation/projector_poll_s",
+            "/observation/reconnect_share",
+            "/observation/streams_per_turn",
+            "/observation/subscription_reconcile_s",
+            "/observation/workflow_read_sets_per_start",
+            "/processes/await_share",
+            "/processes/cancel_share",
+            "/processes/fanout",
+            "/processes/park_share",
+            "/processes/signal_share",
+            "/processes/turn_share",
+            "/processes/wake_delay_ms",
+            "/promotion_reads_per_turn",
+            "/prompt_bytes",
+            "/provider/chunks",
+            "/provider/latency_ms",
+            "/provider/max_concurrent",
+            "/provider/retryable_first_attempt_share",
+            "/provider/stream_share",
+            "/provider_output_bytes",
+            "/queued/active_turn_share",
+            "/queued/cancel_share",
+            "/queued/inputs_per_turn",
+            "/queued/maximum_drain_batch",
+            "/rotate_after_turns",
+            "/saturation_rates_per_session_s",
+            "/saturation_step_s",
+            "/seed",
+            "/sessions",
+            "/steady_s",
+            "/tool_argument_bytes",
+            "/tool_result_bytes",
+            "/tools/batches",
+            "/tools/callback_ms",
+            "/tools/fanout",
+            "/tools/parallel_share",
+            "/tools/turn_share",
+            "/topology/bandwidth_mbps",
+            "/topology/garage_cpu",
+            "/topology/garage_memory_mib",
+            "/topology/network_jitter_ms",
+            "/topology/one_way_delay_ms",
+            "/topology/pg_connections_per_worker",
+            "/topology/pg_cpu",
+            "/topology/pg_memory_mib",
+            "/topology/replication",
+            "/topology/restate_cpu",
+            "/topology/restate_memory_mib",
+            "/topology/restate_nodes",
+            "/topology/restate_partitions",
+            "/topology/worker_cpu",
+            "/topology/worker_memory_mib",
+            "/topology/workers",
+            "/trigger_edits_per_turn",
+            "/turn_cancel_share",
+            "/turns_per_session_s",
+            "/warmup_s"
+          ]
         },
         "maximum_drain_batch": {
           "type": "string",
@@ -1236,219 +1225,230 @@
           "pattern": "^[IV](: .+)?$"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "worker_shape",
+        "pg_connections",
+        "attachment_max",
+        "maximum_drain_batch",
+        "polling",
+        "process_prune",
+        "restate_partitions",
+        "fields"
+      ]
     },
     "Provider": {
       "type": "object",
-      "required": [
-        "chunks",
-        "latency_ms",
-        "max_concurrent",
-        "retryable_first_attempt_share",
-        "stream_share"
-      ],
       "properties": {
         "chunks": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "latency_ms": {
-          "$ref": "#/definitions/Distribution"
+          "$ref": "#/$defs/Distribution"
         },
         "max_concurrent": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "retryable_first_attempt_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "stream_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "latency_ms",
+        "stream_share",
+        "chunks",
+        "retryable_first_attempt_share",
+        "max_concurrent"
+      ]
     },
     "Queued": {
       "type": "object",
-      "required": [
-        "active_turn_share",
-        "cancel_share",
-        "inputs_per_turn",
-        "maximum_drain_batch"
-      ],
       "properties": {
         "active_turn_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "cancel_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "inputs_per_turn": {
           "type": "number",
           "format": "double",
-          "minimum": 0.0
+          "minimum": 0
         },
         "maximum_drain_batch": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "inputs_per_turn",
+        "active_turn_share",
+        "cancel_share",
+        "maximum_drain_batch"
+      ]
     },
     "Tools": {
       "type": "object",
-      "required": [
-        "batches",
-        "callback_ms",
-        "fanout",
-        "parallel_share",
-        "turn_share"
-      ],
       "properties": {
         "batches": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "callback_ms": {
-          "$ref": "#/definitions/Distribution"
+          "$ref": "#/$defs/Distribution"
         },
         "fanout": {
-          "$ref": "#/definitions/Distribution"
+          "$ref": "#/$defs/Distribution"
         },
         "parallel_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         },
         "turn_share": {
           "type": "number",
           "format": "double",
-          "maximum": 1.0,
-          "minimum": 0.0
+          "maximum": 1,
+          "minimum": 0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "turn_share",
+        "batches",
+        "fanout",
+        "parallel_share",
+        "callback_ms"
+      ]
     },
     "Topology": {
       "type": "object",
-      "required": [
-        "bandwidth_mbps",
-        "garage_cpu",
-        "garage_memory_mib",
-        "network_jitter_ms",
-        "one_way_delay_ms",
-        "pg_connections_per_worker",
-        "pg_cpu",
-        "pg_memory_mib",
-        "replication",
-        "restate_cpu",
-        "restate_memory_mib",
-        "restate_nodes",
-        "restate_partitions",
-        "worker_cpu",
-        "worker_memory_mib",
-        "workers"
-      ],
       "properties": {
         "bandwidth_mbps": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "garage_cpu": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "garage_memory_mib": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "network_jitter_ms": {
           "type": "number",
           "format": "double",
-          "minimum": 0.0
+          "minimum": 0
         },
         "one_way_delay_ms": {
           "type": "number",
           "format": "double",
-          "minimum": 0.0
+          "minimum": 0
         },
         "pg_connections_per_worker": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "pg_cpu": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "pg_memory_mib": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "replication": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "restate_cpu": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "restate_memory_mib": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "restate_nodes": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "restate_partitions": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "worker_cpu": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "worker_memory_mib": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         },
         "workers": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 1.0
+          "minimum": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "workers",
+        "worker_cpu",
+        "worker_memory_mib",
+        "pg_connections_per_worker",
+        "restate_nodes",
+        "restate_partitions",
+        "replication",
+        "restate_cpu",
+        "restate_memory_mib",
+        "pg_cpu",
+        "pg_memory_mib",
+        "garage_cpu",
+        "garage_memory_mib",
+        "one_way_delay_ms",
+        "network_jitter_ms",
+        "bandwidth_mbps"
+      ]
     }
   }
 }

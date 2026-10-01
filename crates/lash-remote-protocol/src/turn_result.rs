@@ -505,6 +505,7 @@ pub enum RemoteToolIntentKind {
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum RemoteToolIntentRefusalReason {
     UnsupportedProtocolVersion {
+        #[schemars(transform = crate::omit_schema_integer_maximum)]
         recorded: u16,
     },
     IntentIndexOverflow,
