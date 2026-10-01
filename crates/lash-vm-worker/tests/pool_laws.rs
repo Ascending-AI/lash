@@ -23,10 +23,16 @@ fn config(mode: &str) -> PoolConfig {
     if !mode.is_empty() {
         entry.args.push(mode.into());
     }
+    // Worker startup and replacement are setup for these laws. The short
+    // checkout deadline belongs only to laws that assert CheckoutTimedOut.
     let mut config = PoolConfig::standard(entry);
     config.max_workers = 1;
-    config.deadlines.checkout = Duration::from_millis(150);
     config.protocol.no_response_watchdog = Duration::from_secs(2);
+    config
+}
+fn checkout_timeout_config() -> PoolConfig {
+    let mut config = config("");
+    config.deadlines.checkout = Duration::from_millis(150);
     config
 }
 fn checkout(pool: &WorkerPool) -> Checkout {
@@ -442,7 +448,7 @@ fn restart_storm_fails_queued_work_typed() {
 #[test]
 fn single_slot_nested_compile_completes_by_parking_the_awaiting_run() {
     let source = "finish(await tools.echo({ value: 7 }));";
-    let pool = WorkerPool::new(config("")).expect("pool");
+    let pool = WorkerPool::new(checkout_timeout_config()).expect("pool");
     let mut straight = checkout(&pool);
     let (_, expected) = complete(&mut straight, source);
     straight.release().expect("release");
@@ -920,7 +926,7 @@ fn one_slot_process_await_releases_worker_for_the_awaited_body() {
         "const handle = await tools.echo({{ value: {{ __handle__: 'lash', id: 'p.{}' }} }}); finish(await handle);",
         process_id.as_str(),
     );
-    let pool = WorkerPool::new(config("")).expect("pool");
+    let pool = WorkerPool::new(checkout_timeout_config()).expect("pool");
     let mut worker = checkout(&pool);
     let mut message = worker
         .start(start(&source, ExecutionMode::Foreground))
@@ -1126,7 +1132,7 @@ fn run_parking(pool: &WorkerPool, input: &Start, parks_on: EffectKind) -> (Trans
 /// issued once and in the same order, and the same value (FIG-4275).
 #[test]
 fn one_slot_aggregate_process_await_parks_on_every_pending_handle() {
-    let pool = WorkerPool::new(config("")).expect("pool");
+    let pool = WorkerPool::new(checkout_timeout_config()).expect("pool");
     let [a, b_handle, c] = three_handles();
     let shapes = [
         (
@@ -1169,7 +1175,7 @@ fn one_slot_aggregate_process_await_parks_on_every_pending_handle() {
 fn a_parked_aggregate_await_resumes_after_a_parent_crash_with_the_same_result() {
     let [a, b_handle, c] = three_handles();
     let input = aggregate_await(b::list(vec![a, b_handle, c]));
-    let pool = WorkerPool::new(config("")).expect("pool");
+    let pool = WorkerPool::new(checkout_timeout_config()).expect("pool");
     let expected = straight(&pool, &input);
 
     // The first handle's terminal is answered in place; the cell parks on
@@ -1192,7 +1198,7 @@ fn a_parked_aggregate_await_resumes_after_a_parent_crash_with_the_same_result() 
     drop(worker);
     drop(pool);
 
-    let pool = WorkerPool::new(config("")).expect("the new parent's pool");
+    let pool = WorkerPool::new(checkout_timeout_config()).expect("the new parent's pool");
     let (replayed, parks) = run_parking(&pool, &input, EffectKind::Await);
     assert_eq!(parks, 3, "the replayed cell parks on every pending handle");
     assert_eq!(
@@ -1246,7 +1252,7 @@ fn a_parked_aggregate_await_resumes_after_a_parent_crash_with_the_same_result() 
 #[test]
 fn one_slot_resource_operation_batch_parks_and_resumes() {
     let source = "const [a, b, c] = await Promise.all([tools.echo({ value: 1 }), tools.echo({ value: 2 }), tools.echo({ value: 3 })]); finish(a + b + c);";
-    let pool = WorkerPool::new(config("")).expect("pool");
+    let pool = WorkerPool::new(checkout_timeout_config()).expect("pool");
     for mode in [ExecutionMode::Foreground, ExecutionMode::Process] {
         let input = start(source, mode);
         let expected = straight(&pool, &input);
