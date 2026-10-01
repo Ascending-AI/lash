@@ -91,12 +91,12 @@ pub use protocol::{EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FOR
 use protocol::{load_committed_final, load_index, load_index_shared, load_membership};
 use rank_run::served_run;
 pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
-pub(crate) use wire::EffectGroupOpenerResponse;
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,
     EffectGroupProbeResponse,
 };
+pub(crate) use wire::{EffectGroupOpenerRequest, EffectGroupOpenerResponse};
 
 mod shape;
 pub use shape::{EffectGroupMembership, EffectGroupShape};
@@ -192,7 +192,9 @@ pub(crate) trait EffectGroupState {
     #[shared]
     async fn unsettled_children(call: Call<()>) -> HandlerResult<Reply<usize>>;
     #[shared]
-    async fn opener(call: Call<String>) -> HandlerResult<Reply<EffectGroupOpenerResponse>>;
+    async fn opener(
+        call: Call<EffectGroupOpenerRequest>,
+    ) -> HandlerResult<Reply<EffectGroupOpenerResponse>>;
     async fn open(
         call: Call<EffectGroupOpenRequest>,
     ) -> HandlerResult<Reply<EffectGroupOpenResponse>>;
@@ -334,40 +336,20 @@ impl EffectGroupState for EffectGroupStateImpl {
         Ok(Reply::at(wire, unsettled))
     }
 
-    /// The retained opener of paused dispatcher work. Children need their
-    /// live interest; retirement needs its owner through the cleanup and
-    /// reply windows, including the final tombstone (FIG-4617).
+    /// What the group still needs of one paused dispatcher invocation
+    /// (FIG-4617, FIG-4630). Retirement needs its owner through the cleanup
+    /// and reply windows, including the final tombstone; a child is needed
+    /// until its position is seated, whatever the group's phase.
     async fn opener(
         &self,
         ctx: SharedObjectContext<'_>,
-        call: Call<String>,
+        call: Call<EffectGroupOpenerRequest>,
     ) -> HandlerResult<Reply<EffectGroupOpenerResponse>> {
-        let (wire, handler) = call.open()?;
+        let (wire, request) = call.open()?;
         object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let response = match load_index_shared(&ctx).await? {
-            Some(record) => {
-                let opener = match record.lifecycle {
-                    EffectGroupLifecycle::Preparing { live, .. }
-                    | EffectGroupLifecycle::Ready { live, .. } => Some(live.shape.opener),
-                    EffectGroupLifecycle::Closed { reopened, live, .. }
-                        if reopened || handler == "run" || handler == "retire" =>
-                    {
-                        Some(live.shape.opener)
-                    }
-                    EffectGroupLifecycle::Retired { cleanup } if handler == "retire" => {
-                        Some(match cleanup {
-                            EffectGroupCleanup::Pending { live, .. } => live.shape.opener,
-                            EffectGroupCleanup::Complete { opener } => opener,
-                        })
-                    }
-                    _ => None,
-                };
-                match opener {
-                    Some(opener) => EffectGroupOpenerResponse::Waiting { opener },
-                    None => EffectGroupOpenerResponse::Released,
-                }
-            }
-            None => EffectGroupOpenerResponse::Released,
+            Some(record) => paused_work_need(record.lifecycle, &request),
+            None => EffectGroupOpenerResponse::Seated,
         };
         Ok(Reply::at(wire, response))
     }

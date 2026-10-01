@@ -565,8 +565,9 @@ impl SessionControlEngine for LostResumeReply {
         &self,
         target: &RootRef,
         engine: Option<&EnginePark>,
+        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        self.inner.resume_root(target, engine).await?;
+        self.inner.resume_root(target, engine, children).await?;
         Err(EngineRefusal::retryable(
             lash_core::RuntimeErrorCode::EngineControlRequest,
             "lost reply after the engine resumed",
@@ -597,6 +598,7 @@ impl SessionControlEngine for ReplyOnly {
         &self,
         _: &RootRef,
         _: Option<&EnginePark>,
+        _: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::Resumed)
     }
@@ -958,8 +960,9 @@ impl SessionControlEngine for InterruptedRelease {
         &self,
         target: &RootRef,
         engine: Option<&EnginePark>,
+        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        self.inner.resume_root(target, engine).await
+        self.inner.resume_root(target, engine, children).await
     }
     async fn release_root(
         &self,
@@ -1140,6 +1143,7 @@ async fn crash_gaps(server: HarnessServer) {
                             root: f.driver.root.clone(),
                         },
                         park.engine.as_ref(),
+                        &[],
                     )
                     .await
                     .expect("status read"),
@@ -1389,7 +1393,7 @@ async fn mismatched_handle(server: HarnessServer) {
     let control = f.work.control();
     for refusal in [
         control
-            .resume_root(&other, Some(&handle))
+            .resume_root(&other, Some(&handle), &[])
             .await
             .expect_err("a resume under another session's handle"),
         control
@@ -1570,8 +1574,9 @@ impl SessionControlEngine for SlowControlRpc {
         &self,
         target: &RootRef,
         handle: Option<&EnginePark>,
+        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        self.inner.resume_root(target, handle).await
+        self.inner.resume_root(target, handle, children).await
     }
     async fn release_root(
         &self,

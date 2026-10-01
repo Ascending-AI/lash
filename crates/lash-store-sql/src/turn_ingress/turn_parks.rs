@@ -17,10 +17,10 @@
 pub const TABLE: &str = "turn_parks";
 
 /// Every column a park row carries, in insert order.
-pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref, park_build_generation";
+pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref, park_build_generation, child_engine_refs";
 
 /// The stored record's read projection.
-pub const RECORD_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation";
+pub const RECORD_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation, child_engine_refs";
 
 crate::statements! {
     /// `turn_parks` statements both backends issue verbatim.
@@ -33,9 +33,11 @@ crate::statements! {
         /// reason; FIG-3571), `?10` the engine's handle when the engine parked it,
         /// `?11` the build generation of the parked checkpoint
         /// (`park_build_generation`, NULL when the writer records
-        /// none; FIG-3795).
-        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref, park_build_generation)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+        /// none; FIG-3795), `?12` the JSON array of the engine's handles on
+        /// stopped work the root waits on (`child_engine_refs`, NULL when
+        /// the park records none; FIG-4630).
+        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref, park_build_generation, child_engine_refs)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
 
         /// Re-park of the same turn `?2` in session `?1`: `park_id` and
         /// `since_ms` are kept, the reason refreshes, `last_refused_ms` moves
@@ -59,6 +61,12 @@ crate::statements! {
              SET engine_ref = ?3
              WHERE session_id = ?1 AND turn_id = ?2";
 
+        /// Store `?3`, the JSON array of every child handle session `?1`'s
+        /// park of turn `?2` records, keeping everything else it holds.
+        set_children = "UPDATE turn_parks
+             SET child_engine_refs = ?3
+             WHERE session_id = ?1 AND turn_id = ?2";
+
         /// Record redrive intent `?3` on session `?1`'s park `?2`.
         set_resume_intent = "UPDATE turn_parks
              SET resume_intent = ?3
@@ -75,7 +83,7 @@ crate::statements! {
         count_by_build_generation = "SELECT COUNT(*) FROM turn_parks
              WHERE park_build_generation = ?1";
 
-        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation
+        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation, child_engine_refs
              FROM turn_parks
              WHERE session_id = ?1";
 

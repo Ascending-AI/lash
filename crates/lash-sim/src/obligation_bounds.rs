@@ -100,6 +100,7 @@ impl SessionControlEngine for RefusingEngine {
         &self,
         _: &RootRef,
         _: Option<&lash_core::store::EnginePark>,
+        _: &[lash_core::store::EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
     }
@@ -549,6 +550,7 @@ impl SessionControlEngine for HeldRecovery {
         &self,
         _: &RootRef,
         _: Option<&lash_core::store::EnginePark>,
+        _: &[lash_core::store::EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
     }
@@ -667,6 +669,7 @@ impl SessionControlEngine for SlowReleases {
         &self,
         _: &RootRef,
         _: Option<&lash_core::store::EnginePark>,
+        _: &[lash_core::store::EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
     }

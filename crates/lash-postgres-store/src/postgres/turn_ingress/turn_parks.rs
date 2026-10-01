@@ -14,7 +14,7 @@ lash_store_sql::statements! {
         /// `(since_ms, session_id)` order: optionally one session `?2`, only
         /// parks at or before `?3`, strictly after keyset `?4`/`?5`, reason
         /// codes drawn from the text array `?6` (`NULL` means all).
-        list = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation
+        list = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation, child_engine_refs
              FROM turn_parks
              WHERE (?2 IS NULL OR session_id = ?2)
                AND (?3 IS NULL OR since_ms <= ?3)
@@ -29,7 +29,7 @@ lash_store_sql::statements! {
         /// decision atomic. The read is the table's full record projection
         /// (`park_build_generation` included, FIG-3795) even though the
         /// decision itself reads only the id, turn and counter columns.
-        select_for_update_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation
+        select_for_update_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation, child_engine_refs
              FROM turn_parks
              WHERE session_id = ?1
              FOR UPDATE";

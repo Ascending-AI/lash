@@ -42,6 +42,7 @@ pub(crate) fn turn_park_conn(
         Option<String>,
         Option<i64>,
         Option<String>,
+        Option<String>,
     );
     let row: Option<Row> = conn
         .query_row(
@@ -59,6 +60,7 @@ pub(crate) fn turn_park_conn(
                     row.get(8)?,
                     row.get(9)?,
                     row.get(10)?,
+                    row.get(11)?,
                 ))
             },
         )
@@ -76,6 +78,7 @@ pub(crate) fn turn_park_conn(
             engine_ref,
             resume_intent,
             build_generation,
+            child_engine_refs,
         )| {
             let stored = |field: &str, value: i64| {
                 u64::try_from(value)
@@ -91,6 +94,7 @@ pub(crate) fn turn_park_conn(
                 stored("last_refused_ms", last_refused_ms)?,
                 u32::try_from(attempts).unwrap_or(u32::MAX),
                 engine_ref,
+                child_engine_refs.as_deref(),
                 resume_intent
                     .map(|intent| stored("resume_intent", intent))
                     .transpose()?,
@@ -115,6 +119,7 @@ fn stored_head(
         StoredTurnParkHead {
             root: park.turn_id.clone(),
             engine: park.engine.clone(),
+            children: park.children.clone(),
             redrive: park.resume_intent.map(|intent| StoredParkRedrive {
                 intent,
                 open: redrive
@@ -124,6 +129,30 @@ fn stored_head(
         },
         redrive,
     ))
+}
+
+/// Add the child handle `write` reports to the ones `park` records, on
+/// `conn`.
+fn record_child_conn(
+    conn: &Connection,
+    park: &mut TurnPark,
+    write: &TurnParkWrite,
+) -> Result<(), StoreError> {
+    let Some(child) = write.child().filter(|child| !park.children.contains(child)) else {
+        return Ok(());
+    };
+    park.children.push(child.clone());
+    crate::conn::cached_execute(
+        conn,
+        turn_parks().set_children.sql(),
+        params![
+            park.session_id.as_str(),
+            park.turn_id.as_str(),
+            TurnPark::encode_children(&park.children)?
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
 }
 
 /// Record `write` on `conn` (inside the caller's transaction): refuse a
@@ -205,6 +234,10 @@ pub(crate) fn record_turn_park_conn(
             park.engine = write.engine().cloned();
             return Ok(park);
         }
+        (TurnParkWriteDecision::AttachChild, Some(mut park)) => {
+            record_child_conn(conn, &mut park, write)?;
+            return Ok(park);
+        }
         (TurnParkWriteDecision::Repark, Some(mut park)) => {
             // A same-root re-park keeps `park_id` and `since_ms`, refreshes
             // the reason and `last_refused_ms`, counts the refusal and
@@ -250,6 +283,7 @@ pub(crate) fn record_turn_park_conn(
             if write.build_generation.is_some() {
                 park.build_generation = write.build_generation.clone();
             }
+            record_child_conn(conn, &mut park, write)?;
             return Ok(park);
         }
         (TurnParkWriteDecision::Supersede, Some(superseded)) => {
@@ -288,6 +322,7 @@ pub(crate) fn record_turn_park_conn(
             )));
         }
     }
+    let children: Vec<_> = write.child().cloned().into_iter().collect();
     let park_id = log_turn_parked_conn(
         conn,
         session_id,
@@ -310,7 +345,8 @@ pub(crate) fn record_turn_park_conn(
             1,
             park_executable_generation,
             engine_ref,
-            park_build_generation
+            park_build_generation,
+            TurnPark::encode_children(&children)?
         ],
     )
     .map_err(sqlite_error)?;
@@ -325,6 +361,7 @@ pub(crate) fn record_turn_park_conn(
         last_refused_ms: write.at_ms,
         attempts: 1,
         engine: write.engine().cloned(),
+        children,
         resume_intent: None,
         build_generation: write.build_generation.clone(),
     })

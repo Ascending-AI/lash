@@ -45,10 +45,13 @@ pub async fn record_root_park(
 /// runs.
 ///
 /// Stopped work a root waits on ([`ParkTarget::RootChild`](crate::engine::ParkTarget::RootChild))
-/// parks its root with no engine handle. A root already parked keeps its
-/// park as it is, so any number of stopped children of one root, over any
-/// number of passes, write one park; a child still stopped after a settled
-/// redrive re-parks the root, so the operator can act again.
+/// parks its root and is recorded on the park by its engine handle
+/// (FIG-4630). A root already parked keeps its park and gains the handle, so
+/// any number of stopped children of one root, over any number of passes,
+/// write one park that names each of them once. A redrive resumes the
+/// children its park recorded when it was requested, and owns them until it
+/// did; a child still stopped after a settled redrive re-parks the root, so
+/// the operator can act again.
 ///
 /// Every write here is a reconcile write
 /// ([`TurnParkOrigin::Reconcile`](crate::store::TurnParkOrigin::Reconcile)),
@@ -83,9 +86,9 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
         execution: &dyn crate::engine::StalledExecution,
     ) -> Result<crate::engine::EngineParkRecorded, StoreError> {
         use crate::engine::{EngineParkRecorded, ParkTarget};
-        let (session, root, engine) = match target {
-            ParkTarget::Root { session, root } => (session, root, Some(engine)),
-            ParkTarget::RootChild { session, root } => (session, root, None),
+        let (session, root, engine, child) = match target {
+            ParkTarget::Root { session, root } => (session, root, Some(engine), None),
+            ParkTarget::RootChild { session, root } => (session, root, None, Some(engine)),
             ParkTarget::Drive { session } => {
                 return self.record_drive_park(session, reason, execution).await;
             }
@@ -145,29 +148,43 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                         after_redrive = Some(intent);
                     }
                 }
-                // The root is parked and no redrive ran since: a child that
-                // stopped behind the park, or one a pass already parked, adds
-                // nothing to it.
-                None if engine.is_none() => {
+                // The root is parked and no redrive ran since: a child the
+                // park already records adds nothing to it, and the store
+                // adds the handle of one it does not.
+                None if child
+                    .as_ref()
+                    .is_some_and(|child| park.children.contains(child)) =>
+                {
                     return Ok(EngineParkRecorded::AttachedToExisting(park.park_id));
                 }
                 None => {}
             },
             // A listing read before an operator resumed the child is stale:
             // parking from it would park a running root.
-            None if engine.is_none() && !still_stopped().await? => {
+            None if child.is_some() && !still_stopped().await? => {
                 return Ok(EngineParkRecorded::Redriven);
             }
             None => {}
         }
-        let write = crate::store::TurnParkWrite::reconcile(
-            session.clone(),
-            root.clone(),
-            reason,
-            self.clock.timestamp_ms(),
-            engine,
-            after_redrive,
-        );
+        let at_ms = self.clock.timestamp_ms();
+        let write = match child {
+            Some(child) => crate::store::TurnParkWrite::reconcile_child(
+                session.clone(),
+                root.clone(),
+                reason,
+                at_ms,
+                child,
+                after_redrive,
+            ),
+            None => crate::store::TurnParkWrite::reconcile(
+                session.clone(),
+                root.clone(),
+                reason,
+                at_ms,
+                engine,
+                after_redrive,
+            ),
+        };
         let held = held.map(|park| park.park_id);
         match record_root_park(store, &write).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),

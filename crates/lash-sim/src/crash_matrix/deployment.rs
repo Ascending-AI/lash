@@ -268,7 +268,7 @@ impl HostFaults {
             return;
         }
         let (root, park) = match &intent.kind {
-            lash_core::store::ControlIntentKind::Redrive { root, park }
+            lash_core::store::ControlIntentKind::Redrive { root, park, .. }
             | lash_core::store::ControlIntentKind::Cancel { root, park }
             | lash_core::store::ControlIntentKind::Fork { root, park, .. } => {
                 (Some(root.to_string()), Some(park.feed_sequence()))
@@ -645,8 +645,9 @@ impl lash_core::engine::SessionControlEngine for CrashControl {
         &self,
         target: &lash_core::engine::RootRef,
         engine: Option<&lash_core::store::EnginePark>,
+        children: &[lash_core::store::EnginePark],
     ) -> Result<lash_core::engine::EngineAck, lash_core::engine::EngineRefusal> {
-        let ack = self.inner.resume_root(target, engine).await?;
+        let ack = self.inner.resume_root(target, engine, children).await?;
         self.faults.record(crate::invariants::Fact::Resume {
             session: target.session.to_string(),
             root: target.root.to_string(),

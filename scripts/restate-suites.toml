@@ -148,6 +148,26 @@ endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 240
 
+# Paused children of root-opened effect groups (FIG-4630): the laws let the
+# engine exhaust a group child's retries. Restate's default policy pauses such
+# an invocation and keeps its journal; the shards' bounded policy kills it, so
+# this suite's servers keep the short schedule and restore the pause.
+[suites.paused-group-children]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::paused_group_children::live_"]
+endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
+shards = 1
+timeout_seconds = 300
+
+[suites.paused-group-children.live.server_env]
+RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS = "8"
+RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS = "pause"
+
+[suites.paused-group-children.replay.server_env]
+RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS = "8"
+RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS = "pause"
+
 [suites.session-driver]
 label = "//crates/lash-restate-test:session_driver__test"
 cwd = "crates/lash-restate-test"

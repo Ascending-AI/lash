@@ -173,7 +173,7 @@ impl ControlIntentRelay {
                 )
                 .await
             }
-            ControlIntentKind::Redrive { root, .. } => {
+            ControlIntentKind::Redrive { root, children, .. } => {
                 let target = RootRef {
                     session: intent.session_id.clone(),
                     root: root.clone(),
@@ -183,7 +183,9 @@ impl ControlIntentRelay {
                 // accepted before the intent settles, so a lost ask is this
                 // attempt's failure.
                 if matches!(
-                    engine.resume_root(&target, intent.engine.as_ref()).await?,
+                    engine
+                        .resume_root(&target, intent.engine.as_ref(), children)
+                        .await?,
                     EngineAck::NothingHeld
                 ) {
                     self.work

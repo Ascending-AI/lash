@@ -376,6 +376,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                             row.get::<_, Option<String>>(8)?,
                             row.get::<_, Option<i64>>(9)?,
                             row.get::<_, Option<String>>(10)?,
+                            row.get::<_, Option<String>>(11)?,
                         ))
                     },
                 )?;
@@ -397,6 +398,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                     engine_ref,
                     resume_intent,
                     build_generation,
+                    child_engine_refs,
                 )| {
                     lash_core_execution::store::TurnPark::decode(
                         SessionId::from(session_id),
@@ -410,6 +412,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                         u64::try_from(last_refused_ms).unwrap_or_default(),
                         u32::try_from(attempts).unwrap_or(u32::MAX),
                         engine_ref,
+                        child_engine_refs.as_deref(),
                         resume_intent.and_then(|intent| u64::try_from(intent).ok()),
                         build_generation.as_deref(),
                     )

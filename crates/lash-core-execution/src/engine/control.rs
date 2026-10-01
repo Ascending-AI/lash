@@ -243,7 +243,8 @@ pub trait SessionControlEngine: Send + Sync {
     /// drive is parked on its session's next root; one that stopped only
     /// behind a redrive that has since settled is resumed, and one whose
     /// session's next work names no root is released (ADR 0109 §3). Stalled
-    /// work a root waits on is parked on that root.
+    /// work a root waits on is parked on that root, which records the work's
+    /// handle; stalled work nothing waits for any more is released.
     ///
     /// Each recovery catalog inspects at most `page.limit` records under
     /// `page.budget`. The stalled-work listing resumes after `page.after`
@@ -258,13 +259,17 @@ pub trait SessionControlEngine: Send + Sync {
         page: EnginePage,
     ) -> Result<ParkReconcileReport, EngineRefusal>;
 
-    /// O4 redrive: resume the execution holding the root's park, and every
-    /// stopped execution the root waits on. An engine holding none answers
-    /// [`EngineAck::NothingHeld`], and the caller schedules a drive instead.
+    /// O4 redrive: resume the execution holding the root's park, and the
+    /// stopped work `children` names: the handles the root's park recorded
+    /// (FIG-4630). The engine resumes exactly those and looks for no other
+    /// work of the root, the session or anyone else. An engine holding none
+    /// answers [`EngineAck::NothingHeld`], and the caller schedules a drive
+    /// instead.
     async fn resume_root(
         &self,
         target: &RootRef,
         engine: Option<&EnginePark>,
+        children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal>;
 
     /// Resume a process through the engine's existing process control path.
@@ -310,6 +315,7 @@ impl SessionControlEngine for NoEngineControl {
         &self,
         _target: &RootRef,
         _engine: Option<&EnginePark>,
+        _children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
     }
@@ -371,9 +377,9 @@ pub enum ParkTarget {
     /// Work a session's logical root waits on, stopped in an execution of
     /// its own (a tool attempt's child, FIG-4607). The root's own execution
     /// is not stopped: it waits for the child. The child is parked on the
-    /// root with no engine handle, as a stopped drive is: several children
-    /// of one root may stop, the engine finds them by their root, and the
-    /// park's redrive resumes them all.
+    /// root, whose park records the child's engine handle beside those of
+    /// the root's other stopped children (FIG-4630), and the park's redrive
+    /// resumes exactly the recorded ones.
     RootChild { session: SessionId, root: TurnId },
 }
 
@@ -435,8 +441,9 @@ pub trait StalledExecution: Send + Sync {
 #[async_trait::async_trait]
 pub trait ParkRecoveryWriter: Send + Sync {
     /// Park `target` for `reason`, carrying the engine's `engine` handle. A
-    /// [`ParkTarget::Drive`] or [`ParkTarget::RootChild`] park stores no
-    /// handle: the engine finds that stopped work by its session.
+    /// [`ParkTarget::Drive`] park stores no handle: the engine finds a
+    /// stopped drive by its session. A [`ParkTarget::RootChild`] park records
+    /// the handle as one of the root's stopped children.
     /// `execution` re-reads the stalled execution when a redrive may have
     /// resumed it since the engine listed it.
     async fn record_engine_park(
@@ -458,6 +465,10 @@ pub struct ParkReconcileReport {
     /// Roots whose execution this pass released because the store had
     /// already ended them.
     pub released: Vec<RootRef>,
+    /// Stalled work this pass released because nothing waits for it any
+    /// more, by its engine handle: a group child whose position its group
+    /// already seated, or work of a retired group (FIG-4630).
+    pub released_work: Vec<EnginePark>,
     /// Sessions whose stopped drive this pass released: the session is
     /// gone, or its next work names no root to park on, and its ingress
     /// obligations ask for a fresh drive.

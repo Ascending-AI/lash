@@ -48,19 +48,40 @@ pub enum EffectGroupProbeResponse {
     },
 }
 
-/// Who a group's children run for, as the park reconcile asks of a paused
-/// child (FIG-4607).
+/// One paused dispatcher invocation of a group, as the park reconcile names
+/// it to the index (FIG-4630).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct EffectGroupOpenerRequest {
+    /// The dispatcher handler the invocation runs: `run`, `child` or
+    /// `retire`.
+    pub handler: String,
+    /// The invocation's id: a child's position is the one the index retains
+    /// this id for.
+    pub invocation_id: String,
+}
+
+/// What a group still needs of one paused dispatcher invocation, as the park
+/// reconcile asks (FIG-4607, FIG-4630).
+///
+/// Whether the opener still awaits a child and whether anything still needs
+/// it are two facts. A closed group's opener consumes no more ranks, but a
+/// `RunToCompletion` loser still has to settle before its scope is quiescent,
+/// and a committed child still owes its drain: both are needed. A child whose
+/// position is seated owes nothing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum EffectGroupOpenerResponse {
-    /// The group's opener still waits on its children.
-    Waiting {
+    /// The group still needs the invocation: a child whose position is not
+    /// seated, the dispatch of a group not retired, or a retirement not
+    /// answered. It parks `opener`, the scope the work runs for.
+    Needed {
         #[serde(with = "lash_core::admitted_scope_wire")]
         opener: lash_core::AdmittedScope,
     },
-    /// No opener waits on the group's children: the group is absent, closed
-    /// or retired.
-    Released,
+    /// Nothing needs the invocation: its position is seated (a cancel
+    /// decision or its own settlement took the seat), or its group is
+    /// retired or was never opened. It is released.
+    Seated,
 }
 
 /// A semantic admission under one recorded group child (ADR 0099 §4,

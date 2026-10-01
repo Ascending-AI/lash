@@ -48,6 +48,7 @@ pub(crate) fn open_root_intent_conn(
         RootVerb::Redrive => ControlIntentKind::Redrive {
             root: request.root.clone(),
             park: request.park,
+            children: plan.park.children.clone(),
         },
         RootVerb::Cancel => ControlIntentKind::Cancel {
             root: request.root.clone(),

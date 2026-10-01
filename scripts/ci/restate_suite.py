@@ -754,7 +754,10 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     for name in to_run:
         shared.put(name)
     for index in range(max(1, min(args.shards or suite.shards, len(to_run))) if to_run else 0):
-        shards.append(ShardPlan(f"{leg}-{index}", {**leg_config, **RETRIES_BOUNDED, **overrides}, shared))
+        # A suite's own server settings refine the bounded policy: a suite
+        # whose laws need an exhausted invocation paused, as Restate's default
+        # policy leaves it, says so for its servers.
+        shards.append(ShardPlan(f"{leg}-{index}", {**RETRIES_BOUNDED, **leg_config, **overrides}, shared))
 
     # Reserve every port the suite binds before the first consumer starts:
     # reservations stay bound until claimed, so no allocation of this run --

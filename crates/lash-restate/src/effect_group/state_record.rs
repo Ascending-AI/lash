@@ -265,6 +265,63 @@ fn retired_index_live_read_is_a_typed_terminal_error() {
     );
 }
 
+/// What a group still needs of one paused dispatcher invocation, pure so its
+/// arms are exercisable without an object context (FIG-4630).
+///
+/// - The dispatch (`run`) of a group not retired, and a retirement in any
+///   phase, are needed: they park the group's opener.
+/// - A child is needed until its position is seated, in every phase. A
+///   closed group's opener reads no more ranks, yet a `RunToCompletion` loser
+///   it left running still has to settle before the opener's scope is
+///   quiescent, and a committed child still owes its drain. A seat a cancel
+///   decision took, or the child's own settlement, leaves the invocation
+///   nothing to do.
+/// - An invocation the index retains no position for is a successor minted
+///   to seat a position (§8): needed while any position is unseated.
+/// - A retired group needs nothing but its retirement.
+pub(crate) fn paused_work_need(
+    lifecycle: EffectGroupLifecycle,
+    request: &EffectGroupOpenerRequest,
+) -> EffectGroupOpenerResponse {
+    let (addresses, live) = match lifecycle {
+        EffectGroupLifecycle::Retired { cleanup } => {
+            return if request.handler == "retire" {
+                EffectGroupOpenerResponse::Needed {
+                    opener: match cleanup {
+                        EffectGroupCleanup::Pending { live, .. } => live.shape.opener,
+                        EffectGroupCleanup::Complete { opener } => opener,
+                    },
+                }
+            } else {
+                EffectGroupOpenerResponse::Seated
+            };
+        }
+        // A preparing group records no child id yet, and seats none.
+        EffectGroupLifecycle::Preparing { live, .. } => (BTreeMap::new(), live),
+        EffectGroupLifecycle::Ready { addresses, live }
+        | EffectGroupLifecycle::Closed {
+            addresses, live, ..
+        } => (addresses, live),
+    };
+    let seated = request.handler == "child"
+        && match addresses
+            .iter()
+            .find(|(_, id)| **id == request.invocation_id)
+        {
+            Some((position, _)) => live.settled_positions.contains_key(position),
+            None => {
+                live.shape.children() > 0 && live.settled_positions.len() >= live.shape.children()
+            }
+        };
+    if seated {
+        EffectGroupOpenerResponse::Seated
+    } else {
+        EffectGroupOpenerResponse::Needed {
+            opener: live.shape.opener,
+        }
+    }
+}
+
 /// The §8 admission decision, pure so its arms are exercisable without an
 /// `ObjectContext`: the index's retained invocation id for a position, and
 /// the position's §4 point, are the authority over the id a child invocation
@@ -493,5 +550,151 @@ mod admission_tests {
             decide_group_child_admission(&retired, 0, "child-invocation-0"),
             EffectGroupAdmissionResponse::Retired
         );
+    }
+}
+
+#[cfg(test)]
+mod paused_work_tests {
+    use super::*;
+
+    fn opener() -> lash_core::AdmittedScope {
+        lash_core::AdmittedScope::turn("session", "turn")
+    }
+
+    fn live(children: usize) -> EffectGroupStateLiveRecord {
+        EffectGroupStateLiveRecord {
+            shape: EffectGroupShape {
+                wake: lash_core::GroupWakePolicy::All,
+                loser_disposition: LoserPolicy::RunToCompletion,
+                replay_keys: (0..children)
+                    .map(|child| format!("child-{child}"))
+                    .collect(),
+                opener: opener(),
+            },
+            next_rank: 1,
+            commit_states: BTreeMap::new(),
+            settlements: BTreeMap::new(),
+            settled_positions: BTreeMap::new(),
+        }
+    }
+
+    fn addresses(children: usize) -> BTreeMap<usize, String> {
+        (0..children)
+            .map(|child| (child, format!("invocation-{child}")))
+            .collect()
+    }
+
+    fn ask(handler: &str, invocation: &str) -> EffectGroupOpenerRequest {
+        EffectGroupOpenerRequest {
+            handler: handler.to_owned(),
+            invocation_id: invocation.to_owned(),
+        }
+    }
+
+    fn needed() -> EffectGroupOpenerResponse {
+        EffectGroupOpenerResponse::Needed { opener: opener() }
+    }
+
+    /// A closed group no longer hands ranks to its opener, and still needs
+    /// the loser it left running: only a seated position is released.
+    #[test]
+    fn a_closed_groups_unseated_loser_is_needed_and_a_seated_position_is_not() {
+        let mut winner_seated = live(2);
+        winner_seated.settled_positions.insert(0, 1);
+        for effective in [
+            EffectGroupCloseOutcome::RunToCompletion,
+            EffectGroupCloseOutcome::Cancel,
+        ] {
+            let closed = EffectGroupLifecycle::Closed {
+                effective,
+                reopened: false,
+                addresses: addresses(2),
+                live: winner_seated.clone(),
+            };
+            assert_eq!(
+                paused_work_need(closed.clone(), &ask("child", "invocation-1")),
+                needed(),
+                "{closed:?}"
+            );
+            assert_eq!(
+                paused_work_need(closed.clone(), &ask("child", "invocation-0")),
+                EffectGroupOpenerResponse::Seated,
+                "{closed:?}"
+            );
+            assert_eq!(
+                paused_work_need(closed, &ask("run", "dispatcher")),
+                needed()
+            );
+        }
+        let mut decided = winner_seated;
+        decided
+            .commit_states
+            .insert(1, EffectGroupChildCommitState::CancelDecided);
+        decided.settled_positions.insert(1, 2);
+        let cancelled = EffectGroupLifecycle::Closed {
+            effective: EffectGroupCloseOutcome::Cancel,
+            reopened: false,
+            addresses: addresses(2),
+            live: decided,
+        };
+        assert_eq!(
+            paused_work_need(cancelled.clone(), &ask("child", "invocation-1")),
+            EffectGroupOpenerResponse::Seated,
+            "a cancel decision seated the position"
+        );
+        assert_eq!(
+            paused_work_need(cancelled, &ask("child", "a-successor")),
+            EffectGroupOpenerResponse::Seated,
+            "no position is left for a successor to seat"
+        );
+    }
+
+    #[test]
+    fn open_groups_need_their_children_and_retired_ones_only_their_retirement() {
+        let preparing = EffectGroupLifecycle::Preparing {
+            dispatch: EffectGroupDispatchState::Unadopted,
+            live: live(1),
+        };
+        assert_eq!(
+            paused_work_need(preparing, &ask("child", "invocation-0")),
+            needed()
+        );
+        let ready = EffectGroupLifecycle::Ready {
+            addresses: addresses(2),
+            live: live(2),
+        };
+        assert_eq!(
+            paused_work_need(ready.clone(), &ask("child", "invocation-1")),
+            needed()
+        );
+        assert_eq!(
+            paused_work_need(ready, &ask("child", "a-successor")),
+            needed(),
+            "a successor seats a position still unseated"
+        );
+        for cleanup in [
+            EffectGroupCleanup::Pending {
+                facts: EffectGroupCleanupFacts {
+                    replay_keys: vec!["child-0".to_owned()],
+                    dispatcher: EffectGroupDispatchState::Unadopted,
+                    dispatched: BTreeMap::new(),
+                },
+                live: Box::new(live(1)),
+            },
+            EffectGroupCleanup::Complete { opener: opener() },
+        ] {
+            let retired = EffectGroupLifecycle::Retired { cleanup };
+            for handler in ["child", "run"] {
+                assert_eq!(
+                    paused_work_need(retired.clone(), &ask(handler, "invocation-0")),
+                    EffectGroupOpenerResponse::Seated,
+                    "{handler} of {retired:?}"
+                );
+            }
+            assert_eq!(
+                paused_work_need(retired, &ask("retire", "retirement")),
+                needed()
+            );
+        }
     }
 }

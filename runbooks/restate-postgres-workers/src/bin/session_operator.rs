@@ -205,6 +205,7 @@ impl Harness {
                     lash_core::store::ControlIntentKind::Redrive {
                         root: saved,
                         park: token,
+                        ..
                     }
                     | lash_core::store::ControlIntentKind::Cancel {
                         root: saved,

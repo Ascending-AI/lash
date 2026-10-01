@@ -2,11 +2,13 @@
 
 use super::*;
 
-/// FIG-4607: stopped work a root waits on parks that root, with no engine
-/// handle. Any number of stopped children, over any number of passes, write
-/// one park. A redrive owns the root's children until it resumed them, and a
-/// child still stopped after that stopped again: it re-parks the root, so the
-/// operator can act on it again.
+/// FIG-4607, FIG-4630: stopped work a root waits on parks that root, and the
+/// park records each stopped child's engine handle once. Any number of
+/// stopped children, over any number of passes, write one park. A redrive is
+/// handed exactly the children its park recorded when it was requested and
+/// owns them until it resumed them, and a child still stopped after the
+/// redrive stopped again: it re-parks the root, so the operator can act on it
+/// again.
 pub async fn a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settled_redrive(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
@@ -67,8 +69,17 @@ pub async fn a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settle
         .expect("held");
     assert_eq!((held.turn_id.clone(), held.park_id), (root.clone(), id));
     assert_eq!(held.reason, reason);
-    assert_eq!(held.engine, None, "the engine finds the children itself");
-    for sibling in ["child-a", "child-b"] {
+    assert_eq!(held.engine, None, "the root's own execution is not stopped");
+    assert_eq!(
+        held.children,
+        [EnginePark::new("child-a")],
+        "the park records the stopped child"
+    );
+    for (sibling, recorded) in [
+        ("child-a", vec!["child-a"]),
+        ("child-b", vec!["child-a", "child-b"]),
+        ("child-b", vec!["child-a", "child-b"]),
+    ] {
         assert_eq!(
             writer
                 .record_engine_park(
@@ -81,15 +92,35 @@ pub async fn a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settle
                 .expect("repeat"),
             EngineParkRecorded::AttachedToExisting(id)
         );
+        assert_eq!(
+            parts
+                .store
+                .load_turn_park(&parts.session_id)
+                .await
+                .expect("park"),
+            Some(TurnPark {
+                children: recorded.into_iter().map(EnginePark::new).collect(),
+                ..held.clone()
+            }),
+            "a parked root's stopped children add their handle once and nothing more"
+        );
     }
     assert_eq!(
-        parts
-            .store
-            .load_turn_park(&parts.session_id)
+        factory
+            .list_turn_parks(&TurnParkQuery {
+                reasons: None,
+                session: Some(parts.session_id.clone()),
+                parked_at_or_before_ms: None,
+                after: None,
+                limit: NonZeroUsize::MIN,
+            })
             .await
-            .expect("park"),
-        Some(held),
-        "a parked root's stopped children write nothing more"
+            .expect("list parks")
+            .into_iter()
+            .map(|park| park.children)
+            .collect::<Vec<_>>(),
+        [[EnginePark::new("child-a"), EnginePark::new("child-b")]],
+        "the park listing reads the recorded children too"
     );
     assert!(
         factory
@@ -106,25 +137,57 @@ pub async fn a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settle
         session: f.parts.session_id.clone(),
         root: f.root.clone(),
     };
-    let record = |stopped: bool| {
+    let record = |handle: &'static str, stopped: bool| {
         let (writer, child) = (&writer, &child);
         async move {
             writer
                 .record_engine_park(
                     child,
                     ParkReason::engine_retry_exhausted(8, None, "the child stopped".into()),
-                    EnginePark::new("child-a"),
+                    EnginePark::new(handle),
                     &Execution { stopped },
                 )
                 .await
                 .expect("record the stopped child")
         }
     };
-    let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
+    let children = |handles: &[&str]| -> Vec<EnginePark> {
+        handles.iter().copied().map(EnginePark::new).collect()
+    };
     assert_eq!(
-        record(true).await,
+        record("child-a", true).await,
+        EngineParkRecorded::AttachedToExisting(f.park.park_id),
+        "a root that parked itself gains its stopped child's handle"
+    );
+    let attached = f.park().await.expect("still parked");
+    assert_eq!(
+        attached,
+        TurnPark {
+            children: children(&["child-a"]),
+            ..f.park.clone()
+        }
+    );
+    let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
+    assert!(
+        matches!(
+            &redrive.kind,
+            ControlIntentKind::Redrive { children: recorded, .. }
+                if *recorded == children(&["child-a"])
+        ),
+        "the redrive records its park's children: {redrive:?}"
+    );
+    assert_eq!(
+        record("child-b", true).await,
         EngineParkRecorded::Redriven,
         "an open redrive owns the root's stopped children"
+    );
+    assert_eq!(
+        f.park().await.expect("still parked"),
+        TurnPark {
+            resume_intent: Some(redrive.id),
+            ..attached.clone()
+        },
+        "a child that stops while the redrive is on its way waits for it to settle"
     );
     let (work, close) = f.control(false, false);
     assert!(matches!(
@@ -132,7 +195,12 @@ pub async fn a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settle
         ControlIntentState::Acknowledged { .. }
     ));
     assert_eq!(
-        record(false).await,
+        *work.0.resumed_children.lock().expect("resumed children"),
+        [children(&["child-a"])],
+        "the redrive is handed exactly the children its park recorded"
+    );
+    assert_eq!(
+        record("child-b", false).await,
         EngineParkRecorded::Redriven,
         "a listing read before the redrive resumed the child is stale"
     );
@@ -140,16 +208,30 @@ pub async fn a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settle
     assert_eq!(park.resume_intent, Some(redrive.id));
     assert_eq!(park.attempts, f.park.attempts);
     assert_eq!(
-        record(true).await,
+        record("child-b", true).await,
         EngineParkRecorded::AttachedToExisting(f.park.park_id),
         "a child still stopped after the redrive re-parks the same park"
     );
     let again = f.park().await.expect("re-parked");
     assert_eq!(again.resume_intent, None);
     assert_eq!(again.attempts, f.park.attempts + 1);
-    f.verb(RootVerb::Redrive)
+    assert_eq!(again.children, children(&["child-a", "child-b"]));
+    let second = f
+        .verb(RootVerb::Redrive)
         .await
         .expect("the re-parked root can be redriven again");
+    assert!(matches!(
+        f.apply(&work, &close, &second).await,
+        ControlIntentState::Acknowledged { .. }
+    ));
+    assert_eq!(
+        work.0
+            .resumed_children
+            .lock()
+            .expect("resumed children")
+            .last(),
+        Some(&children(&["child-a", "child-b"]))
+    );
 }
 
 /// A stalled execution whose probe waits at `gate` and then answers

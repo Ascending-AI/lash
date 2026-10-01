@@ -291,6 +291,7 @@ mod live_fault_park_on_the_double;
 mod live_turn_probe;
 mod obligation_relay_on_the_double;
 mod parent_end_on_the_double;
+mod paused_group_children;
 mod process_effect_summary;
 mod process_tool_replay;
 mod remote_turn_cancel;

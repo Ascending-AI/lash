@@ -2395,7 +2395,11 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
 
 /// Replace an effect-group index's retained state through the Restate admin
 /// API.
-async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &serde_json::Value) {
+pub(super) async fn overwrite_index_state(
+    admin: &HarnessAdmin,
+    group_key: &str,
+    state: &serde_json::Value,
+) {
     let bytes = serde_json::to_vec(state).expect("encode the index state");
     let body = serde_json::json!({
         "object_key": group_key,

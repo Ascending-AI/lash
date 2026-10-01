@@ -54,8 +54,16 @@ impl std::fmt::Display for ControlIntentId {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ControlIntentKind {
-    /// Resume the parked root's execution under the same fence.
-    Redrive { root: TurnId, park: ParkId },
+    /// Resume the parked root's execution under the same fence, and the
+    /// stopped work `children` names: the handles its park recorded when the
+    /// redrive was requested (FIG-4630). The engine half resumes exactly
+    /// these.
+    Redrive {
+        root: TurnId,
+        park: ParkId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        children: Vec<EnginePark>,
+    },
     /// End the parked root `Cancelled`.
     Cancel { root: TurnId, park: ParkId },
     /// End the parked root and drive its held inputs under `new_root`.
@@ -299,7 +307,9 @@ pub fn decide_intent_application(
 ) -> IntentApplication {
     match stored.state {
         ControlIntentState::Pending => {
-            if let ControlIntentKind::Redrive { root, park: parked } = &stored.kind
+            if let ControlIntentKind::Redrive {
+                root, park: parked, ..
+            } = &stored.kind
                 && !park.is_some_and(|park| {
                     park.turn_id == *root
                         && park.park_id == *parked
@@ -757,6 +767,7 @@ mod tests {
             kind: ControlIntentKind::Redrive {
                 root: TurnId::from("r"),
                 park: super::super::ParkId::from_feed_sequence(3),
+                children: Vec::new(),
             },
             ..intent(state)
         }
@@ -774,6 +785,7 @@ mod tests {
             last_refused_ms: 1,
             attempts: 1,
             engine: None,
+            children: Vec::new(),
             resume_intent: resume_intent.map(ControlIntentId::from_sequence),
             build_generation: None,
         }
