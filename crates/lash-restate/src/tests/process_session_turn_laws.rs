@@ -816,6 +816,356 @@ async fn redelivery_of_a_committed_keyed_child_reopens_without_reading_the_catal
     );
 }
 
+/// The plugin id and config namespace of [`DefaultsFactory`].
+const DEFAULTS: &str = "partial-create-defaults";
+
+/// [`DefaultsFactory`]'s recorded namespace.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct DefaultsConfig {
+    value: String,
+}
+
+/// The owner of the [`DEFAULTS`] namespace: a creator's value, else the
+/// parent's recorded value, else this deployment's default.
+struct DefaultsOwner {
+    default: &'static str,
+}
+
+impl lash_core::ConfigOwner for DefaultsOwner {
+    type Create = DefaultsConfig;
+    type Recorded = DefaultsConfig;
+    type Refusal = String;
+
+    fn implementation(&self) -> &str {
+        "partial-create-defaults:1"
+    }
+
+    fn create(
+        &self,
+        input: Option<DefaultsConfig>,
+        facts: lash_core::CreationFacts<'_, DefaultsConfig>,
+    ) -> Result<Option<DefaultsConfig>, String> {
+        Ok(Some(input.or_else(|| facts.parent.cloned()).unwrap_or(
+            DefaultsConfig {
+                value: self.default.to_string(),
+            },
+        )))
+    }
+
+    fn validate(
+        &self,
+        _value: &DefaultsConfig,
+        _base: Option<&DefaultsConfig>,
+        _facts: &lash_core::CandidateFacts<'_>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// A plugin that owns one recorded namespace no starter of this file
+/// records, so a creation on its deployment records the deployment's
+/// default.
+struct DefaultsFactory {
+    default: &'static str,
+}
+
+struct DefaultsPlugin;
+
+impl lash_core::plugin::SessionPlugin for DefaultsPlugin {
+    fn id(&self) -> &'static str {
+        DEFAULTS
+    }
+
+    fn register(&self, _reg: &mut lash_core::plugin::PluginRegistrar) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+impl lash_core::facade_support::PluginFactory for DefaultsFactory {
+    fn id(&self) -> &'static str {
+        DEFAULTS
+    }
+
+    fn register_config(
+        &self,
+        registrar: &mut lash_core::ConfigRegistrar,
+    ) -> Result<(), lash_core::ConfigRegistrationError> {
+        registrar.owner(DefaultsOwner {
+            default: self.default,
+        })
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, PluginError> {
+        Ok(Arc::new(DefaultsPlugin))
+    }
+}
+
+/// The plugin default of the deployment that admits the child.
+const ADMITTING_DEFAULT: &str = "the-admitting-deployment-default";
+
+/// A deployment's models with every catalog read for a key counted.
+struct CountingModels {
+    inner: Arc<dyn lash_core::RuntimeModels>,
+    mints: std::sync::atomic::AtomicUsize,
+}
+
+impl lash_core::RuntimeModels for CountingModels {
+    fn snapshot(
+        &self,
+        key: &lash_core::ModelKey,
+    ) -> Result<lash_core::RecordedModel, lash_core::ModelUnavailable> {
+        self.mints.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.snapshot(key)
+    }
+
+    fn bind(
+        &self,
+        recorded: &lash_core::RecordedModel,
+    ) -> Result<lash_core::facade_support::ProviderHandle, lash_core::ModelUnavailable> {
+        self.inner.bind(recorded)
+    }
+}
+
+/// What the deployment that takes a partially created child's redelivery
+/// changed since the child's admission.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Redeployment {
+    /// [`FAST`] is still served, with other metadata.
+    KeyMetadataChanged,
+    /// [`FAST`] is no longer minted.
+    KeyRemoved,
+    /// [`DefaultsFactory`] is installed with another default.
+    PluginDefaultsChanged,
+}
+
+impl Redeployment {
+    pub(super) const ALL: [Self; 3] = [
+        Self::KeyMetadataChanged,
+        Self::KeyRemoved,
+        Self::PluginDefaultsChanged,
+    ];
+}
+
+/// FIG-4627: a child whose creation committed its catalog admission, with
+/// its complete config as the created head at revision zero, and crashed
+/// before its first runtime commit completes from that recorded config. The
+/// redelivery lands on a deployment that changed what the creation resolved
+/// against, and the child's first committed head is the recorded creation
+/// config: no catalog read, no plugin default, no refusal.
+///
+/// `sessions` is the session catalog of the store under test. `Err` names
+/// what the redelivery did instead.
+pub(super) async fn a_partially_created_child_completes_from_its_recorded_creation_config(
+    sessions: Arc<dyn lash_core::DeploymentStore>,
+    redeployment: Redeployment,
+) -> Result<(), String> {
+    let registry = process_registry();
+    let child = SessionId::from(format!("partial-create-{redeployment:?}"));
+    let registration = keyed_registration_for(&child).await;
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .expect("register SessionTurn")
+        .id;
+    let factory = Arc::new(RecordingDeploymentStore::over(sessions));
+    // The crash: the child's catalog admission commits, and its first
+    // runtime commit, the initial head, never lands.
+    assert!(
+        lash_core::store::SessionCommitStore::load_session_head_meta(factory.as_ref(), &child)
+            .await
+            .expect("read the child's head before its creation")
+            .is_none(),
+        "precondition: the child is not created"
+    );
+    let store = factory
+        .store_for(&child)
+        .expect("the catalog tracks the child");
+    store.fail_next_runtime_commit(lash_core::StoreError::Contended);
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let authority = test_restate_authority_id();
+    let admitting = worker_with_models(
+        memory_engine_backend().await,
+        Arc::clone(&registry),
+        Arc::clone(&factory) as Arc<_>,
+        models_serving_fast(answering_provider("never asked")),
+        vec![Arc::new(DefaultsFactory {
+            default: ADMITTING_DEFAULT,
+        })],
+    )
+    .await;
+    let crashed = run(
+        &admitting,
+        &registry,
+        &process_id,
+        &registration,
+        Arc::clone(&context),
+        authority.clone(),
+        RestateNamespace::default(),
+    )
+    .await;
+    assert!(
+        crashed.is_err(),
+        "the attempt ends at its failed initial head commit: {crashed:?}"
+    );
+    drop(admitting);
+    let created =
+        lash_core::store::SessionCommitStore::load_session_head_meta(factory.as_ref(), &child)
+            .await
+            .expect("read the created head")
+            .expect("the admission recorded the created head");
+    assert_eq!(
+        created.head_revision, 0,
+        "precondition: the child has a created head and no committed one"
+    );
+    assert_eq!(
+        created
+            .config
+            .model
+            .as_ref()
+            .map(|model| model.model.key().as_str()),
+        Some(FAST),
+        "precondition: the created head records the binding its key minted"
+    );
+    assert_eq!(
+        created.config.plugin_config.get(DEFAULTS),
+        Some(&serde_json::json!({ "value": ADMITTING_DEFAULT })),
+        "precondition: the created head records the admitting deployment's default"
+    );
+    assert!(
+        store.runtime_commits().is_empty(),
+        "precondition: no runtime commit landed"
+    );
+
+    let provider = answering_provider("redelivered child answered");
+    let (models, default): (Arc<dyn lash_core::RuntimeModels>, _) = match redeployment {
+        Redeployment::KeyMetadataChanged => (
+            Arc::new(
+                lash_core::ModelRegistry::new()
+                    .register(
+                        FAST,
+                        lash_core::RegisteredModel::new(
+                            lash_core::ModelMetadata::builder("fast-wire")
+                                .context_window_tokens(64_000)
+                                .build()
+                                .expect("valid changed metadata"),
+                            provider,
+                        ),
+                    )
+                    .expect("register the changed key"),
+            ),
+            ADMITTING_DEFAULT,
+        ),
+        Redeployment::KeyRemoved => (
+            Arc::new(BindOnlyModels {
+                provider,
+                mints: std::sync::atomic::AtomicUsize::new(0),
+            }),
+            ADMITTING_DEFAULT,
+        ),
+        Redeployment::PluginDefaultsChanged => (
+            models_serving_fast(provider),
+            "the-redelivery-deployment-default",
+        ),
+    };
+    let models = Arc::new(CountingModels {
+        inner: models,
+        mints: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let redelivering = worker_with_models(
+        memory_engine_backend().await,
+        Arc::clone(&registry),
+        Arc::clone(&factory) as Arc<_>,
+        Arc::clone(&models) as Arc<dyn lash_core::RuntimeModels>,
+        vec![Arc::new(DefaultsFactory { default })],
+    )
+    .await;
+    context.start_replay_allowing_journal_extension();
+    let outcome = run(
+        &redelivering,
+        &registry,
+        &process_id,
+        &registration,
+        context,
+        authority,
+        RestateNamespace::default(),
+    )
+    .await
+    .map_err(|error| format!("{redeployment:?}: the redelivery was refused: {error:?}"))?;
+    assert_completed(&outcome);
+    let mints = models.mints.load(std::sync::atomic::Ordering::SeqCst);
+    let mut failures = Vec::new();
+    if mints != 0 {
+        failures.push(format!(
+            "{redeployment:?}: the redelivery read the catalog for the recorded key {mints} time(s)"
+        ));
+    }
+    let commits = store.runtime_commits();
+    let first = commits
+        .first()
+        .expect("the redelivery committed the child's initial head");
+    assert_eq!(
+        first.expected_head_revision, 0,
+        "the first commit publishes over the created head"
+    );
+    if first.config != created.config {
+        failures.push(format!(
+            "{redeployment:?}: the first committed head is not the recorded creation config:\n \
+             recorded: {:?}\n committed: {:?}",
+            created.config, first.config
+        ));
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
+/// Every [`Redeployment`] of the partial-create law over one session
+/// catalog, with every case's failure reported.
+pub(super) async fn partially_created_children_complete_from_their_recorded_creation_config(
+    sessions: Arc<dyn lash_core::DeploymentStore>,
+) {
+    let mut failures = Vec::new();
+    for redeployment in Redeployment::ALL {
+        if let Err(failure) = a_partially_created_child_completes_from_its_recorded_creation_config(
+            Arc::clone(&sessions),
+            redeployment,
+        )
+        .await
+        {
+            failures.push(failure);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "a partially created child was re-resolved against the live deployment:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// FIG-4627 on SQLite; `postgres_ingress` runs the same law on PostgreSQL.
+#[tokio::test]
+async fn a_partially_created_child_completes_from_its_recorded_creation_config_on_sqlite() {
+    partially_created_children_complete_from_their_recorded_creation_config(
+        memory_session_store_factory().await,
+    )
+    .await;
+}
+
 /// FIG-4531: a model key this worker does not serve ends a session-turn
 /// attempt with the typed, retryable `ModelUnavailable`, whether the child
 /// is still to be created (the key cannot be minted) or already committed

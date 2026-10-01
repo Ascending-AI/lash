@@ -315,6 +315,30 @@ async fn remote_after_step_waits_for_committed_boundary_postgres() {
     .await;
 }
 
+/// FIG-4627 on PostgreSQL: a partially created child completes from its
+/// revision-zero recorded creation config.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn a_partially_created_child_completes_from_its_recorded_creation_config_on_postgres() {
+    let url = database_url();
+    let _lock = DatabaseLock::acquire(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(&url)
+        .await
+        .expect("connect the PostgreSQL partial-create law store");
+    reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let stores = lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    );
+    super::process_session_turn_laws::partially_created_children_complete_from_their_recorded_creation_config(
+        lash_core::StoreSet::session_store_factory(&stores),
+    )
+    .await;
+}
+
 /// A process registry over a freshly reset PostgreSQL database, and the
 /// attachment directory its store set holds.
 async fn postgres_process_registry(url: &str) -> (Arc<dyn ProcessRegistry>, tempfile::TempDir) {

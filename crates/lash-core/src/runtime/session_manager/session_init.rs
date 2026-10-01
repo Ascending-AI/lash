@@ -82,8 +82,45 @@ pub(in crate::runtime::session_manager) struct ProcessSessionTurnInit<'a> {
 
 pub(in crate::runtime::session_manager) async fn resolve_session_init(
     current: &CurrentOwnerCapability,
-    mut request: SessionCreateRequest,
+    request: SessionCreateRequest,
 ) -> Result<SessionInitPlan, crate::PluginError> {
+    let (session_id, request) = identified_create_request(request)?;
+    let facts = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
+    plan_session_init(current, request, session_id, facts)
+}
+
+/// The plan that finishes a partial create from the config its admission
+/// recorded (FIG-4627). `created` is the session's revision-zero head: the
+/// complete config a previous attempt resolved and wrote with the catalog
+/// row. It is authoritative, so nothing it records is resolved again: no
+/// model key is minted and no plugin owner creates a namespace. Only what
+/// the head does not record comes from the recorded request: the initial
+/// nodes, the observer intents and the spawn-time plugin capture.
+fn recorded_creation_plan(
+    current: &CurrentOwnerCapability,
+    request: SessionCreateRequest,
+    created: &RuntimeSessionState,
+) -> Result<SessionInitPlan, crate::PluginError> {
+    let (session_id, mut request) = identified_create_request(request)?;
+    let mut policy = created.policy.clone();
+    // The session binding is live-owned, never part of a recorded head.
+    if request.relation.parent_session_id().is_some() {
+        policy.session_id = Some(session_id.clone());
+    }
+    request.tool_access = created.authority.tool_access.clone();
+    request.subagent = created.authority.subagent.clone();
+    let facts = ChildFacts {
+        policy,
+        plugin_config: created.authority.plugin_config.clone(),
+    };
+    plan_session_init(current, request, session_id, facts)
+}
+
+/// `request` with its session identified: the id it names, or a minted one.
+/// A start point initialisation does not admit is refused.
+fn identified_create_request(
+    mut request: SessionCreateRequest,
+) -> Result<(SessionId, SessionCreateRequest), crate::PluginError> {
     let session_id = request
         .session_id
         .take()
@@ -100,6 +137,17 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
             "session `{session_id}` create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)"
         )));
     }
+    Ok((session_id, request))
+}
+
+/// Build the plan that creates `session_id` with `facts`: the facts
+/// `request` resolved to, or the ones its admission already recorded.
+fn plan_session_init(
+    current: &CurrentOwnerCapability,
+    mut request: SessionCreateRequest,
+    session_id: SessionId,
+    facts: ChildFacts,
+) -> Result<SessionInitPlan, crate::PluginError> {
     let parent_session_id = request.relation.parent_session_id().map(ToOwned::to_owned);
     // Every session initializes empty: `SessionStartPoint::Empty` is the only
     // start point initialisation admits. Durable forks and resumed sessions
@@ -111,7 +159,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
     let ChildFacts {
         policy,
         plugin_config: recorded_plugin_config,
-    } = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
+    } = facts;
     // The child records the minted binding in its policy; the request's key
     // has done its work.
     request.model = None;
@@ -668,13 +716,15 @@ pub(in crate::runtime::session_manager) async fn create_session(
 /// or reopen it when a previous attempt already committed the durable row.
 /// Either way the result is an ordinary session runtime owned by the caller.
 ///
-/// A committed child reopens from its durable row before the request is
-/// resolved against anything this deployment installs (FIG-4531): the
-/// session runs what it recorded, so a redelivery never reads today's
-/// catalog for it. Only a child that has no committed head resolves the
-/// recorded request, and a model key this worker does not serve on that
-/// path is the typed, retryable `ModelUnavailable`: the start was admitted
-/// with the key, so the deployment is at fault, never the request.
+/// A child whose durable row records a head is read from it before the
+/// request is resolved against anything this deployment installs (FIG-4531,
+/// FIG-4627): the session runs what it recorded, so a redelivery never reads
+/// today's catalog or plugin defaults for it. A committed head reopens; a
+/// created head at revision zero finishes its create from the config it
+/// records. Only a child with no recorded head resolves the recorded
+/// request, and a model key this worker does not serve on that path is the
+/// typed, retryable `ModelUnavailable`: the start was admitted with the key,
+/// so the deployment is at fault, never the request.
 async fn initialize_session(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
@@ -687,14 +737,20 @@ async fn initialize_session(
         && let Some(store) = durable_session_store(current, session_id).await?
         && let Some(state) = recorded_session_state(session_id, &request.relation, &store).await?
     {
-        return reopen_committed_session(current, &request, session_id, store, state).await;
+        if state.head_revision > 0 {
+            return reopen_committed_session(current, &request, session_id, store, state).await;
+        }
+        // A head at revision zero is a partial create: a previous attempt
+        // admitted the row, with the creation's complete config as its
+        // created head, and crashed before the initial head landed. That
+        // config is recorded, so it finishes the create (FIG-4627): the
+        // admission is idempotent and the head commit publishes over it.
+        let mut plan = recorded_creation_plan(current, request, &state)?;
+        plan.owning_process_id = Some(owning_process_id.clone());
+        return Box::pin(commit_fresh_session_init(current, plan)).await;
     }
-    // A catalog row whose head no commit has written is a partial create: a
-    // previous attempt admitted the row, with the creation's config as its
-    // created head, and crashed before the initial head landed. The recorded
-    // request finishes the create — the admission is idempotent and the head
-    // commit completes what the crashed attempt started — so the session is
-    // not stranded retry-proof.
+    // No session, or a catalog row that records no head: nothing is recorded
+    // for the session yet, so the recorded request creates it.
     let mut plan = resolve_session_init(current, request)
         .await
         .map_err(unserved_model_key)?;
@@ -752,11 +808,10 @@ async fn commit_fresh_session_init(
 }
 
 /// Inspect the durable session behind an existing catalog row for a
-/// redelivery: replay-check the recorded relation, then load the committed
-/// head. `None` means the row is a partial create — a crash landed between
-/// the admission, which wrote the created head at revision `0`, and the
-/// initial head commit — which the caller finishes as a create rather than
-/// reopening.
+/// redelivery: replay-check the recorded relation, then load the head the
+/// row records. A head at revision `0` is the created head an admission
+/// wrote before a crash kept the initial head commit from landing. `None`
+/// means the row records no head at all.
 async fn recorded_session_state(
     session_id: &SessionId,
     relation: &crate::SessionRelation,
@@ -781,11 +836,7 @@ async fn recorded_session_state(
     }
     crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
         .await
-        .map(|loaded| {
-            loaded
-                .map(|loaded| loaded.state)
-                .filter(|state| state.head_revision > 0)
-        })
+        .map(|loaded| loaded.map(|loaded| loaded.state))
         .map_err(|error| {
             crate::PluginError::Session(format!(
                 "failed to load session `{}` for reopen: {error}",
