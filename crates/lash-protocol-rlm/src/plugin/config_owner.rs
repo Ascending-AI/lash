@@ -3,14 +3,19 @@
 //! A session records its RLM namespace once, at creation: the creator's
 //! stated facts, the presentation format the prompt is written against
 //! (`Markdown` for a root session, `RawFinalValue` for a child) when the
-//! creator states none, and the channel and dialect this host selected
-//! (ADR 0096). Every open delivers the namespace unchanged.
+//! creator states none, the channel and dialect this host selected
+//! (ADR 0096), and the behaviour this host's configuration states
+//! ([`RlmRecordedBehaviour`], FIG-4398). Every open delivers the namespace
+//! unchanged.
 //!
 //! The render preferences are the one setting a session may change, through
 //! [`SetRlmRender`]. The termination and the final-answer format are fixed at
 //! creation: no command changes them, and a turn restates them through its
-//! run's protocol turn options instead. The channel and the dialect are the
-//! session's pins: a candidate that changes either is refused.
+//! run's protocol turn options instead. The channel, the dialect and the
+//! behaviour are the session's pins: a candidate that changes any of them is
+//! refused.
+
+use std::sync::{Arc, OnceLock};
 
 use lash_core::facade_support::JsonSchema;
 use lash_core::plugin::{
@@ -20,13 +25,15 @@ use lash_core::plugin::{
 use lash_render::RenderParamsPatch;
 use lash_rlm_types::{RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmTermination};
 
+use super::RlmProtocolPluginConfig;
 use super::channel::RlmChannel;
+use super::config::RlmRecordedBehaviour;
 
 /// The identity of the RLM owner's reducers.
 pub const RLM_CONFIG_IMPLEMENTATION: &str = "lash-rlm-config:1";
 
 /// The RLM namespace a session records.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(deny_unknown_fields)]
 pub struct RlmRecordedConfig {
@@ -49,6 +56,9 @@ pub struct RlmRecordedConfig {
     /// The language id of the session's dialect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialect: Option<String>,
+    /// The behaviour the session's driver, prompt and interpreter run under.
+    #[schemars(with = "serde_json::Value")]
+    pub behaviour: RlmRecordedBehaviour,
 }
 
 /// What a creator states for the RLM namespace.
@@ -68,6 +78,10 @@ pub enum RlmConfigRefusal {
         recorded: Option<String>,
         candidate: Option<String>,
     },
+    /// The creating deployment has not declared whether it has process
+    /// lifecycle, so the durable-sleep ability a new session records is
+    /// unknown: a wiring fault of the deployment, never a default.
+    ProcessLifecycleUndeclared,
 }
 
 impl std::fmt::Display for RlmConfigRefusal {
@@ -83,16 +97,25 @@ impl std::fmt::Display for RlmConfigRefusal {
                 recorded.as_deref().unwrap_or("nothing"),
                 candidate.as_deref().unwrap_or("nothing"),
             ),
+            Self::ProcessLifecycleUndeclared => formatter.write_str(
+                "the RLM protocol factory has not recorded whether process lifecycle is \
+                 available, so a new session's abilities are unknown",
+            ),
         }
     }
 }
 
 /// The RLM protocol's config owner, holding the channel and dialect this
-/// host selected.
-#[derive(Clone, Copy, Debug)]
+/// host selected and the configuration a new session's behaviour is created
+/// from.
+#[derive(Clone, Debug)]
 pub struct RlmConfigOwner {
     pub(crate) channel: RlmChannel,
     pub(crate) dialect: &'static str,
+    pub(crate) config: RlmProtocolPluginConfig,
+    /// The factory's process-lifecycle recording, shared: the owner is
+    /// registered before the deployment declares it.
+    pub(crate) process_lifecycle: Arc<OnceLock<bool>>,
 }
 
 impl ConfigOwner for RlmConfigOwner {
@@ -105,14 +128,18 @@ impl ConfigOwner for RlmConfigOwner {
     }
 
     /// The creator's stated facts, the presentation format a root or child
-    /// session defaults to, and this host's channel and dialect. A child
-    /// inherits nothing from its parent's namespace.
+    /// session defaults to, and this host's channel, dialect and configured
+    /// behaviour. A child inherits nothing from its parent's namespace.
     fn create(
         &self,
         input: Option<RlmCreateConfig>,
         facts: CreationFacts<'_, RlmRecordedConfig>,
     ) -> Result<Option<RlmRecordedConfig>, RlmConfigRefusal> {
         let stated = input.unwrap_or_default().0;
+        let process_lifecycle = *self
+            .process_lifecycle
+            .get()
+            .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?;
         let final_answer_format = stated.final_answer_format.unwrap_or({
             if facts.is_root_session {
                 RlmFinalAnswerFormat::Markdown
@@ -126,10 +153,12 @@ impl ConfigOwner for RlmConfigOwner {
             final_answer_format: Some(final_answer_format),
             channel: Some(self.channel),
             dialect: Some(self.dialect.to_string()),
+            behaviour: self.config.recorded_behaviour(process_lifecycle),
         }))
     }
 
-    /// A candidate keeps the channel and dialect its base recorded.
+    /// A candidate keeps the channel, dialect and behaviour its base
+    /// recorded.
     fn validate(
         &self,
         value: &RlmRecordedConfig,
@@ -151,6 +180,14 @@ impl ConfigOwner for RlmConfigOwner {
                 pin: "dialect".to_string(),
                 recorded: base.dialect.clone(),
                 candidate: value.dialect.clone(),
+            });
+        }
+        if value.behaviour != base.behaviour {
+            let spelled = |behaviour: &RlmRecordedBehaviour| serde_json::to_string(behaviour).ok();
+            return Err(RlmConfigRefusal::PinChanged {
+                pin: "behaviour".to_string(),
+                recorded: spelled(&base.behaviour),
+                candidate: spelled(&value.behaviour),
             });
         }
         Ok(())
@@ -204,13 +241,33 @@ pub(crate) fn register(
 mod tests {
     use super::*;
 
-    const OWNER: RlmConfigOwner = RlmConfigOwner {
-        channel: RlmChannel::Cell,
-        dialect: "typescript",
-    };
+    fn config() -> RlmProtocolPluginConfig {
+        RlmProtocolPluginConfig::builder()
+            .channel(RlmChannel::Cell)
+            .instruction_limit(crate::InstructionBound::instructions(1000))
+            .memory_limit(crate::MemoryBound::mebibytes(1))
+            .build()
+    }
+
+    fn owner_with(process_lifecycle: Option<bool>) -> RlmConfigOwner {
+        let declared = OnceLock::new();
+        if let Some(process_lifecycle) = process_lifecycle {
+            declared.set(process_lifecycle).expect("first declaration");
+        }
+        RlmConfigOwner {
+            channel: RlmChannel::Cell,
+            dialect: "typescript",
+            config: config(),
+            process_lifecycle: Arc::new(declared),
+        }
+    }
+
+    fn owner() -> RlmConfigOwner {
+        owner_with(Some(false))
+    }
 
     fn created(input: Option<RlmCreateExtras>, is_root_session: bool) -> RlmRecordedConfig {
-        OWNER
+        owner()
             .create(
                 input.map(RlmCreateConfig),
                 CreationFacts {
@@ -244,6 +301,7 @@ mod tests {
         );
         assert_eq!(root.channel, Some(RlmChannel::Cell));
         assert_eq!(root.dialect.as_deref(), Some("typescript"));
+        assert_eq!(root.behaviour, config().recorded_behaviour(false));
         assert_eq!(
             created(None, false).final_answer_format,
             Some(RlmFinalAnswerFormat::RawFinalValue)
@@ -288,14 +346,11 @@ mod tests {
     #[test]
     fn set_render_replaces_the_render_and_keeps_the_facts() {
         let factory = crate::RlmProtocolPluginFactory::new(
-            crate::RlmProtocolPluginConfig::builder()
-                .channel(RlmChannel::Cell)
-                .instruction_limit(crate::InstructionBound::instructions(1000))
-                .memory_limit(crate::MemoryBound::mebibytes(1))
-                .build(),
+            config(),
             std::sync::Arc::new(crate::TypescriptDialect),
             &crate::testing::sqlite_recording_backend_blocking().clone(),
-        );
+        )
+        .with_process_lifecycle(false);
         let registry =
             lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");
         let mut config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
@@ -372,13 +427,14 @@ mod tests {
         assert_eq!(config.config_revision, 2);
     }
 
-    /// A candidate that changes the channel or the dialect is refused typed;
-    /// one that keeps them is admitted.
+    /// A candidate that changes the channel, the dialect or the behaviour
+    /// is refused typed; one that keeps them is admitted.
     #[test]
     fn a_candidate_keeps_the_recorded_pins() {
         let base = created(None, true);
+        let owner = owner();
         facts_for(|facts| {
-            OWNER
+            owner
                 .validate(&base, Some(&base), facts)
                 .expect("the recorded pins are kept");
             let rechanneled = RlmRecordedConfig {
@@ -386,7 +442,7 @@ mod tests {
                 ..base.clone()
             };
             assert_eq!(
-                OWNER.validate(&rechanneled, Some(&base), facts),
+                owner.validate(&rechanneled, Some(&base), facts),
                 Err(RlmConfigRefusal::PinChanged {
                     pin: "channel".to_string(),
                     recorded: Some("cell".to_string()),
@@ -398,9 +454,52 @@ mod tests {
                 ..base.clone()
             };
             assert!(matches!(
-                OWNER.validate(&redialected, Some(&base), facts),
+                owner.validate(&redialected, Some(&base), facts),
                 Err(RlmConfigRefusal::PinChanged { pin, .. }) if pin == "dialect"
             ));
+            let rebounded = RlmRecordedConfig {
+                behaviour: RlmRecordedBehaviour {
+                    instruction_limit: crate::InstructionBound::instructions(7),
+                    ..base.behaviour.clone()
+                },
+                ..base.clone()
+            };
+            assert!(matches!(
+                owner.validate(&rebounded, Some(&base), facts),
+                Err(RlmConfigRefusal::PinChanged { pin, .. }) if pin == "behaviour"
+            ));
         });
+    }
+
+    /// A session records the deployment's behaviour, durable sleep included
+    /// when the deployment has process lifecycle; a deployment that never
+    /// declared it creates nothing.
+    #[test]
+    fn creation_records_the_deployments_behaviour() {
+        let created_under = |process_lifecycle| {
+            owner_with(process_lifecycle).create(
+                None,
+                CreationFacts {
+                    parent: None,
+                    is_root_session: true,
+                },
+            )
+        };
+        let without = created_under(Some(false))
+            .expect("create")
+            .expect("recorded");
+        assert!(!without.behaviour.lashlang_abilities.sleep);
+        assert_eq!(
+            without.behaviour.instruction_limit,
+            crate::InstructionBound::instructions(1000)
+        );
+        let with = created_under(Some(true))
+            .expect("create")
+            .expect("recorded");
+        assert!(with.behaviour.lashlang_abilities.sleep);
+        assert_eq!(
+            created_under(None).expect_err("undeclared lifecycle"),
+            RlmConfigRefusal::ProcessLifecycleUndeclared
+        );
     }
 }

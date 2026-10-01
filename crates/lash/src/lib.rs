@@ -108,7 +108,9 @@ pub mod render {
         StandardRenderConfig, ToolOutputRenderer, ToolOutputRendererSlot, ToolRenderParams,
         ToolRenderPatch, resolve,
     };
-    pub use lash_protocol_standard::{SetStandardRender, StandardTurnOptions};
+    pub use lash_protocol_standard::{
+        SetStandardRender, StandardRecordedBehaviour, StandardRecordedConfig, StandardTurnOptions,
+    };
     #[cfg(feature = "rlm")]
     pub use lash_render::*;
 }

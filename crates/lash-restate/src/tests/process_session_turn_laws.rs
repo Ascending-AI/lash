@@ -180,7 +180,13 @@ async fn parent_runtime(
         .with_session_id(&parent)
         .with_policy(policy)
         .with_initial_state(state)
-        .with_plugin_factories(lash_core::testing::test_standard_protocol_factories())
+        // The worker that reopens a child this parent creates runs the
+        // standard protocol, so the parent records that protocol's namespace
+        // (FIG-4398).
+        .with_plugin_factories(vec![
+            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
+                as Arc<dyn lash_core::facade_support::PluginFactory>,
+        ])
         .with_store(store)
         .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
         .with_process_work(backend.process_work())

@@ -31,6 +31,13 @@ The protocol's `ExecutionBounds::new` also requires both axes. The underlying
 VM host contract separately supplies a default logical-memory ceiling of
 512 MiB for a host that does not override `execution_bounds`.
 
+The configured bounds are a deployment's creation default. A session records
+the bounds it was created under in its RLM namespace (`RlmRecordedBehaviour`,
+FIG-4398). Its cells, and every process it starts, run under the recorded
+bounds: a process reads them from the plugin configuration it captured with
+its execution environment. A deployment configured with other bounds that
+opens, redrives or resumes the session does not change them.
+
 ### Heap accounting
 
 The VM meters logical bytes under its registered heap-size schedule rather

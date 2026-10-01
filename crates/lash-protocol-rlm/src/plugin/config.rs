@@ -1,5 +1,15 @@
 use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures};
 
+/// A host's RLM protocol configuration.
+///
+/// The physical slots (the code renderer) are bound live. Every behavioural
+/// choice — the execution bounds, the Lashlang abilities and language
+/// features, the prompt features, discovery, the output limit and the soft
+/// context-budget warning — is this deployment's creation default: a session
+/// records it in its RLM namespace when it is created
+/// ([`RlmRecordedBehaviour`]), and every open, root and process of that
+/// session runs under the recorded value, never under the configuration of
+/// the deployment that happens to open it (FIG-4398).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RlmProtocolPluginConfig {
@@ -7,7 +17,7 @@ pub struct RlmProtocolPluginConfig {
     pub code_renderer: crate::render::CodeRendererSlot,
     #[serde(default)]
     pub render: lash_rlm_types::RlmRenderPatch,
-    /// Host construction-time discovery; never recorded in protocol state.
+    /// The discovery operation a new session records, if any.
     #[serde(skip)]
     pub discovery: Option<lash_core::ToolDiscovery>,
     /// Session-pinned transport used for model-authored programs.
@@ -43,6 +53,29 @@ fn default_continue_as_soft_warn_tokens() -> Option<usize> {
 /// plugin factory applies the host's value verbatim.
 fn default_lashlang_language_features() -> RlmLanguageFeatures {
     RlmLanguageFeatures::default().with_label_annotations()
+}
+
+/// The RLM behaviour a session records at creation (FIG-4398): the logical
+/// choices its driver, prompt and interpreter run under. It is created from
+/// the creating deployment's [`RlmProtocolPluginConfig`], recorded in the
+/// session's RLM namespace, and pinned there: no config command changes it,
+/// a run override cannot restate it, and a session opened, redriven or
+/// resumed by a deployment configured otherwise still runs under it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RlmRecordedBehaviour {
+    pub instruction_limit: InstructionBound,
+    pub memory_limit: MemoryBound,
+    pub lashlang_abilities: RlmAbilities,
+    pub lashlang_language_features: RlmLanguageFeatures,
+    pub prompt_features: crate::protocol::RlmPromptFeatures,
+    pub max_output_chars: usize,
+    /// The prompt-token threshold of the soft context-budget warning, or
+    /// `None` for no warning.
+    pub continue_as_soft_warn_tokens: Option<usize>,
+    /// The host operation the model discovers tools omitted from the prompt
+    /// with, or `None` when every tool is inline.
+    pub discovery_operation: Option<String>,
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
@@ -138,6 +171,47 @@ impl RlmProtocolPluginConfig {
 
     pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::new(self.instruction_limit, self.memory_limit)
+    }
+
+    /// The behaviour a session created under this configuration records:
+    /// every behavioural choice it states, with durable sleep enabled when
+    /// the deployment has process lifecycle.
+    pub fn recorded_behaviour(&self, process_lifecycle: bool) -> RlmRecordedBehaviour {
+        let lashlang_abilities = if process_lifecycle {
+            self.lashlang_abilities.with_sleep()
+        } else {
+            self.lashlang_abilities
+        };
+        RlmRecordedBehaviour {
+            instruction_limit: self.instruction_limit,
+            memory_limit: self.memory_limit,
+            lashlang_abilities,
+            lashlang_language_features: self.lashlang_language_features,
+            prompt_features: self.prompt_features,
+            max_output_chars: self.max_output_chars,
+            continue_as_soft_warn_tokens: self.continue_as_soft_warn_tokens,
+            discovery_operation: self
+                .discovery
+                .as_ref()
+                .map(|discovery| discovery.operation.clone()),
+        }
+    }
+
+    /// This configuration's physical slots under a session's recorded
+    /// `behaviour`: what a session's plugin, driver and interpreter run.
+    pub(crate) fn under_recorded_behaviour(mut self, behaviour: &RlmRecordedBehaviour) -> Self {
+        self.instruction_limit = behaviour.instruction_limit;
+        self.memory_limit = behaviour.memory_limit;
+        self.lashlang_abilities = behaviour.lashlang_abilities;
+        self.lashlang_language_features = behaviour.lashlang_language_features;
+        self.prompt_features = behaviour.prompt_features;
+        self.max_output_chars = behaviour.max_output_chars;
+        self.continue_as_soft_warn_tokens = behaviour.continue_as_soft_warn_tokens;
+        self.discovery = behaviour
+            .discovery_operation
+            .clone()
+            .map(|operation| lash_core::ToolDiscovery { operation });
+        self
     }
 
     pub fn with_lashlang_abilities(mut self, abilities: impl Into<RlmAbilities>) -> Self {

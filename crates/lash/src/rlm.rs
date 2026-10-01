@@ -148,7 +148,8 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
 /// The RLM protocol's config owner and its one command (FIG-4379).
 pub use lash_protocol_rlm::{
-    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, SetRlmRender,
+    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour, RlmRecordedConfig,
+    SetRlmRender,
 };
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`]. Session extensions are process-local

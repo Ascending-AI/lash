@@ -33,6 +33,18 @@ tool-source policy, enqueue-only mode, process-local plugin factories and the
 provider resolver. The resolver must match the recorded provider pin. Config
 changes are typed config commands (ADR 0126).
 
+A factory is live wiring, not behaviour. What a protocol factory states
+about how a session behaves — the RLM execution bounds, Lashlang abilities
+and language features, prompt features, discovery operation, output limit
+and soft-warning threshold; the standard protocol's discovery operation and
+`batch` choice and maximum — is a creation default. The session records it in
+its protocol namespace at creation, and every open, redrive and process of
+that session runs under the recorded value, whatever the opening deployment's
+factory states (FIG-4398). What a factory supplies live is physical: the
+dialect and code or output renderer implementations, the worker service, the
+artifact store, deferred-grant resolvers and trace sinks. Each serves the
+identity the session recorded or refuses.
+
 An open session's `session.durable()` reuses the Session Binding's store and
 owner-issued ports. Catalog-derived and binding-derived handles share
 `DurableSessionOps`, which also implements the runtime's durable queue work.

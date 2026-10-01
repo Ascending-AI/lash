@@ -19,7 +19,9 @@ Teaching follows the selected catalog, host environment, and prompt features.
 Process teaching depends on process catalog membership. Sleep depends on its
 host ability. Trigger teaching requires declared trigger sources. Image,
 decomposition, and continuation instructions follow their configured features
-and catalog. Empty sections are omitted. Promise aggregates and ordinary
+and catalog. The features and abilities a prompt teaches are the ones the
+session recorded at creation, not the opening deployment's (FIG-4398, ADR
+0126). Empty sections are omitted. Promise aggregates and ordinary
 context handling do not require decomposition.
 
 The standard library receives a short description. Unsupported constructs

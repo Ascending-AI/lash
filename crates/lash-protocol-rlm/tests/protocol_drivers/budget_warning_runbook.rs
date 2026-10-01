@@ -20,6 +20,11 @@ use lash_protocol_rlm::{
 use lash_sansio::llm::types::{LlmRequest, LlmUsage};
 use lash_sansio::{SessionId, TurnId};
 
+/// The AfterWork checkpoints of the switch turn, the one turn that begins
+/// over the threshold: one after its first cell. Its second cell switches
+/// frames, which ends the turn without one.
+const WARNED_CHECKPOINTS: usize = 1;
+
 #[test]
 fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed() {
     tokio::runtime::Builder::new_current_thread()
@@ -210,9 +215,17 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(warnings.len(), 1, "the threshold emits one typed status");
-            assert!(warnings[0].contains("warn at 100"), "{:?}", warnings);
-            assert!(warnings[0].contains("120 tokens used"), "{:?}", warnings);
+            // The status is a function of recorded state (FIG-4398): each
+            // AfterWork checkpoint of the turn that began over the threshold
+            // emits the same keyed status, and nothing else does.
+            assert_eq!(
+                warnings,
+                vec![
+                    "120 tokens used; warn at 100; choose frame switch path".to_string();
+                    WARNED_CHECKPOINTS
+                ],
+                "each AfterWork checkpoint of the warned turn emits the same typed status"
+            );
 
             assert_eq!(result.turns.len(), 2, "continue_as opens a follow-frame turn");
             let frame = runtime.state().current_frame_node_id.as_ref().expect("new frame");

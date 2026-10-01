@@ -13,7 +13,8 @@ pub(crate) mod runtime_state;
 pub(crate) mod tool_args;
 
 pub use config::{
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, UnsetBound, UnsetChannel,
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmRecordedBehaviour, UnsetBound,
+    UnsetChannel,
 };
 pub use config_owner::{
     RLM_CONFIG_IMPLEMENTATION, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig,
@@ -31,3 +32,5 @@ pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 
 mod channel;
 pub use channel::RlmChannel;
+#[cfg(test)]
+mod recorded_behaviour_tests;

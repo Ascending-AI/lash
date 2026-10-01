@@ -549,9 +549,11 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "mutants": "//third-party/rust:p0218",
+            "tempfile": "//third-party/rust:p0390",
             "tokio": "//third-party/rust:p0399",
             "tokio_util": "//third-party/rust:p0405"
         },

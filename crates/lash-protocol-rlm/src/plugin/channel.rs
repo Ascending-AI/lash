@@ -35,13 +35,17 @@ impl std::str::FromStr for RlmChannel {
 /// the host selected when the session materialized (ADR 0096).
 const DIALECT_FIELD: &str = "dialect";
 
-/// The bag without the session's transport and dialect pins: what remains is
-/// the RLM create extras.
+/// The recorded key of the session's behaviour (FIG-4398).
+const BEHAVIOUR_FIELD: &str = "behaviour";
+
+/// The bag without the session's transport, dialect and behaviour pins: what
+/// remains is the RLM create extras.
 pub(super) fn without_session_pins(options: &ProtocolTurnOptions) -> ProtocolTurnOptions {
     let mut options = options.clone();
     if let Some(object) = options.payload.as_object_mut() {
         object.remove("channel");
         object.remove(DIALECT_FIELD);
+        object.remove(BEHAVIOUR_FIELD);
     }
     options
 }
@@ -127,9 +131,17 @@ mod tests {
     fn pinned(channel: Option<RlmChannel>, dialect: Option<&str>) -> ProtocolTurnOptions {
         ProtocolTurnOptions::from_payload(
             serde_json::to_value(super::super::RlmRecordedConfig {
+                render: None,
+                termination: None,
+                final_answer_format: None,
                 channel,
                 dialect: dialect.map(str::to_string),
-                ..super::super::RlmRecordedConfig::default()
+                behaviour: super::super::RlmProtocolPluginConfig::builder()
+                    .channel(RlmChannel::Cell)
+                    .instruction_limit(super::super::InstructionBound::unbounded())
+                    .memory_limit(super::super::MemoryBound::unbounded())
+                    .build()
+                    .recorded_behaviour(false),
             })
             .unwrap(),
         )

@@ -517,6 +517,7 @@ async fn run_lashlang_process_scoped(
         .process_name_for_ref(&input.process_ref)
         .unwrap_or("")
         .to_owned();
+    let run_settings = engine.run_settings(&context.plugins().admitted_plugin_config())?;
     let (tool_catalog, host_environment) = {
         let _phase = context.named_phase("rlm_process.resolve_environment");
         let tool_catalog = match context.resolved_tool_catalog() {
@@ -526,9 +527,8 @@ async fn run_lashlang_process_scoped(
             }
         };
         let session_extensions = context.plugins().session_extensions().clone();
-        let surface = engine
+        let surface = run_settings
             .surface
-            .clone()
             .for_process_registry(context.process_registry_available())
             .with_plugin_extensions(&session_extensions);
         let host_environment = match surface {
@@ -647,7 +647,7 @@ async fn run_lashlang_process_scoped(
             &engine.workers,
             &artifact,
             &input,
-            engine.execution_bounds,
+            run_settings.execution_bounds,
             segment_controller.controller(),
             &host,
             (segment_state, current_program_hash),

@@ -72,14 +72,16 @@ fn standard_execution_section(batch: BatchSugar) -> String {
 /// it is refused when the plugin builds.
 pub const BATCH_MEMBER_CEILING: usize = 64;
 
-/// Whether the driver offers `batch`, and with how many members per call.
+/// Whether the driver offers `batch`, and with how many members per call. A
+/// session records its choice at creation ([`StandardRecordedBehaviour`]).
 ///
 /// `batch` is protocol sugar, not a tool: the driver expands each call into
 /// the step's one tool group beside the response's native calls, so every
 /// member starts before any finishes, and folds the members' results into one
 /// batch result. It is not a Tool Catalog entry, so tool membership does not
 /// apply to it and RLM cells and processes cannot call it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BatchSugar {
     /// `batch` is offered, with at most `max_members` members per call.
     Enabled { max_members: std::num::NonZeroUsize },
@@ -103,7 +105,10 @@ pub struct StandardProtocolPluginFactory {
     config: StandardProtocolConfig,
 }
 
-/// Host construction-time standard-mode presentation settings.
+/// A host's standard-protocol configuration. The renderer slot is bound
+/// live; the discovery operation and the batch choice are this deployment's
+/// creation defaults, which a session records at creation and runs under on
+/// every open, whichever deployment opens it (FIG-4398).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StandardProtocolConfig {
     pub discovery: Option<lash_core::ToolDiscovery>,
@@ -119,12 +124,104 @@ impl StandardProtocolConfig {
         self.batch = sugar;
         self
     }
+
+    /// The behaviour a session created under this configuration records.
+    pub fn recorded_behaviour(&self) -> StandardRecordedBehaviour {
+        StandardRecordedBehaviour {
+            discovery_operation: self
+                .discovery
+                .as_ref()
+                .map(|discovery| discovery.operation.clone()),
+            batch: self.batch,
+        }
+    }
+
+    /// This configuration's renderer and render under a session's recorded
+    /// `behaviour`: what the session's driver runs.
+    fn under_recorded_behaviour(mut self, behaviour: &StandardRecordedBehaviour) -> Self {
+        self.discovery = behaviour
+            .discovery_operation
+            .clone()
+            .map(|operation| lash_core::ToolDiscovery { operation });
+        self.batch = behaviour.batch;
+        self
+    }
 }
 
-/// The standard protocol's session namespace (FIG-4379) and its turn
-/// options: the render options its tool results render with, over the host's
-/// configured render. A stated `null` in a run's options resets a key, so a
-/// value is read with its nulls dropped.
+/// The standard-protocol behaviour a session records at creation
+/// (FIG-4398): the discovery operation and the batch choice its driver runs
+/// under. It is pinned: no config command changes it, a run override cannot
+/// restate it, and a session opened, redriven or resumed by a deployment
+/// configured otherwise still runs under it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StandardRecordedBehaviour {
+    /// The host operation the model discovers tools omitted from the prompt
+    /// with, or `None` when every tool is inline.
+    pub discovery_operation: Option<String>,
+    pub batch: BatchSugar,
+}
+
+/// The standard protocol's recorded session namespace (FIG-4379,
+/// FIG-4398): the render options its tool results render with, over the
+/// host's configured render, and the behaviour the session was created
+/// with. A stated `null` in a run's render options resets a key, so the
+/// render is read with its nulls dropped.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(try_from = "serde_json::Value")]
+pub struct StandardRecordedConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub render: Option<StandardRenderConfig>,
+    #[schemars(with = "serde_json::Value")]
+    pub behaviour: StandardRecordedBehaviour,
+}
+
+/// The wire form a [`StandardRecordedConfig`] decodes through.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StandardRecordedConfigWire {
+    #[serde(default)]
+    render: Option<serde_json::Value>,
+    behaviour: StandardRecordedBehaviour,
+}
+
+impl TryFrom<serde_json::Value> for StandardRecordedConfig {
+    type Error = serde_json::Error;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        let wire: StandardRecordedConfigWire = serde_json::from_value(value)?;
+        Ok(Self {
+            render: wire
+                .render
+                .map(|render| serde_json::from_value(render::without_nulls(render)))
+                .transpose()?,
+            behaviour: wire.behaviour,
+        })
+    }
+}
+
+/// The recorded key of the session's behaviour, which a run's render options
+/// do not carry.
+const BEHAVIOUR_FIELD: &str = "behaviour";
+
+/// The render options of a root's protocol turn options: its namespace, the
+/// recorded behaviour aside.
+fn standard_turn_options(
+    options: &lash_core::ProtocolTurnOptions,
+) -> Result<StandardTurnOptions, lash_core::ProtocolTurnOptionsError> {
+    let mut options = options.clone();
+    if let Some(object) = options.payload.as_object_mut() {
+        object.remove(BEHAVIOUR_FIELD);
+    }
+    options.decode()
+}
+
+/// What a creator and a run state for the standard protocol (FIG-4379): the
+/// render options its tool results render with, over the host's configured
+/// render. A stated `null` in a run's options resets a key, so a value is
+/// read with its nulls dropped.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
 )]
@@ -160,25 +257,41 @@ impl TryFrom<serde_json::Value> for StandardTurnOptions {
 pub const STANDARD_CONFIG_IMPLEMENTATION: &str = "lash-standard-config:1";
 
 /// The standard protocol's config owner: it records the creator's render
-/// options, or none, and admits [`SetStandardRender`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct StandardConfigOwner;
+/// options, or none, and this host's configured behaviour, admits
+/// [`SetStandardRender`] and keeps the behaviour pinned.
+#[derive(Clone, Debug)]
+pub struct StandardConfigOwner {
+    behaviour: StandardRecordedBehaviour,
+}
 
-/// Why the standard owner refused a candidate. It refuses nothing a
-/// decodable namespace states.
+/// Why the standard owner refused a candidate.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
-pub enum StandardConfigRefusal {}
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StandardConfigRefusal {
+    /// The candidate changes the behaviour the session recorded at
+    /// creation.
+    BehaviourChanged { recorded: String, candidate: String },
+}
 
 impl std::fmt::Display for StandardConfigRefusal {
-    fn fmt(&self, _formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {}
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BehaviourChanged {
+                recorded,
+                candidate,
+            } => write!(
+                formatter,
+                "the session's standard-protocol behaviour is recorded as {recorded} and cannot \
+                 become {candidate}"
+            ),
+        }
     }
 }
 
 impl ConfigOwner for StandardConfigOwner {
     type Create = StandardTurnOptions;
-    type Recorded = StandardTurnOptions;
+    type Recorded = StandardRecordedConfig;
     type Refusal = StandardConfigRefusal;
 
     fn implementation(&self) -> &str {
@@ -186,22 +299,39 @@ impl ConfigOwner for StandardConfigOwner {
     }
 
     /// Every session records its namespace: the creator's render options,
-    /// or none, under which the host's configured render applies. A child
-    /// inherits nothing from its parent's namespace.
+    /// or none, under which the host's configured render applies, and this
+    /// host's configured behaviour. A child inherits nothing from its
+    /// parent's namespace.
     fn create(
         &self,
         input: Option<StandardTurnOptions>,
-        _facts: CreationFacts<'_, StandardTurnOptions>,
-    ) -> Result<Option<StandardTurnOptions>, StandardConfigRefusal> {
-        Ok(Some(input.unwrap_or_default()))
+        _facts: CreationFacts<'_, StandardRecordedConfig>,
+    ) -> Result<Option<StandardRecordedConfig>, StandardConfigRefusal> {
+        Ok(Some(StandardRecordedConfig {
+            render: input.unwrap_or_default().render,
+            behaviour: self.behaviour.clone(),
+        }))
     }
 
+    /// A candidate keeps the behaviour its base recorded.
     fn validate(
         &self,
-        _value: &StandardTurnOptions,
-        _base: Option<&StandardTurnOptions>,
+        value: &StandardRecordedConfig,
+        base: Option<&StandardRecordedConfig>,
         _facts: &CandidateFacts<'_>,
     ) -> Result<(), StandardConfigRefusal> {
+        let Some(base) = base else {
+            return Ok(());
+        };
+        if value.behaviour != base.behaviour {
+            let spelled = |behaviour: &StandardRecordedBehaviour| {
+                serde_json::to_string(behaviour).unwrap_or_default()
+            };
+            return Err(StandardConfigRefusal::BehaviourChanged {
+                recorded: spelled(&base.behaviour),
+                candidate: spelled(&value.behaviour),
+            });
+        }
         Ok(())
     }
 }
@@ -246,19 +376,48 @@ impl PluginFactory for StandardProtocolPluginFactory {
         &self,
         registrar: &mut ConfigRegistrar,
     ) -> Result<(), ConfigRegistrationError> {
-        registrar.owner(StandardConfigOwner)?;
-        registrar.command::<SetStandardRender>(|_, command| {
+        registrar.owner(StandardConfigOwner {
+            behaviour: self.config.recorded_behaviour(),
+        })?;
+        registrar.command::<SetStandardRender>(|recorded, command| {
             Ok(OwnerChange {
-                recorded: StandardTurnOptions {
+                recorded: StandardRecordedConfig {
                     render: command.render,
+                    behaviour: recorded.behaviour.clone(),
                 },
                 output: (),
             })
         })
     }
 
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        if let BatchSugar::Enabled { max_members } = self.config.batch
+    /// The session's plugin runs under the behaviour the session recorded
+    /// (FIG-4398). A session being created has recorded none yet and runs
+    /// under what its creation records, this deployment's; a rebuilt session
+    /// that recorded none is refused, never given this deployment's.
+    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        let recorded = ctx
+            .plugin_config
+            .decode::<StandardRecordedConfig>(STANDARD_PROTOCOL_PLUGIN_ID)
+            .map_err(|error| {
+                PluginError::Session(format!(
+                    "invalid recorded standard-protocol session config: {error}"
+                ))
+            })?;
+        let behaviour = match recorded {
+            Some(recorded) => recorded.behaviour,
+            None if matches!(
+                ctx.materialization,
+                lash_core::plugin::PluginSessionMaterialization::Rematerialization
+            ) =>
+            {
+                return Err(PluginError::MissingRecordedSessionConfig {
+                    plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
+                    field: BEHAVIOUR_FIELD.to_string(),
+                });
+            }
+            None => self.config.recorded_behaviour(),
+        };
+        if let BatchSugar::Enabled { max_members } = behaviour.batch
             && max_members.get() > BATCH_MEMBER_CEILING
         {
             return Err(PluginError::InvalidBatchMaximum {
@@ -267,7 +426,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
             });
         }
         Ok(Arc::new(StandardProtocolPlugin {
-            config: self.config.clone(),
+            config: self.config.clone().under_recorded_behaviour(&behaviour),
         }))
     }
 }
@@ -358,7 +517,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         &self,
         options: &lash_core::ProtocolTurnOptions,
     ) -> Result<Option<lash_core::RecordedRender>, String> {
-        let patch: StandardTurnOptions = options.decode().map_err(|error| error.to_string())?;
+        let patch = standard_turn_options(options).map_err(|error| error.to_string())?;
         let resolved = render::resolve(
             &StandardRenderConfig::builtin(),
             &self.config.render,
@@ -960,3 +1119,6 @@ mod driver_contract_tests;
 
 #[cfg(test)]
 mod provider_part_persistence_tests;
+
+#[cfg(test)]
+mod recorded_behaviour_tests;

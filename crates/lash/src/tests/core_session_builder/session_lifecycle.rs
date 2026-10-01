@@ -1761,12 +1761,18 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
 
-    let opened = core
-        .session("manual-state")
-        .created()
-        .await
-        .open_with_state(state)
-        .await?;
+    let created = core.session("manual-state").created().await;
+    // A complete state carries the plugin configuration its session recorded
+    // (FIG-4398): a rebuilt session that recorded none is refused.
+    state.authority.plugin_config = lash_core::SessionCommitStore::load_session_head_meta(
+        core.store_factory.as_ref(),
+        &SessionId::from("manual-state"),
+    )
+    .await?
+    .expect("the created session's head")
+    .config
+    .plugin_config;
+    let opened = created.open_with_state(state).await?;
     assert_eq!(
         message_text(&opened.read_view().messages().to_vec()[0]),
         "manual input"

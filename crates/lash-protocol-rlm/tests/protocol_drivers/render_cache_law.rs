@@ -364,6 +364,15 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                 .expect("create render options");
             created_options.payload["channel"] = serde_json::json!("cell");
             created_options.payload["dialect"] = serde_json::json!("typescript");
+            created_options.payload["behaviour"] = serde_json::to_value(
+                RlmProtocolPluginConfig::builder()
+                    .channel(RlmChannel::Cell)
+                    .instruction_limit(InstructionBound::instructions(1_000_000))
+                    .memory_limit(MemoryBound::mebibytes(64))
+                    .build()
+                    .recorded_behaviour(false),
+            )
+            .expect("behaviour JSON");
             let mut runtime = open_runtime(
                 &backend,
                 base.clone(),

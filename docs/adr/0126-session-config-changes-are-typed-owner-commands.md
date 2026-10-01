@@ -43,6 +43,16 @@ by the reserved `core` owner, whose commands include `SetProvider`,
 retries than the provider handle ever buys. The RLM and standard protocols register
 one render command each (`SetRlmRender`, `SetStandardRender`).
 
+Each protocol namespace also records the session's behaviour at creation
+(FIG-4398), from the creating deployment's factory configuration:
+`RlmRecordedBehaviour` (execution bounds, Lashlang abilities and language
+features, prompt features, output limit, soft-warning threshold, discovery
+operation) and `StandardRecordedBehaviour` (discovery operation, `batch`
+choice and maximum). No command changes it, and each owner refuses a
+candidate, a run override included, that changes its recorded behaviour. A
+plugin and its hooks run under the recorded behaviour, never under the
+opening deployment's factory configuration.
+
 **Transactions.** A `ConfigTransaction` is an ordered list of
 `{owner, command, args}` entries and applies all or none. A host submits it
 under a `ConfigWrite { id, expected_revision }`:

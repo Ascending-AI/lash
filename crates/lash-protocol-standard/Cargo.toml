@@ -47,6 +47,10 @@ insta = "1"
 mutants = "0.0.4"
 lash-core = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
+# The recorded-behaviour laws (FIG-4398) run over SQLite file stores and
+# PostgreSQL as well as SQLite memory.
+lash-postgres-store = { workspace = true }
+tempfile = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true }

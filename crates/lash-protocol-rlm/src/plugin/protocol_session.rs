@@ -1,5 +1,4 @@
-use lash_sansio::sync::MutexExt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use lash_core::plugin::{
     CheckpointHookContext, PluginDirective, PluginError, ProtocolSessionContext,
@@ -8,15 +7,14 @@ use lash_core::plugin::{
 use lash_core::{CheckpointKind, ProtocolTurnOptions, SessionError};
 use lash_rlm_types::{RlmCreateExtras, RlmSessionConfig};
 
-use super::RlmProtocolPluginConfig;
 use super::budget_warning::BUDGET_WARNING_STATUS;
 use super::runtime_state::RlmRuntimeState;
+use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig, RlmRecordedConfig};
 use crate::rlm_support::effective_budget_tokens;
 
 pub(crate) struct RlmProtocolSession {
     config: RlmProtocolPluginConfig,
     runtime_state: Arc<RlmRuntimeState>,
-    warned_at_threshold: Mutex<bool>,
 }
 
 impl RlmProtocolSession {
@@ -27,7 +25,6 @@ impl RlmProtocolSession {
         Self {
             runtime_state,
             config,
-            warned_at_threshold: Mutex::new(false),
         }
     }
 
@@ -39,6 +36,12 @@ impl RlmProtocolSession {
             .await
     }
 
+    /// The soft context-budget warning (FIG-4398): a pure function of
+    /// recorded state, holding nothing between calls. Every `AfterWork`
+    /// checkpoint of a turn that began at or over the recorded threshold
+    /// emits the same keyed status — the usage it reads is the session's
+    /// committed prompt usage, which is constant within a turn — so a
+    /// reopened or resumed session warns exactly as the one it replaces.
     pub(crate) fn soft_warn_directives(
         &self,
         ctx: CheckpointHookContext,
@@ -46,10 +49,20 @@ impl RlmProtocolSession {
         if ctx.checkpoint != CheckpointKind::AfterWork {
             return Ok(Vec::new());
         }
-        let threshold = effective_budget_tokens(
-            self.config.continue_as_soft_warn_tokens,
-            Some(ctx.state.policy().context_window_tokens()),
-        );
+        // The threshold the running root was admitted under; a session that
+        // has recorded no RLM namespace yet runs under the behaviour its
+        // plugin was built with.
+        let configured = match ctx
+            .plugin_config
+            .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
+            .map_err(|error| {
+                PluginError::Session(format!("invalid recorded RLM session config: {error}"))
+            })? {
+            Some(recorded) => recorded.behaviour.continue_as_soft_warn_tokens,
+            None => self.config.continue_as_soft_warn_tokens,
+        };
+        let threshold =
+            effective_budget_tokens(configured, Some(ctx.state.policy().context_window_tokens()));
         let Some(threshold) = threshold else {
             return Ok(Vec::new());
         };
@@ -63,11 +76,6 @@ impl RlmProtocolSession {
         if used == 0 || used < threshold {
             return Ok(Vec::new());
         }
-        let mut warned = self.warned_at_threshold.lock_recover();
-        if *warned {
-            return Ok(Vec::new());
-        }
-        *warned = true;
         Ok(vec![
             PluginDirective::emit_runtime_events(vec![lash_core::PluginRuntimeEvent::Status {
                 key: BUDGET_WARNING_STATUS.to_string(),
@@ -426,6 +434,120 @@ mod tests {
             detail.as_deref(),
             Some("40999 tokens used; warn at 40999; choose frame switch path")
         );
+    }
+
+    /// A checkpoint context at `AfterWork` whose session's committed prompt
+    /// usage is `used` tokens, under `plugin_config`.
+    fn after_work(
+        used: i64,
+        plugin_config: lash_core::AdmittedPluginConfig,
+    ) -> lash_core::plugin::CheckpointHookContext {
+        let policy = lash_core::SessionPolicy {
+            model: lash_core::ModelSpec::builder("budget-unit-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model limits"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let state = lash_core::SessionSnapshot {
+            last_prompt_usage: Some(lash_core::TokenUsage {
+                input_tokens: used,
+                ..Default::default()
+            }),
+            ..lash_core::SessionSnapshot::new(policy)
+        };
+        lash_core::plugin::CheckpointHookContext {
+            session_id: SessionId::from("root"),
+            checkpoint: lash_core::CheckpointKind::AfterWork,
+            state: lash_core::SessionReadView::from_snapshot(&state),
+            sessions: Arc::new(NoopPromptManager),
+            session_lifecycle: Arc::new(NoopPromptManager),
+            session_graph: Arc::new(NoopPromptManager),
+            plugin_config,
+        }
+    }
+
+    fn statuses(directives: &[TurnPluginDirective]) -> Vec<lash_core::PluginRuntimeEvent> {
+        directives
+            .iter()
+            .flat_map(|directive| match directive {
+                TurnPluginDirective::Ambient(PluginDirective::EmitRuntimeEvents { events }) => {
+                    events.clone()
+                }
+                other => panic!("the budget warning emits runtime events only: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// The soft warning is a pure function of recorded state (FIG-4398):
+    /// every `AfterWork` checkpoint over the recorded threshold emits the
+    /// same keyed status, a session reopened or resumed by a worker whose
+    /// factory states another threshold — or none — emits exactly what the
+    /// original emits, and nothing the session holds suppresses or changes
+    /// it.
+    #[test]
+    fn the_soft_warning_is_the_same_keyed_status_on_every_worker() {
+        let creating = RlmProtocolPluginConfig {
+            continue_as_soft_warn_tokens: Some(100_000),
+            ..RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
+                .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                .build()
+        };
+        let mut config =
+            lash_core::PluginConfig::for_protocol(Some(crate::RLM_PROTOCOL_PLUGIN_ID.to_string()));
+        config.insert(
+            crate::RLM_PROTOCOL_PLUGIN_ID,
+            serde_json::to_value(crate::RlmRecordedConfig {
+                render: None,
+                termination: None,
+                final_answer_format: None,
+                channel: Some(crate::RlmChannel::Cell),
+                dialect: Some("typescript".to_string()),
+                behaviour: creating.recorded_behaviour(false),
+            })
+            .expect("recorded namespace"),
+        );
+        let recorded = lash_core::AdmittedPluginConfig::new(config, 1);
+        let original = test_session(creating);
+        let resumed = test_session(RlmProtocolPluginConfig {
+            continue_as_soft_warn_tokens: None,
+            ..RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
+                .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                .build()
+        });
+
+        let warned = |session: &RlmProtocolSession, used: i64| {
+            statuses(
+                &session
+                    .soft_warn_directives(after_work(used, recorded.clone()))
+                    .expect("warning directives"),
+            )
+        };
+        let expected = vec![lash_core::PluginRuntimeEvent::Status {
+            key: BUDGET_WARNING_STATUS.to_string(),
+            label: "context budget".to_string(),
+            detail: Some(
+                "120000 tokens used; warn at 100000; choose frame switch path".to_string(),
+            ),
+        }];
+        for checkpoint in 0..3 {
+            assert_eq!(
+                warned(&original, 120_000),
+                expected,
+                "checkpoint {checkpoint} of the original session"
+            );
+            assert_eq!(
+                warned(&resumed, 120_000),
+                expected,
+                "checkpoint {checkpoint} on the worker that resumed it"
+            );
+        }
+        assert!(warned(&original, 99_999).is_empty());
+        assert!(warned(&resumed, 99_999).is_empty());
     }
 
     /// A malformed recorded bag is an error, never a silent default.

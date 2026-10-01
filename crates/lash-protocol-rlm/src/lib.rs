@@ -45,9 +45,9 @@ pub use plugin::{
     LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
     RLM_CONFIG_IMPLEMENTATION, RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner,
     RlmConfigRefusal, RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig,
-    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedConfig,
-    RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_lashlang_surface,
-    rlm_protocol_config, rlm_session_config,
+    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
+    RlmRecordedConfig, RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel,
+    rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,
