@@ -36,17 +36,19 @@
 //!
 //! Restate starts a new invocation on the newest deployment that serves its
 //! service name, and keeps a started invocation pinned to the deployment it
-//! started on. Every service is therefore one of two [`LaneClass`]es:
+//! started on. [`LaneClass`] states which names a service binds:
 //!
 //! - A **pinned** service bears a journal that only its own build may
-//!   replay: the process segment workflow, the effect-group dispatcher, and
-//!   the session driver's `LashSession` and `LashTurn`. Each build binds it
-//!   twice: under its **stable** name (`LashProcessWorkflow`), which Restate
+//!   replay. The process segment workflow and the session driver's
+//!   `LashSession` and `LashTurn` bind twice: under their **stable** name
+//!   (`LashProcessWorkflow`), which Restate
 //!   hands to the newest build, and under its **generation** name
 //!   (`LashProcessWorkflow_g<G>`, [`Lane::Generation`]), which only builds of
 //!   drain generation `G` serve. Work that must reach the build that started
 //!   it — an effect group's children, a redrive, a successor the newest
 //!   build refused — is sent to the generation name.
+//!   `EffectGroupDispatch` binds only its generation name: every opener
+//!   records its build's lane, so no call needs a stable dispatcher binding.
 //! - A **shared** service holds state every build reads and writes: the
 //!   durable-wait workflow and index, process attach, and the effect-group
 //!   index and payload objects. Its name is never split by generation, so a
@@ -221,7 +223,7 @@ impl RestateNamespace {
     }
 
     /// `service` under the lane builds of `generation` serve in this
-    /// namespace. Only a [`LaneClass::Pinned`] service is bound under one;
+    /// namespace. Only a journal-bearing service is bound under one;
     /// a shared service named this way names nothing any deployment serves.
     pub(crate) fn generation(
         &self,
@@ -242,10 +244,13 @@ impl RestateNamespace {
         LASH_SERVICES.iter().find_map(|&service| {
             let rest = name.strip_prefix(service.base_name())?;
             if rest.is_empty() {
-                return Some(self.stable(service));
+                return (service.lane_class() != LaneClass::GenerationOnly)
+                    .then(|| self.stable(service));
             }
             let generation = BuildGeneration::parse(rest.strip_prefix("_g")?).ok()?;
-            (service.lane_class() == LaneClass::Pinned)
+            service
+                .lane_class()
+                .is_pinned()
                 .then(|| self.generation(service, generation))
         })
     }
@@ -291,7 +296,7 @@ impl std::str::FromStr for RestateNamespace {
 pub(crate) fn generation_lane_of(name: &str) -> Option<BuildGeneration> {
     let local = name.rsplit_once('.').map_or(name, |(_, local)| local);
     LASH_SERVICES.iter().find_map(|&service| {
-        if service.lane_class() != LaneClass::Pinned {
+        if !service.lane_class().is_pinned() {
             return None;
         }
         let suffix = local
@@ -307,8 +312,17 @@ pub(crate) enum LaneClass {
     /// Journal-bearing: bound under its stable name and under each build's
     /// generation name.
     Pinned,
+    /// Journal-bearing: every caller names its build, so only the
+    /// generation name is bound.
+    GenerationOnly,
     /// State-holding: bound under its stable name only.
     Shared,
+}
+
+impl LaneClass {
+    pub(crate) const fn is_pinned(self) -> bool {
+        matches!(self, Self::Pinned | Self::GenerationOnly)
+    }
 }
 
 /// Declares [`LashService`] and its complete [`LASH_SERVICES`] together, so
@@ -359,7 +373,7 @@ lash_services! {
     /// An effect group's successful result bytes.
     EffectGroupPayload => "EffectGroupPayload", Shared;
     /// Sends an effect group's children and runs each one.
-    EffectGroupDispatch => "EffectGroupDispatch", Pinned;
+    EffectGroupDispatch => "EffectGroupDispatch", GenerationOnly;
     /// One session's drive: admits roots and runs each in its `LashTurn`
     /// (FIG-3600).
     SessionDriver => "LashSession", Pinned;
@@ -724,9 +738,9 @@ where
 }
 
 /// The lanes `service` is bound under by a build of `generation` in
-/// `namespace`: every service under its stable name, and a pinned one under
-/// the build's generation name too.
-fn lanes(
+/// `namespace`: shared services use their stable name, journal-bearing
+/// services use the generation name, and `Pinned` services also bind stable.
+pub(crate) fn lanes(
     namespace: &RestateNamespace,
     service: LashService,
     generation: &BuildGeneration,
@@ -737,12 +751,12 @@ fn lanes(
             namespace.stable(service),
             namespace.generation(service, generation.clone()),
         ],
+        LaneClass::GenerationOnly => vec![namespace.generation(service, generation.clone())],
     }
 }
 
 /// Every Restate name a build of `generation` serves for lash in
-/// `namespace`: each shared service once, each pinned service under both
-/// lanes.
+/// `namespace`, with only the lanes each service binds.
 #[cfg(test)]
 pub(crate) fn lash_service_routes(
     namespace: &RestateNamespace,
@@ -783,7 +797,7 @@ pub(crate) struct LashServiceParts<'a, R> {
 }
 
 /// Bind every [`LashService`] on `builder` under its name in the
-/// deployment's namespace, each pinned service under both of its lanes, and
+/// deployment's namespace under its declared lanes, and
 /// each carrying the deployment's claim ([`CLAIM_AUTHORITY_METADATA`]).
 ///
 /// The match is exhaustive over [`LASH_SERVICES`] × lanes, so a new lash
@@ -1105,7 +1119,7 @@ mod tests {
     fn only_journal_bearing_services_are_pinned() {
         let pinned: Vec<_> = LASH_SERVICES
             .iter()
-            .filter(|service| service.lane_class() == LaneClass::Pinned)
+            .filter(|service| service.lane_class().is_pinned())
             .map(|service| service.base_name())
             .collect();
         assert_eq!(

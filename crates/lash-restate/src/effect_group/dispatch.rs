@@ -175,8 +175,8 @@ impl EffectGroupDispatchImpl {
 
 /// The effect-group dispatcher: sends a group's children and runs each one.
 ///
-/// A pinned service (FIG-3795): each build binds it under its stable name
-/// and under its generation's lane, and a group's opener records the lane
+/// A pinned service (FIG-3795): each build binds only its generation's lane,
+/// and a group's opener records the lane
 /// its dispatch runs under on the group's index record. Every child call
 /// addresses the dispatcher's own lane, so a group's children run on the
 /// build that opened it, however many newer builds are registered.

@@ -276,8 +276,11 @@ impl RestateEngine {
     pub async fn register_deployment(&self, uri: &str) -> Result<(), RestateRegistrationError> {
         let force = self.redeploys_endpoint(uri).await?;
         let authority = self.effect_host.authority_id().binding_id();
-        for &service in crate::services::LASH_SERVICES {
-            let name = self.namespace.stable(service).name();
+        let routes = crate::services::LASH_SERVICES.iter().flat_map(|&service| {
+            crate::services::lanes(&self.namespace, service, &self.build_generation)
+        });
+        for route in routes {
+            let name = route.name();
             let Some(registration) = self.admin.service_registration(&name).await? else {
                 continue;
             };

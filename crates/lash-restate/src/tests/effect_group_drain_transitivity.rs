@@ -240,7 +240,7 @@ async fn run_round(
             observed.lock().expect("the law's observations").retiring = true;
             ingress
                 .call_lash_workflow::<_, ()>(
-                    "EffectGroupDispatch",
+                    &super::effect_group_conformance::witness_dispatch_route(),
                     &group_key,
                     "retire",
                     &group_key,

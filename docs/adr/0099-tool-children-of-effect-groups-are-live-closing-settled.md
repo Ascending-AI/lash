@@ -834,7 +834,9 @@ controller a host builds inside its own handler, and an effect host all carry
 their build's generation (`RestateRuntimeEffectController::new`,
 `RestateEffectHost::new`), and the index refuses an open that declares any other
 route. No group's children reach whichever build is newest through the stable
-name. A generation's drain waits for its lane's committed children: the
+name. The dispatcher binds only its generation lane; no stable dispatcher
+binding or stable dispatch route is retained. A generation's drain waits for
+its lane's committed children: the
 engine's retirement evidence counts the committed, unseated children of every
 group on the lane (`DeploymentRegistry::undrained_group_children`), a host-built
 opener's included, and `GenerationDrainStatus::drained` waits for none.

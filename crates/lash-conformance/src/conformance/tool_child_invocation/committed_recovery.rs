@@ -34,6 +34,9 @@ enum OpenerAtLoss {
     /// The opener closed the group under `Cancel` after the child committed;
     /// the loss lands before any declared intent.
     CancelClosed,
+    /// Every declared intent landed, but the invocation crashes before its
+    /// settlement is recorded. The tier holds that boundary until expiry.
+    BeforeSeat,
 }
 
 /// A committed child whose invocation is killed and expired across a
@@ -61,6 +64,18 @@ pub async fn a_cancel_closed_groups_committed_final_is_recovered_on_its_lane(
     committed_final_recovers(fixture, prefix, expire, change, OpenerAtLoss::CancelClosed).await;
 }
 
+/// A crash after the last intent but before seating preserves the committed
+/// final and its reserved rank. The tier stops the child at that boundary;
+/// expiry and reopening recover it without repeating its body or intents.
+pub async fn a_child_crashed_after_its_last_intent_recovers_its_reserved_seat(
+    fixture: &ToolChildLawFixture,
+    prefix: &str,
+    expire: &ChildInvocationExpiry,
+    change: &DeploymentChange,
+) {
+    committed_final_recovers(fixture, prefix, expire, change, OpenerAtLoss::BeforeSeat).await;
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -75,6 +90,7 @@ async fn committed_final_recovers(
     let label = match at_loss {
         OpenerAtLoss::Open => "recovery",
         OpenerAtLoss::CancelClosed => "cancel-recovery",
+        OpenerAtLoss::BeforeSeat => "seat-recovery",
     };
     let session_id = crate::SessionId::from(format!("{prefix}-{label}"));
     let turn_id = crate::TurnId::from(format!("{prefix}-{label}-turn"));
@@ -94,6 +110,7 @@ async fn committed_final_recovers(
     match at_loss {
         OpenerAtLoss::Open => sink.hold_kind(&call_0, "event"),
         OpenerAtLoss::CancelClosed => sink.hold_all(),
+        OpenerAtLoss::BeforeSeat => {}
     }
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
         inner: crate::testing::effect_backed_process_service(
@@ -133,7 +150,9 @@ async fn committed_final_recovers(
         .await
         .expect("the group opens under the live opener");
     // The child committed its final and is parked inside its drain.
-    sink.await_blocked(&call_0).await;
+    if !matches!(at_loss, OpenerAtLoss::BeforeSeat) {
+        sink.await_blocked(&call_0).await;
+    }
     match at_loss {
         OpenerAtLoss::Open => {
             sink.await_landed_len(1).await;
@@ -153,6 +172,14 @@ async fn committed_final_recovers(
                 .close_effect_group(handle, crate::LoserPolicy::Cancel)
                 .await
                 .expect("the caller closes under Cancel after the child committed");
+        }
+        OpenerAtLoss::BeforeSeat => {
+            sink.await_landed_len(2).await;
+            assert_eq!(
+                sink.landed(),
+                vec![(call_0.clone(), "start"), (call_0.clone(), "event")],
+                "every intent landed before the crash at the seat boundary"
+            );
         }
     }
     // The committing invocation dies before its seat and outlives its
@@ -189,7 +216,7 @@ async fn committed_final_recovers(
         "the tool's body ran once: recovery drained the committed final and never re-ran it"
     );
     let disposition = match at_loss {
-        OpenerAtLoss::Open => crate::LoserPolicy::RunToCompletion,
+        OpenerAtLoss::Open | OpenerAtLoss::BeforeSeat => crate::LoserPolicy::RunToCompletion,
         OpenerAtLoss::CancelClosed => crate::LoserPolicy::Cancel,
     };
     scoped
@@ -213,6 +240,14 @@ async fn assert_nothing_landed_beyond(sink: &IntentSink, call_0: &str, at_loss: 
         }
         OpenerAtLoss::CancelClosed => {
             assert_nothing_landed(sink, "the loss before the reopen").await;
+        }
+        OpenerAtLoss::BeforeSeat => {
+            tokio::time::sleep(ABSENCE_BUDGET).await;
+            assert_eq!(
+                sink.landed(),
+                vec![(call_0.to_string(), "start"), (call_0.to_string(), "event")],
+                "no intent repeated between the loss and the reopen"
+            );
         }
     }
 }

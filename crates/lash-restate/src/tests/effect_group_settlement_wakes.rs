@@ -195,7 +195,12 @@ async fn a_seat_completes_its_rank_drained_and_cancel_subscribers_in_its_own_jou
     }
 
     ingress
-        .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+        .call_lash_workflow::<_, ()>(
+            &super::effect_group_conformance::witness_dispatch_route(),
+            &group_key,
+            "retire",
+            &group_key,
+        )
         .await
         .expect("the law's group retires");
     harness.finish().await;

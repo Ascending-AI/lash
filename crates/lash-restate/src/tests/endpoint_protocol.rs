@@ -13,6 +13,25 @@ use std::task::{Context, Poll};
 
 pub(super) const RESTATE_INVOCATION_CONTENT_TYPE: &str = "application/vnd.restate.invocation.v6";
 
+pub(super) fn endpoint_on_route<S>(dispatcher: S, route: &crate::services::ServiceRoute) -> Endpoint
+where
+    S: restate_sdk::service::Service<
+            Future = restate_sdk::service::macro_support::ServiceBoxFuture,
+        > + restate_sdk::service::Discoverable
+        + Send
+        + Sync
+        + 'static,
+{
+    let mut discovery = S::discover();
+    discovery.name = restate_sdk::discovery::ServiceName::try_from(route.name().into_owned())
+        .expect("the fixture's route is a valid service name");
+    Endpoint::builder()
+        .bind(restate_sdk::service::macro_support::service_definition(
+            dispatcher, discovery,
+        ))
+        .build()
+}
+
 pub(super) struct FusedChannelBody {
     pub(super) receiver: tokio::sync::mpsc::Receiver<Bytes>,
 }

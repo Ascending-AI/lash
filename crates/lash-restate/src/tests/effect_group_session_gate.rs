@@ -33,6 +33,13 @@ use crate::effect_group::{
     EffectGroupShape,
 };
 
+fn dispatch_route() -> crate::services::ServiceRoute {
+    crate::services::DEFAULT_NAMESPACE.generation(
+        crate::LashService::EffectGroupDispatch,
+        lash_core::engine::BuildGeneration::for_test("session-gate"),
+    )
+}
+
 const SESSION: &str = "pre-cutover-session";
 const GROUP: &str = "pre-cutover-turn:tool-batch";
 /// `RunCommandMessage`: the journal entry of an atomic `ctx.run` body.
@@ -147,19 +154,18 @@ fn endpoint(sessions: Arc<dyn DeploymentStore>, executors: Arc<CountingExecutors
     let host = crate::RestateEffectHost::new_for_test("http://127.0.0.1:9");
     host.register_group_executors(executors as Arc<dyn GroupExecutors>)
         .expect("register the counting resolver");
-    Endpoint::builder()
-        .bind(
-            crate::EffectGroupDispatchImpl::new(
-                &host,
-                crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
-                restate_sdk::context::RunRetryPolicy::new(),
-                sessions,
-                crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupDispatch),
-                lash_core::engine::BuildGeneration::for_test("session-gate"),
-            )
-            .serve(),
+    super::endpoint_protocol::endpoint_on_route(
+        crate::EffectGroupDispatchImpl::new(
+            &host,
+            crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
+            restate_sdk::context::RunRetryPolicy::new(),
+            sessions,
+            dispatch_route(),
+            lash_core::engine::BuildGeneration::for_test("session-gate"),
         )
-        .build()
+        .serve(),
+        &dispatch_route(),
+    )
 }
 
 /// The scenario from FIG-3619: the pre-cutover turn's tool child lands on
@@ -186,7 +192,7 @@ async fn a_pre_cutover_sessions_group_child_is_refused_before_its_tool_is_dispat
 
     let output = invoke_endpoint_with_named_call_responses(
         &endpoint,
-        "EffectGroupDispatch",
+        &dispatch_route().name(),
         "child",
         GROUP,
         &tool_child(),
@@ -265,7 +271,7 @@ async fn a_current_sessions_group_child_passes_the_gate_to_admission() {
 
     let output = invoke_endpoint_with_named_call_responses(
         &endpoint,
-        "EffectGroupDispatch",
+        &dispatch_route().name(),
         "child",
         GROUP,
         &tool_child(),

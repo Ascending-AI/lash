@@ -1177,7 +1177,7 @@ impl LiveConformanceHarness {
         // and no line of the child handler ever runs.
         let child_invocation = ingress
             .send_lash_workflow(
-                "EffectGroupDispatch",
+                &witness_dispatch_route(),
                 &format!("{group_key}-stand-in"),
                 "preflight",
                 &Vec::<RuntimeEffectEnvelope>::new(),
@@ -1315,7 +1315,7 @@ impl LiveConformanceHarness {
         let parked_on_admission = arm_admission_witness(&group_key);
         let child_invocation = ingress
             .send_lash_workflow(
-                "EffectGroupDispatch",
+                &witness_dispatch_route(),
                 &group_key,
                 "child",
                 &EffectGroupChildRequest {
@@ -1555,7 +1555,7 @@ impl LiveConformanceHarness {
         let mut releases = Vec::new();
         let targets = [
             format!("EffectGroupIndex/{group_key}/"),
-            format!("EffectGroupDispatch/{group_key}/"),
+            format!("{}/{group_key}/", witness_dispatch_route()),
         ];
         for child in &children {
             witness_executors.stage(child, Arc::clone(&executions), "settled-cancel-watch");
@@ -1584,7 +1584,7 @@ impl LiveConformanceHarness {
         );
         ingress
             .send_lash_workflow(
-                "EffectGroupDispatch",
+                &witness_dispatch_route(),
                 &group_key,
                 "run",
                 &EffectGroupDispatchRequest {
@@ -1723,7 +1723,12 @@ impl LiveConformanceHarness {
         );
 
         ingress
-            .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+            .call_lash_workflow::<_, ()>(
+                &witness_dispatch_route(),
+                &group_key,
+                "retire",
+                &group_key,
+            )
             .await
             .expect("retirement saga completes");
     }
@@ -1976,9 +1981,10 @@ async fn run_design_witnesses(
     let request = EffectGroupDispatchRequest {
         group_key: group_key.clone(),
     };
+    let dispatch_route = witness_dispatch_route();
     let (first, second) = tokio::join!(
-        ingress.send_lash_workflow("EffectGroupDispatch", &group_key, "run", &request),
-        ingress.send_lash_workflow("EffectGroupDispatch", &group_key, "run", &request)
+        ingress.send_lash_workflow(&dispatch_route, &group_key, "run", &request),
+        ingress.send_lash_workflow(&dispatch_route, &group_key, "run", &request)
     );
     let first = first.expect("first dispatcher submission is accepted");
     let second = second.expect("concurrent dispatcher submission attaches");
@@ -2031,7 +2037,7 @@ async fn run_design_witnesses(
         .len();
     ingress
         .call_lash_workflow::<_, ()>(
-            "EffectGroupDispatch",
+            &witness_dispatch_route(),
             &format!("{group_key}:stale-dispatch-diagnostic"),
             "run",
             &request,
@@ -2054,7 +2060,7 @@ async fn run_design_witnesses(
     println!("EFFECT_GROUP_WITNESS k dispatcher-probe-guard PASS");
 
     ingress
-        .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+        .call_lash_workflow::<_, ()>(&witness_dispatch_route(), &group_key, "retire", &group_key)
         .await
         .expect("retirement saga completes");
     let payload_put: EffectGroupPayloadPutResponse = ingress
@@ -2162,7 +2168,7 @@ async fn run_design_witnesses(
     let first_admit = arm_admission_witness(&admission_group);
     let child_invocation = ingress
         .send_lash_workflow(
-            "EffectGroupDispatch",
+            &witness_dispatch_route(),
             &admission_group,
             "child",
             &EffectGroupChildRequest {
@@ -2266,7 +2272,7 @@ async fn run_design_witnesses(
     let executions_before_child = gap_executions.load(Ordering::SeqCst);
     ingress
         .call_lash_workflow::<_, ()>(
-            "EffectGroupDispatch",
+            &witness_dispatch_route(),
             &gap_group,
             "child",
             &EffectGroupChildRequest {
@@ -2352,7 +2358,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         "child 0 never seated, so child 1's barrier has not lifted"
     );
     ingress
-        .call_lash_workflow::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+        .call_lash_workflow::<_, ()>(&witness_dispatch_route(), &group_key, "retire", &group_key)
         .await
         .expect("retirement saga completes");
     let released = tokio::time::timeout(Duration::from_secs(30), waiter)

@@ -41,7 +41,9 @@ its opener's lane runs on a build that admits every session its opener
 admitted.
 The host gives `G` to the engine, whose journal-bearing services bind a stable
 name and a generation name, `<Service>_g<G>`. Shared state services keep one
-stable name. The fleet epoch `F`, described in §2, selects durable writer
+stable name. `EffectGroupDispatch` binds only its generation name, since
+every group opener records its build's lane. The fleet epoch `F`, described
+in §2, selects durable writer
 formats independently of `G`.
 
 A route is retained data beside the segment handover or group record. Replay

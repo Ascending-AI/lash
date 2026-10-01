@@ -29,7 +29,6 @@ use crate::effect_group::{
     EffectGroupProbeResponse, EffectGroupState as _, EffectGroupStateImpl,
 };
 use crate::object_state::StampedValue;
-use crate::services::LaneClass;
 use crate::wire::{CALL_SCHEMA_TITLE, REPLY_SCHEMA_TITLE, RestateCompatError};
 use crate::{LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRegistrationError};
 use lash_core::engine::DriveStop;
@@ -68,18 +67,8 @@ async fn every_handler_the_binder_binds_takes_a_call_and_answers_a_reply() {
     }
     let expected = crate::services::LASH_SERVICES
         .iter()
-        .flat_map(|&service| {
-            let mut names = vec![namespace.stable(service).name().into_owned()];
-            if service.lane_class() == LaneClass::Pinned {
-                names.push(
-                    namespace
-                        .generation(service, bindings_generation())
-                        .name()
-                        .into_owned(),
-                );
-            }
-            names
-        })
+        .flat_map(|&service| crate::services::lanes(&namespace, service, &bindings_generation()))
+        .map(|route| route.name().into_owned())
         .collect::<BTreeSet<_>>();
     assert_eq!(lanes, expected, "every lash lane was enumerated");
     assert!(

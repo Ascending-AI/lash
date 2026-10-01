@@ -75,6 +75,26 @@ async fn discovered_service_names(endpoint: &Endpoint) -> BTreeSet<String> {
         .collect()
 }
 
+#[tokio::test]
+async fn group_dispatch_is_bound_only_on_its_generation_lane() {
+    let (backend, worker) = backend_and_process_worker().await;
+    let endpoint = backend.endpoint_builder(worker).build();
+    let discovered = discovered_service_names(&endpoint).await;
+    assert!(discovered.contains(&format!(
+        "EffectGroupDispatch{}",
+        bindings_generation().service_suffix()
+    )));
+    assert!(
+        !discovered.contains("EffectGroupDispatch"),
+        "an opener never uses this stable binding"
+    );
+    assert_eq!(
+        crate::services::DEFAULT_NAMESPACE.parse("EffectGroupDispatch"),
+        None,
+        "the deleted binding is no route"
+    );
+}
+
 fn lash_service_names() -> BTreeSet<String> {
     LASH_SERVICES
         .iter()
@@ -191,7 +211,7 @@ async fn the_endpoint_builder_binds_every_lash_service() {
         let lane = format!("{}{}", service.base_name(), generation.service_suffix());
         assert_eq!(
             discovered.contains(&lane),
-            service.lane_class() == crate::services::LaneClass::Pinned,
+            service.lane_class().is_pinned(),
             "{lane}: a pinned service is bound under its generation lane, a shared one never"
         );
     }

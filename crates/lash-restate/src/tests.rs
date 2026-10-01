@@ -268,6 +268,7 @@ mod effect_group_child_cancel;
 mod effect_group_committed_recovery;
 mod effect_group_conformance;
 mod effect_group_drain_transitivity;
+mod effect_group_follow_up_laws;
 mod effect_group_generation_routing;
 mod effect_group_notification_index;
 mod effect_group_notification_ownership;

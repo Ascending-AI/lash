@@ -282,7 +282,7 @@ impl Group {
     pub(super) async fn stand_in(&self, label: &str) -> String {
         self.ingress
             .send_lash_workflow(
-                "EffectGroupDispatch",
+                &super::effect_group_conformance::witness_dispatch_route(),
                 &format!("{}-stand-in-{label}", self.key),
                 "preflight",
                 &Vec::<RuntimeEffectEnvelope>::new(),
@@ -326,7 +326,12 @@ impl Group {
 
     pub(super) async fn retire(&self) {
         self.ingress
-            .call_lash_workflow::<_, ()>("EffectGroupDispatch", &self.key, "retire", &self.key)
+            .call_lash_workflow::<_, ()>(
+                &super::effect_group_conformance::witness_dispatch_route(),
+                &self.key,
+                "retire",
+                &self.key,
+            )
             .await
             .expect("the law's group retires");
     }
@@ -604,7 +609,7 @@ async fn send_attach_expired_child(group: &Group, position: usize) -> String {
     group
         .ingress
         .send_lash_workflow(
-            "EffectGroupDispatch",
+            &super::effect_group_conformance::witness_dispatch_route(),
             &group.key,
             "child",
             &EffectGroupChildRequest {

@@ -41,7 +41,12 @@ use crate::effect_group::{
     EffectGroupSettlementTerminal, EffectGroupShape,
 };
 
-const DISPATCH: &str = "EffectGroupDispatch";
+fn dispatch_route() -> crate::services::ServiceRoute {
+    crate::services::DEFAULT_NAMESPACE.generation(
+        crate::LashService::EffectGroupDispatch,
+        lash_core::engine::BuildGeneration::for_test("fig-3904"),
+    )
+}
 const GROUP: &str = "fig-3904-group";
 /// `ProposeRunCompletionMessage`: a `ctx.run` body's recorded result.
 const PROPOSE_RUN_COMPLETION: u16 = 0x0005;
@@ -213,19 +218,18 @@ async fn endpoint(ingress: Arc<dyn HttpTransport>, executors: Arc<ChildExecutors
         "http://ingress.invalid",
         ingress as Arc<dyn HttpTransport>,
     );
-    Endpoint::builder()
-        .bind(
-            crate::EffectGroupDispatchImpl::new(
-                &host,
-                crate::RestateIngressClient::new(connection),
-                restate_sdk::context::RunRetryPolicy::new(),
-                super::memory_session_store_factory().await,
-                crate::services::DEFAULT_NAMESPACE.stable(crate::LashService::EffectGroupDispatch),
-                lash_core::engine::BuildGeneration::for_test("fig-3904"),
-            )
-            .serve(),
+    super::endpoint_protocol::endpoint_on_route(
+        crate::EffectGroupDispatchImpl::new(
+            &host,
+            crate::RestateIngressClient::new(connection),
+            restate_sdk::context::RunRetryPolicy::new(),
+            super::memory_session_store_factory().await,
+            dispatch_route(),
+            lash_core::engine::BuildGeneration::for_test("fig-3904"),
         )
-        .build()
+        .serve(),
+        &dispatch_route(),
+    )
 }
 
 /// The index's and the durable wait's answers a child's live run reads.
@@ -303,7 +307,7 @@ async fn a_replayed_wait_child_whose_live_run_was_cancelled_settles_cancelled() 
     // timer waits.
     let live = invoke_endpoint_with_named_call_responses(
         &endpoint,
-        DISPATCH,
+        &dispatch_route().name(),
         "child",
         GROUP,
         &request,
@@ -347,7 +351,7 @@ async fn a_replayed_wait_child_whose_live_run_was_cancelled_settles_cancelled() 
     if let Some(timer) = timer {
         body.extend_from_slice(&encode_sleep_completion(timer));
     }
-    let replay = invoke_endpoint_body(&endpoint, DISPATCH, "child", body.freeze())
+    let replay = invoke_endpoint_body(&endpoint, &dispatch_route().name(), "child", body.freeze())
         .await
         .expect("the replay settles");
     assert_eq!(
@@ -385,7 +389,7 @@ async fn a_transient_cancel_watch_fault_does_not_drop_an_atomic_childs_body() {
         async move {
             invoke_endpoint_with_named_call_responses(
                 &endpoint,
-                DISPATCH,
+                &dispatch_route().name(),
                 "child",
                 GROUP,
                 &request,
@@ -453,7 +457,7 @@ pub(super) async fn start_atomic_child(
             Duration::from_secs(120),
             super::endpoint_protocol::invoke_endpoint_body_with_named_call_responses_unbounded(
                 &endpoint,
-                DISPATCH,
+                &dispatch_route().name(),
                 "child",
                 super::endpoint_protocol::encode_invocation_body(GROUP, &request)
                     .expect("encode the child"),

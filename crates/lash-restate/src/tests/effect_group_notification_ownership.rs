@@ -172,7 +172,7 @@ pub(super) fn assert_no_generic_group_waits(
                     view.target
                 );
             }
-            if view.target.starts_with("EffectGroupDispatch/") {
+            if view.target.starts_with("EffectGroupDispatch_g") {
                 assert!(
                     CHILD_GATE_MEMBERSHIP.contains(&target.as_str()),
                     "{} calls the durable-wait services only for its gate membership: {target}",

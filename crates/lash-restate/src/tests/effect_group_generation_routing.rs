@@ -88,7 +88,7 @@ fn generation(build: &'static str) -> lash_core::engine::BuildGeneration {
 /// effect host (the group resolver runs children on it).
 pub(super) async fn build_endpoint(
     connection: &RestateConnection,
-    stores: &lash_sqlite_store::SqliteStoreSet,
+    stores: &dyn lash_core::StoreSet,
     build: &'static str,
     log: &RunLog,
 ) -> (Arc<RestateEffectHost>, Endpoint) {
@@ -99,11 +99,35 @@ pub(super) async fn build_endpoint(
 /// build of another release does.
 pub(super) async fn build_endpoint_reading(
     connection: &RestateConnection,
-    stores: &lash_sqlite_store::SqliteStoreSet,
+    stores: &dyn lash_core::StoreSet,
     build: &'static str,
     log: &RunLog,
     reads: crate::VersionRange,
 ) -> (Arc<RestateEffectHost>, Endpoint) {
+    let (host, builder) = build_endpoint_builder(connection, stores, build, log, reads).await;
+    (host, builder.build())
+}
+
+pub(super) async fn build_endpoint_with_host_controller(
+    connection: &RestateConnection,
+    stores: &dyn lash_core::StoreSet,
+    log: &RunLog,
+) -> (Arc<RestateEffectHost>, Endpoint) {
+    let (host, builder) =
+        build_endpoint_builder(connection, stores, "N", log, crate::RESTATE_WIRE).await;
+    (
+        host,
+        builder.bind(HostBuiltControllerProbeImpl.serve()).build(),
+    )
+}
+
+async fn build_endpoint_builder(
+    connection: &RestateConnection,
+    stores: &dyn lash_core::StoreSet,
+    build: &'static str,
+    log: &RunLog,
+    reads: crate::VersionRange,
+) -> (Arc<RestateEffectHost>, restate_sdk::endpoint::Builder) {
     let host = Arc::new(RestateEffectHost::in_namespace(
         connection.clone(),
         test_restate_authority_id(),
@@ -122,12 +146,12 @@ pub(super) async fn build_endpoint_reading(
         crate::services::LashServiceParts {
             effect_host: &host,
             ingress: ingress.clone(),
-            sessions: stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>,
-            attachments: stores.session_store_factory() as Arc<dyn lash_core::AttachmentReferrers>,
+            sessions: stores.session_store_factory(),
+            attachments: stores.attachment_referrers(),
             process_workflow: LashProcessWorkflowImpl::new(
                 Arc::new(IdleRunner),
-                Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
-                registry as Arc<dyn lash_core::ProcessContinuationStore>,
+                registry,
+                stores.process_continuations(),
                 ingress,
                 Arc::new(lash_core::attachments::NoopAttachmentReferrers),
                 test_restate_authority_id(),
@@ -140,12 +164,61 @@ pub(super) async fn build_endpoint_reading(
             fleet: crate::object_state::FleetView::default(),
         },
         reads,
-    )
-    .build();
+    );
     (host, endpoint)
 }
 
-fn recording(
+#[restate_sdk::workflow]
+pub(super) trait HostBuiltControllerProbe {
+    async fn run(input: Json<String>) -> HandlerResult<Json<Vec<usize>>>;
+}
+
+struct HostBuiltControllerProbeImpl;
+
+impl HostBuiltControllerProbe for HostBuiltControllerProbeImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(key): Json<String>,
+    ) -> HandlerResult<Json<Vec<usize>>> {
+        let controller = crate::RestateRuntimeEffectController::new(
+            ctx,
+            test_restate_authority_id(),
+            generation("N"),
+        );
+        let scoped = controller
+            .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(&key))
+            .map_err(TerminalError::from_error)?;
+        let mut handle = scoped
+            .controller()
+            .open_effect_group(group(&key, 3))
+            .await
+            .map_err(TerminalError::from_error)?;
+        let mut positions = Vec::new();
+        for _ in 0..3 {
+            let settled = scoped
+                .controller()
+                .await_next_settlement(
+                    &mut handle,
+                    lash_core::TurnCancelWait::unobserved(
+                        tokio_util::sync::CancellationToken::new(),
+                    ),
+                )
+                .await
+                .map_err(TerminalError::from_error)?;
+            settled.outcome.map_err(TerminalError::from_error)?;
+            positions.push(settled.position);
+        }
+        scoped
+            .controller()
+            .close_effect_group(handle, LoserPolicy::RunToCompletion)
+            .await
+            .map_err(TerminalError::from_error)?;
+        Ok(Json(positions))
+    }
+}
+
+pub(super) fn recording(
     build: &'static str,
     served: &Arc<Mutex<Vec<(&'static str, AttemptDispatch)>>>,
 ) -> DeploymentHooks {
