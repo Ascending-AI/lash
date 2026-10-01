@@ -57,6 +57,7 @@ fn committed_final_state_key(position: usize) -> String {
 }
 
 mod drain_barrier;
+pub(crate) mod drain_index;
 mod group_waits;
 mod notifications;
 mod protocol;
@@ -77,7 +78,6 @@ pub(crate) use notifications::{
     await_group_notice, await_group_notice_via_ingress, subscription_refused,
 };
 pub(crate) use protocol::EFFECT_GROUP_STATE_FAMILY;
-#[cfg(test)]
 pub(crate) use protocol::EFFECT_GROUP_STATE_FORMATS;
 pub use protocol::{EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION};
 use protocol::{load_committed_final, load_index, load_index_shared, load_membership};
@@ -141,6 +141,10 @@ mod admission_witness {
 
 #[cfg(test)]
 pub(crate) use admission_witness::arm as arm_admission_witness;
+
+#[cfg(test)]
+#[path = "tests/effect_group_drain_cut.rs"]
+pub(crate) mod drain_cut;
 
 fn phase(lifecycle: &EffectGroupLifecycle) -> EffectGroupPhase {
     match lifecycle {
@@ -719,6 +723,9 @@ impl EffectGroupState for EffectGroupStateImpl {
         let rank = live.reserve_rank(&group_key)?;
         live.commit_states
             .insert(position, EffectGroupChildCommitState::Committed { rank });
+        drain_index::register(&ctx, &self.namespace, &record).await?;
+        #[cfg(test)]
+        drain_cut::pause(&ctx, &group_key, "before_commit").await?;
         store_index(&ctx, object.writer, record);
         object_state::set_stamped(
             &ctx,
@@ -882,6 +889,8 @@ impl EffectGroupState for EffectGroupStateImpl {
         live.settlements.insert(rank, settlement);
         live.settled_positions.insert(request.position, rank);
         store_index(&ctx, object.writer, record.clone());
+        #[cfg(test)]
+        drain_cut::pause(&ctx, &group_key, "after_seat").await?;
         // The seat notifies from its own journal and calls no other service
         // (FIG-4344): the opener parked on a rank this seat completes the
         // prefix to, every §5 barrier this seat lifts, and every watch of

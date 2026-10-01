@@ -51,9 +51,13 @@ impl UpgradableFamily {
 /// `upgrade` handler. A `LashTurn` outcome is workflow state no handler may
 /// rewrite once the workflow ends, so it is read through its permanent
 /// history floor instead and is never swept.
-pub const UPGRADABLE_OBJECT_FAMILIES: [UpgradableFamily; 3] = [
+pub const UPGRADABLE_OBJECT_FAMILIES: [UpgradableFamily; 4] = [
     UpgradableFamily::of(
         "EffectGroupIndex",
+        &crate::effect_group::EFFECT_GROUP_STATE_FAMILY,
+    ),
+    UpgradableFamily::of(
+        "EffectGroupDrainIndex",
         &crate::effect_group::EFFECT_GROUP_STATE_FAMILY,
     ),
     UpgradableFamily::of(
@@ -394,7 +398,9 @@ mod tests {
 
     fn family_of(service: &str) -> &'static ObjectFamily {
         match service {
-            "EffectGroupIndex" => &crate::effect_group::EFFECT_GROUP_STATE_FAMILY,
+            "EffectGroupIndex" | "EffectGroupDrainIndex" => {
+                &crate::effect_group::EFFECT_GROUP_STATE_FAMILY
+            }
             "EffectGroupPayload" => &crate::effect_group::EFFECT_GROUP_PAYLOAD_FAMILY,
             "LashDurableWaitIndex" => &crate::durable_wait::DURABLE_WAIT_REGISTRY_FAMILY,
             other => panic!("no family serves {other}"),
@@ -572,6 +578,7 @@ mod tests {
             services,
             [
                 "EffectGroupIndex",
+                "EffectGroupDrainIndex",
                 "EffectGroupPayload",
                 "LashDurableWaitIndex"
             ]
@@ -603,7 +610,7 @@ mod tests {
         }
         let preflight = block_on(preflight_objects(&server)).expect("preflight");
         assert!(!preflight.upgraded());
-        assert_eq!(preflight.families.len(), 3);
+        assert_eq!(preflight.families.len(), 4);
         for family in &preflight.families {
             let expected_objects = if family.service == "EffectGroupIndex" {
                 4
@@ -633,7 +640,7 @@ mod tests {
     fn object_sweep_resumes_after_crash_and_completes() {
         let server = Server::with_objects(FleetFormat::from_version(2), 4, predecessor());
         let every = pending_keys(&block_on(preflight_objects(&server)).expect("preflight"));
-        assert_eq!(every.len(), 12);
+        assert_eq!(every.len(), 16);
 
         server.crash_after(4);
         let mut seen = Vec::new();

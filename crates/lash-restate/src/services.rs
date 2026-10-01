@@ -85,6 +85,7 @@ use crate::durable_wait::{
     LashDurableWaitRegistry as _, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow as _,
     LashDurableWaitWorkflowImpl,
 };
+use crate::effect_group::drain_index::{EffectGroupDrainIndex as _, EffectGroupDrainIndexImpl};
 use crate::effect_group::{
     EffectGroupDispatch as _, EffectGroupDispatchImpl, EffectGroupPayload as _,
     EffectGroupPayloadImpl, EffectGroupState as _, EffectGroupStateImpl,
@@ -370,6 +371,8 @@ lash_services! {
     ProcessAttach => "LashProcessAttach", Shared;
     /// An effect group's lifecycle and settlement rank.
     EffectGroupState => "EffectGroupIndex", Shared;
+    /// The derived group directory keyed by drain generation.
+    EffectGroupDrainIndex => "EffectGroupDrainIndex", Shared;
     /// An effect group's successful result bytes.
     EffectGroupPayload => "EffectGroupPayload", Shared;
     /// Sends an effect group's children and runs each one.
@@ -609,6 +612,12 @@ lash_clients! {
         unsubscribe(crate::effect_group::EffectGroupUnsubscribeRequest) -> ();
         child_cancel(crate::effect_group::EffectGroupChildCancelRequest)
             -> Option<crate::effect_group::EffectGroupNotification>;
+    }
+
+    /// Calls to one generation's group directory.
+    EffectGroupDrainIndexCalls, effect_group_drain_index: EffectGroupDrainIndex object,
+    pinned to crate::effect_group::drain_index::EffectGroupDrainIndexClient {
+        register(String) -> ();
     }
 
     /// Calls to one `EffectGroupPayload` object.
@@ -906,6 +915,16 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                 LashService::EffectGroupState => bind_as(
                     builder,
                     EffectGroupStateImpl::new(namespace.clone(), fleet.clone()).serve(),
+                    &name,
+                    claimed().enable_lazy_state(true),
+                    &wire,
+                ),
+                LashService::EffectGroupDrainIndex => bind_as(
+                    builder,
+                    EffectGroupDrainIndexImpl {
+                        fleet: fleet.clone(),
+                    }
+                    .serve(),
                     &name,
                     claimed().enable_lazy_state(true),
                     &wire,

@@ -841,6 +841,16 @@ engine's retirement evidence counts the committed, unseated children of every
 group on the lane (`DeploymentRegistry::undrained_group_children`), a host-built
 opener's included, and `GenerationDrainStatus::drained` waits for none.
 
+The retirement read uses a derived `EffectGroupDrainIndex` directory keyed by
+`G` in each namespace (FIG-4522). A group registers durably before its final
+commits; a registration failure is retryable and leaves the final uncommitted.
+A poll reads that generation's directory and each listed group's authoritative
+record. An absent, uncommitted or drained group contributes zero. Directory entries remain stored, including after an operator kill or a
+child seats. Polls are admin-only and read-only; their cost is proportional to
+all groups of the retiring generation, including drained history, and is
+independent of other generations. No cleanup invocation or service timer adds
+standing runtime work to a live group.
+
 ---
 
 ### 9. Segments, bounds and retirement

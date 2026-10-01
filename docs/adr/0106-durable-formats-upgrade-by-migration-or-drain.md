@@ -134,7 +134,10 @@ Evidence: `crates/lash-core-store/src/store/fleet_format.rs:23`,
 
 The durable-wait registry, effect-group state and effect-group payload live
 in Restate under stable object keys. Their registered names are
-`LashDurableWaitIndex`, `EffectGroupIndex` and `EffectGroupPayload`.
+`LashDurableWaitIndex`, `EffectGroupIndex`, `EffectGroupDrainIndex` and
+`EffectGroupPayload`. The derived generation directory shares the effect-group
+state family's compatibility and stored-value format; its entries select
+candidate groups, while each group's own record decides the retirement count.
 Stored-value format, handler wire and dispatch-journal format are distinct
 registered surfaces. The Rust traits use `LashDurableWaitRegistry` and
 `EffectGroupState`.
