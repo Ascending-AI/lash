@@ -37,7 +37,7 @@ pub(crate) use lash_core_store::usage;
 mod park;
 pub use park::{
     StoreParkRecovery, TurnLaneHead, head_input, head_input_root, input_root, record_root_park,
-    turn_lane_head,
+    root_park_recorded, turn_lane_head,
 };
 mod deployment_store_decorator;
 pub use deployment_store_decorator::DeploymentStoreDecorator;

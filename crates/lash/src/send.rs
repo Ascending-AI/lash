@@ -113,6 +113,36 @@ impl SendContext {
         self.refresh().await
     }
 
+    /// [`refresh`](Self::refresh) for an answer read while `root`'s run may
+    /// still be under way in this process: a root parked for a stopped child
+    /// it waits on is answered while its run holds the open session's
+    /// runtime (FIG-4618). That run keeps the runtime at the head it commits
+    /// and publishes it when it returns, so the answer never waits for it.
+    /// Any other holder of the runtime is brief, and is waited for.
+    async fn refresh_unless_held_by_run_of(&self, root: &TurnId) -> Result<()> {
+        let Some(runtime) = &self.live else {
+            return Ok(());
+        };
+        let writer = runtime.writer();
+        let mut resident = match writer.try_lock() {
+            Ok(resident) => resident,
+            Err(_)
+                if mailbox::may_deposit(
+                    self.parts.work.store_binding(),
+                    &self.parts.session_id,
+                    root,
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(_) => writer.lock().await,
+        };
+        if resident.adopt_committed_head().await? {
+            runtime.adopt_observation_from(&resident);
+        }
+        Ok(())
+    }
+
     /// The session's state as of the committed head.
     async fn session_snapshot(&self) -> Result<lash_core::SessionSnapshot> {
         if let Some(runtime) = &self.live {

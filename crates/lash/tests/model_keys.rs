@@ -1765,6 +1765,162 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
     );
 }
 
+/// How long after a park is listed its sender's answer may still arrive: far
+/// inside the second a follower's store poll backs off to.
+const AT_THE_PARK_COMMIT: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// A sender awaiting its output learns of a park where it is recorded
+/// (FIG-4618). The root of a paused group child is parked while its own run
+/// still waits for the child in this process, holding the open session's
+/// resident runtime. The handle answers Parked, with the typed cause, at the
+/// park's commit and from the recorded state: it waits neither for the run to
+/// release the runtime nor for its next store poll, which by then is a second
+/// away. Before, it answered only once the redriven root had settled.
+async fn a_send_answers_parked_at_the_park_commit_while_its_roots_run_is_resident(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+) {
+    let Some(double) = double(tier, replay, seed).await else {
+        return;
+    };
+    let session_id = "keys-resident-park";
+    let root = "keys-resident-park-root";
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = || {
+        let calls = Arc::clone(&calls);
+        lash::testing::TestProvider::builder()
+            .kind(KIND)
+            .complete(move |_| {
+                let response = match calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "ask-1".to_string(),
+                            tool_name: ASK_MODEL.to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        ..LlmResponse::default()
+                    },
+                    1 => text("the direct answer"),
+                    _ => text("kimi answers"),
+                };
+                async move { Ok(response) }
+            })
+            .build()
+            .into_handle()
+    };
+    let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", provider()));
+    let tools: Arc<dyn lash::plugins::PluginFactory> =
+        Arc::new(lash::plugins::StaticPluginFactory::new(
+            "keys-ask-model",
+            lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskModel {
+                catalog: Arc::clone(&catalog),
+                retired: AtomicBool::new(false),
+                settled: Arc::new(Mutex::new(Vec::new())),
+            })),
+        ));
+    let core = core_over(&double, &catalog, vec![tools]);
+    let session = created_on(&core, session_id, KIMI).await;
+    let handle = session
+        .send(TurnInput::text("ask the model through the tool"))
+        .id(root)
+        .await
+        .expect("the session accepts the input");
+    // The sender awaits its output from the start, so its follower is at
+    // rest, its store poll backed off, when the park is recorded.
+    let sender = tokio::spawn(async move {
+        let answer = handle.output().await;
+        (answer, std::time::Instant::now())
+    });
+
+    let paused = await_parked_on(&double, KIMI).await;
+    let dispatch = double.double.service_name("EffectGroupDispatch");
+    assert!(
+        paused.target.starts_with(&dispatch) && paused.target.ends_with("/child"),
+        "the engine stopped the tool's group child: {paused:?}"
+    );
+
+    // The park is recorded by a reconcile pass, or by the recovery interval
+    // ahead of it; either way it is listed no earlier than its commit.
+    let listed = async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            loop {
+                if !listed_parks(&core).await.is_empty() {
+                    return std::time::Instant::now();
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the paused child's root is parked")
+    };
+    let (_, listed) = tokio::join!(reconcile_pass(&double), listed);
+
+    let (answer, answered) = tokio::time::timeout(std::time::Duration::from_secs(30), sender)
+        .await
+        .expect("the sender is answered while its root's run still holds the resident runtime")
+        .expect("the sender's task completes");
+    let status = match answer {
+        Err(lash::EmbedError::Send(error)) => match *error {
+            lash::SendError::NotSettled { status, .. } => status,
+            other => panic!("the root is parked, got: {other:?}"),
+        },
+        other => panic!("the root is parked, got: {other:?}"),
+    };
+    let lash::TurnStatus::Parked(parked) = status else {
+        panic!("the root is parked, got: {status:?}");
+    };
+    assert_eq!(parked.root, lash::TurnId::from(root));
+    assert_eq!(
+        parked.reason.code(),
+        lash::persistence::ParkReasonCode::EngineRetryExhausted,
+        "the answer carries the park's typed cause: {parked:?}"
+    );
+    assert_eq!(
+        parked.reason.model_key(),
+        Some(&ModelKey::new(KIMI)),
+        "the answer carries the unbindable key typed: {parked:?}"
+    );
+    let after = answered.saturating_duration_since(listed);
+    assert!(
+        after < AT_THE_PARK_COMMIT,
+        "the park's commit answers the sender, not its next store poll: answered {after:?} \
+         after the park was listed"
+    );
+    // Nothing moved the root meanwhile: its child is still paused, and its
+    // run still waits for it.
+    assert_eq!(
+        double
+            .double
+            .server()
+            .invocations()
+            .iter()
+            .find(|view| view.id == paused.id)
+            .map(|view| view.status),
+        Some("paused"),
+        "the answer came while the child was still paused"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the root made no further model call before the answer"
+    );
+
+    // The park's redrive still completes the root.
+    let [(work, park_id, _, _)] = listed_parks(&core).await.try_into().expect("one park");
+    catalog.serve(registry_of(KIMI, "kimi-k3", provider()));
+    core.parked_work()
+        .redrive(&work, park_id)
+        .await
+        .expect("the operator redrives the parked root");
+    assert_eq!(
+        answer_after_redrive(&session, root).await,
+        "kimi answers",
+        "the redriven root completes once the key is served"
+    );
+}
+
 /// A host refuses a child's key with unsupported inherited reasoning before
 /// it publishes an environment, acquires a referrer or registers a process.
 /// The request's policy takes precedence over the captured environment.
@@ -2038,6 +2194,10 @@ tiered!(
 tiered!(
     a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_park,
     0x4404_1300
+);
+tiered!(
+    a_send_answers_parked_at_the_park_commit_while_its_roots_run_is_resident,
+    0x4618_1100
 );
 tiered!(
     a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording,

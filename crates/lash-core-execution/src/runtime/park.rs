@@ -1,12 +1,27 @@
 //! Persistence entry points shared by aborting roots and engine recovery.
 use crate::StoreError;
 
-/// Record a root park through the store's terminal-aware transaction.
+/// Woken once per root park this process records, after the write committed.
+static ROOT_PARK_RECORDED: std::sync::LazyLock<tokio::sync::Notify> =
+    std::sync::LazyLock::new(tokio::sync::Notify::new);
+
+/// The next root park this process records, in any session: a wake, never an
+/// answer. Whoever waits on a root reads its park from the store; enable the
+/// wake before that read, so a park committed between the read and the wait
+/// is not missed. A park recorded in another process wakes nothing here.
+pub fn root_park_recorded() -> tokio::sync::futures::Notified<'static> {
+    ROOT_PARK_RECORDED.notified()
+}
+
+/// Record a root park through the store's terminal-aware transaction, and
+/// wake whoever waits on [`root_park_recorded`] once it committed.
 pub async fn record_root_park(
     store: &dyn crate::store::RuntimeStore,
     write: &crate::store::TurnParkWrite,
 ) -> Result<crate::store::TurnPark, StoreError> {
-    store.record_turn_park(write).await
+    let park = store.record_turn_park(write).await?;
+    ROOT_PARK_RECORDED.notify_waiters();
+    Ok(park)
 }
 
 /// The store-backed [`ParkRecoveryWriter`](crate::engine::ParkRecoveryWriter):
@@ -151,7 +166,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             )
         };
         let held = held.map(|park| park.park_id);
-        match store.record_turn_park(&write).await {
+        match record_root_park(store, &write).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
             Ok(park) if held == Some(park.park_id) => {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
@@ -259,7 +274,7 @@ impl StoreParkRecovery<'_> {
                 self.clock.timestamp_ms(),
             )
         };
-        match store.record_turn_park(&write).await {
+        match record_root_park(store, &write).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
             Ok(park) => {
                 crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());

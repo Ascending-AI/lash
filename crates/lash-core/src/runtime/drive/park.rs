@@ -128,4 +128,4 @@ impl LashRuntime {
     }
 }
 
-pub use lash_core_execution::runtime::StoreParkRecovery;
+pub use lash_core_execution::runtime::{StoreParkRecovery, root_park_recorded};

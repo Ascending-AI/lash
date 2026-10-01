@@ -4,7 +4,8 @@
 //! the activity of the root that applies its subject, and resolves the
 //! subject from the store on every wake: the engine's drive barrier, a
 //! commit or queue change on the observation, a settled root's report landing
-//! in this process's mailbox, and a bounded poll. Once it knows its root, it
+//! in this process's mailbox, a root's park recorded in this process, and a
+//! bounded poll. Once it knows its root, it
 //! also holds one open wait on the root's published terminal, which wakes it
 //! as soon as a root that ran in another process settles; a follower with no
 //! resident runtime probes for that root at the poll floor (FIG-3981). It
@@ -525,6 +526,11 @@ pub(super) async fn follow(
     probe_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut resolve_now = true;
     let mut last_pass = false;
+    // Armed before the first store read and again before each read its wake
+    // asks for: a park recorded after a read still wakes the wait below.
+    let parked = lash_core::drive::root_park_recorded();
+    tokio::pin!(parked);
+    parked.as_mut().enable();
     loop {
         // Armed before this pass looks in the mailbox: a report deposited
         // after the look still wakes the wait below.
@@ -613,7 +619,10 @@ pub(super) async fn follow(
                 Resolution::Parked(parked) => {
                     adoption.adopt(parked.root.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
-                    ctx.refresh().await?;
+                    // The park is the recorded answer, whatever the root's
+                    // run is doing: a run that still waits on the stopped
+                    // work that parked it holds the resident runtime.
+                    ctx.refresh_unless_held_by_run_of(&parked.root).await?;
                     return Ok(Followed::Answered(Box::new(SendOutcome {
                         root: Some(parked.root.clone()),
                         status: TurnStatus::Parked(parked),
@@ -815,6 +824,13 @@ pub(super) async fn follow(
                         ),
                         Subject::Root(_) => false,
                     };
+            }
+            () = &mut parked => {
+                // A root's park was recorded in this process, which publishes
+                // nothing on the observation: read whether it is this
+                // subject's root that parked.
+                parked.set(lash_core::drive::root_park_recorded());
+                parked.as_mut().enable();
             }
             () = tokio::time::sleep_until(poll_at) => {
                 poll = (poll * 2).min(POLL_CEILING);

@@ -60,7 +60,7 @@ pub use ingress::{FIRST_INGRESS_ATTEMPT, IngressRelay, ingress_drive_request};
 pub use interval::{RECOVERY_TICK, RecoveryInterval};
 pub use lanes::{LanesTick, RelayLanes};
 pub use parent_end_relay::ParentEndRelay;
-pub use park::StoreParkRecovery;
+pub use park::{StoreParkRecovery, root_park_recorded};
 pub use reconcile::{
     DrainHandOverPass, ReconcileParts, ReconcileProcesses, drain_hand_over_slot, reconcile_once,
 };
