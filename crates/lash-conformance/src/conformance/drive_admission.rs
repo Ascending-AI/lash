@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::engine::{
     AdmitVerdict, Admitted, DriveOutcome, DriveRequest, DriveRequestId, DriveStop, RootOutcome,
-    SealVerdict,
+    SealRefusal,
 };
 use lash_sansio::{SessionId, TurnId};
 use pretty_assertions::assert_eq;
@@ -354,7 +354,10 @@ pub async fn admission_delivers_every_row_it_binds(
             &stall.token,
             ObligationSettlement::Stall {
                 reason: StallReason::Refused,
-                error: "stalled before its admission".to_string(),
+                error: crate::store::DeliveryError::new(
+                    crate::RuntimeErrorCode::EngineControlRequest,
+                    "stalled before its admission",
+                ),
             },
             now,
         )
@@ -727,7 +730,7 @@ pub async fn one_authorized_drive_per_session(
         matches!(
             &b,
             RootOutcome::Refused {
-                verdict: SealVerdict::Superseded { epoch: 1 },
+                refusal: SealRefusal::Superseded { epoch: 1 },
                 ..
             }
         ),

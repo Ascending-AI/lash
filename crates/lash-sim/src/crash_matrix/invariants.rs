@@ -164,7 +164,7 @@ impl ObligationProbe for ControlIntentProbe {
             .obligation_ledger(lash_core::store::ObligationKind::ControlIntent);
         let mut unsettled = Vec::new();
         for intent in intents {
-            let Some(obligation) = intent.obligation.as_ref() else {
+            let Some(obligation) = intent.obligation_id() else {
                 unsettled.push(format!(
                     "control intent {} of `{}` has no obligation: {:?}",
                     intent.id, intent.session_id, intent.state

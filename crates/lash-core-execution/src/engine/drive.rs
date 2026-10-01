@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use std::collections::BTreeSet;
 
-use super::admission::{Admitted, AdmittedWork, DriveRequestId, ParkRef, SealVerdict};
+use super::admission::{Admitted, AdmittedWork, DriveRequestId, ParkRef, SealRefusal};
 use super::contracts::DriveRequest;
 use crate::store::TurnCommitId;
 use crate::{AdmittedScope, RuntimeError, SessionId, TurnId, TurnOutcome};
@@ -135,7 +135,7 @@ pub enum RootOutcome {
     /// The seal refused the admission (another admission superseded it, or
     /// the root started under a history this execution cannot read), so
     /// nothing ran.
-    Refused { root: TurnId, verdict: SealVerdict },
+    Refused { root: TurnId, refusal: SealRefusal },
     /// The work admission named was answered by another driver or withdrawn
     /// before the root took it, so nothing ran.
     Ceded { root: TurnId },

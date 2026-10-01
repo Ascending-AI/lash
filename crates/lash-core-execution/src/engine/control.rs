@@ -135,20 +135,97 @@ pub enum EngineAck {
     NothingHeld,
 }
 
-/// Why an engine could not carry out a control verb. A retryable refusal is
-/// retained on the intent, and its `ControlIntent` obligation retried after a
-/// backoff (ADR 0109); a permanent one is retained as failed, its obligation
-/// stalled, visible to an operator.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum EngineRefusal {
-    #[error("{0}")]
-    Retryable(String),
-    #[error("{code}: {message}")]
-    Permanent {
-        code: crate::RuntimeErrorCode,
-        message: String,
-    },
+/// Whether the identical ask may succeed when it is made again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RefusalDisposition {
+    /// A fault of this attempt: the obligation is retried after a backoff.
+    Retryable,
+    /// The engine's answer to the ask: making it again is refused the same
+    /// way.
+    Permanent,
+}
+
+/// Why an engine could not carry out a control verb or accept a drive: its
+/// retry class beside the typed code of its cause. A retryable refusal is
+/// retained on the `ControlIntent` or ingress obligation and retried after a
+/// backoff (ADR 0109); a permanent one refuses the intent and stalls the
+/// obligation, visible to an operator under its code.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{code}: {message}")]
+pub struct EngineRefusal {
+    pub disposition: RefusalDisposition,
+    pub code: crate::RuntimeErrorCode,
+    pub message: String,
+}
+
+impl EngineRefusal {
+    /// A fault of this attempt under `code`.
+    #[must_use]
+    pub fn retryable(code: crate::RuntimeErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            disposition: RefusalDisposition::Retryable,
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// The engine's answer for good under `code`.
+    #[must_use]
+    pub fn permanent(code: crate::RuntimeErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            disposition: RefusalDisposition::Permanent,
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// Whether the ask is worth another attempt.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        self.disposition == RefusalDisposition::Retryable
+    }
+
+    /// The cause as an obligation row and a refused intent retain it.
+    #[must_use]
+    pub fn into_delivery_error(self) -> crate::store::DeliveryError {
+        crate::store::DeliveryError::new(self.code, self.message)
+    }
+}
+
+/// A store's answer to an engine's control read or write: a fault of the
+/// substrate is retryable, every other variant is the store's refusal.
+impl From<StoreError> for EngineRefusal {
+    fn from(error: StoreError) -> Self {
+        let disposition = if error.is_transient() {
+            RefusalDisposition::Retryable
+        } else {
+            RefusalDisposition::Permanent
+        };
+        let crate::store::DeliveryError { code, message } = error.into();
+        Self {
+            disposition,
+            code,
+            message,
+        }
+    }
+}
+
+/// A process registry's answer to an engine's control verb, by the plugin
+/// error's own class: only a terminal one is the registry's refusal.
+impl From<crate::PluginError> for EngineRefusal {
+    fn from(error: crate::PluginError) -> Self {
+        let disposition = if error.is_terminal() {
+            RefusalDisposition::Permanent
+        } else {
+            RefusalDisposition::Retryable
+        };
+        let message = error.to_string();
+        Self {
+            disposition,
+            code: crate::RuntimeEffectControllerError::from(error).code,
+            message,
+        }
+    }
 }
 
 /// The engine half of the control verbs (ADR 0104 O3/O4, FIG-3600 S7): what
@@ -197,8 +274,9 @@ pub trait SessionControlEngine: Send + Sync {
         _process: &crate::ProcessId,
         _park: ParkId,
     ) -> Result<EngineAck, EngineRefusal> {
-        Err(EngineRefusal::Retryable(
-            "process redrive is not supported by this engine".into(),
+        Err(EngineRefusal::permanent(
+            crate::RuntimeErrorCode::EngineControlUnsupported,
+            "process redrive is not supported by this engine",
         ))
     }
 

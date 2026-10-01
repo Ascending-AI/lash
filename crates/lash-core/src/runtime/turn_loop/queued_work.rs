@@ -68,6 +68,31 @@ impl<T> QueuedTurnDrain<T> {
     }
 }
 
+/// What a drain answers when the seal refused the root it admitted. A
+/// superseded admission lost the lane to the drive that sealed first, which
+/// is retryable. A lost execution is not: another execution of the root
+/// sealed it, and this one must never run it, so the drain stops as it does
+/// on [`DriveStop::SubstrateLost`](crate::engine::DriveStop::SubstrateLost).
+fn refused_root_drain<T>(
+    request: &crate::engine::DriveRequestId,
+    root: &crate::TurnId,
+    refusal: crate::engine::SealRefusal,
+) -> Result<QueuedTurnDrain<T>, RuntimeError> {
+    match refusal {
+        crate::engine::SealRefusal::Superseded { .. } => Ok(QueuedTurnDrain::Empty(
+            EmptyQueuedDrainReason::ExecutionLaneBusy,
+        )),
+        crate::engine::SealRefusal::ExecutionLost => Err(RuntimeError::new(
+            RuntimeErrorCode::QueuedWork,
+            format!(
+                "queued drain `{}` stopped: root `{root}` was sealed by another execution, \
+                 whose history this one cannot read",
+                request.as_str()
+            ),
+        )),
+    }
+}
+
 impl LashRuntime {
     /// Drain the session's next work through the session drive (FIG-3600):
     /// one drive, named by the drain's identity, run until its first root has
@@ -152,9 +177,8 @@ impl LashRuntime {
                     )),
                 },
                 (_, None, Some(reason)) => QueuedTurnDrain::Empty(reason),
-                // Another drive sealed the session first: it holds the lane.
-                (crate::engine::RootOutcome::Refused { .. }, None, _) => {
-                    QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ExecutionLaneBusy)
+                (crate::engine::RootOutcome::Refused { root, refusal }, None, _) => {
+                    return refused_root_drain(&request.request, &root, refusal);
                 }
                 // The root's rows were answered by another driver.
                 (_, None, _) => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
@@ -204,5 +228,29 @@ impl LashRuntime {
         } else {
             crate::AdmissionRefusal::AdmissionRaceLost
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{DriveRequestId, SealRefusal};
+
+    /// F75 (FIG-4648): a seal another admission superseded leaves the lane
+    /// busy and the work retryable; a seal another execution of the root took
+    /// is a lost execution, never a busy lane.
+    #[test]
+    fn a_lost_execution_is_never_answered_as_a_busy_lane() {
+        let request = DriveRequestId::new("drain-1");
+        let root = crate::TurnId::from("r");
+        assert!(matches!(
+            refused_root_drain::<()>(&request, &root, SealRefusal::Superseded { epoch: 3 }),
+            Ok(QueuedTurnDrain::Empty(
+                EmptyQueuedDrainReason::ExecutionLaneBusy
+            ))
+        ));
+        let lost = refused_root_drain::<()>(&request, &root, SealRefusal::ExecutionLost)
+            .expect_err("a lost execution stops the drain");
+        assert_eq!(lost.code, RuntimeErrorCode::QueuedWork);
     }
 }

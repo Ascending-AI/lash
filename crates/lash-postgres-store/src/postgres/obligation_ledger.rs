@@ -10,10 +10,10 @@ use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, KeyColumn, KeyColumnType,
-    ObligationId, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
-    ObligationStanding, ObligationState, SettleOutcome, StallReason, StalledObligation,
-    UndecodableObligation,
+    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, ControlIntentState,
+    DeliveryError, KeyColumn, KeyColumnType, ObligationId, ObligationKey, ObligationKind,
+    ObligationLedger, ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome,
+    StallReason, StalledObligation, UndecodableObligation,
 };
 use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
 use lash_store_sql::Dialect;
@@ -242,17 +242,17 @@ fn read_key(
             KeyColumnType::Text => match row.try_get::<String, _>(index) {
                 Ok(text) => KeyColumn::Text(text),
                 Err(error) => {
-                    return Ok(Err(UndecodableObligation {
-                        detail: format!("{kind} obligation key column {offset}: {error}"),
-                    }));
+                    return Ok(Err(UndecodableObligation::malformed(format!(
+                        "{kind} obligation key column {offset}: {error}"
+                    ))));
                 }
             },
             KeyColumnType::Integer => match row.try_get::<i64, _>(index) {
                 Ok(integer) => KeyColumn::Integer(integer),
                 Err(error) => {
-                    return Ok(Err(UndecodableObligation {
-                        detail: format!("{kind} obligation key column {offset}: {error}"),
-                    }));
+                    return Ok(Err(UndecodableObligation::malformed(format!(
+                        "{kind} obligation key column {offset}: {error}"
+                    ))));
                 }
             },
         });
@@ -488,13 +488,15 @@ impl ObligationLedger for PostgresObligationLedger {
                 .bind(id.as_str())
                 .bind(token.as_str())
                 .bind(sql_i64("obligation due instant", due_at_ms)?)
-                .bind(error),
+                .bind(error.message)
+                .bind(error.code.as_str().to_owned()),
             ObligationSettlement::Stall { reason, error } => sqlx::query(sql.settle_stall.sql())
                 .bind(id.as_str())
                 .bind(token.as_str())
                 .bind(reason.as_str())
-                .bind(error)
-                .bind(now),
+                .bind(error.message)
+                .bind(now)
+                .bind(error.code.as_str().to_owned()),
             ObligationSettlement::Defer { due_at_ms } => {
                 if self.kind != ObligationKind::ArtifactCleanup {
                     return Err(StoreError::Backend(
@@ -525,9 +527,15 @@ impl ObligationLedger for PostgresObligationLedger {
         let sql = self.sql;
         let due_at = sql_i64("obligation due instant", now_ms)?;
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
-        let changed = sqlx::query(sql.rearm.sql())
-            .bind(id.as_str())
-            .bind(due_at)
+        let mut query = sqlx::query(sql.rearm.sql()).bind(id.as_str()).bind(due_at);
+        // A control intent the engine refused returns to pending with its
+        // obligation: the statement takes that state's stored columns.
+        if self.kind == ObligationKind::ControlIntent {
+            let (code, json) =
+                lash_core_execution::store::stored_intent_state(&ControlIntentState::Pending)?;
+            query = query.bind(code).bind(json);
+        }
+        let changed = query
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
@@ -552,15 +560,24 @@ impl ObligationLedger for PostgresObligationLedger {
             .map(|row| {
                 let attempts: i32 = row.try_get(1).map_err(store_sqlx_error)?;
                 let reason: String = row.try_get(2).map_err(store_sqlx_error)?;
-                let stalled_at: i64 = row.try_get(4).map_err(store_sqlx_error)?;
+                let last_error: Option<String> = row.try_get(3).map_err(store_sqlx_error)?;
+                let last_error_code: Option<String> = row.try_get(4).map_err(store_sqlx_error)?;
+                let stalled_at: i64 = row.try_get(5).map_err(store_sqlx_error)?;
                 Ok(StalledObligation {
                     kind: self.kind,
                     id: ObligationId::new(row.try_get::<String, _>(0).map_err(store_sqlx_error)?),
-                    key: read_key(self.kind, row, 5)?,
+                    key: read_key(self.kind, row, 6)?,
                     reason: StallReason::from_label(&reason)?,
                     attempts: u32::try_from(attempts)
                         .map_err(|_| corrupt("a negative attempt count"))?,
-                    last_error: row.try_get(3).map_err(store_sqlx_error)?,
+                    last_error: match (last_error, last_error_code) {
+                        (Some(message), Some(code)) => Some(DeliveryError::new(
+                            lash_core_execution::RuntimeErrorCode::from_wire_code(&code),
+                            message,
+                        )),
+                        (None, None) => None,
+                        _ => return Err(corrupt("a last error and its code disagree")),
+                    },
                     stalled_at_ms: u64::try_from(stalled_at)
                         .map_err(|_| corrupt("a negative stall instant"))?,
                 })

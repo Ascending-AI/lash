@@ -117,17 +117,9 @@ impl ParkedWork {
                     .control()
                     .resume_process(process_id, park)
                     .await
-                    .map_err(|error| {
-                        let code = match &error {
-                            lash_core::engine::EngineRefusal::Permanent { code, .. } => {
-                                code.clone()
-                            }
-                            _ => lash_core::RuntimeErrorCode::PluginSessionManager,
-                        };
-                        ParkVerbRefused::SubstrateRefused {
-                            code,
-                            message: error.to_string(),
-                        }
+                    .map_err(|refusal| ParkVerbRefused::SubstrateRefused {
+                        code: refusal.code,
+                        message: refusal.message,
                     })?;
                 return Ok(RedriveAccepted::Process {
                     process: process_id.clone(),

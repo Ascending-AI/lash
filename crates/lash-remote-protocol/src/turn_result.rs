@@ -238,6 +238,10 @@ pub enum RemoteTurnStatus {
         reason: String,
         /// Delivery attempts made before it stalled.
         attempts: u32,
+        /// The stable error code of the last delivery failure: present
+        /// exactly when `last_error` is.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
         /// The last delivery failure.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_error: Option<String>,
@@ -295,6 +299,10 @@ pub struct RemoteParkedTurn {
 pub struct RemoteStalledDelivery {
     pub reason: String,
     pub attempts: u32,
+    /// The stable error code of the last delivery failure: present exactly
+    /// when `last_error` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
     pub stalled_at_ms: u64,
@@ -356,6 +364,7 @@ impl RemoteSendOutcome {
             Self::Stalled { stalled, .. } => RemoteTurnStatus::Stalled {
                 reason: stalled.reason.clone(),
                 attempts: stalled.attempts,
+                code: stalled.code.clone(),
                 last_error: stalled.last_error.clone(),
                 stalled_at_ms: stalled.stalled_at_ms,
             },
@@ -401,6 +410,13 @@ impl RemoteSendOutcome {
             }
             Self::Parked { parked, .. } => require_non_empty(TYPE, "parked.root", &parked.root),
             Self::Stalled { stalled, .. } => {
+                if stalled.code.is_some() != stalled.last_error.is_some() {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: TYPE,
+                        message: "a stalled input's last error and its code are present together"
+                            .to_string(),
+                    });
+                }
                 require_non_empty(TYPE, "stalled.reason", &stalled.reason)
             }
             Self::Withdrawn { .. } => Ok(()),

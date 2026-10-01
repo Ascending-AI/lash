@@ -25,7 +25,8 @@ An owning ledger row carries its delivery obligation. The common family is:
 | `obligation_due_at_ms` | Retry time while due, claim expiry while claimed. |
 | `obligation_claim_token` | The claimant's settlement fence. |
 | `obligation_stall_reason` | `attempts_exhausted`, `refused` or `undecodable`. |
-| `obligation_last_error` | Detail of the failed attempt. |
+| `obligation_last_error` | Message of the failed attempt. |
+| `obligation_last_error_code` | Its typed error code; set exactly when the message is. |
 | `obligation_settled_at_ms` | Delivered or stalled settlement time. |
 
 A row owing nothing has no obligation id or state. Constraints keep the
@@ -257,9 +258,18 @@ claim. Binding settles the row in any state. A concurrent relay can then
 observe `ClaimLost`. Recovery uses the recorded reservation and the same
 router wiring as an emit.
 
-Control-intent acknowledgements and failures compare their claim token.
-A terminal delivery failure writes the intent failed and unwedges admission;
-explicit re-arm reopens it. Root scope close and parent-end cancellation
+Control-intent acknowledgements and refusals compare their claim token. An
+intent's state records only what was decided about its engine half: pending,
+acknowledged, superseded, or refused with the engine's typed cause. Failed
+attempts and their exhaustion live on the obligation alone. The engine half
+is owed exactly while the intent is pending and its obligation is due or
+claimed; each store states that once, as the generated column
+`engine_half_owed`, and admission reads it. A permanent refusal writes the
+intent refused and stalls the obligation; attempts running out, a failing
+ledger call included, stall the obligation and leave the intent pending.
+Either way the stall unwedges admission, and the session is asked to drive
+once it is durable. Explicit re-arm makes the intent owed again, returning a
+refused one to pending. Root scope close and parent-end cancellation
 retain their own retry ownership, so a failing child does not keep a cancel
 or fork verb open. A refused child is recorded on its plan.
 

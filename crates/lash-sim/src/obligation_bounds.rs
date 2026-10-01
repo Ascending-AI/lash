@@ -109,10 +109,10 @@ impl SessionControlEngine for RefusingEngine {
         _: &RootRef,
         _: Option<&lash_core::store::EnginePark>,
     ) -> Result<EngineAck, EngineRefusal> {
-        Err(EngineRefusal::Permanent {
-            code: lash_core::RuntimeErrorCode::PluginSessionManager,
-            message: "the engine refuses the release for good".into(),
-        })
+        Err(EngineRefusal::permanent(
+            lash_core::RuntimeErrorCode::PluginSessionManager,
+            "the engine refuses the release for good",
+        ))
     }
 }
 
@@ -263,7 +263,7 @@ impl World {
     async fn obligation(&self) -> Option<ObligationState> {
         self.stores
             .obligation_ledger(ObligationKind::ControlIntent)
-            .state(self.intent.obligation.as_ref().expect("armed by the close"))
+            .state(self.intent.obligation_id().expect("armed by the close"))
             .await
             .expect("obligation state")
     }
@@ -379,7 +379,7 @@ async fn a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick() {
             .stores
             .obligation_ledger(ObligationKind::ControlIntent)
             .claim(
-                world.intent.obligation.as_ref().expect("armed"),
+                world.intent.obligation_id().expect("armed"),
                 &lash_core::store::ClaimToken::mint(),
                 world.clock.timestamp_ms(),
                 policy.claim_ttl_ms,
@@ -414,7 +414,8 @@ async fn a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick() {
 /// Retryable failure: attempt `n + 1` comes `min(2^(n−1) s, 15 min)` after
 /// attempt `n`, plus at most `T`, and the obligation stalls after the
 /// attempt ceiling's attempts — about 1 h 47 min at the defaults — never
-/// later. At the ceiling the intent closes `Failed { retryable: false }`.
+/// later. The intent stays `Pending` throughout: the attempts and their
+/// exhaustion are the obligation's alone.
 #[tokio::test]
 async fn a_failing_intent_retries_on_its_backoff_and_stalls_at_its_ceiling_never_later() {
     let policy = RelayPolicy::default();
@@ -428,17 +429,14 @@ async fn a_failing_intent_retries_on_its_backoff_and_stalls_at_its_ceiling_never
         )
         .await;
         // Attempt 1: the verb's own.
-        assert!(matches!(
+        assert_eq!(
             world
                 .relay
                 .deliver_intent(&world.intent)
                 .await
                 .expect("deliver"),
-            ControlIntentState::Failed {
-                retryable: true,
-                ..
-            }
-        ));
+            ControlIntentState::Pending
+        );
         let bound: u64 = (1..ceiling)
             .map(|attempt| policy.backoff_ms(attempt) + TICK_MAX_MS)
             .sum();
@@ -478,13 +476,7 @@ async fn a_failing_intent_retries_on_its_backoff_and_stalls_at_its_ceiling_never
             .expect("stalled");
         assert_eq!(stalled[0].reason, StallReason::AttemptsExhausted);
         assert_eq!(stalled[0].attempts, ceiling);
-        assert!(matches!(
-            world.intent_state().await,
-            ControlIntentState::Failed {
-                retryable: false,
-                ..
-            }
-        ));
+        assert_eq!(world.intent_state().await, ControlIntentState::Pending);
         // Never retried again once stalled.
         world
             .tick_until(seed, policy.max_backoff_ms + TICK_MAX_MS, async |_| false)
@@ -513,6 +505,16 @@ async fn a_refused_intent_stalls_in_the_pass_that_claims_it() {
         .expect("stalled");
     assert_eq!(stalled[0].reason, StallReason::Refused);
     assert_eq!(stalled[0].attempts, 1);
+    // F12 (FIG-4648): the engine's code reaches the stall row and the intent.
+    assert_eq!(
+        stalled[0].last_error.as_ref().map(|error| &error.code),
+        Some(&lash_core::RuntimeErrorCode::PluginSessionManager)
+    );
+    assert!(matches!(
+        world.intent_state().await,
+        ControlIntentState::Refused { cause }
+            if cause.code == lash_core::RuntimeErrorCode::PluginSessionManager
+    ));
     assert!(
         world.attempts().is_empty(),
         "a refused release closes nothing"

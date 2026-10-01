@@ -16,9 +16,10 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core_execution::store::{
-    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, KeyColumn, KeyColumnType,
-    ObligationId, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
-    ObligationStanding, ObligationState, SettleOutcome, StallReason, StalledObligation,
+    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, ControlIntentState,
+    DeliveryError, KeyColumn, KeyColumnType, ObligationId, ObligationKey, ObligationKind,
+    ObligationLedger, ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome,
+    StallReason, StalledObligation,
 };
 use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
 use lash_store_sql::artifact::cleanup_obligations::{
@@ -104,6 +105,25 @@ fn key_values(key: &ObligationKey) -> Vec<Value> {
         .collect()
 }
 
+/// The stored error of a failed attempt: its message and its code are
+/// written together, so one without the other is corrupt.
+fn stored_delivery_error(
+    message: Option<String>,
+    code: Option<String>,
+) -> Result<Option<DeliveryError>, StoreError> {
+    match (message, code) {
+        (Some(message), Some(code)) => Ok(Some(DeliveryError::new(
+            lash_core_execution::RuntimeErrorCode::from_wire_code(&code),
+            message,
+        ))),
+        (None, None) => Ok(None),
+        _ => Err(stored_data_corrupt(
+            "obligation",
+            "a last error and its code disagree",
+        )),
+    }
+}
+
 /// The key columns of `kind` read from `row` starting at column `first`.
 fn read_key(
     kind: ObligationKind,
@@ -117,11 +137,11 @@ fn read_key(
             (KeyColumnType::Text, Value::Text(text)) => KeyColumn::Text(text),
             (KeyColumnType::Integer, Value::Integer(integer)) => KeyColumn::Integer(integer),
             (_, other) => {
-                return Ok(Err(lash_core_execution::store::UndecodableObligation {
-                    detail: format!(
+                return Ok(Err(
+                    lash_core_execution::store::UndecodableObligation::malformed(format!(
                         "{kind} obligation key column {offset} holds {other:?}, not {column_type:?}"
-                    ),
-                }));
+                    )),
+                ));
             }
         });
     }
@@ -382,7 +402,7 @@ impl ObligationLedger for SqliteObligationLedger {
                         crate::conn::cached_execute(
                             tx,
                             sql.settle_retry.sql(),
-                            rusqlite::params![id, token, due, error],
+                            rusqlite::params![id, token, due, error.message, error.code.as_str()],
                         )
                     })
                     .await
@@ -393,7 +413,14 @@ impl ObligationLedger for SqliteObligationLedger {
                         crate::conn::cached_execute(
                             tx,
                             sql.settle_stall.sql(),
-                            rusqlite::params![id, token, reason.as_str(), error, now],
+                            rusqlite::params![
+                                id,
+                                token,
+                                reason.as_str(),
+                                error.message,
+                                now,
+                                error.code.as_str()
+                            ],
                         )
                     })
                     .await
@@ -429,10 +456,22 @@ impl ObligationLedger for SqliteObligationLedger {
         let sql = self.sql();
         let now = sql_i64("obligation due instant", now_ms)?;
         let id = id.as_str().to_owned();
+        // A control intent the engine refused returns to pending with its
+        // obligation: the statement takes that state's stored columns.
+        let reopened = (self.kind == ObligationKind::ControlIntent)
+            .then(|| lash_core_execution::store::stored_intent_state(&ControlIntentState::Pending))
+            .transpose()?;
         let changed = self
             .conn
-            .write(move |tx| {
-                crate::conn::cached_execute(tx, sql.rearm.sql(), rusqlite::params![id, now])
+            .write(move |tx| match reopened {
+                Some((code, json)) => crate::conn::cached_execute(
+                    tx,
+                    sql.rearm.sql(),
+                    rusqlite::params![id, now, code, json],
+                ),
+                None => {
+                    crate::conn::cached_execute(tx, sql.rearm.sql(), rusqlite::params![id, now])
+                }
             })
             .await
             .map_err(sqlite_error)?;
@@ -453,6 +492,7 @@ impl ObligationLedger for SqliteObligationLedger {
             i64,
             String,
             Option<String>,
+            Option<String>,
             i64,
             Result<ObligationKey, lash_core_execution::store::UndecodableObligation>,
         );
@@ -468,7 +508,8 @@ impl ObligationLedger for SqliteObligationLedger {
                             row.get(2)?,
                             row.get(3)?,
                             row.get(4)?,
-                            read_key(kind, row, 5)?,
+                            row.get(5)?,
+                            read_key(kind, row, 6)?,
                         ))
                     })?
                     .collect()
@@ -476,21 +517,23 @@ impl ObligationLedger for SqliteObligationLedger {
             .await
             .map_err(sqlite_error)?;
         rows.into_iter()
-            .map(|(id, attempts, reason, last_error, stalled_at, key)| {
-                Ok(StalledObligation {
-                    kind,
-                    id: ObligationId::new(id),
-                    key,
-                    reason: StallReason::from_label(&reason)?,
-                    attempts: u32::try_from(attempts).map_err(|_| {
-                        stored_data_corrupt("obligation", "a negative attempt count")
-                    })?,
-                    last_error,
-                    stalled_at_ms: u64::try_from(stalled_at).map_err(|_| {
-                        stored_data_corrupt("obligation", "a negative stall instant")
-                    })?,
-                })
-            })
+            .map(
+                |(id, attempts, reason, last_error, last_error_code, stalled_at, key)| {
+                    Ok(StalledObligation {
+                        kind,
+                        id: ObligationId::new(id),
+                        key,
+                        reason: StallReason::from_label(&reason)?,
+                        attempts: u32::try_from(attempts).map_err(|_| {
+                            stored_data_corrupt("obligation", "a negative attempt count")
+                        })?,
+                        last_error: stored_delivery_error(last_error, last_error_code)?,
+                        stalled_at_ms: u64::try_from(stalled_at).map_err(|_| {
+                            stored_data_corrupt("obligation", "a negative stall instant")
+                        })?,
+                    })
+                },
+            )
             .collect()
     }
 

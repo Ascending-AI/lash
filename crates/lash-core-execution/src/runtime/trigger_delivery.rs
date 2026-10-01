@@ -10,9 +10,9 @@
 //! reservation already held.
 
 use crate::runtime::drive::relay::{
-    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy,
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
 };
-use crate::store::{ObligationKey, ObligationLedger};
+use crate::store::{ObligationKey, ObligationKind, ObligationLedger};
 use crate::triggers::{TriggerDeliveryRecoveryError, TriggerRouter};
 use std::sync::Arc;
 
@@ -63,18 +63,18 @@ impl ObligationRelay for TriggerDeliveryRelay {
             subscription_id,
         } = key
         else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "a {} key on the trigger_delivery ledger",
-                key.kind()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::TriggerDelivery,
+                key,
+            ));
         };
         match Box::pin(self.router.recover_delivery(occurrence_id, subscription_id)).await {
             Ok(_) => Ok(()),
             Err(TriggerDeliveryRecoveryError::Refused(error)) => {
-                Err(DeliveryFailure::Refused(error.to_string()))
+                Err(DeliveryFailure::Refused(plugin_delivery_error(error)))
             }
             Err(TriggerDeliveryRecoveryError::Retryable(error)) => {
-                Err(DeliveryFailure::Retryable(error.to_string()))
+                Err(DeliveryFailure::Retryable(plugin_delivery_error(error)))
             }
         }
     }

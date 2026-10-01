@@ -478,10 +478,10 @@ pub async fn run_admitted_root_retired(
 ) -> Result<RootOutcome, DriveAbort> {
     let scope = controller.admitted_scope().clone();
     let verdict = Box::pin(mark_and_seal_root(controller, &scope, &admitted, None)).await?;
-    if !matches!(verdict, crate::engine::SealVerdict::Sealed(_)) {
+    if let crate::engine::SealVerdict::Refused(refusal) = verdict {
         return Ok(RootOutcome::Refused {
             root: admitted.root().clone(),
-            verdict,
+            refusal,
         });
     }
     let headless = root::HeadlessRoot::Retired;
@@ -1077,17 +1077,16 @@ impl LashRuntime {
             Some(store),
         ))
         .await;
-        let verdict = marked?;
-        if !matches!(verdict, crate::engine::SealVerdict::Sealed(_)) {
-            return Ok(RootRun {
-                outcome: RootOutcome::Refused { root, verdict },
-                run: None,
-                driven_inputs: Vec::new(),
-                empty_drain: None,
-            });
-        }
-        let crate::engine::SealVerdict::Sealed(fence) = verdict else {
-            unreachable!("a refused seal returned above");
+        let fence = match marked? {
+            crate::engine::SealVerdict::Sealed(fence) => fence,
+            crate::engine::SealVerdict::Refused(refusal) => {
+                return Ok(RootRun {
+                    outcome: RootOutcome::Refused { root, refusal },
+                    run: None,
+                    driven_inputs: Vec::new(),
+                    empty_drain: None,
+                });
+            }
         };
         let run = DriveRootRun::sealed(&admitted, fence.clone());
         let evidence_root = run.root.clone();

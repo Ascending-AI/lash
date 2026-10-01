@@ -377,6 +377,7 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
         stalled: RemoteStalledDelivery {
             reason: "attempts_exhausted".into(),
             attempts: 3,
+            code: Some("runtime_store".into()),
             last_error: Some("delivery failed".into()),
             stalled_at_ms: 1000,
         },

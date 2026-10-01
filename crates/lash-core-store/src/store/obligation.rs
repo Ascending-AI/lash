@@ -189,10 +189,8 @@ impl ObligationKey {
         kind_label: &str,
         columns: Vec<KeyColumn>,
     ) -> Result<Self, UndecodableObligation> {
-        let kind =
-            ObligationKind::from_label(kind_label).map_err(|error| UndecodableObligation {
-                detail: error.to_string(),
-            })?;
+        let kind = ObligationKind::from_label(kind_label)
+            .map_err(UndecodableObligation::of_store_error)?;
         Self::decode(kind, columns)
     }
 
@@ -296,19 +294,17 @@ impl ObligationKey {
                 let referrer_id = next_text(&mut columns, kind, "referrer_id")?;
                 Self::ArtifactCleanup {
                     referrer: ArtifactReferrer::decode(&referrer_kind, &referrer_id).map_err(
-                        |error| UndecodableObligation {
-                            detail: error
-                                .into_store_error("artifact_cleanup_obligation")
-                                .to_string(),
+                        |error| {
+                            UndecodableObligation::of_store_error(
+                                error.into_store_error("artifact_cleanup_obligation"),
+                            )
                         },
                     )?,
                 }
             }
             kind @ (ObligationKind::ProcessStart | ObligationKind::ProcessTerminal) => {
                 let process_id = ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
-                    .map_err(|error| UndecodableObligation {
-                        detail: error.to_string(),
-                    })?;
+                    .map_err(|error| UndecodableObligation::malformed(error.to_string()))?;
                 match kind {
                     ObligationKind::ProcessStart => Self::ProcessStart { process_id },
                     ObligationKind::ProcessTerminal => Self::ProcessTerminal { process_id },
@@ -319,8 +315,10 @@ impl ObligationKey {
                 let sequence = next_integer(&mut columns, kind, "intent_id")?;
                 Self::ControlIntent {
                     intent_id: ControlIntentId::from_sequence(u64::try_from(sequence).map_err(
-                        |_| UndecodableObligation {
-                            detail: format!("control intent id {sequence} is negative"),
+                        |_| {
+                            UndecodableObligation::malformed(format!(
+                                "control intent id {sequence} is negative"
+                            ))
                         },
                     )?),
                 }
@@ -337,9 +335,9 @@ fn next_text(
 ) -> Result<String, UndecodableObligation> {
     match columns.next() {
         Some(KeyColumn::Text(value)) => Ok(value),
-        other => Err(UndecodableObligation {
-            detail: format!("{kind} obligation key column `{name}` is {other:?}, not text"),
-        }),
+        other => Err(UndecodableObligation::malformed(format!(
+            "{kind} obligation key column `{name}` is {other:?}, not text"
+        ))),
     }
 }
 
@@ -351,9 +349,9 @@ fn next_integer(
 ) -> Result<i64, UndecodableObligation> {
     match columns.next() {
         Some(KeyColumn::Integer(value)) => Ok(value),
-        other => Err(UndecodableObligation {
-            detail: format!("{kind} obligation key column `{name}` is {other:?}, not an integer"),
-        }),
+        other => Err(UndecodableObligation::malformed(format!(
+            "{kind} obligation key column `{name}` is {other:?}, not an integer"
+        ))),
     }
 }
 
@@ -551,10 +549,82 @@ fn unknown_vocabulary(surface: &str, label: &str) -> StoreError {
     }
 }
 
+/// Why a delivery attempt did not deliver, as its obligation row and the
+/// intent it refused retain it: the typed code beside the message, so a
+/// reader never recovers the cause from the text.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryError {
+    pub code: crate::RuntimeErrorCode,
+    pub message: String,
+}
+
+impl DeliveryError {
+    /// The cause `code`, worded `message`.
+    #[must_use]
+    pub fn new(code: crate::RuntimeErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// The same cause, its message led by what the attempt was doing.
+    #[must_use]
+    pub fn in_context(mut self, context: impl std::fmt::Display) -> Self {
+        self.message = format!("{context}: {}", self.message);
+        self
+    }
+}
+
+impl std::fmt::Display for DeliveryError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+impl From<StoreError> for DeliveryError {
+    fn from(error: StoreError) -> Self {
+        Self {
+            code: crate::RuntimeErrorCode::of_store_error(&error),
+            message: error.to_string(),
+        }
+    }
+}
+
 /// A row this build could not decode into its key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UndecodableObligation {
+    /// The store's code for why: an unknown vocabulary is the store's
+    /// compatibility refusal, a malformed key its corruption.
+    pub code: crate::RuntimeErrorCode,
     pub detail: String,
+}
+
+impl UndecodableObligation {
+    /// A key column set no build of this vocabulary writes.
+    #[must_use]
+    pub fn malformed(detail: String) -> Self {
+        Self {
+            code: crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+            detail,
+        }
+    }
+
+    /// The store error that refused the row's label or key.
+    #[must_use]
+    pub fn of_store_error(error: StoreError) -> Self {
+        let DeliveryError { code, message } = DeliveryError::from(error);
+        Self {
+            code,
+            detail: message,
+        }
+    }
+
+    /// The stall this row settles with.
+    #[must_use]
+    pub fn into_delivery_error(self) -> DeliveryError {
+        DeliveryError::new(self.code, self.detail)
+    }
 }
 
 /// One claimed obligation.
@@ -574,9 +644,15 @@ pub enum ObligationSettlement {
     /// The engine accepted it.
     Delivered,
     /// Try again at `due_at_ms`.
-    Retry { due_at_ms: u64, error: String },
+    Retry {
+        due_at_ms: u64,
+        error: DeliveryError,
+    },
     /// Stop until re-armed.
-    Stall { reason: StallReason, error: String },
+    Stall {
+        reason: StallReason,
+        error: DeliveryError,
+    },
     /// Not owed yet: back to `due` at `due_at_ms` with attempts reset to 0.
     Defer { due_at_ms: u64 },
 }
@@ -599,7 +675,7 @@ pub struct StalledObligation {
     pub key: Result<ObligationKey, UndecodableObligation>,
     pub reason: StallReason,
     pub attempts: u32,
-    pub last_error: Option<String>,
+    pub last_error: Option<DeliveryError>,
     pub stalled_at_ms: u64,
 }
 

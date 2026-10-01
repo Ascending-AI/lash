@@ -104,9 +104,9 @@ pub use commit_identity::{
 };
 pub use control_intent::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    ControlIntentStore, IntentApplication, IntentSettle, RootIntentFacts, RootIntentPlan,
-    RootIntentRefused, RootIntentRequest, RootVerb, decide_intent_acknowledgement,
-    decide_intent_application, decide_intent_failure, decide_root_intent, forked_root,
+    ControlIntentStore, IntentApplication, IntentObligation, IntentSettle, RootIntentFacts,
+    RootIntentPlan, RootIntentRefused, RootIntentRequest, RootVerb, decide_intent_acknowledgement,
+    decide_intent_application, decide_intent_refusal, decide_root_intent, forked_root,
     stored_intent_kind, stored_intent_state,
 };
 pub use drive_fence::{

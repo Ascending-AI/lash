@@ -14,10 +14,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod child_park;
+mod intent_ledger_fault;
 mod interleavings;
 mod lost_root;
 mod ownership;
 pub use child_park::*;
+pub use intent_ledger_fault::*;
 pub use interleavings::*;
 pub use lost_root::*;
 pub use ownership::*;
@@ -51,8 +53,9 @@ impl SessionControlEngine for Control {
         }
         self.events.lock().expect("events").push("resume");
         if self.lose_resume_reply.swap(false, Ordering::SeqCst) {
-            return Err(EngineRefusal::Retryable(
-                "the resume timed out after the engine acted".into(),
+            return Err(EngineRefusal::retryable(
+                crate::RuntimeErrorCode::EngineControlRequest,
+                "the resume timed out after the engine acted",
             ));
         }
         Ok(EngineAck::NothingHeld)
@@ -73,10 +76,10 @@ impl SessionControlEngine for Control {
             gate.pass().await;
         }
         if self.permanent.load(Ordering::SeqCst) {
-            return Err(EngineRefusal::Permanent {
-                code: crate::RuntimeErrorCode::PluginSessionManager,
-                message: "permanent engine refusal".into(),
-            });
+            return Err(EngineRefusal::permanent(
+                crate::RuntimeErrorCode::PluginSessionManager,
+                "permanent engine refusal",
+            ));
         }
         if self.fail.swap(false, Ordering::SeqCst)
             || self
@@ -86,7 +89,10 @@ impl SessionControlEngine for Control {
                 })
                 .is_ok()
         {
-            return Err(EngineRefusal::Retryable("release interrupted".into()));
+            return Err(EngineRefusal::retryable(
+                crate::RuntimeErrorCode::EngineControlRequest,
+                "release interrupted",
+            ));
         }
         self.events.lock().expect("events").push("release");
         Ok(EngineAck::Released)
@@ -129,8 +135,9 @@ impl crate::SessionWorkEngine for Work {
             .is_ok()
         {
             self.0.events.lock().expect("events").push("drive-refused");
-            return Err(EngineRefusal::Retryable(
-                "the drive ask was not accepted".into(),
+            return Err(EngineRefusal::retryable(
+                crate::RuntimeErrorCode::EngineControlRequest,
+                "the drive ask was not accepted",
             ));
         }
         self.schedule_drive(session, request);
@@ -473,7 +480,7 @@ impl Fixture {
     /// Where `intent`'s obligation stands.
     async fn obligation(&self, intent: &ControlIntent) -> Option<ObligationState> {
         self.intents
-            .state(intent.obligation.as_ref().expect("armed by its verb"))
+            .state(intent.obligation_id().expect("armed by its verb"))
             .await
             .expect("obligation read")
     }
@@ -495,13 +502,19 @@ impl Fixture {
             .iter()
             .any(|batch| batch.batch_id == *batch_id)
     }
-    async fn intent_state(&self, id: ControlIntentId) -> ControlIntentState {
+    async fn intent(&self, id: ControlIntentId) -> ControlIntent {
         self.factory
             .load_intent(id)
             .await
             .expect("intent read")
             .expect("intent retained")
-            .state
+    }
+    async fn intent_state(&self, id: ControlIntentId) -> ControlIntentState {
+        self.intent(id).await.state
+    }
+    /// Whether `id`'s engine half is still owed.
+    async fn owed(&self, id: ControlIntentId) -> bool {
+        self.intent(id).await.engine_half_owed()
     }
 }
 
@@ -1022,10 +1035,7 @@ pub async fn fork_releases_the_old_owner_before_the_new_root_drives_in_original_
     let (work, close) = f.control(true, false);
     assert!(matches!(
         f.apply(&work, &close, &intent).await,
-        ControlIntentState::Failed {
-            retryable: true,
-            ..
-        }
+        ControlIntentState::Pending
     ));
     assert!(f.parts.epoch().await.control_pending);
     assert!(work.0.events.lock().expect("events").is_empty());
@@ -1148,10 +1158,7 @@ pub async fn an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it(
         if gap > 0 {
             assert!(matches!(
                 f.apply(&work, &close, &intent).await,
-                ControlIntentState::Failed {
-                    retryable: true,
-                    ..
-                }
+                ControlIntentState::Pending
             ));
         }
         assert_eq!(f.obligation(&intent).await, Some(ObligationState::Due));
@@ -1187,10 +1194,8 @@ pub async fn engine_refusals_are_retained_and_listed(
     work.0.permanent.store(true, Ordering::SeqCst);
     assert!(matches!(
         f.apply(&work, &close, &intent).await,
-        ControlIntentState::Failed {
-            retryable: false,
-            ..
-        }
+        ControlIntentState::Refused { cause }
+            if cause.code == crate::RuntimeErrorCode::PluginSessionManager
     ));
     // Its obligation stalled `refused`, listed for an operator; nothing
     // retries it until one re-arms it.
@@ -1201,8 +1206,12 @@ pub async fn engine_refusals_are_retained_and_listed(
         .await
         .expect("stalled list");
     assert!(stalled.iter().any(|stalled| {
-        Some(&stalled.id) == intent.obligation.as_ref()
+        Some(&stalled.id) == intent.obligation_id()
             && stalled.reason == StallReason::Refused
+            && stalled.last_error.as_ref().is_some_and(|error| {
+                error.code == crate::RuntimeErrorCode::PluginSessionManager
+                    && error.message == "permanent engine refusal"
+            })
             && stalled.key
                 == Ok(ObligationKey::ControlIntent {
                     intent_id: intent.id,
@@ -1214,7 +1223,7 @@ pub async fn engine_refusals_are_retained_and_listed(
         .await
         .expect("operator list");
     assert!(
-        matches!(&retained[0].state, ControlIntentState::Failed { last_error, retryable: false } if last_error.contains("permanent engine refusal"))
+        matches!(&retained[0].state, ControlIntentState::Refused { cause } if cause.code == crate::RuntimeErrorCode::PluginSessionManager && cause.message == "permanent engine refusal")
     );
     // A verb the engine refused for good is surfaced, never a wedge: its
     // store half ended the root and raised the epoch, so the unreleased
@@ -1638,10 +1647,7 @@ pub async fn a_redrive_the_root_ran_past_is_never_applied_again(
     work.0.lose_resume_reply.store(true, Ordering::SeqCst);
     assert!(matches!(
         f.apply(&work, &close, &redrive).await,
-        ControlIntentState::Failed {
-            retryable: true,
-            ..
-        }
+        ControlIntentState::Pending
     ));
     // The resumed root runs, refuses again under the same build, re-parks.
     let again = f
@@ -1674,7 +1680,7 @@ pub async fn a_redrive_the_root_ran_past_is_never_applied_again(
         resumes, 1,
         "a redrive the root ran past never resumes it again"
     );
-    assert!(!f.intent_state(redrive.id).await.is_open());
+    assert!(!f.owed(redrive.id).await);
     assert!(matches!(
         f.intent_state(cancel.id).await,
         ControlIntentState::Acknowledged { .. }
@@ -1808,7 +1814,7 @@ pub async fn a_parked_session_is_asked_to_drive_only_through_its_ingress_obligat
     let claim = f
         .intents
         .claim(
-            cancel.obligation.as_ref().expect("armed"),
+            cancel.obligation_id().expect("armed"),
             &crate::store::ClaimToken::mint(),
             3,
             0,
@@ -1821,10 +1827,8 @@ pub async fn a_parked_session_is_asked_to_drive_only_through_its_ingress_obligat
             .acknowledge_intent(cancel.id, &claim.token, 3)
             .await
             .expect("acknowledge"),
-        IntentSettle::Held(ControlIntent {
-            state: ControlIntentState::Acknowledged { .. },
-            ..
-        })
+        IntentSettle::Held(settled)
+            if matches!(settled.state, ControlIntentState::Acknowledged { .. })
     ));
     let resolved = f.reconcile(&work, &close).await;
     assert!(resolved.failures.is_empty(), "{:?}", resolved.failures);
@@ -1867,7 +1871,7 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
         .await
         .expect("command accepted");
     let intent = f.verb(RootVerb::Redrive).await.expect("redrive");
-    assert!(f.intent_state(intent.id).await.is_open());
+    assert!(f.owed(intent.id).await);
     // The send's drive meets the unsettled redrive. In process its typed
     // refusal answers at once; on Restate the attempt dies inside its
     // recorded admission step and the open invocation retries until the
@@ -1926,7 +1930,7 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
         // A drive that lands while its redrive is unsettled is the bug
         // this law rules out (D15): admitted ahead of the redrive.
         Some(Ok(landed)) => assert!(
-            !f.intent_state(intent.id).await.is_open(),
+            !f.owed(intent.id).await,
             "the send landed while the redrive was unsettled: {landed:?}"
         ),
         Some(Err(abort)) => {
@@ -2000,12 +2004,9 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
     work.0.lose_resume_reply.store(true, Ordering::SeqCst);
     assert!(matches!(
         f.apply(&work, &close, &intent).await,
-        ControlIntentState::Failed {
-            retryable: true,
-            ..
-        }
+        ControlIntentState::Pending
     ));
-    assert!(f.intent_state(intent.id).await.is_open());
+    assert!(f.owed(intent.id).await);
     // The queued send's drive meets the unsettled redrive: its refusal is
     // the typed retryable one in process, and an invocation the server
     // keeps retrying on Restate. The probe holds that retry's re-decision
@@ -2044,7 +2045,7 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
              unsettled: {refusal:?}"
         ),
         Some(Ok(landed)) => assert!(
-            !f.intent_state(intent.id).await.is_open(),
+            !f.owed(intent.id).await,
             "the queued send landed while the redrive was unsettled: {landed:?}"
         ),
         Some(Err(abort)) => {
@@ -2183,8 +2184,8 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
     let f = Fixture::new(prefix, "retaken-claim", &host, &stores).await;
     let intent = f.verb(RootVerb::Cancel).await.expect("cancel");
     let id = intent
-        .obligation
-        .clone()
+        .obligation_id()
+        .cloned()
         .expect("the verb armed its obligation");
     // A relay claims it with a claim that lapses at once...
     let stale = f
@@ -2216,9 +2217,17 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
     );
     assert_eq!(
         f.factory
-            .record_intent_failure(intent.id, &stale.token, "late refusal", false, 5)
+            .refuse_intent(
+                intent.id,
+                &stale.token,
+                &crate::store::DeliveryError::new(
+                    crate::RuntimeErrorCode::EngineHandleMismatch,
+                    "late refusal",
+                ),
+                5,
+            )
             .await
-            .expect("stale failure"),
+            .expect("stale refusal"),
         IntentSettle::ClaimLost
     );
     assert_eq!(f.intent_state(intent.id).await, ControlIntentState::Pending);
@@ -2228,10 +2237,8 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
             .acknowledge_intent(intent.id, &fresh.token, 6)
             .await
             .expect("live acknowledgement"),
-        IntentSettle::Held(ControlIntent {
-            state: ControlIntentState::Acknowledged { at_ms: 6 },
-            ..
-        })
+        IntentSettle::Held(settled)
+            if settled.state == ControlIntentState::Acknowledged { at_ms: 6 }
     ));
     assert!(!f.parts.epoch().await.control_pending);
     assert_eq!(
@@ -2278,7 +2285,7 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
         .claim_due(20 + ttl + 1, ttl, NonZeroUsize::MIN.saturating_add(63))
         .await
         .expect("due claim");
-    fresh.sort_by_key(|claimed| claimed.id != *intent_a.obligation.as_ref().expect("armed"));
+    fresh.sort_by_key(|claimed| claimed.id != *intent_a.obligation_id().expect("armed"));
     let [fresh_a, fresh_b]: [ClaimedObligation; 2] =
         fresh.try_into().expect("both lapsed claims are retaken");
     assert_eq!((fresh_a.attempts, fresh_b.attempts), (2, 2));
@@ -2336,7 +2343,7 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
     let claimed = c
         .intents
         .claim(
-            intent_c.obligation.as_ref().expect("armed"),
+            intent_c.obligation_id().expect("armed"),
             &crate::store::ClaimToken::mint(),
             lash_core::ClockWallTime::timestamp_ms(clock.as_ref()),
             60_000,
@@ -2358,10 +2365,10 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
 
 /// S8-C (ADR 0109 §1.4, §3): an intent whose engine half keeps failing is
 /// retried after a capped exponential backoff, never before, and at the
-/// kind's attempt ceiling its obligation stalls and the intent closes
-/// `Failed { retryable: false }` — surfaced, never a wedge: its session
-/// drives the next root. Re-arming the stalled obligation reopens the
-/// intent, and its next delivery completes it.
+/// kind's attempt ceiling its obligation stalls under the engine's code. The
+/// intent stays pending and owes nothing more — surfaced, never a wedge: its
+/// session drives the next root. Re-arming the stalled obligation makes the
+/// intent owed again, and its next delivery completes it.
 pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
@@ -2371,7 +2378,7 @@ pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and
     let f = Fixture::new(prefix, "intent-ceiling", &host, &stores).await;
     let next = f.parts.enqueue("behind", Some("behind-root")).await;
     let intent = f.verb(RootVerb::Cancel).await.expect("cancel");
-    let id = intent.obligation.clone().expect("armed");
+    let id = intent.obligation_id().cloned().expect("armed");
     let (work, close) = f.control(false, false);
     work.0.fail_releases.store(usize::MAX, Ordering::SeqCst);
     let clock = Arc::new(ManualClock(std::sync::atomic::AtomicU64::new(
@@ -2388,10 +2395,7 @@ pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and
     // Attempt 1: the verb's own.
     assert!(matches!(
         relay.deliver_intent(&intent).await.expect("deliver"),
-        ControlIntentState::Failed {
-            retryable: true,
-            ..
-        }
+        ControlIntentState::Pending
     ));
     assert!(f.parts.epoch().await.control_pending);
     for attempt in 2..=3_u32 {
@@ -2425,13 +2429,15 @@ pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and
         .expect("the obligation stalled");
     assert_eq!(stalled.reason, StallReason::AttemptsExhausted);
     assert_eq!(stalled.attempts, 3);
-    assert!(matches!(
-        f.intent_state(intent.id).await,
-        ControlIntentState::Failed {
-            retryable: false,
-            ..
-        }
-    ));
+    assert_eq!(
+        stalled.last_error.map(|error| error.code),
+        Some(crate::RuntimeErrorCode::EngineControlRequest),
+        "the stall row keeps the engine's code"
+    );
+    // The attempts running out is the obligation's fact alone: the intent
+    // stays pending and owes nothing while its obligation is stalled.
+    assert_eq!(f.intent_state(intent.id).await, ControlIntentState::Pending);
+    assert!(!f.owed(intent.id).await);
     // Stalled, not a wedge: the session drives its next root.
     assert!(!f.parts.epoch().await.control_pending);
     assert!(work.0.events.lock().expect("events").contains(&"schedule"));
@@ -2457,6 +2463,7 @@ pub async fn an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and
             .expect("rearm")
     );
     assert_eq!(f.intent_state(intent.id).await, ControlIntentState::Pending);
+    assert!(f.owed(intent.id).await, "a re-armed intent is owed again");
     let pass = lash_core::runtime::drive::relay::relay_due(&relay, clock.as_ref(), page)
         .await
         .expect("re-armed pass");

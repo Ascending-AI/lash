@@ -62,14 +62,15 @@ impl SessionWorkEngine for Engine {
             .expect("refusals")
             .contains(request.as_str())
         {
-            return Err(EngineRefusal::Permanent {
-                code: lash_core::RuntimeErrorCode::SessionWorkUnavailable,
-                message: "the engine refuses this drive".to_owned(),
-            });
+            return Err(EngineRefusal::permanent(
+                lash_core::RuntimeErrorCode::SessionWorkUnavailable,
+                "the engine refuses this drive",
+            ));
         }
         if *self.retry.lock().expect("retry") {
-            return Err(EngineRefusal::Retryable(
-                "the engine is unavailable".to_owned(),
+            return Err(EngineRefusal::retryable(
+                lash_core::RuntimeErrorCode::EngineControlRequest,
+                "the engine is unavailable",
             ));
         }
         Ok(())

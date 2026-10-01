@@ -1361,7 +1361,7 @@ impl Driver {
                 if !deleted {
                     continue;
                 }
-                let standing = match &intent.obligation {
+                let standing = match intent.obligation_id() {
                     Some(id) => format!("{:?}", intents.standing(id).await),
                     None => "no obligation".to_owned(),
                 };

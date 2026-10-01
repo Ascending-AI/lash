@@ -1744,6 +1744,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "code": {
+          "description": "The stable error code of the last delivery failure: present exactly\nwhen `last_error` is.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "last_error": {
           "type": [
             "string",

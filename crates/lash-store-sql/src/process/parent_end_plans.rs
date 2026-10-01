@@ -45,7 +45,7 @@ crate::statements! {
         /// its stall for the operator.
         obligation_apply_delivered = "UPDATE parent_end_plans
              SET obligation_state = 'delivered', obligation_due_at_ms = NULL,
-                 obligation_last_error = NULL, obligation_settled_at_ms = ?3
+                 obligation_last_error = NULL, obligation_last_error_code = NULL, obligation_settled_at_ms = ?3
              WHERE parent_kind = ?1 AND parent_id = ?2 AND obligation_state = 'due'";
     }
 }
@@ -65,7 +65,7 @@ crate::statements! {
         obligation_arm = "UPDATE parent_end_plans
              SET obligation_id = ?3, obligation_state = 'due', obligation_attempts = 0,
                  obligation_due_at_ms = ?4, obligation_claim_token = NULL,
-                 obligation_stall_reason = NULL, obligation_last_error = NULL,
+                 obligation_stall_reason = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = NULL
              WHERE parent_kind = ?1 AND parent_id = ?2 AND obligation_state IS NULL";
 
@@ -99,25 +99,25 @@ crate::statements! {
         /// Settle claim `?2` on obligation `?1` delivered at `?3`.
         obligation_settle_delivered = "UPDATE parent_end_plans
              SET obligation_state = 'delivered', obligation_claim_token = NULL,
-                 obligation_due_at_ms = NULL, obligation_last_error = NULL,
+                 obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = ?3
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
         /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
-        /// error `?4`.
+        /// error `?4` under code `?5`.
         obligation_settle_retry = "UPDATE parent_end_plans
              SET obligation_state = 'due', obligation_claim_token = NULL,
-                 obligation_due_at_ms = ?3, obligation_last_error = ?4
+                 obligation_due_at_ms = ?3, obligation_last_error = ?4, obligation_last_error_code = ?5
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
         /// Stall claim `?2` on obligation `?1` for reason `?3` with error
-        /// `?4` at `?5`.
+        /// `?4` under code `?6` at `?5`.
         obligation_settle_stall = "UPDATE parent_end_plans
              SET obligation_state = 'stalled', obligation_claim_token = NULL,
                  obligation_due_at_ms = NULL, obligation_stall_reason = ?3,
-                 obligation_last_error = ?4, obligation_settled_at_ms = ?5
+                 obligation_last_error = ?4, obligation_last_error_code = ?6, obligation_settled_at_ms = ?5
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
@@ -128,7 +128,7 @@ crate::statements! {
              WHERE obligation_id = ?1 AND obligation_state = 'stalled'";
 
         /// At most `?2` stalled obligations after id `?1`, in id order.
-        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, parent_kind, parent_id
+        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_last_error_code, obligation_settled_at_ms, parent_kind, parent_id
              FROM parent_end_plans
              WHERE obligation_state = 'stalled' AND obligation_id > ?1
              ORDER BY obligation_id

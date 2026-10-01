@@ -587,7 +587,10 @@ pub async fn a_stale_claimant_cannot_take_back_a_retaken_claim(fixture: Obligati
                 &retaken.token,
                 ObligationSettlement::Retry {
                     due_at_ms: T0 + 2_000,
-                    error: "retried".to_owned(),
+                    error: crate::store::DeliveryError::new(
+                        crate::RuntimeErrorCode::EngineControlRequest,
+                        "retried"
+                    ),
                 },
                 T0 + 1_003,
             )
@@ -616,7 +619,10 @@ pub async fn a_retryable_failure_backs_off(fixture: ObligationLawFixture) {
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
     relay.fail(
         &key,
-        DeliveryFailure::Retryable("engine unreachable".to_owned()),
+        DeliveryFailure::Retryable(crate::store::DeliveryError::new(
+            crate::RuntimeErrorCode::EngineControlRequest,
+            "engine unreachable",
+        )),
     );
     // Attempt n is retried after min(1 s · 2^(n-1), 4 s).
     let mut due = T0;
@@ -664,7 +670,10 @@ pub async fn the_attempt_ceiling_stalls(fixture: ObligationLawFixture) {
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(3));
     relay.fail(
         &key,
-        DeliveryFailure::Retryable("still unreachable".to_owned()),
+        DeliveryFailure::Retryable(crate::store::DeliveryError::new(
+            crate::RuntimeErrorCode::EngineControlRequest,
+            "still unreachable",
+        )),
     );
     let before = ledger.count_stalled().await.expect("count before");
     for _ in 0..3 {
@@ -687,7 +696,13 @@ pub async fn the_attempt_ceiling_stalls(fixture: ObligationLawFixture) {
     assert_eq!(stalled.attempts, 3);
     assert_eq!(stalled.kind, ObligationKind::SessionDelete);
     assert_eq!(stalled.key.as_ref().ok(), Some(&key));
-    assert_eq!(stalled.last_error.as_deref(), Some("still unreachable"));
+    assert_eq!(
+        stalled
+            .last_error
+            .as_ref()
+            .map(|error| error.message.as_str()),
+        Some("still unreachable")
+    );
     assert_eq!(
         ledger.count_stalled().await.expect("count after"),
         before + 1
@@ -715,10 +730,19 @@ pub async fn a_refused_or_undecodable_row_stalls_without_failing_the_page(
     let (poison, poison_id) = armed_session(&fixture, ledger.as_ref(), "page-poison", T0).await;
     let (_, healthy_id) = armed_session(&fixture, ledger.as_ref(), "page-healthy", T0).await;
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
-    relay.fail(&refused, DeliveryFailure::Refused("target gone".to_owned()));
+    relay.fail(
+        &refused,
+        DeliveryFailure::Refused(crate::store::DeliveryError::new(
+            crate::RuntimeErrorCode::EngineControlRequest,
+            "target gone",
+        )),
+    );
     relay.fail(
         &poison,
-        DeliveryFailure::Undecodable("payload from a newer build".to_owned()),
+        DeliveryFailure::Undecodable(crate::store::DeliveryError::new(
+            crate::RuntimeErrorCode::EngineControlRequest,
+            "payload from a newer build",
+        )),
     );
     let pass = relay_due(&relay, &clock, page(64)).await.expect("one pass");
     assert!(pass.claimed >= 3, "the pass claims every due row: {pass:?}");
@@ -804,7 +828,13 @@ pub async fn an_unknown_referrer_kind_is_refused_typed_and_stalled(
         detail.contains(&format!("label `{label}` is unknown to this build")),
         "the stall names the typed refusal: {detail}"
     );
-    assert_eq!(stalled.last_error.as_deref(), Some(detail.as_str()));
+    assert_eq!(
+        stalled
+            .last_error
+            .as_ref()
+            .map(|error| error.message.as_str()),
+        Some(detail.as_str())
+    );
     assert_eq!(
         ledger.count_stalled().await.expect("count after"),
         before + 1
@@ -879,7 +909,8 @@ pub async fn a_missing_engine_carry_stalls_the_cleanup_row(fixture: ObligationLa
     );
     assert!(
         row.last_error
-            .as_deref()
+            .as_ref()
+            .map(|error| error.message.as_str())
             .is_some_and(|error| error.contains("missing-engine-bytes")),
         "the stalled row names the missing carry: {row:?}"
     );
@@ -893,7 +924,13 @@ pub async fn a_rearm_returns_a_stalled_obligation_to_due(fixture: ObligationLawF
     let clock = TestClock::new(T0);
     let (key, id) = armed_session(&fixture, ledger.as_ref(), "rearm", T0).await;
     let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
-    relay.fail(&key, DeliveryFailure::Refused("refused once".to_owned()));
+    relay.fail(
+        &key,
+        DeliveryFailure::Refused(crate::store::DeliveryError::new(
+            crate::RuntimeErrorCode::EngineControlRequest,
+            "refused once",
+        )),
+    );
     relay_due(&relay, &clock, page(64)).await.expect("stall it");
     assert_eq!(
         ledger.state(&id).await.expect("stalled"),
@@ -1026,7 +1063,10 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
                 &stall.token,
                 ObligationSettlement::Stall {
                     reason: StallReason::Refused,
-                    error: "stalled before its withdrawal".to_string(),
+                    error: crate::store::DeliveryError::new(
+                        crate::RuntimeErrorCode::EngineControlRequest,
+                        "stalled before its withdrawal"
+                    ),
                 },
                 now,
             )

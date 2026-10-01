@@ -130,7 +130,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                         .sessions
                         .load_intent(intent)
                         .await?
-                        .is_some_and(|intent| intent.state.is_open());
+                        .is_some_and(|intent| intent.engine_half_owed());
                     if open {
                         // The redrive owns the stopped work until it resumes
                         // it: the store would leave the park as it is.
@@ -245,7 +245,7 @@ impl StoreParkRecovery<'_> {
                         .sessions
                         .load_intent(intent)
                         .await?
-                        .is_some_and(|intent| intent.state.is_open());
+                        .is_some_and(|intent| intent.engine_half_owed());
                     if open || !still_stopped().await? {
                         return Ok(EngineParkRecorded::Redriven);
                     }

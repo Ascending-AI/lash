@@ -1,8 +1,12 @@
 //! `control_intents`: an operator's verb on a parked root, or a session's
 //! close, as a versioned record (ADR 0104 O4). The store half of the intent
 //! commits in the transaction that inserts the row and arms the row's
-//! `ControlIntent` obligation (ADR 0109); `state` tracks the engine half, and
-//! every write that settles it compares the obligation's claim token. A
+//! `ControlIntent` obligation (ADR 0109); `state` records what was decided
+//! about the engine half, and every write that settles it compares the
+//! obligation's claim token. Whether the engine half is still owed is the
+//! generated column `engine_half_owed`, the one SQL statement of the rule
+//! [`ControlIntent::engine_half_owed`](lash_core_store::store::ControlIntent::engine_half_owed)
+//! states in Rust: every statement that asks reads that column. A
 //! `close_session` row outlives its session: it is the deletion tombstone a
 //! deleted session's roots answer from.
 
@@ -10,7 +14,7 @@
 pub const TABLE: &str = "control_intents";
 
 /// Every column a row decoder reads, in the order both backends index.
-pub const ROW_COLUMNS: &str = "intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id";
+pub const ROW_COLUMNS: &str = "intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id, obligation_state";
 
 /// What recording an intent writes: [`ROW_COLUMNS`] minus the allocated
 /// `intent_id`, plus the `kind`/`state` tags beside their JSON bodies so a
@@ -22,23 +26,23 @@ crate::statements! {
     /// `control_intents` statements both backends issue verbatim.
     pub struct ControlIntentStatements @ "control_intent" {
         /// Session `?1`'s `close_session` intent: its deletion tombstone.
-        select_close_session = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
+        select_close_session = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id, obligation_state
              FROM control_intents
              WHERE session_id = ?1 AND kind = 'close_session'
              ORDER BY intent_id
              LIMIT 1";
 
         /// Intent `?1`.
-        select_by_id = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
+        select_by_id = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id, obligation_state
              FROM control_intents
              WHERE intent_id = ?1";
 
-        /// Session `?1`'s open verbs (pending, or failed and retryable), in
-        /// id order: what its close supersedes.
-        select_open_verbs_by_session = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
+        /// Session `?1`'s verbs whose engine half is still owed, in id
+        /// order: what its close supersedes.
+        select_open_verbs_by_session = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id, obligation_state
              FROM control_intents
              WHERE session_id = ?1 AND kind <> 'close_session'
-               AND state IN ('pending', 'failed_retryable')
+               AND engine_half_owed
              ORDER BY intent_id";
 
         /// Record a new intent of session `?1` (format `?2`, kind `?3` with
@@ -80,7 +84,7 @@ crate::statements! {
     /// Statements for parked-root control and recovery.
     pub struct ControlVerbStatements @ "control_intent" {
         set_kind = "UPDATE control_intents SET kind_json = ?2 WHERE intent_id = ?1";
-        intents = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id
+        intents = "SELECT intent_id, session_id, format, kind_json, state_json, created_at_ms, engine_ref, obligation_id, obligation_state
             FROM control_intents WHERE intent_id > ?1 ORDER BY intent_id LIMIT ?2";
     }
 }
@@ -99,7 +103,7 @@ crate::statements! {
         obligation_arm = "UPDATE control_intents
              SET obligation_id = ?2, obligation_state = 'due', obligation_attempts = 0,
                  obligation_due_at_ms = ?3, obligation_claim_token = NULL,
-                 obligation_stall_reason = NULL, obligation_last_error = NULL,
+                 obligation_stall_reason = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = NULL
              WHERE intent_id = ?1 AND obligation_state IS NULL";
 
@@ -133,40 +137,43 @@ crate::statements! {
         /// Settle claim `?2` on obligation `?1` delivered at `?3`.
         obligation_settle_delivered = "UPDATE control_intents
              SET obligation_state = 'delivered', obligation_claim_token = NULL,
-                 obligation_due_at_ms = NULL, obligation_last_error = NULL,
+                 obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = ?3
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
         /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
-        /// error `?4`.
+        /// error `?4` under code `?5`.
         obligation_settle_retry = "UPDATE control_intents
              SET obligation_state = 'due', obligation_claim_token = NULL,
-                 obligation_due_at_ms = ?3, obligation_last_error = ?4
+                 obligation_due_at_ms = ?3, obligation_last_error = ?4, obligation_last_error_code = ?5
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
         /// Stall claim `?2` on obligation `?1` for reason `?3` with error
-        /// `?4` at `?5`.
+        /// `?4` under code `?6` at `?5`.
         obligation_settle_stall = "UPDATE control_intents
              SET obligation_state = 'stalled', obligation_claim_token = NULL,
                  obligation_due_at_ms = NULL, obligation_stall_reason = ?3,
-                 obligation_last_error = ?4, obligation_settled_at_ms = ?5
+                 obligation_last_error = ?4, obligation_last_error_code = ?6, obligation_settled_at_ms = ?5
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
         /// Re-arm stalled obligation `?1`, due at `?2`, its attempts reset.
-        /// An intent its stall closed `failed` reopens `pending` (ADR 0109
-        /// §3: re-arm reopens it), so its engine half runs again.
+        /// An intent the engine refused returns to the pending state `?3`
+        /// (JSON `?4`), the encoding of `ControlIntentState::Pending` (ADR
+        /// 0109 §3: re-arm reopens it), so its engine half runs again. One
+        /// whose obligation stalled while it was pending needs no state
+        /// write: it is owed again the moment the obligation is due.
         obligation_rearm = "UPDATE control_intents
              SET obligation_state = 'due', obligation_attempts = 0, obligation_due_at_ms = ?2,
                  obligation_stall_reason = NULL, obligation_settled_at_ms = NULL,
-                 state = CASE WHEN state = 'failed' THEN 'pending' ELSE state END,
-                 state_json = CASE WHEN state = 'failed' THEN '{\"state\":\"pending\"}' ELSE state_json END
+                 state = CASE WHEN state = 'refused' THEN ?3 ELSE state END,
+                 state_json = CASE WHEN state = 'refused' THEN ?4 ELSE state_json END
              WHERE obligation_id = ?1 AND obligation_state = 'stalled'";
 
         /// At most `?2` stalled obligations after id `?1`, in id order.
-        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, intent_id
+        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_last_error_code, obligation_settled_at_ms, intent_id
              FROM control_intents
              WHERE obligation_state = 'stalled' AND obligation_id > ?1
              ORDER BY obligation_id

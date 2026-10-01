@@ -144,7 +144,7 @@ macro_rules! runtime_store_operations {
                 fn begin_session_close(&self, session_id: &SessionId, at_ms: u64) -> Result<Option<ControlIntent>, StoreError>;
                 fn claim_intent_application(&self, id: ControlIntentId, at_ms: u64) -> Result<IntentApplication, StoreError>;
                 fn acknowledge_intent(&self, id: ControlIntentId, claim: &ClaimToken, at_ms: u64) -> Result<IntentSettle, StoreError>;
-                fn record_intent_failure(&self, id: ControlIntentId, claim: &ClaimToken, error: &str, retryable: bool, at_ms: u64) -> Result<IntentSettle, StoreError>;
+                fn refuse_intent(&self, id: ControlIntentId, claim: &ClaimToken, cause: &DeliveryError, at_ms: u64) -> Result<IntentSettle, StoreError>;
                 fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError>;
                 fn open_root_intent(&self, request: &RootIntentRequest, at_ms: u64) -> Result<ControlIntent, RootIntentRefused>;
             }

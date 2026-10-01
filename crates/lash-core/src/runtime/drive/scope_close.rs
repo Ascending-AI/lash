@@ -94,18 +94,18 @@ impl ObligationRelay for ScopeCloseRelay {
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
         let ObligationDelivery { key, .. } = delivery;
         let ObligationKey::ScopeClose { session_id, root } = key else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "a scope-close delivery was handed a {} key",
-                key.kind().label()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::ScopeClose,
+                key,
+            ));
         };
         let terminal = self
             .sessions
             .root_terminal(session_id, root)
             .await
-            .map_err(|error| DeliveryFailure::Retryable(error.to_string()))?
+            .map_err(DeliveryFailure::retryable)?
             .ok_or_else(|| {
-                DeliveryFailure::Refused(format!(
+                DeliveryFailure::row_invariant(format!(
                     "root `{root}` of session `{session_id}` armed a scope close but \
                      carries no terminal evidence"
                 ))
@@ -113,7 +113,7 @@ impl ObligationRelay for ScopeCloseRelay {
         self.sink
             .close_root_scope(&terminal)
             .await
-            .map_err(|error| DeliveryFailure::Retryable(error.to_string()))
+            .map_err(DeliveryFailure::retryable)
     }
 }
 

@@ -226,9 +226,13 @@ where
     assert_eq!(stalled.len(), 1);
     assert_eq!(stalled[0].reason, crate::StallReason::Refused);
     assert!(
-        stalled[0].last_error.as_deref().is_some_and(
-            |error| error.contains("trigger engine target payload must be a JSON object")
-        ),
+        stalled[0]
+            .last_error
+            .as_ref()
+            .map(|error| error.message.as_str())
+            .is_some_and(
+                |error| error.contains("trigger engine target payload must be a JSON object")
+            ),
         "the runtime refuses an invalid Engine payload: {stalled:?}"
     );
     assert!(

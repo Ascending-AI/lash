@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::engine::{
     AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, DriveRequestId, ParkRef,
-    SealVerdict,
+    SealRefusal, SealVerdict,
 };
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::store::DriveEpochSeal;
@@ -173,14 +173,14 @@ impl AdmitDriveRunner {
             }));
         }
         // D15: a park that names a redrive intent is being resolved. While
-        // that intent is unsettled — pending, or failed retryably with its
-        // engine half still owed — a new turn input is refused retryably,
+        // that intent's engine half is still owed, a new turn input is
+        // refused retryably,
         // never interleaved with the redrive and never a recorded verdict.
         // A ledger that cannot name intents holds no unsettled redrive.
         let redrive = park.as_ref().and_then(|park| park.resume_intent);
         let redrive_unsettled = match redrive {
             Some(intent) => match self.stores.load_intent(intent).await {
-                Ok(intent) => intent.is_some_and(|intent| intent.state.is_open()),
+                Ok(intent) => intent.is_some_and(|intent| intent.engine_half_owed()),
                 Err(StoreError::UnsupportedStoreOperation { .. }) => false,
                 Err(error) => return Err(store_fault("redrive intent read", error)),
             },
@@ -404,10 +404,10 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
             .map_err(|error| store_fault("drive epoch seal", error))?;
         let verdict = match seal {
             DriveEpochSeal::Sealed(fence) => SealVerdict::Sealed(fence),
-            DriveEpochSeal::Superseded { epoch } => SealVerdict::Superseded { epoch },
-            DriveEpochSeal::ExecutionLost => SealVerdict::SubstrateLost {
-                root: self.admitted.root().clone(),
-            },
+            DriveEpochSeal::Superseded { epoch } => {
+                SealVerdict::Refused(SealRefusal::Superseded { epoch })
+            }
+            DriveEpochSeal::ExecutionLost => SealVerdict::Refused(SealRefusal::ExecutionLost),
         };
         Ok(RuntimeEffectOutcome::SealDriveAdmission {
             verdict: Box::new(verdict),

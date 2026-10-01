@@ -120,14 +120,20 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             "b",
             ObligationSettlement::Retry {
                 due_at_ms: T0 + 5_000,
-                error: "retry later".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "retry later",
+                ),
             },
         ),
         (
             "c",
             ObligationSettlement::Stall {
                 reason: StallReason::Refused,
-                error: "refused".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "refused",
+                ),
             },
         ),
     ];
@@ -177,7 +183,10 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             &immediate.token,
             ObligationSettlement::Stall {
                 reason: StallReason::AttemptsExhausted,
-                error: "exhausted".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "exhausted",
+                ),
             },
             T0 + 1_001,
         )
@@ -251,9 +260,10 @@ impl ProcessResidue<'_> {
         }
     }
 
-    /// Write one `start_obligation_*` column around the ledger: the residue
-    /// coverage is proven by this write moving the digest, and unconstrained
-    /// `last_error` is exactly where a leaked write would land.
+    /// Write the `start_obligation_*` error around the ledger: the residue
+    /// coverage is proven by this write moving the digest, and the error —
+    /// its message and code, which the schema only requires to be written
+    /// together — is exactly where a leaked write would land.
     #[expect(
         clippy::expect_used,
         reason = "test support: a backend that cannot take the planted write panics the harness with its name by design"
@@ -265,7 +275,8 @@ impl ProcessResidue<'_> {
                     .expect("open the SQLite residue writer");
                 connection
                     .execute(
-                        "UPDATE processes SET start_obligation_last_error = 'planted divergence'
+                        "UPDATE processes SET start_obligation_last_error = 'planted divergence',
+                             start_obligation_last_error_code = 'runtime_store'
                          WHERE process_id = ?1",
                         rusqlite::params![process_id],
                     )
@@ -273,7 +284,8 @@ impl ProcessResidue<'_> {
             }
             Self::Postgres(pool) => {
                 sqlx::query(
-                    "UPDATE lash_processes SET start_obligation_last_error = 'planted divergence'
+                    "UPDATE lash_processes SET start_obligation_last_error = 'planted divergence',
+                         start_obligation_last_error_code = 'runtime_store'
                      WHERE process_id = $1",
                 )
                 .bind(process_id)
@@ -439,14 +451,20 @@ async fn process_start_transcript(
             "b",
             ObligationSettlement::Retry {
                 due_at_ms: T0 + 5_000,
-                error: "retry later".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "retry later",
+                ),
             },
         ),
         (
             "c",
             ObligationSettlement::Stall {
                 reason: StallReason::Refused,
-                error: "refused".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "refused",
+                ),
             },
         ),
         ("d", ObligationSettlement::Delivered),
@@ -509,7 +527,10 @@ async fn process_start_transcript(
             &immediate.token,
             ObligationSettlement::Stall {
                 reason: StallReason::AttemptsExhausted,
-                error: "exhausted".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "exhausted",
+                ),
             },
             T0 + 1_001,
         )

@@ -285,8 +285,97 @@ async fn recorded_outcome(
     Ok(false)
 }
 
-fn refusal(error: impl std::fmt::Display) -> EngineRefusal {
-    EngineRefusal::Retryable(error.to_string())
+/// An error an engine control verb met, as the refusal it answers: the
+/// cause's own retry class and code, never its text alone.
+pub(crate) trait ControlFailure {
+    fn into_refusal(self) -> EngineRefusal;
+}
+
+/// Restate answered, or did not: the client's own classification decides
+/// whether asking again can succeed.
+impl ControlFailure for crate::RestateHttpError {
+    fn into_refusal(self) -> EngineRefusal {
+        let code = lash_core::RuntimeErrorCode::EngineControlRequest;
+        match self.classification() {
+            crate::RestateHttpErrorClass::Transient => {
+                EngineRefusal::retryable(code, self.to_string())
+            }
+            crate::RestateHttpErrorClass::Terminal => {
+                EngineRefusal::permanent(code, self.to_string())
+            }
+        }
+    }
+}
+
+impl ControlFailure for lash_core::StoreError {
+    fn into_refusal(self) -> EngineRefusal {
+        self.into()
+    }
+}
+
+impl ControlFailure for lash_core::PluginError {
+    fn into_refusal(self) -> EngineRefusal {
+        self.into()
+    }
+}
+
+/// The recovery page's budget ran out before the request answered: the next
+/// page asks again.
+impl ControlFailure for tokio::time::error::Elapsed {
+    fn into_refusal(self) -> EngineRefusal {
+        EngineRefusal::retryable(
+            lash_core::RuntimeErrorCode::EngineControlRequest,
+            "recovery page time budget exhausted",
+        )
+    }
+}
+
+impl<E: ControlFailure + std::fmt::Display> ControlFailure for RecoveryRequestError<E> {
+    fn into_refusal(self) -> EngineRefusal {
+        match self {
+            Self::Failed(error) => error.into_refusal(),
+            Self::BudgetExhausted => EngineRefusal::retryable(
+                lash_core::RuntimeErrorCode::EngineControlRequest,
+                self.to_string(),
+            ),
+        }
+    }
+}
+
+/// Usage retirement answers only text (its own boundary): a request that
+/// did not complete, asked again by the next attempt.
+impl ControlFailure for String {
+    fn into_refusal(self) -> EngineRefusal {
+        EngineRefusal::retryable(lash_core::RuntimeErrorCode::EngineControlRequest, self)
+    }
+}
+
+pub(crate) fn refusal(error: impl ControlFailure) -> EngineRefusal {
+    error.into_refusal()
+}
+
+/// The refusal of a drive ask Restate did not accept: the cause keeps its
+/// code and retry class, and the message names the drive it refused.
+pub(crate) fn unaccepted_drive(
+    session: &lash_core::SessionId,
+    request: &lash_core::engine::DriveRequestId,
+    mut cause: EngineRefusal,
+) -> EngineRefusal {
+    cause.message = format!(
+        "drive `{}` of session `{session}` was not accepted: {}",
+        request.as_str(),
+        cause.message
+    );
+    cause
+}
+
+/// No registry row carries the process a control verb named: nothing a
+/// retry of the verb can resume.
+fn process_gone(process: &lash_core::ProcessId) -> EngineRefusal {
+    EngineRefusal::permanent(
+        lash_core::RuntimeErrorCode::ProcessNotVisible,
+        format!("process `{process}` is gone"),
+    )
 }
 
 /// One paused invocation, re-read on demand: what the park writer asks when
@@ -432,7 +521,8 @@ impl RestateSessionControl {
                     .and_then(parse_turn_workflow_key)
                     .is_none_or(|(session, _)| session != target.session))
         {
-            return Err(refusal(
+            return Err(EngineRefusal::permanent(
+                lash_core::RuntimeErrorCode::EngineHandleMismatch,
                 "stored engine handle does not name a run of the requested root's session",
             ));
         }
@@ -766,9 +856,14 @@ impl RestateSessionControl {
                     .get_process(process_id)
                     .await
                     .map_err(refusal)?
-                    .ok_or_else(|| refusal("process is gone"))?;
+                    .ok_or_else(|| process_gone(process_id))?;
                 let authority = crate::process::park_reconcile::execution_authority(&record)
-                    .ok_or_else(|| refusal("process execution is not started"))?;
+                    .ok_or_else(|| {
+                        EngineRefusal::permanent(
+                            lash_core::RuntimeErrorCode::MissingProcessExecutionId,
+                            format!("process `{process_id}` execution is not started"),
+                        )
+                    })?;
                 self.processes
                     .begin_parked_rerun_with_authority(process_id, &authority)
                     .await
@@ -829,13 +924,21 @@ impl SessionControlEngine for RestateSessionControl {
             .get_process(process)
             .await
             .map_err(refusal)?
-            .ok_or_else(|| refusal("process is gone"))?;
-        let current = record
-            .park
-            .as_deref()
-            .ok_or_else(|| refusal("process is not parked"))?;
+            .ok_or_else(|| process_gone(process))?;
+        let current = record.park.as_deref().ok_or_else(|| {
+            EngineRefusal::permanent(
+                lash_core::RuntimeErrorCode::ProcessNotParked,
+                format!("process `{process}` is not parked"),
+            )
+        })?;
         if current.park_id != park {
-            return Err(refusal("process park was superseded"));
+            return Err(EngineRefusal::permanent(
+                lash_core::RuntimeErrorCode::ProcessParkSuperseded,
+                format!(
+                    "process `{process}` park {park} was superseded by park {}",
+                    current.park_id
+                ),
+            ));
         }
         let work = self
             .resume_group_work(&lash_core::ExecutionScope::process(process.clone()))

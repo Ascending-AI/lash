@@ -524,7 +524,10 @@ async fn the_due_index_serves_the_earliest_due_row_first() {
             &claim_a.token,
             ObligationSettlement::Retry {
                 due_at_ms: world.clock.timestamp_ms() + 3_600_000,
-                error: "a backed off an hour".to_string(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "a backed off an hour",
+                ),
             },
             world.clock.timestamp_ms(),
         )
@@ -561,7 +564,10 @@ async fn the_due_index_serves_the_earliest_due_row_first() {
             &claims[0].token,
             ObligationSettlement::Retry {
                 due_at_ms: world.clock.timestamp_ms(),
-                error: "b retries at now".to_string(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "b retries at now",
+                ),
             },
             world.clock.timestamp_ms(),
         )

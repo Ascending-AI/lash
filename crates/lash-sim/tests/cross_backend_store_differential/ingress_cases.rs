@@ -159,14 +159,20 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             "b",
             ObligationSettlement::Retry {
                 due_at_ms: FAR + 5_000,
-                error: "retry later".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "retry later",
+                ),
             },
         ),
         (
             "c",
             ObligationSettlement::Stall {
                 reason: StallReason::Refused,
-                error: "refused".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "refused",
+                ),
             },
         ),
     ];
@@ -207,7 +213,10 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             &retried.token,
             ObligationSettlement::Stall {
                 reason: StallReason::AttemptsExhausted,
-                error: "exhausted".to_owned(),
+                error: lash_core::store::DeliveryError::new(
+                    lash_core::RuntimeErrorCode::EngineControlRequest,
+                    "exhausted",
+                ),
             },
             FAR + 5_001,
         )

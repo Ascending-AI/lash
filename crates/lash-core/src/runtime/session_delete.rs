@@ -46,11 +46,11 @@ use crate::drive::relay::{
 use crate::session_close::{SessionCloseError, close_session};
 use crate::store::session_delete::{SessionCleanup, SessionDeleteLedger, SessionDeleteObligation};
 use crate::store::{
-    ControlIntentState, MaintenanceFailure, ObligationId, ObligationKey, ObligationKind,
-    ObligationLedger, ObligationState, SessionBlobReclaimReport, StoreError,
+    ControlIntentState, DeliveryError, MaintenanceFailure, ObligationId, ObligationKey,
+    ObligationKind, ObligationLedger, ObligationState, SessionBlobReclaimReport, StoreError,
 };
 use crate::{
-    EffectJournalRetirement, ProcessSessionDeleteReport, SessionAdministration,
+    EffectJournalRetirement, ProcessSessionDeleteReport, RuntimeErrorCode, SessionAdministration,
     SessionDeleteContext, SessionId,
 };
 
@@ -109,8 +109,8 @@ pub enum SessionDeleteFailure {
     /// The effect host did not drain the session's usage accounting: its
     /// settlements are not all delivered yet, or its owner is not retired
     /// (ADR 0125). Nothing of the session was deleted; the relay retries.
-    #[error("usage accounting: {message}")]
-    UsageAccounting { message: String },
+    #[error("usage accounting: {source}")]
+    UsageAccounting { source: Box<crate::RuntimeError> },
     /// The process registry did not delete the session's process state.
     #[error("process state: {source}")]
     Process { source: Box<crate::PluginError> },
@@ -139,6 +139,24 @@ impl SessionDeleteFailure {
             Self::UsageAccounting { .. } => true,
             Self::Waits { source } | Self::Journal { source } => source.is_retryable(),
             Self::Storage(_) => false,
+        }
+    }
+
+    /// The typed code of the step that stopped the delete.
+    pub fn code(&self) -> RuntimeErrorCode {
+        match self {
+            Self::UsageAccounting { source }
+            | Self::Waits { source }
+            | Self::Journal { source } => source.code.clone(),
+            Self::Process { source } | Self::Triggers { source } => {
+                crate::drive::relay::plugin_delivery_error((**source).clone()).code
+            }
+            Self::Storage(failure) => match &failure.stop {
+                crate::store::MaintenanceStop::Failed(error) => {
+                    RuntimeErrorCode::of_store_error(error)
+                }
+                crate::store::MaintenanceStop::Refused(_) => RuntimeErrorCode::RuntimeStore,
+            },
         }
     }
 
@@ -338,7 +356,7 @@ pub async fn physically_delete(
         .drain_usage_accounting(&crate::RuntimeOwner::Session(session_id.clone()))
         .await
         .map_err(|error| SessionDeleteFailure::UsageAccounting {
-            message: error.to_string(),
+            source: Box::new(error),
         })?;
     let process = match administration.process() {
         Some(process) => Some(
@@ -460,20 +478,21 @@ impl ObligationRelay for SessionDeleteRelay {
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
         let ObligationDelivery { id, key, .. } = delivery;
         let ObligationKey::SessionDelete { session_id } = key else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "a {} key on the session_delete ledger",
-                key.kind()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::SessionDelete,
+                key,
+            ));
         };
         let cleanup = self
             .ledger
             .undelivered_cleanup(session_id)
             .await
-            .map_err(|error| DeliveryFailure::Retryable(error.to_string()))?;
+            .map_err(DeliveryFailure::retryable)?;
         if !cleanup.is_settled() {
             self.record(id, DeleteAttempt::Waiting(cleanup));
-            return Err(DeliveryFailure::Retryable(format!(
-                "session `{session_id}` waits on its cleanup: {cleanup}"
+            return Err(DeliveryFailure::Retryable(DeliveryError::new(
+                RuntimeErrorCode::SessionDeleteCleanupPending,
+                format!("session `{session_id}` waits on its cleanup: {cleanup}"),
             )));
         }
         match physically_delete(&self.administration, session_id).await {
@@ -482,9 +501,12 @@ impl ObligationRelay for SessionDeleteRelay {
                 Ok(())
             }
             Err(failure) => {
-                let message = format!("session `{session_id}` physical delete: {failure}");
+                let error = DeliveryError::new(
+                    failure.code(),
+                    format!("session `{session_id}` physical delete: {failure}"),
+                );
                 self.record(id, DeleteAttempt::Failed(failure));
-                Err(DeliveryFailure::Retryable(message))
+                Err(DeliveryFailure::Retryable(error))
             }
         }
     }

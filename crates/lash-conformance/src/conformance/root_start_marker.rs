@@ -213,9 +213,9 @@ pub async fn fresh_execution_of_started_root_is_substrate_lost(
     match second {
         RootOutcome::Refused {
             root: refused,
-            verdict: lash_core::engine::SealVerdict::SubstrateLost { .. },
+            refusal: lash_core::engine::SealRefusal::ExecutionLost,
         } => assert_eq!(refused, root),
-        other => panic!("a fresh execution of a started root is SubstrateLost: {other:?}"),
+        other => panic!("a fresh execution of a started root is refused ExecutionLost: {other:?}"),
     }
     assert_eq!(
         calls.load(Ordering::SeqCst),

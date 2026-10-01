@@ -1003,7 +1003,9 @@ async fn cleanup_never_counts_an_undecodable_edge_as_absent() {
         });
     assert!(matches!(
         harness.deliver_row(&id, &key).await,
-        Err(DeliveryFailure::Undecodable(error)) if error.contains("synthetic_next")
+        Err(DeliveryFailure::Undecodable(error))
+            if error.code == crate::RuntimeErrorCode::StoreIncompatible
+                && error.message.contains("synthetic_next")
     ));
     assert!(
         harness

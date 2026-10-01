@@ -52,8 +52,8 @@ const ATTACH_PAUSE_CEILING: Duration = Duration::from_secs(2);
 pub(super) enum Sent {
     /// Restate accepted it under the drive's request.
     Accepted,
-    /// It did not reach Restate.
-    Failed(String),
+    /// It did not reach Restate, or Restate refused it.
+    Failed(lash_core::engine::EngineRefusal),
 }
 
 /// One drive the engine sends for a session, named by the first ask that
@@ -82,7 +82,10 @@ impl Drive {
         // The drive holds the sender, so the wait ends only on a value.
         match sent.wait_for(Option::is_some).await {
             Ok(sent) => sent.clone().unwrap_or(Sent::Accepted),
-            Err(_) => Sent::Failed(format!("drive `{}` was dropped", self.request.as_str())),
+            Err(_) => Sent::Failed(lash_core::engine::EngineRefusal::retryable(
+                lash_core::RuntimeErrorCode::EngineControlRequest,
+                format!("drive `{}` was dropped", self.request.as_str()),
+            )),
         }
     }
 
@@ -243,7 +246,7 @@ async fn pump(engine: RestateSessionWork, session: SessionId, mut drive: Arc<Dri
                 );
                 drive
                     .sent
-                    .send_replace(Some(Sent::Failed(error.to_string())));
+                    .send_replace(Some(Sent::Failed(crate::session_control::refusal(error))));
             }
         }
         match engine.asks.hand_over(&session, &drive) {

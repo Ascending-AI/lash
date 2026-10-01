@@ -67,12 +67,13 @@ crate::statements! {
         /// Session `?1`'s drive epoch, the admission that last raised it, the
         /// start marker of the execution that sealed that admission, the
         /// control intent the session is closing under, and whether a cancel
-        /// or fork still owes its engine half (pending, or failed and
-        /// retryable). A verb the engine refused for good owes nothing more:
-        /// it is surfaced on the intent, and the session drives on.
+        /// or fork still owes its engine half (`engine_half_owed`). A verb
+        /// the engine refused for good, or whose obligation stalled, owes
+        /// nothing more: it is surfaced for an operator, and the session
+        /// drives on.
         select_drive_epoch = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
             EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
-                AND kind IN ('cancel', 'fork') AND state IN ('pending', 'failed_retryable'))
+                AND kind IN ('cancel', 'fork') AND engine_half_owed)
             FROM session_meta WHERE session_id = ?1";
 
         /// The seal's compare-and-set: raise session `?1`'s drive epoch from
@@ -148,7 +149,7 @@ crate::statements! {
         obligation_arm = "UPDATE session_meta
              SET obligation_id = ?2, obligation_state = 'due', obligation_attempts = 0,
                  obligation_due_at_ms = ?3, obligation_claim_token = NULL,
-                 obligation_stall_reason = NULL, obligation_last_error = NULL,
+                 obligation_stall_reason = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = NULL
              WHERE session_id = ?1 AND obligation_state IS NULL";
 
@@ -182,25 +183,25 @@ crate::statements! {
         /// Settle claim `?2` on obligation `?1` delivered at `?3`.
         obligation_settle_delivered = "UPDATE session_meta
              SET obligation_state = 'delivered', obligation_claim_token = NULL,
-                 obligation_due_at_ms = NULL, obligation_last_error = NULL,
+                 obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = ?3
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
         /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
-        /// error `?4`.
+        /// error `?4` under code `?5`.
         obligation_settle_retry = "UPDATE session_meta
              SET obligation_state = 'due', obligation_claim_token = NULL,
-                 obligation_due_at_ms = ?3, obligation_last_error = ?4
+                 obligation_due_at_ms = ?3, obligation_last_error = ?4, obligation_last_error_code = ?5
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
         /// Stall claim `?2` on obligation `?1` for reason `?3` with error
-        /// `?4` at `?5`.
+        /// `?4` under code `?6` at `?5`.
         obligation_settle_stall = "UPDATE session_meta
              SET obligation_state = 'stalled', obligation_claim_token = NULL,
                  obligation_due_at_ms = NULL, obligation_stall_reason = ?3,
-                 obligation_last_error = ?4, obligation_settled_at_ms = ?5
+                 obligation_last_error = ?4, obligation_last_error_code = ?6, obligation_settled_at_ms = ?5
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";
 
@@ -211,7 +212,7 @@ crate::statements! {
              WHERE obligation_id = ?1 AND obligation_state = 'stalled'";
 
         /// At most `?2` stalled obligations after id `?1`, in id order.
-        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_settled_at_ms, session_id
+        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_last_error_code, obligation_settled_at_ms, session_id
              FROM session_meta
              WHERE obligation_state = 'stalled' AND obligation_id > ?1
              ORDER BY obligation_id

@@ -452,18 +452,12 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
     let retained = async |intent: Option<ControlIntent>, calls: usize| {
         let intent = intent.expect("the close intent is kept");
         assert!(
-            matches!(
-                intent.state,
-                ControlIntentState::Failed {
-                    retryable: true,
-                    ..
-                }
-            ),
-            "a failed engine half is retained, retryable: {intent:?}"
+            matches!(intent.state, ControlIntentState::Pending),
+            "a failed engine half leaves the intent pending: {intent:?}"
         );
         assert_eq!(
             intents
-                .state(intent.obligation.as_ref().expect("armed by the close"))
+                .state(intent.obligation_id().expect("armed by the close"))
                 .await
                 .expect("obligation state"),
             Some(ObligationState::Due),
@@ -789,7 +783,7 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
         .find(|intent| intent.session_id == id)
         .expect("the interrupted close is kept");
     let intents = stores.obligation_ledger(ObligationKind::ControlIntent);
-    let obligation = open.obligation.clone().expect("armed by the close");
+    let obligation = open.obligation_id().cloned().expect("armed by the close");
     assert_eq!(
         intents.state(&obligation).await.expect("obligation state"),
         Some(ObligationState::Claimed),

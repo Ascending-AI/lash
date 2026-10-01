@@ -13,8 +13,12 @@
 
 use std::sync::Arc;
 
-use super::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy};
-use crate::store::{ArtifactCleanupLedger, ObligationKey, ObligationLedger};
+use super::drive::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
+};
+use crate::store::{
+    ArtifactCleanupLedger, DeliveryError, ObligationKey, ObligationKind, ObligationLedger,
+};
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreError,
     ArtifactStoreId, EffectHost, JournalReplay, ModuleArtifactStore, PluginError,
@@ -207,8 +211,8 @@ impl ArtifactCleanupRelay {
         match self.ports.authorities.journal_replay(journal).await {
             Ok(JournalReplay::Settled) => Ok(true),
             Ok(JournalReplay::MayReplay) => Ok(false),
-            Err(error) => Err(DeliveryFailure::Retryable(format!(
-                "journal verdict for `{}`: {error}",
+            Err(error) => Err(retryable_text("journal verdict")(format!(
+                "`{}`: {error}",
                 journal.key()
             ))),
         }
@@ -370,12 +374,12 @@ impl ArtifactCleanupRelay {
         };
         let record = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
         let claim = ReferrerClaim::unguarded(record.clone())
-            .map_err(|error| DeliveryFailure::Undecodable(error.to_string()))?;
+            .map_err(|error| undecodable(error.to_string()))?;
         for name in self.retained_names(&retained).await? {
             let acquired = match &name.store {
                 ArtifactStoreId::ProcessDefinition => {
                     let id = ProcessDefinitionId::parse(&name.artifact_ref).map_err(|error| {
-                        DeliveryFailure::Undecodable(format!(
+                        undecodable(format!(
                             "the retained record names definition `{}`: {error}",
                             name.artifact_ref
                         ))
@@ -410,7 +414,7 @@ impl ArtifactCleanupRelay {
                         .await
                 }
                 store => {
-                    return Err(DeliveryFailure::Undecodable(format!(
+                    return Err(undecodable(format!(
                         "unknown artifact store for retained start: {store:?}"
                     )));
                 }
@@ -421,10 +425,12 @@ impl ArtifactCleanupRelay {
                 Err(PluginError::Runtime(error))
                     if error.code == RuntimeErrorCode::ArtifactMissing => {}
                 Err(error) => {
-                    return Err(DeliveryFailure::Retryable(format!(
-                        "holding `{}` under `{record}`: {error}",
-                        name.artifact_ref
-                    )));
+                    return Err(DeliveryFailure::Retryable(
+                        plugin_delivery_error(error).in_context(format_args!(
+                            "holding `{}` under `{record}`",
+                            name.artifact_ref
+                        )),
+                    ));
                 }
             }
         }
@@ -449,7 +455,7 @@ impl ArtifactCleanupRelay {
         }
         let referrer = ArtifactReferrer::ProcessRecord(retained.process_id.clone());
         let claim = ReferrerClaim::unguarded(referrer.clone())
-            .map_err(|error| DeliveryFailure::Undecodable(error.to_string()))?;
+            .map_err(|error| undecodable(error.to_string()))?;
         match self
             .ports
             .attachments
@@ -487,13 +493,11 @@ impl ArtifactCleanupRelay {
                 .definitions
                 .get_process_definition(definition_id)
                 .await
-                .map_err(|error| DeliveryFailure::Retryable(format!("definition read: {error}")))?
+                .map_err(|error| retryable("definition read")(PluginError::from(error)))?
             {
                 let draft = ProcessDefinitionDraft::from_store_bytes(definition_id, &bytes)
                     .map_err(|error| {
-                        DeliveryFailure::Undecodable(format!(
-                            "stored definition `{definition_id}`: {error}"
-                        ))
+                        undecodable(format!("stored definition `{definition_id}`: {error}"))
                     })?;
                 names.extend(draft.artifacts().iter().cloned());
             }
@@ -506,12 +510,16 @@ impl ArtifactCleanupRelay {
         }
         if let ProcessInput::Engine { kind, payload } = retained.input.as_ref() {
             let engine = self.ports.engines.require(kind).map_err(|error| {
-                DeliveryFailure::Refused(format!(
-                    "the retained record names engine `{kind}`: {error}"
-                ))
+                DeliveryFailure::Refused(
+                    plugin_delivery_error(error)
+                        .in_context(format_args!("the retained record names engine `{kind}`")),
+                )
             })?;
             names.extend(engine.start_artifacts(payload).map_err(|error| {
-                DeliveryFailure::Refused(format!("the retained record's engine artifacts: {error}"))
+                DeliveryFailure::Refused(
+                    plugin_delivery_error(error)
+                        .in_context("the retained record's engine artifacts"),
+                )
             })?);
         }
         Ok(names)
@@ -575,39 +583,53 @@ impl ArtifactCleanupRelay {
     }
 }
 
+/// An authority read that answered only text: a store fault, retried.
 fn retryable_text(context: &'static str) -> impl Fn(String) -> DeliveryFailure {
-    move |error| DeliveryFailure::Retryable(format!("{context}: {error}"))
+    move |error| {
+        DeliveryFailure::Retryable(
+            DeliveryError::new(RuntimeErrorCode::RuntimeStore, error).in_context(context),
+        )
+    }
 }
 
 fn retryable(context: &'static str) -> impl Fn(PluginError) -> DeliveryFailure {
-    move |error| DeliveryFailure::Retryable(format!("{context}: {error}"))
+    move |error| DeliveryFailure::Retryable(plugin_delivery_error(error).in_context(context))
+}
+
+/// A cleanup row or the record it names that this build cannot read.
+fn undecodable(message: String) -> DeliveryFailure {
+    DeliveryFailure::Undecodable(DeliveryError::new(
+        RuntimeErrorCode::RuntimeStoreCorrupt,
+        message,
+    ))
 }
 
 /// A carry whose bytes are gone is refused and stalls the row; every other
 /// store failure is retried.
 fn store_failure(context: &'static str) -> impl Fn(ArtifactStoreError) -> DeliveryFailure {
-    move |error| match error {
-        ArtifactStoreError::CarryArtifactMissing { .. }
-        | ArtifactStoreError::ReferrerKindRefused { .. } => {
-            DeliveryFailure::Refused(format!("{context}: {error}"))
-        }
-        ArtifactStoreError::Incompatible { .. }
-        | ArtifactStoreError::UnsupportedGeneration { .. }
-        | ArtifactStoreError::StoredDataCorrupt { .. } => {
-            DeliveryFailure::Undecodable(format!("{context}: {error}"))
-        }
-        other => DeliveryFailure::Retryable(format!("{context}: {other}")),
+    move |error| {
+        let class: fn(DeliveryError) -> DeliveryFailure = match &error {
+            ArtifactStoreError::CarryArtifactMissing { .. }
+            | ArtifactStoreError::ReferrerKindRefused { .. } => DeliveryFailure::Refused,
+            ArtifactStoreError::Incompatible { .. }
+            | ArtifactStoreError::UnsupportedGeneration { .. }
+            | ArtifactStoreError::StoredDataCorrupt { .. } => DeliveryFailure::Undecodable,
+            _ => DeliveryFailure::Retryable,
+        };
+        class(plugin_delivery_error(PluginError::from(error)).in_context(context))
     }
 }
 
 /// An attachment-store fault is retried, except a row this build cannot read,
 /// which no retry repairs.
 fn durable_store_failure(context: &'static str) -> impl Fn(crate::StoreError) -> DeliveryFailure {
-    move |error| match error {
-        crate::StoreError::Incompatible { .. } | crate::StoreError::StoredDataCorrupt { .. } => {
-            DeliveryFailure::Undecodable(format!("{context}: {error}"))
-        }
-        other => DeliveryFailure::Retryable(format!("{context}: {other}")),
+    move |error| {
+        let class: fn(DeliveryError) -> DeliveryFailure = match &error {
+            crate::StoreError::Incompatible { .. }
+            | crate::StoreError::StoredDataCorrupt { .. } => DeliveryFailure::Undecodable,
+            _ => DeliveryFailure::Retryable,
+        };
+        class(DeliveryError::from(error).in_context(context))
     }
 }
 
@@ -624,10 +646,10 @@ impl ObligationRelay for ArtifactCleanupRelay {
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
         let ObligationDelivery { id, key, .. } = delivery;
         let ObligationKey::ArtifactCleanup { referrer } = key else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "the artifact-cleanup relay was handed a {} key",
-                key.kind()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::ArtifactCleanup,
+                key,
+            ));
         };
         // 1. A missing row was settled by another relay.
         let Some(cleanup) = self
@@ -640,7 +662,7 @@ impl ObligationRelay for ArtifactCleanupRelay {
             return Ok(());
         };
         if cleanup.referrer() != *referrer {
-            return Err(DeliveryFailure::Undecodable(format!(
+            return Err(undecodable(format!(
                 "cleanup `{id}` names referrer `{}`, not its row's `{referrer}`",
                 cleanup.referrer()
             )));

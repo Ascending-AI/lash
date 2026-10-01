@@ -676,11 +676,8 @@ impl SessionWorkEngine for RestateSessionWork {
         session: &SessionId,
         request: DriveRequestId,
     ) -> Result<(), lash_core::engine::EngineRefusal> {
-        let refusal = |request: &DriveRequestId, error: &dyn std::fmt::Display| {
-            lash_core::engine::EngineRefusal::Retryable(format!(
-                "drive `{}` of session `{session}` was not accepted: {error}",
-                request.as_str()
-            ))
+        let refusal = |request: &DriveRequestId, cause| {
+            crate::session_control::unaccepted_drive(session, request, cause)
         };
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             // No runtime to pump on: send this ask alone.
@@ -688,7 +685,7 @@ impl SessionWorkEngine for RestateSessionWork {
                 .send_drive(session, request.clone())
                 .await
                 .map(|_| ())
-                .map_err(|error| refusal(&request, &error));
+                .map_err(|error| refusal(&request, crate::session_control::refusal(error)));
         };
         let joined = self.asks.join(self, &runtime, session, request);
         if joined.queued {
@@ -696,7 +693,7 @@ impl SessionWorkEngine for RestateSessionWork {
         }
         match joined.drive.sent().await {
             asks::Sent::Accepted => Ok(()),
-            asks::Sent::Failed(error) => Err(refusal(joined.drive.request(), &error)),
+            asks::Sent::Failed(error) => Err(refusal(joined.drive.request(), error)),
         }
     }
 

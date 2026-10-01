@@ -1227,7 +1227,7 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
         let claimed = services
             .intents
             .claim(
-                intent.obligation.as_ref().expect("close obligation"),
+                intent.obligation_id().expect("close obligation"),
                 &lash_core::store::ClaimToken::mint(),
                 services.clock.timestamp_ms(),
                 services.policy.claim_ttl_ms,

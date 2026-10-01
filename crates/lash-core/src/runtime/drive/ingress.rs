@@ -24,7 +24,6 @@ use super::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict,
     deliver_claimed, deliver_now,
 };
-use crate::engine::EngineRefusal;
 pub use crate::engine::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
 use crate::store::ingress_obligation::ingress_obligation_id;
 use crate::store::{ObligationId, ObligationKey, ObligationKind, ObligationLedger};
@@ -185,18 +184,6 @@ fn report_store_failure(id: &ObligationId, error: &StoreError) {
     );
 }
 
-/// The engine's refusal as a delivery failure: a retryable refusal is worth
-/// another attempt after the backoff, a permanent one stalls the row.
-fn delivery_failure(refusal: EngineRefusal) -> DeliveryFailure {
-    match refusal {
-        EngineRefusal::Retryable(message) => DeliveryFailure::Retryable(message),
-        EngineRefusal::Permanent { code, message } => {
-            DeliveryFailure::Refused(format!("{code}: {message}"))
-        }
-        other => DeliveryFailure::Retryable(other.to_string()),
-    }
-}
-
 #[async_trait::async_trait]
 impl ObligationRelay for IngressRelay {
     fn ledger(&self) -> &dyn ObligationLedger {
@@ -222,14 +209,11 @@ impl ObligationRelay for IngressRelay {
             item_id,
         } = key
         else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "the ingress relay was handed a {} obligation",
-                key.kind()
-            )));
+            return Err(DeliveryFailure::key_mismatch(ObligationKind::Ingress, key));
         };
         self.work
             .request_drive(session_id, ingress_drive_request(item_id, attempt))
             .await
-            .map_err(delivery_failure)
+            .map_err(DeliveryFailure::from)
     }
 }

@@ -194,7 +194,10 @@ mod tests {
             "the ceiling's attempts are counted"
         );
         assert_eq!(
-            stalled.last_error.as_deref(),
+            stalled
+                .last_error
+                .as_ref()
+                .map(|error| error.message.as_str()),
             Some("plugin invoke error: the engine's ingress is down"),
             "the row carries the last delivery's error for the operator"
         );

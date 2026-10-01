@@ -324,6 +324,28 @@ impl RuntimeErrorCode {
             // engine interaction failed; re-attaching is safe.
             Self::EngineTurnTerminalAttach => Retryable,
             Self::EngineRootSubstrateLost => Terminal,
+            // the engine's control API did not carry out the ask; a later attempt asks again.
+            Self::EngineControlRequest => Redrivable,
+            // the installed engine has no such verb; only another engine changes that.
+            Self::EngineControlUnsupported => Terminal,
+            // the stored handle names another execution; a retry reads the same handle.
+            Self::EngineHandleMismatch => Terminal,
+            // the process holds no park; a redrive of it has nothing to resume.
+            Self::ProcessNotParked => Terminal,
+            // the process parked again; the caller must act on the current park.
+            Self::ProcessParkSuperseded => Terminal,
+            // the row's key names another ledger; no retry rewrites it.
+            Self::ObligationKeyMismatch => Terminal,
+            // the row lacks what its obligation needs; a retry reads the same row.
+            Self::ObligationRowInvariant => Terminal,
+            // the attempt was cut at its budget; delivery is idempotent.
+            Self::ObligationAttemptBudgetExceeded => Retryable,
+            // the engine accepted the asks and admitted nothing; an operator re-arm asks again.
+            Self::ObligationAskUnadmitted => Redrivable,
+            // another relay retook the claim; its attempt settles the row.
+            Self::ObligationClaimLost => Retryable,
+            // the cleanup the delete waits on is still running.
+            Self::SessionDeleteCleanupPending => Retryable,
             // the attach ceiling elapsed; re-attaching is safe.
             Self::EngineTurnTerminalAttachCeilingElapsed => Retryable,
             // the terminal does not decode.

@@ -17,9 +17,14 @@
 
 use std::sync::Arc;
 
-use super::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy};
-use crate::store::{ObligationKey, ObligationLedger};
-use crate::{Clock, PluginError, ProcessRegistry, ProcessWorkSubstrate, apply_parent_end_plan};
+use super::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
+};
+use crate::store::{DeliveryError, ObligationKey, ObligationKind, ObligationLedger};
+use crate::{
+    Clock, PluginError, ProcessRegistry, ProcessWorkSubstrate, RuntimeErrorCode,
+    apply_parent_end_plan,
+};
 
 /// The `ParentEnd` relay: the kind's ledger, plus the registry and process
 /// port its delivery applies through.
@@ -63,11 +68,11 @@ impl ParentEndRelay {
 /// is `refused` (stall); anything else is `retryable`.
 fn classify(context: &'static str) -> impl Fn(PluginError) -> DeliveryFailure {
     move |error| match &error {
-        PluginError::StoredDataCorrupt { message, .. } => {
-            DeliveryFailure::Undecodable(message.clone())
-        }
-        _ if error.is_terminal() => DeliveryFailure::Refused(error.to_string()),
-        _ => DeliveryFailure::Retryable(format!("{context}: {error}")),
+        PluginError::StoredDataCorrupt { message, .. } => DeliveryFailure::Undecodable(
+            DeliveryError::new(RuntimeErrorCode::RuntimeStoreCorrupt, message.clone()),
+        ),
+        _ if error.is_terminal() => DeliveryFailure::Refused(plugin_delivery_error(error)),
+        _ => DeliveryFailure::Retryable(plugin_delivery_error(error).in_context(context)),
     }
 }
 
@@ -96,10 +101,10 @@ impl ObligationRelay for ParentEndRelay {
             parent_id,
         } = key
         else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "a {} key cannot name a ParentEnd row",
-                key.kind().label()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::ParentEnd,
+                key,
+            ));
         };
         let plan = self
             .registry
@@ -107,7 +112,7 @@ impl ObligationRelay for ParentEndRelay {
             .await
             .map_err(classify("parent-end row read"))?
             .ok_or_else(|| {
-                DeliveryFailure::Refused(format!(
+                DeliveryFailure::row_invariant(format!(
                     "no parent-end row carries {parent_kind} `{parent_id}`"
                 ))
             })?;
@@ -170,9 +175,9 @@ mod tests {
             id: ObligationId::new(id),
             token: ClaimToken::new(format!("token-{id}")),
             attempts: 1,
-            key: Err(UndecodableObligation {
-                detail: format!("{id} cannot be read by this build"),
-            }),
+            key: Err(UndecodableObligation::malformed(format!(
+                "{id} cannot be read by this build"
+            ))),
         }
     }
 
@@ -340,9 +345,10 @@ mod tests {
         // A refusal for every deliverable row: one, two and four stall
         // refused, three stalls undecodable on its claim, and the page
         // completes — a failed claim never stops the rows behind it.
-        relay.fails_with(DeliveryFailure::Refused(
-            "the engine refused it for good".to_string(),
-        ));
+        relay.fails_with(DeliveryFailure::Refused(crate::store::DeliveryError::new(
+            crate::RuntimeErrorCode::EngineControlRequest,
+            "the engine refused it for good",
+        )));
         let pass = relay_due(
             &relay,
             &clock,
@@ -394,7 +400,12 @@ mod tests {
     async fn a_retryable_failure_at_the_attempt_ceiling_stalls_instead_of_retrying() {
         let relay = ScriptedRelay::new();
         let clock = TestClock::new(1_000);
-        relay.fails_with(DeliveryFailure::Retryable("the engine is down".to_string()));
+        relay.fails_with(DeliveryFailure::Retryable(
+            crate::store::DeliveryError::new(
+                crate::RuntimeErrorCode::EngineControlRequest,
+                "the engine is down",
+            ),
+        ));
         // Attempt 1 hands the row back under the policy's backoff; attempt 3
         // meets the ceiling and stalls instead.
         relay.ledger.due(vec![claim("obligation:a", 1, "a")]);
@@ -406,7 +417,10 @@ mod tests {
             relay.ledger.settles()[0].1,
             ObligationSettlement::Retry {
                 due_at_ms: 11_000,
-                error: "the engine is down".to_string(),
+                error: crate::store::DeliveryError::new(
+                    crate::RuntimeErrorCode::EngineControlRequest,
+                    "the engine is down"
+                ),
             }
         );
 
@@ -419,7 +433,10 @@ mod tests {
             relay.ledger.settles()[1].1,
             ObligationSettlement::Stall {
                 reason: StallReason::AttemptsExhausted,
-                error: "the engine is down".to_string(),
+                error: crate::store::DeliveryError::new(
+                    crate::RuntimeErrorCode::EngineControlRequest,
+                    "the engine is down"
+                ),
             }
         );
     }

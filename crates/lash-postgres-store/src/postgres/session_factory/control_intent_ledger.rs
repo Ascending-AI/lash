@@ -6,8 +6,8 @@
 use super::*;
 use lash_core_execution::store::{
     ClaimToken, ControlIntent, ControlIntentId, ControlIntentState, ControlIntentStore,
-    IntentApplication, IntentSettle, decide_intent_acknowledgement, decide_intent_application,
-    decide_intent_failure,
+    DeliveryError, IntentApplication, IntentSettle, decide_intent_acknowledgement,
+    decide_intent_application, decide_intent_refusal,
 };
 
 use crate::session_roots::{
@@ -114,18 +114,15 @@ impl ControlIntentStore for PostgresStore {
         .await
     }
 
-    async fn record_intent_failure(
+    async fn refuse_intent(
         &self,
         id: ControlIntentId,
         claim: &ClaimToken,
-        error: &str,
-        retryable: bool,
+        cause: &DeliveryError,
         _at_ms: u64,
     ) -> Result<IntentSettle, StoreError> {
-        self.settle_intent_claimed(id, claim, |stored| {
-            decide_intent_failure(stored, error, retryable)
-        })
-        .await
+        self.settle_intent_claimed(id, claim, |stored| decide_intent_refusal(stored, cause))
+            .await
     }
 
     async fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError> {

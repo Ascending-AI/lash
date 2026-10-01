@@ -357,19 +357,19 @@ fn stalled_at_ceiling(session: SessionId) -> crate::crash_matrix::invariants::Cu
                 .filter(|intent| intent.session_id == session)
             {
                 seen += 1;
-                if !matches!(
-                    intent.state,
-                    lash_core::store::ControlIntentState::Failed {
-                        retryable: false,
-                        ..
-                    }
-                ) {
+                // Running out of attempts is the obligation's fact alone:
+                // the intent stays pending and owes nothing more.
+                if intent.state != lash_core::store::ControlIntentState::Pending
+                    || intent.engine_half_owed()
+                {
                     violations.push(format!(
-                        "intent {} is {:?}, not failed for good",
-                        intent.id, intent.state
+                        "intent {} is {:?} (owed: {}), not pending behind a stalled obligation",
+                        intent.id,
+                        intent.state,
+                        intent.engine_half_owed()
                     ));
                 }
-                let Some(obligation) = intent.obligation.as_ref() else {
+                let Some(obligation) = intent.obligation_id() else {
                     violations.push(format!("intent {} has no obligation", intent.id));
                     continue;
                 };

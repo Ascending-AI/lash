@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use lash_core::engine::{
     AdmitVerdict, Admitted, DriveAbort, DriveOutcome, DriveRequest, DriveRequestId, DriveStop,
-    RootOutcome, SealVerdict, admission_body, drive_admission_replay_key,
+    RootOutcome, SealRefusal, admission_body, drive_admission_replay_key,
 };
 use lash_core::{
     EffectAddress, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
@@ -344,7 +344,7 @@ impl SessionDriver for ScriptedDriver {
                         Some(RootScript::Supersede) => {
                             return Ok(RootOutcome::Refused {
                                 root,
-                                verdict: SealVerdict::Superseded { epoch: 2 },
+                                refusal: SealRefusal::Superseded { epoch: 2 },
                             });
                         }
                         Some(RootScript::Cede) => return Ok(RootOutcome::Ceded { root }),
@@ -456,8 +456,8 @@ fn committed_roots(outcome: &DriveOutcome) -> Vec<String> {
         .iter()
         .map(|root| match root {
             RootOutcome::Committed { root, .. } => root.as_str().to_owned(),
-            RootOutcome::Refused { root, verdict } => {
-                panic!("root {root} was refused: {verdict:?}")
+            RootOutcome::Refused { root, refusal } => {
+                panic!("root {root} was refused: {refusal:?}")
             }
             RootOutcome::Ceded { root } => panic!("root {root} ceded"),
             RootOutcome::Applied { root } => panic!("root {root} ran no turn"),
@@ -1573,7 +1573,7 @@ async fn a_drive_whose_seal_another_driver_superseded_stops_cleanly() {
         outcome.ran,
         [RootOutcome::Refused {
             root: root.clone(),
-            verdict: SealVerdict::Superseded { epoch: 2 },
+            refusal: SealRefusal::Superseded { epoch: 2 },
         }]
     );
     assert_eq!(outcome.stop, DriveStop::Yielded { root });

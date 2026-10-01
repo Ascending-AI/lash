@@ -32,6 +32,7 @@ table lash_artifact_cleanup_obligations
   column obligation_due_at_ms bigint nullable
   column obligation_id text not-null
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text not-null default
@@ -93,6 +94,7 @@ table lash_checkpoint_blob_refs
   foreign-key (checkpoint_ref) references lash_blobs (hash) on delete cascade
 table lash_control_intents
   column created_at_ms bigint not-null
+  column engine_half_owed boolean not-null generated
   column engine_ref text nullable
   column format bigint not-null
   column intent_id bigint not-null default
@@ -103,6 +105,7 @@ table lash_control_intents
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
@@ -175,6 +178,7 @@ table lash_parent_end_plans
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
@@ -197,6 +201,7 @@ table lash_pending_turn_inputs
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
@@ -293,6 +298,7 @@ table lash_processes
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
@@ -310,6 +316,7 @@ table lash_processes
   column start_obligation_due_at_ms bigint nullable
   column start_obligation_id text nullable
   column start_obligation_last_error text nullable
+  column start_obligation_last_error_code text nullable
   column start_obligation_settled_at_ms bigint nullable
   column start_obligation_stall_reason text nullable
   column start_obligation_state text nullable
@@ -336,6 +343,7 @@ table lash_queued_work_batches
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
@@ -424,6 +432,7 @@ table lash_session_meta
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
@@ -456,6 +465,7 @@ table lash_session_roots
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
@@ -490,6 +500,7 @@ table lash_trigger_deliveries
   column obligation_due_at_ms bigint nullable
   column obligation_id text nullable
   column obligation_last_error text nullable
+  column obligation_last_error_code text nullable
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable

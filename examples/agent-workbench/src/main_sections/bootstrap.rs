@@ -400,7 +400,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                                             stalled.id.as_str(),
                                             stalled.reason,
                                             stalled.attempts,
-                                            stalled.last_error.as_deref().unwrap_or("none"),
+                                            stalled.last_error.as_ref().map_or_else(
+                                                || "none".to_owned(),
+                                                ToString::to_string,
+                                            ),
                                         );
                                     }
                                 }

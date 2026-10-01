@@ -138,7 +138,7 @@ pub async fn every_order_of_two_child_reconciles_and_a_redrive_counts_one_refusa
         );
         let f = Fixture::parked(admitted, &stores, park).await;
         assert!(
-            f.intent_state(redrive.id).await.is_open(),
+            f.owed(redrive.id).await,
             "a reconcile never acknowledges a redrive whose engine half has not run"
         );
         let (work, close) = f.control(false, false);
@@ -195,7 +195,7 @@ pub async fn every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of
         let send_root = format!("{name}-send");
         let send = f.parts.enqueue("racing send", Some(&send_root)).await;
         let intent = f.verb(RootVerb::Redrive).await.expect("redrive");
-        assert!(f.intent_state(intent.id).await.is_open());
+        assert!(f.owed(intent.id).await);
         f.parts.store = schedule.actor("send", Arc::clone(&f.parts.store));
         f.factory = schedule.actor("redrive", Arc::clone(&f.factory));
         schedule.yields_after("send", 2);

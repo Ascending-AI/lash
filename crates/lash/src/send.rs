@@ -477,8 +477,9 @@ pub struct StalledDelivery {
     pub reason: StallReason,
     /// Delivery attempts made before it stalled.
     pub attempts: u32,
-    /// The last delivery failure, as the relay recorded it.
-    pub last_error: Option<String>,
+    /// The last delivery failure, as the relay recorded it: its typed code
+    /// beside its message.
+    pub last_error: Option<lash_core::store::DeliveryError>,
     /// When it stalled, in milliseconds since the Unix epoch.
     pub stalled_at_ms: u64,
 }
@@ -586,7 +587,14 @@ impl SendOutcome {
                 stalled: RemoteStalledDelivery {
                     reason: stalled.reason.as_str().to_owned(),
                     attempts: stalled.attempts,
-                    last_error: stalled.last_error.clone(),
+                    code: stalled
+                        .last_error
+                        .as_ref()
+                        .map(|error| error.code.as_str().to_owned()),
+                    last_error: stalled
+                        .last_error
+                        .as_ref()
+                        .map(|error| error.message.clone()),
                     stalled_at_ms: stalled.stalled_at_ms,
                 },
                 gaps,

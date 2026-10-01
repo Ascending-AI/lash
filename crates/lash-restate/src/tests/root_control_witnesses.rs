@@ -567,8 +567,9 @@ impl SessionControlEngine for LostResumeReply {
         engine: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal> {
         self.inner.resume_root(target, engine).await?;
-        Err(EngineRefusal::Retryable(
-            "lost reply after the engine resumed".into(),
+        Err(EngineRefusal::retryable(
+            lash_core::RuntimeErrorCode::EngineControlRequest,
+            "lost reply after the engine resumed",
         ))
     }
     async fn release_root(
@@ -834,9 +835,19 @@ async fn a_drive_paused_only_by_an_unsettled_redrive_is_resumed_once_it_settles(
         .deliver_intent(&intent)
         .await
         .expect("apply");
+    assert_eq!(
+        lost,
+        ControlIntentState::Pending,
+        "the lost reply leaves the redrive pending"
+    );
     assert!(
-        lost.is_open(),
-        "the lost reply keeps the redrive open: {lost:?}"
+        f.factory
+            .load_intent(intent.id)
+            .await
+            .expect("intent")
+            .expect("retained")
+            .engine_half_owed(),
+        "the lost reply keeps the redrive owed"
     );
     f.await_paused_drive().await;
     let open = f.park_pass().await;
@@ -957,8 +968,9 @@ impl SessionControlEngine for InterruptedRelease {
     ) -> Result<EngineAck, EngineRefusal> {
         let answer = self.inner.release_root(target, engine).await?;
         if self.interrupt.swap(false, Ordering::SeqCst) {
-            return Err(EngineRefusal::Retryable(
-                "lost acknowledgement after engine release".into(),
+            return Err(EngineRefusal::retryable(
+                lash_core::RuntimeErrorCode::EngineControlRequest,
+                "lost acknowledgement after engine release",
             ));
         }
         Ok(answer)
@@ -1058,14 +1070,9 @@ async fn crash_gaps(server: HarnessServer) {
                     .await
                     .expect("interrupted apply");
                 if gap == 1 {
-                    // A lost release stays on the intent.
-                    assert!(matches!(
-                        state,
-                        ControlIntentState::Failed {
-                            retryable: true,
-                            ..
-                        }
-                    ));
+                    // A lost release leaves the intent pending: the failed
+                    // attempt is its obligation's alone.
+                    assert_eq!(state, ControlIntentState::Pending);
                 } else {
                     // A missed scope close is its armed `ScopeClose`
                     // obligation's to retry: it never holds the intent open.
@@ -1346,6 +1353,88 @@ async fn one_failing_paused_execution_never_fails_the_park_page() {
         "the cursor moves past the failed execution"
     );
     f.finish().await;
+}
+
+/// F12 (FIG-4648): a control verb Restate can never carry out is refused for
+/// good under its typed code, so the intent's relay stalls it at once instead
+/// of retrying it to the attempt ceiling. A stored engine handle that names
+/// a run of another session is such a verb, for a resume and a release
+/// alike.
+async fn mismatched_handle(server: HarnessServer) {
+    let f = Fixture::new(server, false).await;
+    let admin = f.harness.admin_client();
+    let mut paused = Vec::new();
+    for _ in 0..2000 {
+        if let Some(double) = f.harness.server_double() {
+            double.settle().await;
+            double.fire_next_timer();
+        }
+        paused = admin
+            .paused_work_page(&crate::services::DEFAULT_NAMESPACE, None, NonZeroUsize::MIN)
+            .await
+            .expect("paused listing");
+        if !paused.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(paused.len(), 1, "the root's execution pauses");
+    // The handle names the paused run of the fixture's session; the verb
+    // names a root of another session.
+    let handle = EnginePark::new(paused[0].id.clone());
+    let other = RootRef {
+        session: SessionId::from(format!("{}-other", f.driver.session)),
+        root: f.driver.root.clone(),
+    };
+    let control = f.work.control();
+    for refusal in [
+        control
+            .resume_root(&other, Some(&handle))
+            .await
+            .expect_err("a resume under another session's handle"),
+        control
+            .release_root(&other, Some(&handle))
+            .await
+            .expect_err("a release under another session's handle"),
+    ] {
+        assert_eq!(
+            (refusal.disposition, &refusal.code),
+            (
+                RefusalDisposition::Permanent,
+                &lash_core::RuntimeErrorCode::EngineHandleMismatch
+            ),
+            "{refusal:?}"
+        );
+        assert!(
+            matches!(
+                lash_core::drive::relay::DeliveryFailure::from(refusal),
+                lash_core::drive::relay::DeliveryFailure::Refused(cause)
+                    if cause.code == lash_core::RuntimeErrorCode::EngineHandleMismatch
+            ),
+            "the relay stalls it refused, under the engine's code"
+        );
+    }
+    // The run the handle names was neither resumed nor killed.
+    let after = admin
+        .paused_work_page(&crate::services::DEFAULT_NAMESPACE, None, NonZeroUsize::MIN)
+        .await
+        .expect("paused listing");
+    assert_eq!(
+        after.iter().map(|run| &run.id).collect::<Vec<_>>(),
+        vec![&paused[0].id]
+    );
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_handle_naming_another_sessions_run_is_refused_for_good_with_its_code() {
+    mismatched_handle(HarnessServer::in_process()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires the pinned live Restate server"]
+async fn live_a_handle_naming_another_sessions_run_is_refused_for_good_with_its_code() {
+    mismatched_handle(HarnessServer::Live).await;
 }
 
 #[derive(Default)]
@@ -1752,7 +1841,7 @@ async fn recovery_tick_keeps_cadence_with_slow_control_rpc(server: HarnessServer
         "the retry began {:?} after the cut attempt",
         *retried - *cut
     );
-    assert!(matches!(
+    assert_eq!(
         factory
             .load_intent(intent.id)
             .await
@@ -1760,11 +1849,7 @@ async fn recovery_tick_keeps_cadence_with_slow_control_rpc(server: HarnessServer
             .expect("retained")
             .state,
         ControlIntentState::Pending
-            | ControlIntentState::Failed {
-                retryable: true,
-                ..
-            }
-    ));
+    );
     harness.finish().await;
 }
 

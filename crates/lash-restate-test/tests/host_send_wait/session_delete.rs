@@ -618,7 +618,10 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
                 &claim.token,
                 ObligationSettlement::Stall {
                     reason: lash_core::store::StallReason::Refused,
-                    error: "scope close needs operator repair".into(),
+                    error: lash_core::store::DeliveryError::new(
+                        lash_core::RuntimeErrorCode::EngineControlRequest,
+                        "scope close needs operator repair"
+                    ),
                 },
                 world.backend.server().now_ms()
             )
@@ -637,7 +640,10 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
     assert_eq!(stalled.kind, ObligationKind::ScopeClose);
     assert_eq!(stalled.id, id);
     assert_eq!(
-        stalled.last_error.as_deref(),
+        stalled
+            .last_error
+            .as_ref()
+            .map(|error| error.message.as_str()),
         Some("scope close needs operator repair")
     );
     assert!(

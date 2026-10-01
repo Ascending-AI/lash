@@ -1206,7 +1206,10 @@ mod tests {
             key: ObligationKey::decode(ObligationKind::ControlIntent, vec![KeyColumn::Integer(7)]),
             reason: StallReason::AttemptsExhausted,
             attempts: 3,
-            last_error: Some("the engine was unavailable".to_owned()),
+            last_error: Some(lash_core_store::store::DeliveryError::new(
+                lash_core_execution::RuntimeErrorCode::EngineControlRequest,
+                "the engine was unavailable",
+            )),
             stalled_at_ms: 11,
         };
         assert_eq!(
@@ -1218,7 +1221,10 @@ mod tests {
                 "row": {"intent_id": 7},
                 "undecodable": null,
                 "attempts": 3,
-                "last_error": "the engine was unavailable",
+                "last_error": {
+                    "code": "engine_control_request",
+                    "message": "the engine was unavailable",
+                },
                 "stalled_at_ms": 11,
             })
         );
@@ -1227,6 +1233,7 @@ mod tests {
             kind: ObligationKind::ArtifactCleanup,
             id: ObligationId::new("obligation-foreign"),
             key: Err(UndecodableObligation {
+                code: lash_core_execution::RuntimeErrorCode::StoreIncompatible,
                 detail: "unknown artifact referrer kind `synthetic_next`".to_owned(),
             }),
             reason: StallReason::Undecodable,

@@ -1640,7 +1640,8 @@ mod recovery_tests {
             connection.execute(
                 "UPDATE session_roots SET obligation_state = 'due', obligation_due_at_ms = ?1, \
                  obligation_attempts = 1, obligation_claim_token = NULL, obligation_settled_at_ms = NULL, \
-                 obligation_last_error = 'the delivery ran past its 30000 ms attempt budget' \
+                 obligation_last_error = 'the delivery ran past its 30000 ms attempt budget', \
+                 obligation_last_error_code = 'obligation_attempt_budget_exceeded' \
                  WHERE session_id = 'suspend-exec-code' AND root = 'suspend-exec-code:suspend-turn'",
                 [due],
             ).expect("plant the CI timeout's durable retry"),

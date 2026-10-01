@@ -620,11 +620,12 @@ struct CrashControl {
 
 fn refusal(effect: ArmEffect, site: HostSite) -> lash_core::engine::EngineRefusal {
     match effect {
-        ArmEffect::Refuse => lash_core::engine::EngineRefusal::Permanent {
-            code: lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
-            message: format!("crash matrix: {site:?} refused for good"),
-        },
-        ArmEffect::Crash | ArmEffect::FailRetryable => lash_core::engine::EngineRefusal::Retryable(
+        ArmEffect::Refuse => lash_core::engine::EngineRefusal::permanent(
+            lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
+            format!("crash matrix: {site:?} refused for good"),
+        ),
+        ArmEffect::Crash | ArmEffect::FailRetryable => lash_core::engine::EngineRefusal::retryable(
+            lash_core::RuntimeErrorCode::EngineControlRequest,
             format!("crash matrix: {site:?} failed retryably"),
         ),
     }

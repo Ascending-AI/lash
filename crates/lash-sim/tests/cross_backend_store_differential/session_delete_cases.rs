@@ -99,8 +99,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         .obligation_ledger(ObligationKind::ControlIntent)
         .claim(
             intent
-                .obligation
-                .as_ref()
+                .obligation_id()
                 .expect("the close armed its obligation"),
             &lash_core::store::ClaimToken::mint(),
             T0 + 1,

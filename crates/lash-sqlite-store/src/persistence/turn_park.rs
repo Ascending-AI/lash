@@ -119,7 +119,7 @@ fn stored_head(
                 intent,
                 open: redrive
                     .as_ref()
-                    .is_some_and(|redrive| redrive.state.is_open()),
+                    .is_some_and(ControlIntent::engine_half_owed),
             }),
         },
         redrive,
@@ -229,7 +229,9 @@ pub(crate) fn record_turn_park_conn(
             // lost. Settle it here, so it never resumes the root again. Only
             // the root's own refusal re-parks past an open redrive: a
             // reconcile write is decided `Unchanged` against one.
-            if let Some(open) = redrive.filter(|redrive| redrive.state.is_open()) {
+            if let Some(open) =
+                redrive.filter(|redrive| matches!(redrive.state, ControlIntentState::Pending))
+            {
                 let mut settled = open.clone();
                 settled.state = ControlIntentState::Acknowledged { at_ms: write.at_ms };
                 if !crate::session_roots::write_intent_state_conn(conn, &open, &settled)? {

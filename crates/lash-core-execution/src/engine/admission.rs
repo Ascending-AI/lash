@@ -60,8 +60,21 @@ pub enum AdmitVerdict {
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum SealVerdict {
     Sealed(DriveFence),
-    SubstrateLost { root: TurnId },
+    Refused(SealRefusal),
+}
+
+/// Why a seal refused its admission: nothing ran. The refused root is the
+/// admission's own, so a refusal names none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "refusal", rename_all = "snake_case")]
+pub enum SealRefusal {
+    /// Another admission raised the drive epoch to `epoch`, past the one
+    /// this admission observed.
     Superseded { epoch: u64 },
+    /// Another execution of the root sealed this admission under a start
+    /// marker this execution did not draw: it cannot read what that one did,
+    /// so it must not run the root (ADR 0105 L-S8).
+    ExecutionLost,
 }
 
 /// An admission granted by a recorded `AdmitDrive` step, to be sealed.

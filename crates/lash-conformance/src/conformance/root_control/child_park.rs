@@ -227,7 +227,7 @@ pub async fn a_delayed_child_reconcile_never_settles_a_redrive_admitted_since_it
 
     // The operator's redrive is admitted before its engine half runs.
     let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
-    assert!(f.intent_state(redrive.id).await.is_open());
+    assert!(f.owed(redrive.id).await);
 
     // The delayed pass writes what it prepared before the redrive existed.
     gate.open_one();
@@ -244,7 +244,7 @@ pub async fn a_delayed_child_reconcile_never_settles_a_redrive_admitted_since_it
         "the delayed write counts no refusal and keeps the reason"
     );
     assert!(
-        f.intent_state(redrive.id).await.is_open(),
+        f.owed(redrive.id).await,
         "a reconcile never acknowledges a redrive whose engine half has not run"
     );
     assert_eq!(

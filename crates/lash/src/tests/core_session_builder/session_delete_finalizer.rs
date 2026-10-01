@@ -216,7 +216,8 @@ async fn a_stalled_delete_is_surfaced_until_rearmed() -> Result<()> {
     assert!(
         stalled[0]
             .last_error
-            .as_deref()
+            .as_ref()
+            .map(|error| error.message.as_str())
             .is_some_and(|error| error.contains("waits on its cleanup")),
         "{:?}",
         stalled[0].last_error
@@ -460,7 +461,7 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .filter_map(|(_, settlement)| match settlement {
-            ObligationSettlement::Retry { error, .. } => Some(error.clone()),
+            ObligationSettlement::Retry { error, .. } => Some(error.message.clone()),
             _ => None,
         })
         .collect();
@@ -584,7 +585,10 @@ async fn delete_delivery_exhausts_its_budget(
                         &claim.token,
                         ObligationSettlement::Retry {
                             due_at_ms: now,
-                            error: "earlier delivery exhausted its budget".into(),
+                            error: lash_core::store::DeliveryError::new(
+                                lash_core::RuntimeErrorCode::EngineControlRequest,
+                                "earlier delivery exhausted its budget",
+                            ),
                         },
                         now,
                     )
@@ -636,7 +640,10 @@ async fn delete_delivery_exhausts_its_budget(
                 .any(|(_, settlement)| match settlement {
                     ObligationSettlement::Retry { error, .. }
                     | ObligationSettlement::Stall { error, .. } =>
-                        error.contains(&format!("past its {BUDGET_MS} ms attempt budget")),
+                        error.code == lash_core::RuntimeErrorCode::ObligationAttemptBudgetExceeded
+                            && error
+                                .message
+                                .contains(&format!("past its {BUDGET_MS} ms attempt budget")),
                     ObligationSettlement::Delivered | ObligationSettlement::Defer { .. } => false,
                 })
         );

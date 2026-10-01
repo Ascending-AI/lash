@@ -242,7 +242,10 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
         &plans[1],
         ObligationSettlement::Stall {
             reason: StallReason::Refused,
-            error: "a child refused its cancel".into(),
+            error: crate::store::DeliveryError::new(
+                crate::RuntimeErrorCode::EngineControlRequest,
+                "a child refused its cancel",
+            ),
         },
         now,
     )

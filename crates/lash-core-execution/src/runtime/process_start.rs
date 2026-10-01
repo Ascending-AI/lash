@@ -6,7 +6,8 @@ use crate::runtime::drive::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, deliver_now,
 };
 use crate::store::{
-    ClaimToken, ObligationKey, ObligationLedger, ObligationSettlement, process_start_obligation_id,
+    ClaimToken, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
+    process_start_obligation_id,
 };
 use crate::{Clock, PluginError, ProcessRegistry, ProcessWorkSubstrate};
 
@@ -121,14 +122,6 @@ impl ProcessStartRelay {
     }
 }
 
-fn failure(error: PluginError) -> DeliveryFailure {
-    if error.is_terminal() {
-        DeliveryFailure::Refused(error.to_string())
-    } else {
-        DeliveryFailure::Retryable(error.to_string())
-    }
-}
-
 #[async_trait::async_trait]
 impl ObligationRelay for ProcessStartRelay {
     fn ledger(&self) -> &dyn ObligationLedger {
@@ -142,15 +135,15 @@ impl ObligationRelay for ProcessStartRelay {
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
         let ObligationDelivery { key, .. } = delivery;
         let ObligationKey::ProcessStart { process_id } = key else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "a {} key on the process_start ledger",
-                key.kind()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::ProcessStart,
+                key,
+            ));
         };
         let record = match self.registry.get_process(process_id).await {
             Ok(record) => record,
             Err(PluginError::ProcessNoLongerRetained { .. }) => None,
-            Err(error) => return Err(failure(error)),
+            Err(error) => return Err(DeliveryFailure::of_plugin(error)),
         };
         let Some(record) = record else {
             return Ok(());
@@ -159,13 +152,13 @@ impl ObligationRelay for ProcessStartRelay {
             return Ok(());
         }
         if record.input.is_externally_owned() {
-            return Err(DeliveryFailure::Refused(format!(
+            return Err(DeliveryFailure::row_invariant(format!(
                 "externally owned process `{process_id}` has a start obligation"
             )));
         }
         self.port
             .deliver_process_start(&record)
             .await
-            .map_err(failure)
+            .map_err(DeliveryFailure::of_plugin)
     }
 }

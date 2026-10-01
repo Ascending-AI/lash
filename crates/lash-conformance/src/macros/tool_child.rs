@@ -201,6 +201,8 @@ macro_rules! drive_admission_tests {
     (a_failing_child_cancel_never_wedges_its_roots_cancel_or_fork, "s8c-1"),
     (a_delivery_whose_claim_was_retaken_never_settles_its_intent, "s8c-2"),
     (an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session, "s8c-3"),
+    (a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_never_wedges_its_session, "f09-1"),
+    (re_arming_a_refused_intent_makes_it_owed_again_and_its_delivery_completes_it, "f09-2"),
     (a_refused_follow_on_drive_keeps_the_intents_obligation_due, "s8c-4"),
             (one_authorized_drive_per_session, "drive-one-authorized"),
             (one_unfinished_root_per_session, "root-one-unfinished"),

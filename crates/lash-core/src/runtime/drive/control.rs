@@ -19,17 +19,23 @@
 //! delivery whose claim lapsed and was retaken never settles the intent under
 //! the newer claim.
 //!
-//! **A failed engine half.** A retryable failure keeps the intent open and
-//! hands the obligation back for its next attempt; while a cancel or fork is
-//! open its session admits nothing, so the next root never runs beside the
-//! old execution it has yet to release. A permanent failure — the engine
-//! refused for good, or the root's evidence is missing — and a retryable one
-//! at the attempt ceiling close the intent `Failed { retryable: false }` and
-//! stall its obligation: surfaced typed for an operator, and it never wedges
-//! the session. Its store half already ended the root and raised the drive
-//! epoch past the old execution's fence, so that execution can neither
-//! commit nor park; the session is asked to drive its next root. Re-arming
-//! the stalled obligation reopens the intent.
+//! **A failed engine half.** A retryable failure writes nothing on the
+//! intent: it hands the obligation back for its next attempt, and its code
+//! and message live on the obligation. While a cancel or fork is owed — it
+//! is pending and its obligation is due or claimed
+//! ([`ControlIntent::engine_half_owed`]) — its session admits nothing, so the
+//! next root never runs beside the old execution it has yet to release. A
+//! permanent failure — the engine refused for good, or the root's evidence
+//! is missing — writes the intent `Refused { cause }` with the typed cause
+//! and stalls its obligation; a retryable one at the attempt ceiling, a
+//! store that refuses the delivery's own reads or writes included, stalls
+//! the obligation and leaves the intent pending. Either way the stall is
+//! surfaced typed for an operator and the intent owes nothing more, so it
+//! never wedges the session. Its store half already ended the root and
+//! raised the drive epoch past the old execution's fence, so that execution
+//! can neither commit nor park; once the obligation has stalled the session
+//! is asked to drive its next root ([`ObligationRelay::stalled`]).
+//! Re-arming the stalled obligation makes the intent owed again.
 //!
 //! **A root's scope close** follows its release but is not the intent's to
 //! finish: a child whose cancel keeps failing must not hold the session's
@@ -56,9 +62,9 @@ use crate::engine::{
     DriveRequestId, EngineAck, EngineRefusal, RootRef, ScopeCloseSink, SessionControlEngine,
 };
 use crate::store::{
-    ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState, IntentApplication,
-    IntentSettle, ObligationId, ObligationKey, ObligationLedger, StoreError,
-    scope_close_obligation_id,
+    ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState, DeliveryError,
+    IntentApplication, IntentSettle, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
+    StoreError, scope_close_obligation_id,
 };
 use crate::{Clock, DeploymentStore, SessionWorkEngine};
 
@@ -117,24 +123,25 @@ impl ControlIntentRelay {
     }
 
     /// Deliver `intent`'s obligation now — the recording verb's own attempt
-    /// — and answer the intent's state after it: `Acknowledged`, the state a
-    /// failure retained, or the state another delivery reached first.
+    /// — and answer the intent's state after it: `Acknowledged`, `Refused`,
+    /// still `Pending` behind a failed attempt its obligation retains, or
+    /// the state another delivery reached first.
     ///
     /// # Errors
     ///
     /// Only a store that did not answer. A failed engine half is retained on
-    /// the intent and its obligation, never an error.
+    /// the intent's obligation, and a refusal on the intent, never an error.
     pub async fn deliver_intent(
         &self,
         intent: &ControlIntent,
     ) -> Result<ControlIntentState, StoreError> {
-        let obligation = match &intent.obligation {
+        let obligation = match intent.obligation_id() {
             Some(obligation) => obligation.clone(),
             None => self
                 .stores
                 .load_intent(intent.id)
                 .await?
-                .and_then(|stored| stored.obligation)
+                .and_then(|stored| stored.obligation_id().cloned())
                 .ok_or_else(|| {
                     StoreError::Backend(format!(
                         "control intent {} carries no obligation to deliver",
@@ -151,8 +158,8 @@ impl ControlIntentRelay {
             .state)
     }
 
-    /// The engine half of an open `intent`.
-    async fn engine_half(&self, intent: &ControlIntent) -> Result<(), EngineHalfFailure> {
+    /// The engine half of a pending `intent`.
+    async fn engine_half(&self, intent: &ControlIntent) -> Result<(), DeliveryFailure> {
         let engine = self.work.control();
         match &intent.kind {
             ControlIntentKind::CloseSession { roots } => {
@@ -200,31 +207,37 @@ impl ControlIntentRelay {
         }
     }
 
-    /// The drive a settled cancel or fork owes its session: the next root
-    /// runs once the old one is released, or once its release failed for
-    /// good (the store half already fenced the old execution out).
+    /// The drive a decided cancel or fork owes its session: the next root
+    /// runs once the old one is released, or once its release was refused
+    /// for good (the store half already fenced the old execution out).
     async fn follow_on(&self, intent: &ControlIntent) -> Result<(), DeliveryFailure> {
-        let settled = matches!(
+        let decided = matches!(
             intent.state,
-            ControlIntentState::Acknowledged { .. }
-                | ControlIntentState::Failed {
-                    retryable: false,
-                    ..
-                }
+            ControlIntentState::Acknowledged { .. } | ControlIntentState::Refused { .. }
         );
-        if settled
-            && matches!(
-                intent.kind,
-                ControlIntentKind::Cancel { .. } | ControlIntentKind::Fork { .. }
-            )
-        {
+        if decided && releases_a_root(&intent.kind) {
             self.work
                 .request_drive(&intent.session_id, intent_drive_request(intent.id))
-                .await
-                .map_err(|refusal| DeliveryFailure::Retryable(refusal.to_string()))?;
+                .await?;
         }
         Ok(())
     }
+}
+
+/// Whether an intent of `kind` holds its session until its engine half is
+/// no longer owed: a cancel or a fork.
+fn releases_a_root(kind: &ControlIntentKind) -> bool {
+    matches!(
+        kind,
+        ControlIntentKind::Cancel { .. } | ControlIntentKind::Fork { .. }
+    )
+}
+
+/// A store that did not carry out one of the delivery's own reads or
+/// writes: a fault of the substrate is worth another attempt, any other
+/// answer is the store's refusal.
+fn store_failure(error: StoreError) -> DeliveryFailure {
+    EngineRefusal::from(error).into()
 }
 
 #[async_trait::async_trait]
@@ -238,45 +251,33 @@ impl ObligationRelay for ControlIntentRelay {
     }
 
     /// Apply the intent's engine half under `delivery`'s claim: its
-    /// acknowledgement and its failure compare that claim's token, and its
-    /// attempt decides whether a retryable failure is the last one.
+    /// acknowledgement and its refusal compare that claim's token. A
+    /// retryable failure writes nothing on the intent: the relay retains it
+    /// on the obligation and decides from the obligation's attempts whether
+    /// it is the last one.
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
-        let ObligationDelivery {
-            id,
-            key,
-            token,
-            attempt,
-        } = delivery;
+        let ObligationDelivery { id, key, token, .. } = delivery;
         let ObligationKey::ControlIntent { intent_id } = key else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "the control-intent relay cannot deliver a {} obligation",
-                key.kind()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::ControlIntent,
+                key,
+            ));
         };
-        let application = match self
+        let application = self
             .stores
             .claim_intent_application(*intent_id, self.clock.timestamp_ms())
             .await
-        {
-            Ok(application) => application,
-            Err(error @ StoreError::ControlIntentUnknown { .. }) => {
-                return Err(DeliveryFailure::Refused(error.to_string()));
-            }
-            Err(error) => return Err(DeliveryFailure::Retryable(error.to_string())),
-        };
+            .map_err(store_failure)?;
         let intent = match application {
             // A later intent took over the root or the session: nothing is
             // owed.
             IntentApplication::Superseded(_) => return Ok(()),
-            // An earlier attempt settled the intent: only what follows it
+            // An earlier attempt decided the intent: only what follows it
             // may still be owed.
             IntentApplication::Done(intent) => {
                 self.follow_on(&intent).await?;
                 return match intent.state {
-                    ControlIntentState::Failed {
-                        last_error,
-                        retryable: false,
-                    } => Err(DeliveryFailure::Refused(last_error)),
+                    ControlIntentState::Refused { cause } => Err(DeliveryFailure::Refused(cause)),
                     _ => Ok(()),
                 };
             }
@@ -288,62 +289,76 @@ impl ObligationRelay for ControlIntentRelay {
                 .stores
                 .acknowledge_intent(intent.id, token, at_ms())
                 .await
-                .map_err(|error| DeliveryFailure::Retryable(error.to_string()))?
+                .map_err(store_failure)?
             {
                 IntentSettle::ClaimLost => Err(claim_lost(id)),
                 IntentSettle::Held(settled) => self.follow_on(&settled).await,
             },
-            Err(failure) => {
-                // At the ceiling a retryable failure closes the intent for
-                // good, as a permanent one does, so the session it holds is
-                // released; the relay stalls the obligation.
-                let exhausted = failure.retryable && attempt >= self.policy.attempt_ceiling.get();
-                let open = failure.retryable && !exhausted;
-                let settled = match self
-                    .stores
-                    .record_intent_failure(intent.id, token, &failure.message, open, at_ms())
-                    .await
-                    .map_err(|error| DeliveryFailure::Retryable(error.to_string()))?
-                {
-                    IntentSettle::ClaimLost => return Err(claim_lost(id)),
-                    IntentSettle::Held(settled) => settled,
-                };
-                let mut message = failure.message;
-                if !open
-                    && let Err(DeliveryFailure::Retryable(drive)) = self.follow_on(&settled).await
-                {
-                    message = format!("{message}; its session's drive was not accepted: {drive}");
-                }
-                Err(if failure.retryable {
-                    DeliveryFailure::Retryable(message)
-                } else {
-                    DeliveryFailure::Refused(message)
-                })
+            // Refused for good: the intent retains the typed cause, and the
+            // relay stalls the obligation under it.
+            Err(DeliveryFailure::Refused(cause)) => match self
+                .stores
+                .refuse_intent(intent.id, token, &cause, at_ms())
+                .await
+                .map_err(store_failure)?
+            {
+                IntentSettle::ClaimLost => Err(claim_lost(id)),
+                IntentSettle::Held(_) => Err(DeliveryFailure::Refused(cause)),
+            },
+            Err(failure) => Err(failure),
+        }
+    }
+
+    /// A stalled cancel or fork no longer holds its session, whatever
+    /// stalled it: its store half already ended the root, so the session is
+    /// asked to drive what follows. Asked here, once the stall is durable,
+    /// because the session admits nothing while the obligation is claimed.
+    async fn stalled(&self, delivery: ObligationDelivery<'_>) {
+        let ObligationKey::ControlIntent { intent_id } = delivery.key else {
+            return;
+        };
+        let intent = match self.stores.load_intent(*intent_id).await {
+            Ok(Some(intent)) => intent,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::warn!(
+                    intent = %intent_id,
+                    error = %error,
+                    "a stalled control intent could not be read; its session's next drive \
+                     waits for the session's next ask"
+                );
+                return;
             }
+        };
+        if !releases_a_root(&intent.kind)
+            || matches!(intent.state, ControlIntentState::Superseded { .. })
+        {
+            return;
+        }
+        if let Err(refusal) = self
+            .work
+            .request_drive(&intent.session_id, intent_drive_request(intent.id))
+            .await
+        {
+            tracing::warn!(
+                session_id = intent.session_id.as_str(),
+                intent = %intent.id,
+                code = refusal.code.as_str(),
+                error = %refusal.message,
+                "the drive that follows a stalled control intent was not accepted; the \
+                 session's next ask drives it"
+            );
         }
     }
 }
 
 fn claim_lost(id: &ObligationId) -> DeliveryFailure {
-    DeliveryFailure::Retryable(format!(
-        "obligation {id} was retaken by another claim before this delivery settled its intent"
+    DeliveryFailure::Retryable(DeliveryError::new(
+        crate::RuntimeErrorCode::ObligationClaimLost,
+        format!(
+            "obligation {id} was retaken by another claim before this delivery settled its intent"
+        ),
     ))
-}
-
-/// Why an intent's engine half did not finish: retained on the intent.
-struct EngineHalfFailure {
-    message: String,
-    retryable: bool,
-}
-
-impl From<EngineRefusal> for EngineHalfFailure {
-    fn from(refusal: EngineRefusal) -> Self {
-        let retryable = matches!(refusal, EngineRefusal::Retryable(_));
-        Self {
-            message: refusal.to_string(),
-            retryable,
-        }
-    }
 }
 
 /// A `CloseSession`'s engine half: release every root it closed, then close
@@ -358,7 +373,7 @@ async fn close_session_engine_half(
     intent: &ControlIntent,
     roots: &[crate::TurnId],
     clock: &dyn Clock,
-) -> Result<(), EngineHalfFailure> {
+) -> Result<(), DeliveryFailure> {
     for root in roots {
         engine
             .release_root(
@@ -389,9 +404,8 @@ async fn close_session_engine_half(
     scopes
         .close_session_scope(&intent.session_id, intent.id, roots)
         .await
-        .map_err(|error| EngineHalfFailure {
-            message: format!("session scope close: {error}"),
-            retryable: true,
+        .map_err(|error| {
+            DeliveryFailure::Retryable(DeliveryError::from(error).in_context("session scope close"))
         })
 }
 
@@ -408,7 +422,7 @@ async fn release_root_engine_half(
     intent: &ControlIntent,
     root: &crate::TurnId,
     clock: &dyn Clock,
-) -> Result<(), EngineHalfFailure> {
+) -> Result<(), DeliveryFailure> {
     engine
         .release_root(
             &RootRef {
@@ -421,20 +435,14 @@ async fn release_root_engine_half(
     let terminal = stores
         .root_terminal(&intent.session_id, root)
         .await
-        .map_err(|error| EngineHalfFailure {
-            message: error.to_string(),
-            retryable: true,
-        })?
-        .ok_or_else(|| EngineHalfFailure {
-            message: "root control intent has no terminal evidence".into(),
-            retryable: false,
+        .map_err(DeliveryFailure::retryable)?
+        .ok_or_else(|| {
+            DeliveryFailure::row_invariant("root control intent has no terminal evidence")
         })?;
     match deliver_scope_close(scope_close, scopes, &terminal, clock)
         .await
-        .map_err(|error| EngineHalfFailure {
-            message: error.to_string(),
-            retryable: true,
-        })? {
+        .map_err(DeliveryFailure::retryable)?
+    {
         ScopeCloseAttempt::Delivered => Ok(()),
         ScopeCloseAttempt::Owed { retryable } => {
             tracing::warn!(

@@ -416,6 +416,36 @@ pub enum RuntimeErrorCode {
     EngineTurnTerminalAttach,
     /// The engine ended a root's only run without a Lash outcome.
     EngineRootSubstrateLost,
+    /// A control verb or drive request did not reach the engine, or the engine
+    /// did not carry it out. The refusal's disposition says whether asking
+    /// again can succeed.
+    EngineControlRequest,
+    /// The installed engine does not implement the control verb asked of it.
+    EngineControlUnsupported,
+    /// A park's stored engine handle does not name an execution of the root's
+    /// session, so the engine resumes or releases nothing under it.
+    EngineHandleMismatch,
+    /// A process redrive named a process that holds no park.
+    ProcessNotParked,
+    /// A process redrive named a park the process has since replaced.
+    ProcessParkSuperseded,
+    /// A relay was handed an obligation whose key belongs to another ledger.
+    ObligationKeyMismatch,
+    /// The row an obligation lives on lacks the durable evidence its delivery
+    /// needs, so the delivery can never be made as armed.
+    ObligationRowInvariant,
+    /// One obligation delivery attempt ran past its kind's attempt budget and
+    /// was abandoned.
+    ObligationAttemptBudgetExceeded,
+    /// The engine accepted every ask of a consumer-settled obligation and no
+    /// consumer settled it.
+    ObligationAskUnadmitted,
+    /// A delivery's claim was retaken by another relay before the delivery
+    /// settled what it owed.
+    ObligationClaimLost,
+    /// A closing session's physical delete waits on cleanup that has not
+    /// settled.
+    SessionDeleteCleanupPending,
     /// A Restate terminal attachment elapsed; re-attaching is safe.
     EngineTurnTerminalAttachCeilingElapsed,
     EngineTurnTerminalDecode,
@@ -832,6 +862,17 @@ impl RuntimeErrorCode {
             Self::EngineProcessTerminalEncode => "engine_process_terminal_encode",
             Self::EngineTurnTerminalAttach => "engine_turn_terminal_attach",
             Self::EngineRootSubstrateLost => "engine_root_substrate_lost",
+            Self::EngineControlRequest => "engine_control_request",
+            Self::EngineControlUnsupported => "engine_control_unsupported",
+            Self::EngineHandleMismatch => "engine_handle_mismatch",
+            Self::ProcessNotParked => "process_not_parked",
+            Self::ProcessParkSuperseded => "process_park_superseded",
+            Self::ObligationKeyMismatch => "obligation_key_mismatch",
+            Self::ObligationRowInvariant => "obligation_row_invariant",
+            Self::ObligationAttemptBudgetExceeded => "obligation_attempt_budget_exceeded",
+            Self::ObligationAskUnadmitted => "obligation_ask_unadmitted",
+            Self::ObligationClaimLost => "obligation_claim_lost",
+            Self::SessionDeleteCleanupPending => "session_delete_cleanup_pending",
             Self::EngineTurnTerminalAttachCeilingElapsed => {
                 "engine_turn_terminal_attach_ceiling_elapsed"
             }
@@ -1116,6 +1157,17 @@ impl RuntimeErrorCode {
             "engine_process_terminal_encode" => Self::EngineProcessTerminalEncode,
             "engine_turn_terminal_attach" => Self::EngineTurnTerminalAttach,
             "engine_root_substrate_lost" => Self::EngineRootSubstrateLost,
+            "engine_control_request" => Self::EngineControlRequest,
+            "engine_control_unsupported" => Self::EngineControlUnsupported,
+            "engine_handle_mismatch" => Self::EngineHandleMismatch,
+            "process_not_parked" => Self::ProcessNotParked,
+            "process_park_superseded" => Self::ProcessParkSuperseded,
+            "obligation_key_mismatch" => Self::ObligationKeyMismatch,
+            "obligation_row_invariant" => Self::ObligationRowInvariant,
+            "obligation_attempt_budget_exceeded" => Self::ObligationAttemptBudgetExceeded,
+            "obligation_ask_unadmitted" => Self::ObligationAskUnadmitted,
+            "obligation_claim_lost" => Self::ObligationClaimLost,
+            "session_delete_cleanup_pending" => Self::SessionDeleteCleanupPending,
             "engine_turn_terminal_attach_ceiling_elapsed" => {
                 Self::EngineTurnTerminalAttachCeilingElapsed
             }

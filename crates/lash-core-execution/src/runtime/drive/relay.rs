@@ -27,19 +27,21 @@ use std::num::{NonZeroU32, NonZeroUsize};
 
 use crate::Clock;
 use crate::store::{
-    ClaimToken, ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, SettleOutcome, StallReason, StoreError,
+    ClaimToken, ClaimedObligation, DeliveryError, ObligationId, ObligationKey, ObligationKind,
+    ObligationLedger, ObligationSettlement, SettleOutcome, StallReason, StoreError,
 };
+use crate::{PluginError, RuntimeErrorCode};
 
-/// Why one delivery attempt did not deliver.
+/// Why one delivery attempt did not deliver. Every cause carries its typed
+/// code to the obligation row that retains it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeliveryFailure {
     /// Worth another attempt after the backoff.
-    Retryable(String),
+    Retryable(DeliveryError),
     /// The engine refused it for good.
-    Refused(String),
+    Refused(DeliveryError),
     /// What the key names cannot be decoded by this build.
-    Undecodable(String),
+    Undecodable(DeliveryError),
     /// Not owed yet: a guard whose authority has not ended it (ADR 0113
     /// §2.5). Settles as `Defer` at `now + policy.max_backoff_ms`. Never
     /// stalls.
@@ -48,6 +50,79 @@ pub enum DeliveryFailure {
     /// `due_at_ms` (an upload's expiry). Settles as `Defer` at that instant,
     /// or at `now + policy.max_backoff_ms` if that comes first. Never stalls.
     NotBefore { due_at_ms: u64 },
+}
+
+impl DeliveryFailure {
+    /// A failure worth another attempt.
+    pub fn retryable(error: impl Into<DeliveryError>) -> Self {
+        Self::Retryable(error.into())
+    }
+
+    /// A failure no later attempt repairs.
+    pub fn refused(error: impl Into<DeliveryError>) -> Self {
+        Self::Refused(error.into())
+    }
+
+    /// The relay of `ledger` was handed `key`, which names another ledger's
+    /// row.
+    #[must_use]
+    pub fn key_mismatch(ledger: ObligationKind, key: &ObligationKey) -> Self {
+        Self::Undecodable(DeliveryError::new(
+            RuntimeErrorCode::ObligationKeyMismatch,
+            format!("a {} key on the {ledger} ledger", key.kind()),
+        ))
+    }
+
+    /// The row the obligation lives on lacks what its delivery needs.
+    pub fn row_invariant(message: impl Into<String>) -> Self {
+        Self::Refused(DeliveryError::new(
+            RuntimeErrorCode::ObligationRowInvariant,
+            message,
+        ))
+    }
+
+    /// A plugin error by its own class: a terminal one is refused, any
+    /// other is worth another attempt.
+    #[must_use]
+    pub fn of_plugin(error: PluginError) -> Self {
+        if error.is_terminal() {
+            Self::Refused(plugin_delivery_error(error))
+        } else {
+            Self::Retryable(plugin_delivery_error(error))
+        }
+    }
+
+    /// The same failure, its message led by what the attempt was doing.
+    #[must_use]
+    pub fn in_context(self, context: impl std::fmt::Display) -> Self {
+        match self {
+            Self::Retryable(error) => Self::Retryable(error.in_context(context)),
+            Self::Refused(error) => Self::Refused(error.in_context(context)),
+            Self::Undecodable(error) => Self::Undecodable(error.in_context(context)),
+            other @ (Self::NotYet | Self::NotBefore { .. }) => other,
+        }
+    }
+}
+
+/// A plugin error's typed code beside its message.
+#[must_use]
+pub fn plugin_delivery_error(error: PluginError) -> DeliveryError {
+    let message = error.to_string();
+    DeliveryError::new(
+        crate::RuntimeEffectControllerError::from(error).code,
+        message,
+    )
+}
+
+/// An engine's refusal keeps its code and its retry class.
+impl From<crate::engine::EngineRefusal> for DeliveryFailure {
+    fn from(refusal: crate::engine::EngineRefusal) -> Self {
+        if refusal.is_retryable() {
+            Self::Retryable(refusal.into_delivery_error())
+        } else {
+            Self::Refused(refusal.into_delivery_error())
+        }
+    }
 }
 
 /// One kind's retry policy (ADR 0109 §1.4). A host lever (ADR 0014).
@@ -121,6 +196,11 @@ pub trait ObligationRelay: Send + Sync {
     /// dedupes on a key derived from it (and from the attempt, for a kind
     /// whose consumer settles, so a lapsed claim's retry is a new ask).
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure>;
+
+    /// What the kind owes once `delivery`'s obligation stalled: called after
+    /// the stall is durable, whatever stalled it, and never for a row whose
+    /// key did not decode. The stall stands whatever this does.
+    async fn stalled(&self, _delivery: ObligationDelivery<'_>) {}
 }
 
 /// One delivery attempt's authority (ADR 0109 §1.4): the claimed obligation
@@ -233,9 +313,12 @@ async fn within_budget(
     let deadline = clock.now() + std::time::Duration::from_millis(policy.attempt_budget_ms);
     tokio::select! {
         result = delivery => result,
-        () = clock.sleep_until(deadline) => Err(DeliveryFailure::Retryable(format!(
-            "the delivery ran past its {} ms attempt budget",
-            policy.attempt_budget_ms
+        () = clock.sleep_until(deadline) => Err(DeliveryFailure::Retryable(DeliveryError::new(
+            RuntimeErrorCode::ObligationAttemptBudgetExceeded,
+            format!(
+                "the delivery ran past its {} ms attempt budget",
+                policy.attempt_budget_ms
+            ),
         ))),
     }
 }
@@ -267,9 +350,12 @@ async fn attempt(
         // A consumer-settled claim is retaken only when its last ask lapsed
         // unsettled: past the ceiling, it stalls instead of asking again.
         Ok(_) if consumer_settles && claimed.attempts > policy.attempt_ceiling.get() => {
-            Err(DeliveryFailure::Retryable(format!(
-                "the engine accepted {} asks and nothing admitted the row",
-                claimed.attempts.saturating_sub(1)
+            Err(DeliveryFailure::Retryable(DeliveryError::new(
+                RuntimeErrorCode::ObligationAskUnadmitted,
+                format!(
+                    "the engine accepted {} asks and nothing admitted the row",
+                    claimed.attempts.saturating_sub(1)
+                ),
             )))
         }
         Ok(key) => {
@@ -285,7 +371,9 @@ async fn attempt(
             )
             .await
         }
-        Err(undecodable) => Err(DeliveryFailure::Undecodable(undecodable.detail.clone())),
+        Err(undecodable) => Err(DeliveryFailure::Undecodable(
+            undecodable.clone().into_delivery_error(),
+        )),
     };
     let now_ms = clock.timestamp_ms();
     if consumer_settles && result.is_ok() {
@@ -307,7 +395,8 @@ async fn attempt(
                 obligation_id = claimed.id.as_str(),
                 reason = reason.as_str(),
                 attempts = claimed.attempts,
-                error = error.as_str(),
+                code = error.code.as_str(),
+                error = error.message.as_str(),
                 "obligation stalled; it waits for an operator re-arm"
             );
             RelayVerdict::Stalled(*reason)
@@ -323,6 +412,16 @@ async fn attempt(
         SettleOutcome::Applied => planned,
         SettleOutcome::ClaimLost => RelayVerdict::ClaimLost,
     };
+    if let (RelayVerdict::Stalled(_), Ok(key)) = (&verdict, &claimed.key) {
+        relay
+            .stalled(ObligationDelivery {
+                id: &claimed.id,
+                key,
+                token: &claimed.token,
+                attempt: claimed.attempts,
+            })
+            .await;
+    }
     if let Some(outcome) = outcome_label(&verdict) {
         crate::operational_metrics::record_obligation_attempt(kind.label(), outcome);
     }
@@ -573,6 +672,7 @@ mod tests {
                 claimed(
                     "poison",
                     Err(UndecodableObligation {
+                        code: RuntimeErrorCode::RuntimeStoreCorrupt,
                         detail: "key column `session_id` is Integer(7), not text".to_owned(),
                     }),
                 ),
@@ -607,7 +707,10 @@ mod tests {
                     ObligationId::new("poison"),
                     ObligationSettlement::Stall {
                         reason: StallReason::Undecodable,
-                        error: "key column `session_id` is Integer(7), not text".to_owned(),
+                        error: DeliveryError::new(
+                            RuntimeErrorCode::RuntimeStoreCorrupt,
+                            "key column `session_id` is Integer(7), not text",
+                        ),
                     }
                 ),
                 (ObligationId::new("after"), ObligationSettlement::Delivered),
@@ -693,8 +796,9 @@ mod tests {
                 ObligationId::new("spent"),
                 ObligationSettlement::Stall {
                     reason: StallReason::AttemptsExhausted,
-                    error: format!(
-                        "the engine accepted {ceiling} asks and nothing admitted the row"
+                    error: DeliveryError::new(
+                        RuntimeErrorCode::ObligationAskUnadmitted,
+                        format!("the engine accepted {ceiling} asks and nothing admitted the row"),
                     ),
                 }
             )],
@@ -803,9 +907,10 @@ mod tests {
                 return std::future::pending().await;
             };
             self.clock.advance(ran_ms);
-            Err(DeliveryFailure::Retryable(
-                "the engine timed out".to_owned(),
-            ))
+            Err(DeliveryFailure::Retryable(DeliveryError::new(
+                RuntimeErrorCode::EngineControlRequest,
+                "the engine timed out",
+            )))
         }
     }
 
@@ -859,9 +964,12 @@ mod tests {
             if ran_ms.is_none() {
                 assert_eq!(
                     error,
-                    &format!(
-                        "the delivery ran past its {} ms attempt budget",
-                        policy.attempt_budget_ms
+                    &DeliveryError::new(
+                        RuntimeErrorCode::ObligationAttemptBudgetExceeded,
+                        format!(
+                            "the delivery ran past its {} ms attempt budget",
+                            policy.attempt_budget_ms
+                        )
                     )
                 );
             }

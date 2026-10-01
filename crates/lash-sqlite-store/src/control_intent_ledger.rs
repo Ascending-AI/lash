@@ -6,8 +6,8 @@
 use super::*;
 use lash_core_execution::store::{
     ClaimToken, ControlIntent, ControlIntentId, ControlIntentState, ControlIntentStore,
-    IntentApplication, IntentSettle, decide_intent_acknowledgement, decide_intent_application,
-    decide_intent_failure,
+    DeliveryError, IntentApplication, IntentSettle, decide_intent_acknowledgement,
+    decide_intent_application, decide_intent_refusal,
 };
 
 use crate::session_roots::{
@@ -142,17 +142,16 @@ impl ControlIntentStore for SqliteStore {
         .await
     }
 
-    async fn record_intent_failure(
+    async fn refuse_intent(
         &self,
         id: ControlIntentId,
         claim: &ClaimToken,
-        error: &str,
-        retryable: bool,
+        cause: &DeliveryError,
         _at_ms: u64,
     ) -> Result<IntentSettle, StoreError> {
-        let error = error.to_string();
+        let cause = cause.clone();
         self.settle_intent_claimed(id, claim, move |stored| {
-            decide_intent_failure(stored, &error, retryable)
+            decide_intent_refusal(stored, &cause)
         })
         .await
     }

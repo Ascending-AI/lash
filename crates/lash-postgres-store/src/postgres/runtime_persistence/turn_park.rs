@@ -7,9 +7,9 @@
 //! execution of a root an operator already ended leaves nothing behind.
 
 use lash_core_execution::store::{
-    ControlIntentId, ControlIntentState, ParkEventKind, ParkId, StoreError, StoredParkRedrive,
-    StoredTurnParkHead, TurnPark, TurnParkWrite, TurnParkWriteDecision, UnparkCause,
-    decide_turn_park_write,
+    ControlIntent, ControlIntentId, ControlIntentState, ParkEventKind, ParkId, StoreError,
+    StoredParkRedrive, StoredTurnParkHead, TurnPark, TurnParkWrite, TurnParkWriteDecision,
+    UnparkCause, decide_turn_park_write,
 };
 use lash_sansio::SessionId;
 use sqlx::{PgConnection, Row};
@@ -153,7 +153,7 @@ pub(crate) async fn record_turn_park_tx(
                     intent,
                     open: redrive
                         .as_ref()
-                        .is_some_and(|redrive| redrive.state.is_open()),
+                        .is_some_and(ControlIntent::engine_half_owed),
                 }),
             };
             (Some(head), redrive)
@@ -194,7 +194,9 @@ pub(crate) async fn record_turn_park_tx(
             // lost. Settle it here, so it never resumes the root again. Only
             // the root's own refusal re-parks past an open redrive: a
             // reconcile write is decided `Unchanged` against one.
-            if let Some(open) = redrive.filter(|redrive| redrive.state.is_open()) {
+            if let Some(open) =
+                redrive.filter(|redrive| matches!(redrive.state, ControlIntentState::Pending))
+            {
                 let mut settled = open.clone();
                 settled.state = ControlIntentState::Acknowledged { at_ms: write.at_ms };
                 if !crate::session_roots::write_intent_state_conn(tx, &open, &settled).await? {

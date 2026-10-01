@@ -235,8 +235,8 @@ pub use lash_core::facade_support::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::store::{
-    ObligationId, ObligationKey, ObligationKind, ObligationState, StallReason, StalledObligation,
-    UndecodableObligation, session_delete::SessionCleanup,
+    DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, StallReason,
+    StalledObligation, UndecodableObligation, session_delete::SessionCleanup,
 };
 pub use lash_core::{
     AdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
@@ -667,9 +667,9 @@ pub mod persistence {
     /// control intents a session's close and a parked root's verbs record.
     pub use lash_core::store::{
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
-        ControlIntentState, ControlIntentStore, EnginePark, IntentApplication, IntentSettle,
-        RootCommittedOutcome, RootEnd, RootIntentRefused, RootIntentRequest, RootStore,
-        RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWrite, RootVerb,
+        ControlIntentState, ControlIntentStore, EnginePark, IntentApplication, IntentObligation,
+        IntentSettle, RootCommittedOutcome, RootEnd, RootIntentRefused, RootIntentRequest,
+        RootStore, RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWrite, RootVerb,
         TurnCommitId,
     };
     /// Test-only store hooks and the conformance-suite handle types that
@@ -1312,7 +1312,8 @@ pub mod runtime {
     pub use lash_core::engine::{
         AdmitRequest, AdmitVerdict, DriveAbort, EngineAck, EngineCursor, EnginePage,
         EngineParkRecorded, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef,
-        ParkTarget, ScopeCloseSink, SealVerdict, SessionControlEngine, StalledExecution,
+        ParkTarget, RefusalDisposition, ScopeCloseSink, SealRefusal, SealVerdict,
+        SessionControlEngine, StalledExecution,
     };
     pub use lash_core::facade_support::CommittedGroupChildFinal;
     pub use lash_core::facade_support::{

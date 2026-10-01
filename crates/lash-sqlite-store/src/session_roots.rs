@@ -10,10 +10,11 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
-    ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootEnd, RootStore, RootTerminal, RootTerminalCause, RootTerminalWriteDecision,
-    RootTurns, UnfinishedRoot, close_admission, decide_root_terminal_write, refused_run_owns_root,
-    root_binding_conflict, scope_close_obligation_id, stored_intent_kind, stored_intent_state,
+    ControlIntentState, EnginePark, IntentObligation, IntentSettle, ObligationKey, ObligationState,
+    ParkCancelCause, ParkEventKind, RootAdmission, RootEnd, RootStore, RootTerminal,
+    RootTerminalCause, RootTerminalWriteDecision, RootTurns, UnfinishedRoot, close_admission,
+    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict,
+    scope_close_obligation_id, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
@@ -731,6 +732,7 @@ pub(crate) fn intent_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredInte
         created_at_ms: row.get(5)?,
         engine_ref: row.get(6)?,
         obligation_id: row.get(7)?,
+        obligation_state: row.get(8)?,
     })
 }
 
@@ -743,6 +745,7 @@ pub(crate) struct StoredIntentRow {
     created_at_ms: i64,
     engine_ref: Option<String>,
     obligation_id: Option<String>,
+    obligation_state: Option<String>,
 }
 
 impl StoredIntentRow {
@@ -757,6 +760,7 @@ impl StoredIntentRow {
             stored_u64("ControlIntent", self.created_at_ms)?,
             self.engine_ref,
             self.obligation_id,
+            self.obligation_state,
         )
     }
 }
@@ -864,7 +868,10 @@ pub(crate) fn insert_intent_conn(
         state,
         created_at_ms: at_ms,
         engine: engine.cloned(),
-        obligation: Some(obligation),
+        obligation: Some(IntentObligation {
+            id: obligation,
+            state: ObligationState::Due,
+        }),
     })
 }
 
@@ -922,7 +929,7 @@ pub(crate) fn settle_intent_claimed_conn(
         return Ok(IntentSettle::ClaimLost);
     }
     let Some(state) = decide(&stored.state) else {
-        return Ok(IntentSettle::Held(stored));
+        return Ok(IntentSettle::Held(Box::new(stored)));
     };
     let (state_code, state_json) = stored_intent_state(&state)?;
     let (_, prior_json) = stored_intent_state(&stored.state)?;
@@ -948,7 +955,7 @@ pub(crate) fn settle_intent_claimed_conn(
     // A session close's acknowledgement owes its physical delete (ADR 0109
     // §4), armed in this transaction.
     crate::session_delete_ledger::arm_on_close_acknowledged_conn(tx, &stored, &settled)?;
-    Ok(IntentSettle::Held(settled))
+    Ok(IntentSettle::Held(Box::new(settled)))
 }
 
 /// The store half of session `session_id`'s close, in the caller's

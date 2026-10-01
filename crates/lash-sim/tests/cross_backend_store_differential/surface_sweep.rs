@@ -181,10 +181,10 @@ pub(super) enum SurfaceMethod {
     ClaimIntentApplication {
         known: bool,
     },
-    /// [`ControlIntentStore::record_intent_failure`](lash_core::store::ControlIntentStore::record_intent_failure)
-    /// of the case's close intent, retryable, under the claim the run took
-    /// on its obligation.
-    RecordIntentFailure,
+    /// [`ControlIntentStore::refuse_intent`](lash_core::store::ControlIntentStore::refuse_intent)
+    /// of the case's close intent, for a typed cause, under the claim the
+    /// run took on its obligation.
+    RefuseIntent,
     /// [`ControlIntentStore::acknowledge_intent`](lash_core::store::ControlIntentStore::acknowledge_intent)
     /// of the case's close intent under the claim the run took on its
     /// obligation, or of an id no ledger minted.
@@ -282,7 +282,7 @@ impl SurfaceMethod {
             Self::ClaimIntentApplication { known: false } => {
                 "surface:claim_intent_application_unknown"
             }
-            Self::RecordIntentFailure => "surface:record_intent_failure",
+            Self::RefuseIntent => "surface:refuse_intent",
             Self::AcknowledgeIntent { known: true } => "surface:acknowledge_intent",
             Self::AcknowledgeIntent { known: false } => "surface:acknowledge_intent_unknown",
             Self::RecordRootPark => "surface:record_root_park",
@@ -816,12 +816,10 @@ pub(super) fn session_close_ledger_case() -> GeneratedCase {
             surface(SurfaceMethod::UnfinishedRoot),
             surface(SurfaceMethod::LoadIntent { known: true }),
             surface(SurfaceMethod::ClaimIntentApplication { known: true }),
-            surface(SurfaceMethod::RecordIntentFailure),
-            surface(SurfaceMethod::ClaimIntentApplication { known: true }),
             surface(SurfaceMethod::AcknowledgeIntent { known: true }),
             surface(SurfaceMethod::ClaimIntentApplication { known: true }),
-            // A late failure never reopens an acknowledged intent.
-            surface(SurfaceMethod::RecordIntentFailure),
+            // A late refusal never reopens an acknowledged intent.
+            surface(SurfaceMethod::RefuseIntent),
             surface(SurfaceMethod::AcknowledgeIntent { known: true }),
             surface(SurfaceMethod::LoadIntent { known: true }),
         ],
@@ -1569,15 +1567,17 @@ impl BackendRunner {
                     )
                 )
             }
-            SurfaceMethod::RecordIntentFailure => {
+            SurfaceMethod::RefuseIntent => {
                 let claim = self.intent_claim(true).await?;
                 match self
                     .factory()
-                    .record_intent_failure(
+                    .refuse_intent(
                         self.case_intent(true),
                         &claim,
-                        "fig-3600 engine half refused",
-                        true,
+                        &lash_core::store::DeliveryError::new(
+                            lash_core::RuntimeErrorCode::EngineHandleMismatch,
+                            "fig-3600 engine half refused",
+                        ),
                         CLOSE_FAILED_AT_MS,
                     )
                     .await?
@@ -1730,7 +1730,7 @@ impl BackendRunner {
             .factory()
             .load_intent(self.case_intent(true))
             .await?
-            .and_then(|intent| intent.obligation)
+            .and_then(|intent| intent.obligation.map(|obligation| obligation.id))
             .ok_or_else(|| StoreError::Backend("the close armed no obligation".into()))?;
         let claimed = self
             .lifecycle_backend

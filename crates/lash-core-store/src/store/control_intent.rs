@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ClaimToken, EnginePark, ObligationId, ParkId};
+use super::{ClaimToken, DeliveryError, EnginePark, ObligationId, ObligationState, ParkId};
 use crate::{SessionId, TurnId};
 
 /// The registered durable format of a [`ControlIntent`] record.
@@ -81,11 +81,14 @@ impl ControlIntentKind {
     }
 }
 
-/// Where an intent's engine half stands.
+/// What was decided about an intent's engine half. A failed attempt and
+/// the attempts running out are not states: they live on the intent's
+/// obligation alone, and whether the engine half is still owed is
+/// [`ControlIntent::engine_half_owed`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ControlIntentState {
-    /// The store half committed; the engine half is not acknowledged.
+    /// The store half committed; nothing has decided the engine half.
     Pending,
     Acknowledged {
         at_ms: u64,
@@ -94,9 +97,10 @@ pub enum ControlIntentState {
     Superseded {
         by: ControlIntentId,
     },
-    Failed {
-        last_error: String,
-        retryable: bool,
+    /// The engine refused the engine half for good, for `cause`. Re-arming
+    /// the intent's stalled obligation returns it to `Pending`.
+    Refused {
+        cause: DeliveryError,
     },
 }
 
@@ -108,23 +112,17 @@ impl ControlIntentState {
             Self::Pending => "pending",
             Self::Acknowledged { .. } => "acknowledged",
             Self::Superseded { .. } => "superseded",
-            Self::Failed { .. } => "failed",
+            Self::Refused { .. } => "refused",
         }
     }
+}
 
-    /// Whether this intent's engine half is still owed: the relay delivers
-    /// it, and while a cancel or fork is open its session admits nothing.
-    #[must_use]
-    pub const fn is_open(&self) -> bool {
-        matches!(
-            self,
-            Self::Pending
-                | Self::Failed {
-                    retryable: true,
-                    ..
-                }
-        )
-    }
+/// The `ControlIntent` obligation armed on an intent's row, as the row read
+/// it: its id, and where it stands.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentObligation {
+    pub id: ObligationId,
+    pub state: ObligationState,
 }
 
 /// One control intent, as the store holds it.
@@ -142,13 +140,39 @@ pub struct ControlIntent {
     /// fork), so the engine half can still find the execution to release.
     pub engine: Option<EnginePark>,
     /// The `ControlIntent` obligation the recording transaction armed on
-    /// the intent's row (ADR 0109): its engine half, delivered under this
-    /// id. Its attempts, due time and stall live on the obligation.
+    /// the intent's row (ADR 0109): its engine half, delivered under its
+    /// id. Its attempts, due time, last error and stall live on the
+    /// obligation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub obligation: Option<ObligationId>,
+    pub obligation: Option<IntentObligation>,
 }
 
 impl ControlIntent {
+    /// The id its obligation is delivered under, once armed.
+    #[must_use]
+    pub fn obligation_id(&self) -> Option<&ObligationId> {
+        self.obligation.as_ref().map(|obligation| &obligation.id)
+    }
+
+    /// Whether this intent's engine half is still owed: nothing has decided
+    /// it, and its obligation is due or claimed, so a relay will deliver it.
+    /// While a cancel or fork is owed its session admits nothing. An intent
+    /// whose obligation stalled owes nothing until an operator re-arms it,
+    /// whatever stalled it, so a stall never holds a session.
+    ///
+    /// This is the one definition in Rust; the stores' `engine_half_owed`
+    /// generated column states the same rule over the same two columns.
+    #[must_use]
+    pub fn engine_half_owed(&self) -> bool {
+        matches!(self.state, ControlIntentState::Pending)
+            && self.obligation.as_ref().is_some_and(|obligation| {
+                matches!(
+                    obligation.state,
+                    ObligationState::Due | ObligationState::Claimed
+                )
+            })
+    }
+
     /// The deletion this intent records, when it is a session's
     /// `CloseSession`: the terminal evidence every root of the deleted
     /// session answers.
@@ -174,7 +198,8 @@ impl ControlIntent {
         state_json: &str,
         created_at_ms: u64,
         engine: Option<String>,
-        obligation: Option<String>,
+        obligation_id: Option<String>,
+        obligation_state: Option<String>,
     ) -> Result<Self, super::StoreError> {
         if format != CONTROL_INTENT_FORMAT {
             return Err(super::StoreError::UnsupportedRecordSchemaVersion {
@@ -197,7 +222,18 @@ impl ControlIntent {
                 .map_err(|error| corrupt(format!("control intent state: {error}")))?,
             created_at_ms,
             engine: engine.map(EnginePark::new),
-            obligation: obligation.map(ObligationId::new),
+            obligation: match (obligation_id, obligation_state) {
+                (Some(id), Some(state)) => Some(IntentObligation {
+                    id: ObligationId::new(id),
+                    state: ObligationState::from_label(&state)?,
+                }),
+                (None, None) => None,
+                _ => {
+                    return Err(corrupt(
+                        "control intent obligation id and state disagree".to_owned(),
+                    ));
+                }
+            },
         })
     }
 }
@@ -226,11 +262,11 @@ impl ControlIntent {
 /// transaction, so an intent a later one superseded never reaches its engine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntentApplication {
-    /// The intent is open: run its engine half.
+    /// Nothing has decided the engine half: run it.
     Apply(ControlIntent),
     /// A later intent superseded it before it applied: run nothing.
     Superseded(ControlIntent),
-    /// Its engine half is acknowledged, or failed for good: run nothing.
+    /// Its engine half is acknowledged, or refused for good: run nothing.
     Done(ControlIntent),
 }
 
@@ -262,10 +298,7 @@ pub fn decide_intent_application(
     at_ms: u64,
 ) -> IntentApplication {
     match stored.state {
-        ControlIntentState::Pending
-        | ControlIntentState::Failed {
-            retryable: true, ..
-        } => {
+        ControlIntentState::Pending => {
             if let ControlIntentKind::Redrive { root, park: parked } = &stored.kind
                 && !park.is_some_and(|park| {
                     park.turn_id == *root
@@ -280,22 +313,21 @@ pub fn decide_intent_application(
             IntentApplication::Apply(stored)
         }
         ControlIntentState::Superseded { .. } => IntentApplication::Superseded(stored),
-        ControlIntentState::Acknowledged { .. }
-        | ControlIntentState::Failed {
-            retryable: false, ..
-        } => IntentApplication::Done(stored),
+        ControlIntentState::Acknowledged { .. } | ControlIntentState::Refused { .. } => {
+            IntentApplication::Done(stored)
+        }
     }
 }
 
 /// What a claim-fenced write of an intent's engine half answers (ADR 0109
 /// §1.3): [`ControlIntentStore::acknowledge_intent`] and
-/// [`ControlIntentStore::record_intent_failure`] compare the intent's
+/// [`ControlIntentStore::refuse_intent`] compare the intent's
 /// obligation claim token before they write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntentSettle {
     /// The claim held: the intent as stored after the write — unchanged
-    /// when it was no longer open.
-    Held(ControlIntent),
+    /// when it was no longer pending.
+    Held(Box<ControlIntent>),
     /// The obligation is no longer claimed under the caller's token: another
     /// relay retook it after the claim lapsed, or it settled. Nothing was
     /// written.
@@ -303,44 +335,35 @@ pub enum IntentSettle {
 }
 
 /// The state an acknowledgement writes over `stored`: `None` when the intent
-/// is not open (already acknowledged, superseded or failed for good), so a
+/// is not pending (already acknowledged, superseded or refused), so a
 /// retried acknowledgement writes nothing.
 #[must_use]
 pub fn decide_intent_acknowledgement(
     stored: &ControlIntentState,
     at_ms: u64,
 ) -> Option<ControlIntentState> {
-    stored
-        .is_open()
+    matches!(stored, ControlIntentState::Pending)
         .then_some(ControlIntentState::Acknowledged { at_ms })
 }
 
-/// The state a failure writes over `stored`: `None` when the intent is no
-/// longer open, so a late failure never reopens an acknowledged or
-/// superseded intent.
+/// The state a permanent refusal writes over `stored`: `None` when the
+/// intent is no longer pending, so a late refusal never reopens an
+/// acknowledged or superseded intent.
 #[must_use]
-pub fn decide_intent_failure(
+pub fn decide_intent_refusal(
     stored: &ControlIntentState,
-    error: &str,
-    retryable: bool,
+    cause: &DeliveryError,
 ) -> Option<ControlIntentState> {
-    stored.is_open().then(|| ControlIntentState::Failed {
-        last_error: error.to_string(),
-        retryable,
+    matches!(stored, ControlIntentState::Pending).then(|| ControlIntentState::Refused {
+        cause: cause.clone(),
     })
 }
 
-/// The stored columns of an intent's state: its code (the open-intent index
-/// keys on it) and its JSON.
+/// The stored columns of an intent's state: its code and its JSON.
 pub fn stored_intent_state(
     state: &ControlIntentState,
 ) -> Result<(&'static str, String), super::StoreError> {
-    let code = match state {
-        ControlIntentState::Failed {
-            retryable: true, ..
-        } => "failed_retryable",
-        other => other.code(),
-    };
+    let code = state.code();
     let json =
         serde_json::to_string(state).map_err(|error| super::StoreError::RecordEncodingFailed {
             record_kind: "ControlIntent".to_string(),
@@ -414,7 +437,8 @@ pub struct RootIntentFacts<'a> {
     pub closing: Option<ControlIntentId>,
     /// The session's park.
     pub park: Option<&'a super::TurnPark>,
-    /// The session's open verbs (every open intent but its close).
+    /// The session's owed verbs (every intent whose engine half is owed,
+    /// but its close).
     pub open_verbs: &'a [ControlIntent],
     /// The redrive the park's `resume_intent` names, as stored.
     pub resume: Option<&'a ControlIntent>,
@@ -468,17 +492,17 @@ pub fn decide_root_intent(
             current: park.park_id,
         });
     }
-    // A redrive the park names: open means it has not resumed the root yet;
+    // A redrive the park names: owed means it has not resumed the root yet;
     // acknowledged means it did, and the root runs until it parks again
     // (which clears `resume_intent`) or commits (which clears the park).
     let redrive = facts.resume.filter(|intent| {
-        intent.state.is_open() || matches!(intent.state, ControlIntentState::Acknowledged { .. })
+        intent.engine_half_owed() || matches!(intent.state, ControlIntentState::Acknowledged { .. })
     });
     match (request.verb, redrive) {
         (RootVerb::Redrive, Some(redrive)) => {
             return Err(RootIntentRefused::Redriving { intent: redrive.id });
         }
-        (_, Some(redrive)) if !redrive.state.is_open() => {
+        (_, Some(redrive)) if !redrive.engine_half_owed() => {
             return Err(RootIntentRefused::Redriving { intent: redrive.id });
         }
         _ => {}
@@ -534,7 +558,7 @@ pub trait ControlIntentStore: Send + Sync {
     ///   [`SessionDeleted`](super::RootTerminalCause::SessionDeleted), deletes
     ///   the session's park (feed `Cancelled{SessionDeleted}`) and settles its
     ///   open queued run;
-    /// - supersedes every open intent of the session;
+    /// - supersedes every owed intent of the session;
     /// - inserts the `CloseSession { roots }` intent, `Pending`, naming the
     ///   roots it ended, with its `ControlIntent` obligation armed due now.
     ///
@@ -562,7 +586,7 @@ pub trait ControlIntentStore: Send + Sync {
     /// Acknowledge intent `id`'s engine half under the obligation claim
     /// `claim`, in one transaction that compares it: [`IntentSettle::ClaimLost`]
     /// and nothing written when the obligation is no longer claimed under
-    /// `claim`. A no-op once the intent is not open.
+    /// `claim`. A no-op once the intent is not pending.
     async fn acknowledge_intent(
         &self,
         id: ControlIntentId,
@@ -570,18 +594,17 @@ pub trait ControlIntentStore: Send + Sync {
         at_ms: u64,
     ) -> Result<IntentSettle, super::StoreError>;
 
-    /// Retain the failure of intent `id`'s engine half under the obligation
-    /// claim `claim`, compared as [`acknowledge_intent`](Self::acknowledge_intent)
-    /// compares it: a retryable failure leaves the intent open for its
-    /// relay's next attempt, a permanent one closes it `Failed { retryable:
-    /// false }`, visible for an operator, until its obligation is re-armed.
-    /// A no-op once it is not open.
-    async fn record_intent_failure(
+    /// Refuse intent `id`'s engine half for good, for `cause`, under the
+    /// obligation claim `claim`, compared as
+    /// [`acknowledge_intent`](Self::acknowledge_intent) compares it: the
+    /// intent is `Refused { cause }`, visible for an operator, until its
+    /// obligation is re-armed. A retryable failure is never written here: it
+    /// is the obligation's alone. A no-op once the intent is not pending.
+    async fn refuse_intent(
         &self,
         id: ControlIntentId,
         claim: &ClaimToken,
-        error: &str,
-        retryable: bool,
+        cause: &DeliveryError,
         at_ms: u64,
     ) -> Result<IntentSettle, super::StoreError>;
 
@@ -629,6 +652,13 @@ pub trait ControlIntentStore: Send + Sync {
 mod tests {
     use super::*;
 
+    fn armed(state: ObligationState) -> Option<IntentObligation> {
+        Some(IntentObligation {
+            id: ObligationId::new("control_intent:4"),
+            state,
+        })
+    }
+
     fn intent(state: ControlIntentState) -> ControlIntent {
         ControlIntent {
             id: ControlIntentId::from_sequence(4),
@@ -640,29 +670,64 @@ mod tests {
             state,
             created_at_ms: 1,
             engine: None,
-            obligation: None,
+            obligation: armed(ObligationState::Due),
         }
     }
 
+    fn refused() -> ControlIntentState {
+        ControlIntentState::Refused {
+            cause: DeliveryError::new(crate::RuntimeErrorCode::EngineHandleMismatch, "x"),
+        }
+    }
+
+    /// F09 (FIG-4648): the engine half is owed exactly while nothing has
+    /// decided it and its obligation is due or claimed. A stalled obligation
+    /// owes nothing, whatever stalled it, and neither does a decided intent.
     #[test]
-    fn an_open_intent_is_applied_unchanged_and_a_closed_one_is_not() {
+    fn the_engine_half_is_owed_only_while_pending_and_its_obligation_is_live() {
+        for obligation in ObligationState::ALL {
+            let pending = ControlIntent {
+                obligation: armed(obligation),
+                ..intent(ControlIntentState::Pending)
+            };
+            assert_eq!(
+                pending.engine_half_owed(),
+                matches!(obligation, ObligationState::Due | ObligationState::Claimed),
+                "pending, obligation {obligation:?}"
+            );
+            for decided in [
+                ControlIntentState::Acknowledged { at_ms: 2 },
+                ControlIntentState::Superseded {
+                    by: ControlIntentId::from_sequence(9),
+                },
+                refused(),
+            ] {
+                let decided = ControlIntent {
+                    obligation: armed(obligation),
+                    ..intent(decided)
+                };
+                assert!(
+                    !decided.engine_half_owed(),
+                    "{:?}, obligation {obligation:?}",
+                    decided.state
+                );
+            }
+        }
+        let unarmed = ControlIntent {
+            obligation: None,
+            ..intent(ControlIntentState::Pending)
+        };
+        assert!(!unarmed.engine_half_owed());
+    }
+
+    #[test]
+    fn a_pending_intent_is_applied_unchanged_and_a_decided_one_is_not() {
         let IntentApplication::Apply(applied) =
             decide_intent_application(intent(ControlIntentState::Pending), None, 7)
         else {
             panic!("a pending intent applies");
         };
         assert_eq!(applied, intent(ControlIntentState::Pending));
-        assert!(matches!(
-            decide_intent_application(
-                intent(ControlIntentState::Failed {
-                    last_error: "x".into(),
-                    retryable: true
-                }),
-                None,
-                7
-            ),
-            IntentApplication::Apply(_)
-        ));
         assert!(matches!(
             decide_intent_application(
                 intent(ControlIntentState::Superseded {
@@ -682,14 +747,7 @@ mod tests {
             IntentApplication::Done(_)
         ));
         assert!(matches!(
-            decide_intent_application(
-                intent(ControlIntentState::Failed {
-                    last_error: "x".into(),
-                    retryable: false
-                }),
-                None,
-                7
-            ),
+            decide_intent_application(intent(refused()), None, 7),
             IntentApplication::Done(_)
         ));
     }
@@ -735,28 +793,20 @@ mod tests {
             IntentApplication::Apply(_)
         ));
         for stale in [None, Some(park(None)), Some(park(Some(9)))] {
-            let IntentApplication::Done(settled) = decide_intent_application(
-                redrive(ControlIntentState::Failed {
-                    last_error: "timed out".into(),
-                    retryable: true,
-                }),
-                stale.as_ref(),
-                7,
-            ) else {
+            let IntentApplication::Done(settled) =
+                decide_intent_application(redrive(ControlIntentState::Pending), stale.as_ref(), 7)
+            else {
                 panic!("a redrive its park does not name never applies");
             };
             assert_eq!(settled.state, ControlIntentState::Acknowledged { at_ms: 7 });
         }
     }
 
-    /// H2: a cancel or fork supersedes every open redrive of its root, not
+    /// H2: a cancel or fork supersedes every owed redrive of its root, not
     /// only the one its park names.
     #[test]
-    fn a_cancel_supersedes_every_open_redrive_of_its_root() {
-        let orphaned = redrive(ControlIntentState::Failed {
-            last_error: "timed out".into(),
-            retryable: true,
-        });
+    fn a_cancel_supersedes_every_owed_redrive_of_its_root() {
+        let orphaned = redrive(ControlIntentState::Pending);
         let request = RootIntentRequest {
             session_id: SessionId::from("s"),
             root: TurnId::from("r"),
@@ -777,46 +827,82 @@ mod tests {
         assert_eq!(plan.supersede, vec![orphaned]);
     }
 
+    /// F09: a redrive whose obligation stalled owes nothing, so the root it
+    /// would have resumed takes a new verb instead of answering `Redriving`
+    /// until an operator re-arms the old one.
     #[test]
-    fn a_late_acknowledgement_or_failure_never_reopens_a_closed_intent() {
-        let acknowledged = ControlIntentState::Acknowledged { at_ms: 2 };
-        assert_eq!(decide_intent_acknowledgement(&acknowledged, 5), None);
-        assert_eq!(decide_intent_failure(&acknowledged, "late", true), None);
-        assert_eq!(
-            decide_intent_failure(&ControlIntentState::Pending, "engine down", true),
-            Some(ControlIntentState::Failed {
-                last_error: "engine down".into(),
-                retryable: true
-            })
-        );
-        assert_eq!(
-            stored_intent_state(&ControlIntentState::Failed {
-                last_error: "x".into(),
-                retryable: true
-            })
-            .expect("encode")
-            .0,
-            "failed_retryable"
-        );
+    fn a_stalled_redrive_does_not_hold_its_root() {
+        let stalled = ControlIntent {
+            obligation: armed(ObligationState::Stalled),
+            ..redrive(ControlIntentState::Pending)
+        };
+        let named = park(Some(4));
+        for verb in [RootVerb::Redrive, RootVerb::Cancel, RootVerb::Fork] {
+            let request = RootIntentRequest {
+                session_id: SessionId::from("s"),
+                root: TurnId::from("r"),
+                park: super::super::ParkId::from_feed_sequence(3),
+                verb,
+            };
+            decide_root_intent(
+                &request,
+                &RootIntentFacts {
+                    closing: None,
+                    park: Some(&named),
+                    open_verbs: &[],
+                    resume: Some(&stalled),
+                },
+            )
+            .unwrap_or_else(|refused| panic!("{verb:?} behind a stalled redrive: {refused}"));
+        }
     }
 
     #[test]
+    fn a_late_acknowledgement_or_refusal_never_reopens_a_decided_intent() {
+        let cause = DeliveryError::new(crate::RuntimeErrorCode::EngineHandleMismatch, "late");
+        let acknowledged = ControlIntentState::Acknowledged { at_ms: 2 };
+        assert_eq!(decide_intent_acknowledgement(&acknowledged, 5), None);
+        assert_eq!(decide_intent_refusal(&acknowledged, &cause), None);
+        assert_eq!(decide_intent_acknowledgement(&refused(), 5), None);
+        assert_eq!(
+            decide_intent_refusal(&ControlIntentState::Pending, &cause),
+            Some(ControlIntentState::Refused {
+                cause: cause.clone()
+            })
+        );
+    }
+
+    /// F09: every state is stored under its own code, and the refusal keeps
+    /// its typed code in the stored JSON.
+    #[test]
     fn stored_columns_round_trip() {
-        let stored = intent(ControlIntentState::Pending);
-        let (_, state_json) = stored_intent_state(&stored.state).expect("state");
-        let kind_json = stored_intent_kind(&stored.kind).expect("kind");
-        let decoded = ControlIntent::from_stored(
-            4,
-            SessionId::from("s"),
-            CONTROL_INTENT_FORMAT,
-            &kind_json,
-            &state_json,
-            1,
-            None,
-            None,
-        )
-        .expect("decode");
-        assert_eq!(decoded, stored);
-        assert_eq!(decoded.closed_roots(), &[TurnId::from("r")]);
+        for state in [ControlIntentState::Pending, refused()] {
+            let stored = intent(state);
+            let (code, state_json) = stored_intent_state(&stored.state).expect("state");
+            assert_eq!(code, stored.state.code());
+            let kind_json = stored_intent_kind(&stored.kind).expect("kind");
+            let decoded = ControlIntent::from_stored(
+                4,
+                SessionId::from("s"),
+                CONTROL_INTENT_FORMAT,
+                &kind_json,
+                &state_json,
+                1,
+                None,
+                Some("control_intent:4".to_owned()),
+                Some("due".to_owned()),
+            )
+            .expect("decode");
+            assert_eq!(decoded, stored);
+            assert_eq!(decoded.closed_roots(), &[TurnId::from("r")]);
+        }
+        let (_, json) = stored_intent_state(&refused()).expect("state");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).expect("json"),
+            serde_json::json!({
+                "state": "refused",
+                "cause": {"code": "engine_handle_mismatch", "message": "x"}
+            })
+        );
     }
 }

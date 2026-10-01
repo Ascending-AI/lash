@@ -19,7 +19,7 @@ use std::sync::Arc;
 use crate::runtime::drive::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy,
 };
-use crate::store::{ObligationKey, ObligationLedger};
+use crate::store::{ObligationKey, ObligationKind, ObligationLedger};
 use crate::{PluginError, ProcessRegistry, ProcessWorkSubstrate};
 
 /// The `ProcessTerminal` relay over one deployment's process registry and
@@ -56,17 +56,6 @@ impl ProcessTerminalRelay {
     }
 }
 
-/// A failure no retry can fix without changing durable state or wiring is a
-/// refusal; anything else — the engine or the store unreachable — is worth
-/// another attempt, since nothing about the terminal changed.
-fn failure(error: PluginError) -> DeliveryFailure {
-    if error.is_terminal() {
-        DeliveryFailure::Refused(error.to_string())
-    } else {
-        DeliveryFailure::Retryable(error.to_string())
-    }
-}
-
 #[async_trait::async_trait]
 impl ObligationRelay for ProcessTerminalRelay {
     fn ledger(&self) -> &dyn ObligationLedger {
@@ -80,29 +69,29 @@ impl ObligationRelay for ProcessTerminalRelay {
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
         let ObligationDelivery { id, key, .. } = delivery;
         let ObligationKey::ProcessTerminal { process_id } = key else {
-            return Err(DeliveryFailure::Undecodable(format!(
-                "a {} key on the process_terminal ledger",
-                key.kind()
-            )));
+            return Err(DeliveryFailure::key_mismatch(
+                ObligationKind::ProcessTerminal,
+                key,
+            ));
         };
         let record = match self.registry.get_process(process_id).await {
             Ok(record) => record,
             // Retention reclaimed the process: nothing is left to publish and
             // no waiter is left to strand.
             Err(PluginError::ProcessNoLongerRetained { .. }) => None,
-            Err(error) => return Err(failure(error)),
+            Err(error) => return Err(DeliveryFailure::of_plugin(error)),
         };
         let Some(record) = record else {
             return Ok(());
         };
         let Some(output) = record.outcome.as_ref() else {
-            return Err(DeliveryFailure::Refused(format!(
+            return Err(DeliveryFailure::row_invariant(format!(
                 "process `{process_id}` owes a terminal publication but stores no terminal"
             )));
         };
         self.port
             .publish_process_terminal(process_id, output, id.as_str())
             .await
-            .map_err(failure)
+            .map_err(DeliveryFailure::of_plugin)
     }
 }

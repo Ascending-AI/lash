@@ -573,12 +573,11 @@ impl ControlIntentStore for Integrator {
     ) -> Result<IntentSettle, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn record_intent_failure(
+    async fn refuse_intent(
         &self,
         id: ControlIntentId,
         claim: &ClaimToken,
-        error: &str,
-        retryable: bool,
+        cause: &DeliveryError,
         at_ms: u64,
     ) -> Result<IntentSettle, StoreError> {
         unreachable!("external signature witness")
