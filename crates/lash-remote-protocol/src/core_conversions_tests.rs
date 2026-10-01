@@ -1270,7 +1270,7 @@ fn synthetic_terminal_call_record(
             retry_budget_consumed,
             retry_decision: None,
             error: Some(lash_core::NormalizedError {
-                class: failure_kind.code().to_string(),
+                class: failure_kind,
                 code: Some(lash_core::FailureCode::provider(code)),
                 http_status: None,
                 provider_request_id: None,
@@ -1388,7 +1388,7 @@ fn attempt_records_expose_only_structured_failure_facts() {
             retry_budget_consumed: true,
             retry_decision: None,
             error: Some(lash_core::NormalizedError {
-                class: "unknown".to_string(),
+                class: lash_sansio::llm::types::ProviderFailureKind::Unknown,
                 code: Some(lash_core::FailureCode::provider("provider_panicked")),
                 http_status: None,
                 provider_request_id: None,

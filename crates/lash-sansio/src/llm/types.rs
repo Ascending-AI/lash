@@ -6,6 +6,9 @@ use std::sync::Arc;
 
 use crate::{AttachmentRef, MediaType, SchemaContract};
 
+mod retry;
+pub use retry::{RetryClass, RetryDecision, RetryDeclineCause, RetryWait};
+
 pub use crate::llm::capability::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
@@ -16,7 +19,9 @@ pub use crate::llm::capability::{
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmTerminalReason {
     Stop,
@@ -55,7 +60,9 @@ impl LlmTerminalReason {
 ///
 /// `Unknown` is an explicit classification, never a decoder fallback.
 /// Persisted failure records reject unrecognized kind literals.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderFailureKind {
     Transport,
@@ -73,6 +80,10 @@ pub enum ProviderFailureKind {
 impl ProviderFailureKind {
     /// Stable snake_case code, identical to the serde wire form.
     pub fn code(self) -> &'static str {
+        self.wire_tag()
+    }
+
+    pub fn wire_tag(self) -> &'static str {
         match self {
             Self::Transport => "transport",
             Self::Timeout => "timeout",
@@ -1547,7 +1558,7 @@ pub enum ExecutionEvidenceCollectionInterruption {
 #[serde(transparent)]
 pub struct LlmCallId(pub String);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttemptOutcome {
     Completed,
@@ -1566,13 +1577,12 @@ pub enum ProtocolPosition {
 }
 
 /// A journal-safe projection of a provider/transport failure.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct NormalizedError {
-    pub class: String,
+    pub class: ProviderFailureKind,
     /// The failure code, namespaced by who authored the spelling: `lash:` for
     /// workspace-authored codes, `provider:` for provider wire vocabulary,
-    /// and a host's own namespace for host-authored codes. Rows written
-    /// before the namespaced `code` field decode with `None`.
+    /// and a host's own namespace for host-authored codes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<crate::session_model::FailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1581,19 +1591,6 @@ pub struct NormalizedError {
     pub provider_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<std::time::Duration>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RetryDecision {
-    pub scheduled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delay: Option<std::time::Duration>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// Typed host risk-appetite decision when a retry would purchase a second
-    /// generation without an idempotency or resume guarantee.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub charge_safety: Option<ChargeSafetyDecision>,
 }
 
 /// Why host charge-safety policy denied an otherwise transport-retryable
@@ -1612,8 +1609,6 @@ pub enum ChargeSafetyDenialReason {
     UnsafeRetryLimitExceeded,
     /// Provider-reported tokens exceed the host's duplicate-cost bound.
     DuplicateCostLimitExceeded,
-    /// The provider's requested retry delay exceeds the host cap.
-    RetryAfterExceedsCap,
 }
 
 impl ChargeSafetyDenialReason {
@@ -1640,7 +1635,6 @@ impl ChargeSafetyDenialReason {
             Self::DuplicateCostLimitExceeded => {
                 TurnFailureCode::ChargeSafetyDuplicateCostLimitExceeded
             }
-            Self::RetryAfterExceedsCap => TurnFailureCode::RetryAfterExceedsCap,
         }
     }
 }

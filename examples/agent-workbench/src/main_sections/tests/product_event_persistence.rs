@@ -204,13 +204,9 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                         outcome: RemoteAttemptOutcome::Aborted,
                         protocol_position: RemoteProtocolPosition::ResponseObserved,
                         retry_budget_consumed: false,
-                        retry_decision: Some(lash::remote::llm::RemoteRetryDecision {
-                            scheduled: false,
-                            delay_ms: Some(0),
-                            reason: Some("cancelled".to_string()),
-                        }),
+                        retry_decision: Some(lash::remote::llm::RemoteRetryDecision::Declined(lash::remote::llm::RemoteRetryDeclineCause::NotRetryable)),
                         error: Some(lash::remote::llm::RemoteNormalizedError {
-                            class: "cancelled".to_string(),
+                            class: lash::remote::llm::RemoteProviderFailureKind::Unknown,
                             code: Some(lash::provider::FailureCode::provider("request_cancelled")),
                             http_status: Some(499),
                             provider_request_id: Some("request-1".to_string()),
@@ -249,7 +245,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                         retry_budget_consumed: true,
                         retry_decision: None,
                         error: Some(lash::remote::llm::RemoteNormalizedError {
-                            class: "stream".to_string(),
+                            class: lash::remote::llm::RemoteProviderFailureKind::Stream,
                             code: Some(lash::provider::FailureCode::provider("eof")),
                             http_status: None,
                             provider_request_id: None,

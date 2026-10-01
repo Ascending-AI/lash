@@ -518,54 +518,48 @@ impl ProviderHandle {
                         );
                     }
 
-                    let (delay, reason, consumed) = match &verdict {
-                        RetryVerdict::Refusal(RetryRefusal::ChargeSafety(reason)) => (
-                            None,
-                            Some(charge_safety_retry_reason(*reason, protocol_position)),
-                            true,
+                    let (decision, consumed) = match verdict {
+                        RetryVerdict::Declined(cause) => (RetryDecision::Declined(cause), true),
+                        RetryVerdict::Throttle { wait, class } => (
+                            RetryDecision::Scheduled {
+                                delay: wait,
+                                wait: RetryWait::Throttle,
+                                class,
+                            },
+                            false,
                         ),
-                        RetryVerdict::Refusal(RetryRefusal::RetryAfterCap) => {
-                            (None, Some("retry_after_exceeds_cap".to_string()), true)
-                        }
-                        RetryVerdict::Throttle { wait, .. } => {
-                            (Some(*wait), Some("provider_retry_after".to_string()), false)
-                        }
-                        RetryVerdict::Exhaustion { reason } => {
-                            (None, Some((*reason).to_string()), true)
-                        }
                         RetryVerdict::Backoff { class } => (
-                            Some(
-                                reliability
+                            RetryDecision::Scheduled {
+                                delay: reliability
                                     .retry
                                     .delay_for_attempt(budget.attempt, failure.retry_after())
                                     .expect(
                                         "Retry-After was checked against the cap before scheduling",
                                     ),
-                            ),
-                            class.reason(),
+                                wait: RetryWait::Backoff,
+                                class,
+                            },
                             true,
                         ),
                     };
+                    let delay = decision.delay();
                     let unsafe_retry = charge_safety_decision.is_some();
                     records.push(failure_attempt_record(
                         attempt_ordinal,
                         recorded_failure,
                         consumed,
                         protocol_position,
-                        Some(RetryDecision {
-                            scheduled: delay.is_some(),
-                            delay,
-                            reason,
-                            charge_safety: charge_safety_decision,
-                        }),
+                        Some(decision),
                     ));
                     match verdict {
-                        RetryVerdict::Refusal(_) | RetryVerdict::Exhaustion { .. } => {
-                            let error = match verdict {
-                                RetryVerdict::Refusal(RetryRefusal::ChargeSafety(reason)) => {
+                        RetryVerdict::Declined(cause) => {
+                            let error = match cause {
+                                RetryDeclineCause::ChargeSafety { reason, .. } => {
                                     charge_safety_refusal(failure, protocol_position, reason)
                                 }
-                                _ => failure,
+                                RetryDeclineCause::NotRetryable
+                                | RetryDeclineCause::RetryBudgetExhausted
+                                | RetryDeclineCause::RetryAfterExceedsCap => failure,
                             };
                             let completion_error = ProviderCompletionError {
                                 error,
@@ -576,8 +570,11 @@ impl ProviderHandle {
                                     attempts: records,
                                 }),
                             };
-                            if matches!(verdict, RetryVerdict::Exhaustion { .. })
-                                && let Some(payload) = panic_payload
+                            if matches!(
+                                cause,
+                                RetryDeclineCause::NotRetryable
+                                    | RetryDeclineCause::RetryBudgetExhausted
+                            ) && let Some(payload) = panic_payload
                             {
                                 crate::panic_containment::enforce_loudness(payload);
                             }
@@ -687,7 +684,12 @@ fn success_outcome(reason: LlmTerminalReason) -> AttemptOutcome {
     match reason {
         LlmTerminalReason::Cancelled => AttemptOutcome::Aborted,
         LlmTerminalReason::Unknown => AttemptOutcome::Interrupted,
-        _ => AttemptOutcome::Completed,
+        LlmTerminalReason::Stop
+        | LlmTerminalReason::ToolUse
+        | LlmTerminalReason::OutputLimit
+        | LlmTerminalReason::ContextOverflow
+        | LlmTerminalReason::ContentFilter
+        | LlmTerminalReason::ProviderError => AttemptOutcome::Completed,
     }
 }
 
@@ -701,39 +703,20 @@ fn success_protocol_position(response: &LlmResponse, outcome: AttemptOutcome) ->
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RetryClass {
-    Automatic(AutomaticRetryClass),
-    ChargeAuthorized,
-}
-
-impl RetryClass {
-    fn reason(self) -> Option<String> {
-        match self {
-            Self::Automatic(class) => Some(class.reason().to_string()),
-            Self::ChargeAuthorized => None,
-        }
+fn resets_stream(class: RetryClass) -> bool {
+    match class {
+        RetryClass::NoResponse
+        | RetryClass::RejectedHttpResponse
+        | RetryClass::EmptyStreamPartial
+        | RetryClass::ProviderIdempotency => true,
+        RetryClass::ProviderResume | RetryClass::ChargeAuthorized { .. } => false,
     }
-
-    fn resets_stream(self) -> bool {
-        match self {
-            Self::Automatic(class) => class.resets_stream(),
-            Self::ChargeAuthorized => false,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RetryRefusal {
-    ChargeSafety(ChargeSafetyDenialReason),
-    RetryAfterCap,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RetryVerdict {
-    Refusal(RetryRefusal),
+    Declined(RetryDeclineCause),
     Throttle { wait: Duration, class: RetryClass },
-    Exhaustion { reason: &'static str },
     Backoff { class: RetryClass },
 }
 
@@ -750,7 +733,7 @@ fn retry_verdict(
     let exceeds_cap = failure
         .retry_after()
         .is_some_and(|wait| policy.retry_after_within_cap(wait).is_none());
-    let mut charge = if failure.is_retryable() && automatic.is_none() {
+    let charge = if failure.is_retryable() && automatic.is_none() {
         match charge_safety_decision(
             failure.retry_verdict,
             guarantee,
@@ -767,42 +750,54 @@ fn retry_verdict(
     } else {
         None
     };
-    if exceeds_cap
-        && let Some(ChargeSafetyDecision::Authorized {
-            tokens_at_stake,
-            attempt_number,
-        }) = charge
+    if let Some(ChargeSafetyDecision::Denied {
+        tokens_at_stake,
+        attempt_number,
+        reason,
+    }) = charge.as_ref()
     {
-        charge = Some(ChargeSafetyDecision::Denied {
-            tokens_at_stake,
-            attempt_number,
-            reason: ChargeSafetyDenialReason::RetryAfterExceedsCap,
-        });
-    }
-    if let Some(ChargeSafetyDecision::Denied { reason, .. }) = charge.as_ref() {
         return (
-            RetryVerdict::Refusal(RetryRefusal::ChargeSafety(*reason)),
+            RetryVerdict::Declined(RetryDeclineCause::ChargeSafety {
+                tokens_at_stake: *tokens_at_stake,
+                attempt_number: *attempt_number,
+                reason: *reason,
+            }),
             charge,
         );
     }
     if failure.is_retryable() && exceeds_cap {
-        return (RetryVerdict::Refusal(RetryRefusal::RetryAfterCap), charge);
+        return (
+            RetryVerdict::Declined(RetryDeclineCause::RetryAfterExceedsCap),
+            charge,
+        );
     }
-    let class = automatic
-        .map(RetryClass::Automatic)
-        .unwrap_or(RetryClass::ChargeAuthorized);
+    if !failure.is_retryable() {
+        return (
+            RetryVerdict::Declined(RetryDeclineCause::NotRetryable),
+            charge,
+        );
+    }
+    let class = match automatic {
+        Some(class) => class,
+        None => match charge.as_ref() {
+            Some(ChargeSafetyDecision::Authorized {
+                tokens_at_stake,
+                attempt_number,
+            }) => RetryClass::ChargeAuthorized {
+                tokens_at_stake: *tokens_at_stake,
+                attempt_number: *attempt_number,
+            },
+            Some(ChargeSafetyDecision::Denied { .. }) | None => {
+                unreachable!("retryable failure requires retry permission")
+            }
+        },
+    };
     if let Some(wait) = budget.throttle_wait(policy, failure.retry_verdict) {
         return (RetryVerdict::Throttle { wait, class }, charge);
     }
-    if budget.attempt + 1 >= policy.attempts() || !failure.is_retryable() {
+    if budget.attempt + 1 >= policy.attempts() {
         return (
-            RetryVerdict::Exhaustion {
-                reason: if failure.is_retryable() {
-                    "retry_budget_exhausted"
-                } else {
-                    "not_retryable"
-                },
-            },
+            RetryVerdict::Declined(RetryDeclineCause::RetryBudgetExhausted),
             charge,
         );
     }
@@ -818,7 +813,7 @@ fn announce_retry(
     failure: &LlmTransportError,
 ) {
     if let Some(events) = request.stream_events.as_ref() {
-        if class.resets_stream() {
+        if resets_stream(class) {
             events.send(crate::llm::types::LlmStreamEvent::AttemptReset);
         }
         events.send(crate::llm::types::LlmStreamEvent::RetryStatus {
@@ -828,14 +823,6 @@ fn announce_retry(
             reason: failure.message.clone(),
         });
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum AutomaticRetryClass {
-    NoResponse,
-    RejectedHttpResponse,
-    EmptyStreamPartial,
-    ProviderGuarantee(GenerationRetryGuarantee),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -910,32 +897,6 @@ fn duplicate_cost_tokens(usage: &crate::llm::types::LlmUsage) -> u64 {
     total.clamp(0, i128::from(u64::MAX)) as u64
 }
 
-impl AutomaticRetryClass {
-    fn reason(self) -> &'static str {
-        match self {
-            Self::NoResponse => "failure_before_response",
-            Self::RejectedHttpResponse => "retryable_http_rejection",
-            Self::EmptyStreamPartial => "empty_stream_partial_before_output",
-            Self::ProviderGuarantee(GenerationRetryGuarantee::Idempotent) => {
-                "provider_idempotency_guarantee"
-            }
-            Self::ProviderGuarantee(GenerationRetryGuarantee::Resumable) => {
-                "provider_resume_guarantee"
-            }
-            Self::ProviderGuarantee(GenerationRetryGuarantee::None) => {
-                unreachable!("None is never classified as a provider guarantee")
-            }
-        }
-    }
-
-    fn resets_stream(self) -> bool {
-        !matches!(
-            self,
-            Self::ProviderGuarantee(GenerationRetryGuarantee::Resumable)
-        )
-    }
-}
-
 pub(super) fn failure_protocol_position(failure: &LlmTransportError) -> ProtocolPosition {
     if failure.output_started {
         return ProtocolPosition::OutputStarted;
@@ -963,24 +924,26 @@ pub(super) fn automatic_retry_class(
     failure: &LlmTransportError,
     position: ProtocolPosition,
     guarantee: GenerationRetryGuarantee,
-) -> Option<AutomaticRetryClass> {
+) -> Option<RetryClass> {
     if matches!(
         failure.retry_verdict,
         TransportRetryVerdict::NotRetryable | TransportRetryVerdict::Forbidden
     ) {
         return None;
     }
-    if guarantee != GenerationRetryGuarantee::None {
-        return Some(AutomaticRetryClass::ProviderGuarantee(guarantee));
+    match guarantee {
+        GenerationRetryGuarantee::Idempotent => return Some(RetryClass::ProviderIdempotency),
+        GenerationRetryGuarantee::Resumable => return Some(RetryClass::ProviderResume),
+        GenerationRetryGuarantee::None => {}
     }
 
     match position {
-        ProtocolPosition::NoResponse => Some(AutomaticRetryClass::NoResponse),
+        ProtocolPosition::NoResponse => Some(RetryClass::NoResponse),
         ProtocolPosition::ResponseObserved if retryable_http_rejection(failure) => {
-            Some(AutomaticRetryClass::RejectedHttpResponse)
+            Some(RetryClass::RejectedHttpResponse)
         }
         ProtocolPosition::ResponseObserved if empty_stream_partial(failure) => {
-            Some(AutomaticRetryClass::EmptyStreamPartial)
+            Some(RetryClass::EmptyStreamPartial)
         }
         ProtocolPosition::ResponseObserved
         | ProtocolPosition::OutputStarted
@@ -1139,12 +1102,26 @@ fn failure_attempt_record(
             .get_or_insert_with(ExecutionEvidence::default)
             .provider_request_id = Some(provider_request_id);
     }
-    let outcome = match (failure.terminal_reason, failure.kind) {
-        (LlmTerminalReason::Cancelled, _) => AttemptOutcome::Aborted,
-        (_, ProviderFailureKind::Timeout | ProviderFailureKind::Stream) => {
-            AttemptOutcome::Interrupted
-        }
-        _ => AttemptOutcome::Failed,
+    let outcome = match failure.terminal_reason {
+        LlmTerminalReason::Cancelled => AttemptOutcome::Aborted,
+        LlmTerminalReason::Stop
+        | LlmTerminalReason::ToolUse
+        | LlmTerminalReason::OutputLimit
+        | LlmTerminalReason::ContextOverflow
+        | LlmTerminalReason::ContentFilter
+        | LlmTerminalReason::ProviderError
+        | LlmTerminalReason::Unknown => match failure.kind {
+            ProviderFailureKind::Timeout | ProviderFailureKind::Stream => {
+                AttemptOutcome::Interrupted
+            }
+            ProviderFailureKind::Transport
+            | ProviderFailureKind::Http
+            | ProviderFailureKind::Auth
+            | ProviderFailureKind::Validation
+            | ProviderFailureKind::Quota
+            | ProviderFailureKind::Unsupported
+            | ProviderFailureKind::Unknown => AttemptOutcome::Failed,
+        },
     };
     let usage = partial.and_then(|response| {
         (response.provider_usage.is_some()
@@ -1158,7 +1135,7 @@ fn failure_attempt_record(
         retry_budget_consumed,
         retry_decision,
         error: Some(NormalizedError {
-            class: failure.kind.code().to_string(),
+            class: failure.kind,
             code: failure.code.clone(),
             http_status: failure.http_status,
             provider_request_id,
@@ -1280,22 +1257,24 @@ mod retry_verdict_tests {
                         assert!(
                             matches!(
                                 verdict,
-                                RetryVerdict::Refusal(RetryRefusal::ChargeSafety(_))
+                                RetryVerdict::Declined(RetryDeclineCause::ChargeSafety { .. })
                             ),
                             "{position:?}/{guarantee:?}/{attempt}: {verdict:?}"
                         );
                     } else if attempt == 1 {
                         assert_eq!(
                             verdict,
-                            RetryVerdict::Exhaustion {
-                                reason: "retry_budget_exhausted"
-                            }
+                            RetryVerdict::Declined(RetryDeclineCause::RetryBudgetExhausted)
                         );
                     } else {
                         assert!(matches!(
                             verdict,
                             RetryVerdict::Backoff {
-                                class: RetryClass::Automatic(_)
+                                class: RetryClass::NoResponse
+                                    | RetryClass::RejectedHttpResponse
+                                    | RetryClass::EmptyStreamPartial
+                                    | RetryClass::ProviderIdempotency
+                                    | RetryClass::ProviderResume
                             }
                         ));
                     }
@@ -1337,9 +1316,7 @@ mod retry_verdict_tests {
         budget.consume(false);
         assert_eq!(
             verdict(&budget),
-            RetryVerdict::Exhaustion {
-                reason: "retry_budget_exhausted"
-            }
+            RetryVerdict::Declined(RetryDeclineCause::RetryBudgetExhausted)
         );
     }
 
@@ -1364,9 +1341,7 @@ mod retry_verdict_tests {
                     &RetryBudget::default()
                 )
                 .0,
-                RetryVerdict::Exhaustion {
-                    reason: "not_retryable"
-                }
+                RetryVerdict::Declined(RetryDeclineCause::NotRetryable)
             );
         }
         let failure = LlmTransportError::new("cap").with_retry_verdict(
@@ -1384,7 +1359,7 @@ mod retry_verdict_tests {
                 &RetryBudget::default()
             )
             .0,
-            RetryVerdict::Refusal(RetryRefusal::RetryAfterCap)
+            RetryVerdict::Declined(RetryDeclineCause::RetryAfterExceedsCap)
         );
     }
 }

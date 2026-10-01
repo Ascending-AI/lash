@@ -121,13 +121,13 @@ fn output_started_refusal(body: &'static str, tokens_at_stake: u64) -> ProviderC
     let attempt = &failure.call_record.attempts[0];
     assert_eq!(attempt.protocol_position, ProtocolPosition::OutputStarted);
     let retry = attempt.retry_decision.as_ref().expect("retry decision");
-    assert!(!retry.scheduled);
+    assert!(!retry.is_scheduled());
     assert_eq!(
-        retry.reason.as_deref(),
-        Some("output_started_without_retry_guarantee")
+        retry.denial_reason(),
+        Some(ChargeSafetyDenialReason::GuaranteeRequired)
     );
     assert_eq!(
-        retry.charge_safety,
+        retry.charge_safety(),
         Some(ChargeSafetyDecision::Denied {
             tokens_at_stake,
             attempt_number: 1,
@@ -156,13 +156,13 @@ fn empty_stream_partial_retry(body: &'static str) -> ProviderCompletionError {
     let first = &failure.call_record.attempts[0];
     assert_eq!(first.protocol_position, ProtocolPosition::ResponseObserved);
     let retry = first.retry_decision.as_ref().expect("retry decision");
-    assert!(retry.scheduled);
-    assert_eq!(retry.delay, Some(std::time::Duration::ZERO));
+    assert!(retry.is_scheduled());
+    assert_eq!(retry.delay(), Some(std::time::Duration::ZERO));
     assert_eq!(
-        retry.reason.as_deref(),
-        Some("empty_stream_partial_before_output")
+        retry.retry_class(),
+        Some(lash_core::RetryClass::EmptyStreamPartial)
     );
-    assert_eq!(retry.charge_safety, None);
+    assert_eq!(retry.charge_safety(), None);
 
     let exhausted = &failure.call_record.attempts[1];
     assert_eq!(
@@ -173,8 +173,8 @@ fn empty_stream_partial_retry(body: &'static str) -> ProviderCompletionError {
         exhausted
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.reason.as_deref()),
-        Some("retry_budget_exhausted")
+            .and_then(|decision| decision.decline_cause()),
+        Some(lash_sansio::llm::types::RetryDeclineCause::RetryBudgetExhausted)
     );
     failure
 }

@@ -70,7 +70,7 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
     assert!(result.validate().is_err());
     result.llm_calls[0] = valid_record;
     result.llm_calls[0].attempts[0].error = Some(RemoteNormalizedError {
-        class: String::new(),
+        class: RemoteProviderFailureKind::Unknown,
         code: None,
         http_status: None,
         provider_request_id: None,
@@ -110,7 +110,7 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
             retry_budget_consumed: true,
             retry_decision: None,
             error: Some(RemoteNormalizedError {
-                class: "transport".to_string(),
+                class: RemoteProviderFailureKind::Transport,
                 code: Some(lash_sansio::FailureCode::provider("connection_failed")),
                 http_status: None,
                 provider_request_id: None,
@@ -287,7 +287,7 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
     }
 
     let normalized_error = || RemoteNormalizedError {
-        class: "provider".to_string(),
+        class: RemoteProviderFailureKind::Unknown,
         code: None,
         http_status: None,
         provider_request_id: None,
@@ -299,10 +299,10 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
     assert_rejected(completed_with_error);
 
     let mut completed_with_retry = valid_attempt();
-    completed_with_retry.retry_decision = Some(RemoteRetryDecision {
-        scheduled: true,
-        delay_ms: Some(1),
-        reason: Some("retry".to_string()),
+    completed_with_retry.retry_decision = Some(RemoteRetryDecision::Scheduled {
+        delay_ms: 1,
+        wait: RemoteRetryWait::Backoff,
+        class: RemoteRetryClass::NoResponse,
     });
     assert_rejected(completed_with_retry);
 
@@ -318,9 +318,9 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
 
 #[test]
 fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
-    fn normalized_error(class: &str) -> RemoteNormalizedError {
+    fn normalized_error(class: RemoteProviderFailureKind) -> RemoteNormalizedError {
         RemoteNormalizedError {
-            class: class.to_string(),
+            class,
             code: None,
             http_status: None,
             provider_request_id: None,
@@ -377,7 +377,7 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         protocol_position: RemoteProtocolPosition::NoResponse,
         retry_budget_consumed: false,
         retry_decision: None,
-        error: Some(normalized_error("provider_panicked")),
+        error: Some(normalized_error(RemoteProviderFailureKind::Unknown)),
         evidence: None,
         generation_disposition: None,
         usage: None,
@@ -389,7 +389,7 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         protocol_position: RemoteProtocolPosition::OutputStarted,
         retry_budget_consumed: false,
         retry_decision: None,
-        error: Some(normalized_error("stream_interrupted")),
+        error: Some(normalized_error(RemoteProviderFailureKind::Stream)),
         evidence: Some(RemoteExecutionEvidence {
             collection_interruption: Some(
                 RemoteExecutionEvidenceCollectionInterruption::ProtocolAbort,
@@ -406,12 +406,12 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
             outcome: RemoteAttemptOutcome::Failed,
             protocol_position: RemoteProtocolPosition::NoResponse,
             retry_budget_consumed: true,
-            retry_decision: Some(RemoteRetryDecision {
-                scheduled: true,
-                delay_ms: Some(1),
-                reason: Some("retry".to_string()),
+            retry_decision: Some(RemoteRetryDecision::Scheduled {
+                delay_ms: 1,
+                wait: RemoteRetryWait::Backoff,
+                class: RemoteRetryClass::NoResponse,
             }),
-            error: Some(normalized_error("transport")),
+            error: Some(normalized_error(RemoteProviderFailureKind::Transport)),
             evidence: None,
             generation_disposition: None,
             usage: None,

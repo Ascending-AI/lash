@@ -620,8 +620,8 @@ async fn run_matrix_row(
                     attempt
                         .retry_decision
                         .as_ref()
-                        .and_then(|decision| decision.reason.as_deref()),
-                    Some("empty_stream_partial_before_output"),
+                        .and_then(|decision| decision.retry_class()),
+                    Some(lash_sansio::llm::types::RetryClass::EmptyStreamPartial),
                     "{dialect} response observation alone must not authorize retry"
                 );
             }

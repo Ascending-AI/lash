@@ -3816,3 +3816,33 @@ test("a typed model survives an intervening snapshot and is what the turn sends"
   assert.match(snapshot, /applyProjectedModel\(state\.settings\.model\)/);
   assert.doesNotMatch(snapshot, /modelInput\.value\s*=/);
 });
+
+test("execution scorecard renders typed retry decisions and policy evidence", () => {
+  const context = { Map, Math, Number };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
+     this.scorecard = createExecutionScorecardState();`,
+    context,
+  );
+  context.applyExecutionScorecardRecord(context.scorecard, {
+    call_id: "typed-retries",
+    attempts: [
+      { ordinal: 1, outcome: "failed", retry_decision: {
+        outcome: "scheduled", delay_ms: 250, wait: "backoff",
+        class: { class: "charge_authorized", tokens_at_stake: 42, attempt_number: 1 },
+      } },
+      { ordinal: 2, outcome: "failed", retry_decision: {
+        outcome: "declined", cause: "charge_safety", reason: "duplicate_cost_limit_exceeded",
+        tokens_at_stake: 50, attempt_number: 2,
+      } },
+      { ordinal: 3, outcome: "failed", retry_decision: {
+        outcome: "declined", cause: "retry_after_exceeds_cap",
+      } },
+    ],
+  });
+  assert.equal(context.executionScorecardText(context.scorecard), [
+    "typed-retries #1 failed · retry scheduled · delay 250ms · retry wait backoff · retry class charge_authorized · tokens at stake 42 · unsafe attempt 1",
+    "typed-retries #2 failed · retry declined · retry cause charge_safety · policy duplicate_cost_limit_exceeded · tokens at stake 50 · unsafe attempt 2",
+    "typed-retries #3 failed · retry declined · retry cause retry_after_exceeds_cap",
+  ].join("\n"));
+});

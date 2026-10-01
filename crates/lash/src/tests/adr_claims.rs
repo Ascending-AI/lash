@@ -194,7 +194,7 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
             .retry_decision
             .as_ref()
             .unwrap()
-            .scheduled
+            .is_scheduled()
     );
     assert_eq!(
         calls[0].attempts[1].outcome,

@@ -696,8 +696,8 @@ async fn provider_panic_is_typed_and_non_retryable() {
         failure.call_record.attempts[0]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.reason.as_deref()),
-        Some("not_retryable")
+            .and_then(|decision| decision.decline_cause()),
+        Some(lash_sansio::llm::types::RetryDeclineCause::NotRetryable)
     );
 }
 
@@ -1476,8 +1476,8 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
                 record.attempts[0]
                     .retry_decision
                     .as_ref()
-                    .and_then(|decision| decision.reason.as_deref()),
-                Some("not_retryable")
+                    .and_then(|decision| decision.decline_cause()),
+                Some(lash_sansio::llm::types::RetryDeclineCause::NotRetryable)
             );
         }
     }

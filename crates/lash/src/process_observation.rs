@@ -53,9 +53,6 @@ pub enum ProcessObservationGapReason {
     RoutingUnavailable,
     CrossProcess,
     InvalidCursor,
-    PublisherJoinedMidRun,
-    IncompleteGraph,
-    ProjectionTruncated,
     /// Retained `Committed` evidence cannot bridge the cursor's durable
     /// sequence to the durable high-water mark.
     SequenceUnbridged,
@@ -63,12 +60,38 @@ pub enum ProcessObservationGapReason {
     HistoryUnavailable,
 }
 
+/// Why the live graph cannot describe the complete process execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessLiveIncompleteness {
+    RoutingUnavailable,
+    PublisherReplaced,
+    PublisherJoinedMidRun,
+    IncompleteGraph,
+    ProjectionTruncated,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RingTrim {
+    Overflow,
+    Expired,
+}
+
+impl From<RingTrim> for ProcessObservationGapReason {
+    fn from(value: RingTrim) -> Self {
+        match value {
+            RingTrim::Overflow => Self::Overflow,
+            RingTrim::Expired => Self::Expired,
+        }
+    }
+}
+
 /// Live-graph completeness.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProcessObservationCompleteness {
     Complete,
-    Incomplete { reason: ProcessObservationGapReason },
+    Incomplete { reason: ProcessLiveIncompleteness },
 }
 
 /// The live half of a snapshot.
@@ -226,11 +249,21 @@ fn remote_reason(
         ProcessObservationGapReason::RoutingUnavailable => Remote::RoutingUnavailable,
         ProcessObservationGapReason::CrossProcess => Remote::CrossProcess,
         ProcessObservationGapReason::InvalidCursor => Remote::InvalidCursor,
-        ProcessObservationGapReason::PublisherJoinedMidRun => Remote::PublisherJoinedMidRun,
-        ProcessObservationGapReason::IncompleteGraph => Remote::IncompleteGraph,
-        ProcessObservationGapReason::ProjectionTruncated => Remote::ProjectionTruncated,
         ProcessObservationGapReason::SequenceUnbridged => Remote::SequenceUnbridged,
         ProcessObservationGapReason::HistoryUnavailable => Remote::HistoryUnavailable,
+    }
+}
+
+fn remote_live_incompleteness(
+    value: ProcessLiveIncompleteness,
+) -> lash_remote_protocol::RemoteProcessLiveIncompleteness {
+    use lash_remote_protocol::RemoteProcessLiveIncompleteness as Remote;
+    match value {
+        ProcessLiveIncompleteness::RoutingUnavailable => Remote::RoutingUnavailable,
+        ProcessLiveIncompleteness::PublisherReplaced => Remote::PublisherReplaced,
+        ProcessLiveIncompleteness::PublisherJoinedMidRun => Remote::PublisherJoinedMidRun,
+        ProcessLiveIncompleteness::IncompleteGraph => Remote::IncompleteGraph,
+        ProcessLiveIncompleteness::ProjectionTruncated => Remote::ProjectionTruncated,
     }
 }
 
@@ -324,7 +357,7 @@ fn remote_snapshot(
                 ProcessObservationCompleteness::Complete => LiveCompleteness::Complete,
                 ProcessObservationCompleteness::Incomplete { reason } => {
                     LiveCompleteness::Incomplete {
-                        reason: remote_reason(reason),
+                        reason: remote_live_incompleteness(reason),
                     }
                 }
             },
@@ -370,7 +403,7 @@ struct Published {
 #[derive(Clone)]
 enum PublishedNotification {
     Item(u64, PublishedItem),
-    Replaced(ProcessObservationGapReason),
+    Replaced,
 }
 
 /// The live records one accumulator update takes at most. Snapshot projection
@@ -396,7 +429,7 @@ struct ProcessState {
     terminal: bool,
     last_published: Instant,
     ring: VecDeque<Published>,
-    trim_reason: ProcessObservationGapReason,
+    trim_reason: RingTrim,
     sender: broadcast::Sender<PublishedNotification>,
 }
 
@@ -416,7 +449,7 @@ impl ProcessState {
             terminal: false,
             last_published: Instant::now(),
             ring: VecDeque::new(),
-            trim_reason: ProcessObservationGapReason::Overflow,
+            trim_reason: RingTrim::Overflow,
             sender,
         }
     }
@@ -435,9 +468,9 @@ impl ProcessState {
             if let Some(old) = self.ring.pop_front() {
                 self.base_position = old.position;
                 self.trim_reason = if expired {
-                    ProcessObservationGapReason::Expired
+                    RingTrim::Expired
                 } else {
-                    ProcessObservationGapReason::Overflow
+                    RingTrim::Overflow
                 };
             }
         }
@@ -470,16 +503,16 @@ impl ProcessState {
             return ProcessObservationProjection {
                 graph: None,
                 completeness: ProcessObservationCompleteness::Incomplete {
-                    reason: ProcessObservationGapReason::RoutingUnavailable,
+                    reason: ProcessLiveIncompleteness::RoutingUnavailable,
                 },
             };
         };
         let reason = if !self.joined_at_start {
-            Some(ProcessObservationGapReason::PublisherJoinedMidRun)
+            Some(ProcessLiveIncompleteness::PublisherJoinedMidRun)
         } else if graph.completeness != TraceLashlangGraphCompleteness::Complete {
-            Some(ProcessObservationGapReason::IncompleteGraph)
+            Some(ProcessLiveIncompleteness::IncompleteGraph)
         } else if !graph.node_retention.is_empty() {
-            Some(ProcessObservationGapReason::ProjectionTruncated)
+            Some(ProcessLiveIncompleteness::ProjectionTruncated)
         } else {
             None
         };
@@ -508,8 +541,8 @@ impl ProcessState {
             .send(PublishedNotification::Item(position, item));
     }
 
-    fn replace(&mut self, reason: ProcessObservationGapReason, capacity: usize) {
-        let _ = self.sender.send(PublishedNotification::Replaced(reason));
+    fn replace(&mut self, capacity: usize) {
+        let _ = self.sender.send(PublishedNotification::Replaced);
         *self = Self::new(capacity);
     }
 }
@@ -522,7 +555,7 @@ struct Capture {
     epoch: String,
     position: u64,
     base_position: u64,
-    trim_reason: ProcessObservationGapReason,
+    trim_reason: RingTrim,
     live: ProcessObservationProjection,
     tail: VecDeque<(u64, PublishedItem)>,
     receiver: broadcast::Receiver<PublishedNotification>,
@@ -676,7 +709,7 @@ impl ProcessObservationHub {
         } else if from.position() > capture.position || from.sequence() > high_water {
             Some(ProcessObservationGapReason::InvalidCursor)
         } else if from.position() < capture.base_position {
-            Some(capture.trim_reason)
+            Some(capture.trim_reason.into())
         } else if !bridges(&capture.tail, from.sequence(), high_water) {
             Some(ProcessObservationGapReason::SequenceUnbridged)
         } else {
@@ -880,19 +913,14 @@ impl TraceSink for ProcessObservationHub {
         let graph_key = event.identity.graph_key();
         let (state, _) = self.state_for(process_id);
         let mut publisher = state.lock_recover();
-        let replaced = if publisher.graph_key.as_ref().is_some_and(|current| {
+        if publisher.graph_key.as_ref().is_some_and(|current| {
             *current != graph_key
                 || matches!(
                     &event.payload,
                     TraceLanguageExecutionPayload::ExecutionStarted { .. }
                 )
         }) {
-            Some(ProcessObservationGapReason::PublisherReplaced)
-        } else {
-            None
-        };
-        if let Some(reason) = replaced {
-            publisher.replace(reason, self.config.capacity);
+            publisher.replace(self.config.capacity);
         }
         if publisher.graph_key.is_none() {
             publisher.joined_at_start = matches!(
@@ -999,8 +1027,13 @@ impl ProcessObservationSubscription {
                     ProcessObservationProjection {
                         graph: None,
                         completeness: ProcessObservationCompleteness::Incomplete {
-                            reason: lifetime_gap
-                                .unwrap_or(ProcessObservationGapReason::HistoryUnavailable),
+                            reason: if reason
+                                == Some(ProcessObservationGapReason::PublisherReplaced)
+                            {
+                                ProcessLiveIncompleteness::PublisherReplaced
+                            } else {
+                                ProcessLiveIncompleteness::RoutingUnavailable
+                            },
                         },
                     },
                     false,
@@ -1051,9 +1084,13 @@ impl ProcessObservationSubscription {
                 };
                 match receiver.recv().await {
                     Ok(PublishedNotification::Item(position, item)) => (position, item),
-                    Ok(PublishedNotification::Replaced(reason)) => {
+                    Ok(PublishedNotification::Replaced) => {
                         let requested = self.cursor();
-                        self.resync(Some(reason), Some(requested)).await?;
+                        self.resync(
+                            Some(ProcessObservationGapReason::PublisherReplaced),
+                            Some(requested),
+                        )
+                        .await?;
                         continue;
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {

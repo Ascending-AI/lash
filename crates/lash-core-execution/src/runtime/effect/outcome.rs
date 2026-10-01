@@ -140,17 +140,9 @@ pub fn emit_llm_trace_failed(
         lash_trace::TraceEvent::LlmCallFailed {
             error: lash_trace::TraceError {
                 retryable: failure.retryable,
-                terminal_reason: Some(failure.terminal_reason.code().to_string()),
-                failure_kind: (failure.kind != crate::ProviderFailureKind::Unknown)
-                    .then(|| failure.kind.code().to_string()),
-                code: failure
-                    .code
-                    .as_ref()
-                    .map(|code| code.spelling().to_string()),
-                code_namespace: failure
-                    .code
-                    .as_ref()
-                    .map(|code| code.namespace().as_str().to_string()),
+                terminal_reason: failure.terminal_reason,
+                failure_kind: failure.kind,
+                code: failure.code,
             },
             stream_summary,
             attempts: crate::trace::trace_llm_attempts(call_record),

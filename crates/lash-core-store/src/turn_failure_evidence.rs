@@ -112,7 +112,7 @@ impl TurnFailureEvidence {
                 attempt
                     .retry_decision
                     .as_ref()
-                    .and_then(|decision| decision.charge_safety.as_ref()),
+                    .and_then(|decision| decision.charge_safety()),
                 Some(crate::ChargeSafetyDecision::Denied { .. })
             )
         })?;
@@ -123,7 +123,7 @@ impl TurnFailureEvidence {
         } = attempt
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.charge_safety.as_ref())?
+            .and_then(|decision| decision.charge_safety())?
         else {
             return None;
         };
@@ -141,9 +141,9 @@ impl TurnFailureEvidence {
             partial_output,
             billed_usage,
             refusal: ChargeSafetyRefusalEvidence {
-                denial_reason: *reason,
+                denial_reason: reason,
                 protocol_position: attempt.protocol_position,
-                attempt_number: *attempt_number,
+                attempt_number,
                 attempt_count: u32::try_from(call_record.attempts.len()).unwrap_or(u32::MAX),
             },
         })
@@ -209,7 +209,6 @@ mod tests {
                 Reason::DuplicateCostLimitExceeded,
                 ["charge_safety_duplicate_cost_limit_exceeded"; 4],
             ),
-            (Reason::RetryAfterExceedsCap, ["retry_after_exceeds_cap"; 4]),
         ] {
             for (position, code) in positions.into_iter().zip(codes) {
                 let record: crate::LlmCallRecord = serde_json::from_value(serde_json::json!({
@@ -220,11 +219,9 @@ mod tests {
                         "protocol_position": position,
                         "retry_budget_consumed": false,
                         "retry_decision": {
-                            "scheduled": false,
-                            "charge_safety": {
-                                "outcome": "denied", "tokens_at_stake": 10,
-                                "attempt_number": 1, "reason": reason,
-                            }
+                            "outcome": "declined", "cause": "charge_safety",
+                            "tokens_at_stake": 10, "attempt_number": 1,
+                            "reason": reason,
                         }
                     }]
                 }))

@@ -166,10 +166,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             TraceEvent::LlmCallFailed {
                 error: TraceError {
                     retryable: false,
-                    terminal_reason: None,
-                    failure_kind: None,
+                    terminal_reason: crate::TraceLlmTerminalReason::Unknown,
+                    failure_kind: crate::TraceProviderFailureKind::Unknown,
                     code: None,
-                    code_namespace: None,
                 },
                 stream_summary: None,
                 attempts: None,
@@ -189,7 +188,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             "store error observed",
             TraceEvent::StoreErrorObserved {
                 operation: "load".to_string(),
-                error_class: "corrupt".to_string(),
+                error_class: crate::TraceStoreErrorClass::StoredDataCorrupt,
                 message: "failed".to_string(),
             },
         ),

@@ -25,8 +25,8 @@ async fn authorizes_bounded_duplicate_billing_and_projects_typed_trace() {
         completion.call_record.attempts[0]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.charge_safety.as_ref()),
-        Some(&crate::ChargeSafetyDecision::Authorized {
+            .and_then(|decision| decision.charge_safety()),
+        Some(crate::ChargeSafetyDecision::Authorized {
             tokens_at_stake: 10,
             attempt_number: 1,
         })
@@ -34,10 +34,16 @@ async fn authorizes_bounded_duplicate_billing_and_projects_typed_trace() {
     let trace =
         crate::trace::trace_llm_attempts(Some(&completion.call_record)).expect("typed retry trace");
     assert_eq!(
-        trace[0].charge_safety,
-        Some(lash_trace::TraceChargeSafetyDecision::Authorized {
+        match &trace[0].detail {
+            lash_trace::TraceRetryAttemptDetail::Llm {
+                retry_decision: Some(lash_trace::TraceRetryDecision::Scheduled { class, .. }),
+                ..
+            } => Some(*class),
+            _ => None,
+        },
+        Some(lash_sansio::llm::types::RetryClass::ChargeAuthorized {
             tokens_at_stake: 10,
-            attempt_number: 1,
+            attempt_number: 1
         })
     );
 }
@@ -64,8 +70,8 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
         failure.call_record.attempts[0]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.charge_safety.as_ref()),
-        Some(&crate::ChargeSafetyDecision::Denied {
+            .and_then(|decision| decision.charge_safety()),
+        Some(crate::ChargeSafetyDecision::Denied {
             tokens_at_stake: 10,
             attempt_number: 1,
             reason: crate::ChargeSafetyDenialReason::DuplicateCostLimitExceeded,
@@ -74,11 +80,17 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
     let trace =
         crate::trace::trace_llm_attempts(Some(&failure.call_record)).expect("typed retry trace");
     assert_eq!(
-        trace[0].charge_safety,
-        Some(lash_trace::TraceChargeSafetyDecision::Denied {
+        match &trace[0].detail {
+            lash_trace::TraceRetryAttemptDetail::Llm {
+                retry_decision: Some(lash_trace::TraceRetryDecision::Declined(cause)),
+                ..
+            } => Some(*cause),
+            _ => None,
+        },
+        Some(lash_sansio::llm::types::RetryDeclineCause::ChargeSafety {
             tokens_at_stake: 10,
             attempt_number: 1,
-            reason: lash_trace::TraceChargeSafetyDenialReason::DuplicateCostLimitExceeded,
+            reason: crate::ChargeSafetyDenialReason::DuplicateCostLimitExceeded
         })
     );
 }
@@ -105,8 +117,8 @@ async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceil
         failure.call_record.attempts[6]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.charge_safety.as_ref()),
-        Some(&crate::ChargeSafetyDecision::Denied {
+            .and_then(|decision| decision.charge_safety()),
+        Some(crate::ChargeSafetyDecision::Denied {
             tokens_at_stake: 10,
             attempt_number: 7,
             reason: crate::ChargeSafetyDenialReason::UnsafeRetryLimitExceeded,
@@ -156,12 +168,8 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
         failure.call_record.attempts[0]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.charge_safety.as_ref()),
-        Some(&crate::ChargeSafetyDecision::Denied {
-            tokens_at_stake: 10,
-            attempt_number: 1,
-            reason: crate::ChargeSafetyDenialReason::RetryAfterExceedsCap,
-        })
+            .and_then(|decision| decision.decline_cause()),
+        Some(lash_sansio::llm::types::RetryDeclineCause::RetryAfterExceedsCap)
     );
 }
 

@@ -3068,6 +3068,7 @@
           const evidence = attempt.evidence || {};
           const error = attempt.error || {};
           const retry = attempt.retry_decision;
+          const policy = retry?.outcome === "scheduled" ? retry.class : retry;
           const usage = attempt.usage;
           const generation = attempt.generation_disposition;
           const facts = [
@@ -3077,9 +3078,14 @@
             error.http_status !== undefined && `http ${error.http_status}`,
             error.provider_request_id && `request ${error.provider_request_id}`,
             error.retry_after_ms !== undefined && `retry-after ${error.retry_after_ms}ms`,
-            retry && (retry.scheduled ? "retry scheduled" : "retry not scheduled"),
+            retry && `retry ${retry.outcome}`,
             retry?.delay_ms !== undefined && `delay ${retry.delay_ms}ms`,
-            retry?.reason && `retry reason ${retry.reason}`,
+            retry?.wait && `retry wait ${retry.wait}`,
+            retry?.class && `retry class ${retry.class.class}`,
+            retry?.cause && `retry cause ${retry.cause}`,
+            retry?.reason && `policy ${retry.reason}`,
+            policy?.tokens_at_stake !== undefined && `tokens at stake ${policy.tokens_at_stake}`,
+            policy?.attempt_number !== undefined && `unsafe attempt ${policy.attempt_number}`,
             attempt.retry_budget_consumed === true && "retry budget consumed",
             attempt.retry_budget_consumed === false && "retry budget not consumed",
             usage && `usage input=${usage.input_tokens} cache_read=${usage.cache_read_input_tokens} cache_write=${usage.cache_write_input_tokens} output=${usage.output_tokens}`,

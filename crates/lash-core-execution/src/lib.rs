@@ -694,13 +694,12 @@ pub use lash_sansio::{
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{
-    TraceAttachment, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason, TraceContentBlock,
-    TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-    TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
-    TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
-    TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
-    TraceToolResultBlock, TraceToolSpec,
+    TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
+    TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
+    TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
+    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
+    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
+    TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{

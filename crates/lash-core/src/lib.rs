@@ -530,7 +530,8 @@ pub use lash_sansio::llm::types::{
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
     LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64, NormalizedError, ProtocolPosition,
     ProviderEndpointError, ProviderFileScope, ProviderReplayDrop, ProviderReplayDropReason,
-    ProviderReplayKind, ProviderRouteIdentity, RetryDecision,
+    ProviderReplayKind, ProviderRouteIdentity, RetryClass, RetryDecision, RetryDeclineCause,
+    RetryWait,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, BatchId,
@@ -613,13 +614,12 @@ pub use lash_sansio::{
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{
-    TraceAttachment, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason, TraceContentBlock,
-    TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-    TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
-    TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
-    TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
-    TraceToolResultBlock, TraceToolSpec,
+    TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
+    TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
+    TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
+    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
+    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
+    TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{

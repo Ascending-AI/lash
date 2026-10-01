@@ -1489,10 +1489,12 @@ async fn retry_ladder_survives_a_later_pending_completion() {
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(pending.attempts.len(), 1);
     assert_eq!(pending.attempts[0].ordinal, 1);
-    assert_eq!(
-        pending.attempts[0].outcome,
-        lash_trace::TraceRetryAttemptOutcome::Failed
-    );
+    assert!(matches!(
+        pending.attempts[0].detail,
+        lash_trace::TraceRetryAttemptDetail::Tool {
+            outcome: lash_trace::TraceToolAttemptOutcome::Failed { .. }
+        }
+    ));
 
     let attachment_store = Arc::clone(&context.attachment_store);
     let execution = crate::RuntimeExecutionContext::new(
@@ -1526,10 +1528,12 @@ async fn retry_ladder_survives_a_later_pending_completion() {
         .await;
     assert_eq!(completed.attempts.len(), 2);
     assert_eq!(completed.attempts[1].ordinal, 2);
-    assert_eq!(
-        completed.attempts[1].outcome,
-        lash_trace::TraceRetryAttemptOutcome::Completed
-    );
+    assert!(matches!(
+        completed.attempts[1].detail,
+        lash_trace::TraceRetryAttemptDetail::Tool {
+            outcome: lash_trace::TraceToolAttemptOutcome::Completed
+        }
+    ));
     drop(execution);
     handler.close().await.expect("close the dispatch handler");
 }

@@ -250,8 +250,8 @@ pub struct SessionNodeRecord {
 /// both acceptance arms are deleted because pre-cutover bytes must fail at
 /// decode rather than be reconstructed.
 ///
-/// Version 4 persists `RetryDecision.charge_safety` when present; older bodies
-/// omit it and continue to decode through the field's `default`.
+/// Retry decisions carry their scheduling class or decline cause, including
+/// host charge-safety evidence, inside the sealed attempt record.
 ///
 /// Version 5 persists typed `MessageOrigin::TurnOutput` provenance on durable
 /// assistant messages.

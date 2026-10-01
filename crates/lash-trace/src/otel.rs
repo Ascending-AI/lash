@@ -676,22 +676,17 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             stream_summary,
             attempts,
         } => {
-            // `error.type` is the failure kind/category, not the code
-            // spelling or the terminal reason: a timeout reports `timeout`,
-            // not `provider_error`. Anything outside the provider-failure
-            // vocabulary demotes to `_OTHER`.
-            let error_type = match error.failure_kind.as_deref() {
-                Some(
-                    kind @ ("transport" | "timeout" | "http" | "stream" | "auth" | "validation"
-                    | "quota" | "unsupported"),
-                ) => kind.to_string(),
-                _ => "_OTHER".to_string(),
+            let error_type = if error.failure_kind == crate::TraceProviderFailureKind::Unknown {
+                "_OTHER"
+            } else {
+                error.failure_kind.wire_tag()
             };
             attrs.push(KeyValue::new(attr::ERROR_TYPE, error_type));
-            // `lash.error.code` is the code's spelling alone — `code` arrives
-            // already projected to spelling-only by the trace producers.
             if let Some(code) = &error.code {
-                attrs.push(KeyValue::new(attr::LASH_ERROR_CODE, code.clone()));
+                attrs.push(KeyValue::new(
+                    attr::LASH_ERROR_CODE,
+                    code.spelling().to_string(),
+                ));
             }
             attrs.push(KeyValue::new(attr::LASH_ERROR_RETRYABLE, error.retryable));
             push_payload_json(
@@ -1012,7 +1007,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             message,
         } => {
             attrs.push(KeyValue::new(attr::LASH_STORE_OPERATION, operation.clone()));
-            attrs.push(KeyValue::new(attr::ERROR_TYPE, error_class.clone()));
+            attrs.push(KeyValue::new(attr::ERROR_TYPE, error_class.wire_tag()));
             attrs.push(KeyValue::new(attr::ERROR_MESSAGE, message.clone()));
         }
         TraceEvent::RlmStep {

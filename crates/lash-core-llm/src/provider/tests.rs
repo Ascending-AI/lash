@@ -1006,7 +1006,7 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
         .error
         .as_ref()
         .expect("original provider failure evidence remains attached");
-    assert_eq!(original.class, ProviderFailureKind::Stream.code());
+    assert_eq!(original.class, ProviderFailureKind::Stream);
     assert_eq!(
         original.code.as_ref().map(|code| code.namespaced()),
         Some("provider:original_partial_code".to_string())
@@ -1468,15 +1468,15 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
         failure.call_record.attempts[0]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.reason.as_deref()),
-        Some("output_started_without_retry_guarantee")
+            .and_then(|decision| decision.denial_reason()),
+        Some(lash_sansio::llm::types::ChargeSafetyDenialReason::GuaranteeRequired)
     );
     assert_eq!(
         failure.call_record.attempts[0]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.charge_safety.as_ref()),
-        Some(&crate::ChargeSafetyDecision::Denied {
+            .and_then(|decision| decision.charge_safety()),
+        Some(crate::ChargeSafetyDecision::Denied {
             tokens_at_stake: 0,
             attempt_number: 1,
             reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
@@ -1539,7 +1539,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
             failure_protocol_position(&no_response),
             GenerationRetryGuarantee::None,
         ),
-        Some(AutomaticRetryClass::NoResponse)
+        Some(RetryClass::NoResponse)
     );
 
     let rejected = LlmTransportError::new("throttled")
@@ -1554,7 +1554,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
             failure_protocol_position(&rejected),
             GenerationRetryGuarantee::None,
         ),
-        Some(AutomaticRetryClass::RejectedHttpResponse)
+        Some(RetryClass::RejectedHttpResponse)
     );
 
     // Response-observed transient statuses cannot prove that an upstream
@@ -1580,7 +1580,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
             failure_protocol_position(&retry_after_absent),
             GenerationRetryGuarantee::None,
         ),
-        Some(AutomaticRetryClass::RejectedHttpResponse),
+        Some(RetryClass::RejectedHttpResponse),
         "typed throttling is sufficient rejection proof without Retry-After"
     );
 
@@ -1594,7 +1594,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
             failure_protocol_position(&empty_partial),
             GenerationRetryGuarantee::None,
         ),
-        Some(AutomaticRetryClass::EmptyStreamPartial)
+        Some(RetryClass::EmptyStreamPartial)
     );
 
     let output_started = LlmTransportError::new("stream disconnected")
@@ -1636,9 +1636,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
             position,
             GenerationRetryGuarantee::Idempotent,
         ),
-        Some(AutomaticRetryClass::ProviderGuarantee(
-            GenerationRetryGuarantee::Idempotent
-        ))
+        Some(RetryClass::ProviderIdempotency)
     );
 }
 
@@ -1860,9 +1858,9 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
     let wire = serde_json::to_string(&record).expect("serialize trace stream record");
     let consumed: serde_json::Value =
         serde_json::from_str(&wire).expect("trace consumer decodes JSONL record");
-    assert_eq!(consumed["attempts"][0]["outcome"], "completed");
+    assert_eq!(consumed["attempts"][0]["detail"]["outcome"], "completed");
     assert_eq!(
-        consumed["attempts"][0]["generation_disposition"],
+        consumed["attempts"][0]["detail"]["generation_disposition"],
         serde_json::json!({
             "output_token_cap": "not_requested",
             "temperature": "applied",
@@ -1879,7 +1877,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
         "the trace stream must carry the completed attempt's generation disposition",
     );
     assert_eq!(
-        consumed["attempts"][0]["usage"],
+        consumed["attempts"][0]["detail"]["usage"],
         serde_json::json!({
             "input_tokens": 11,
             "output_tokens": 5,
@@ -2028,8 +2026,8 @@ async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
         failure.call_record.attempts[0]
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.reason.as_deref()),
-        Some("retry_after_exceeds_cap")
+            .and_then(|decision| decision.decline_cause()),
+        Some(lash_sansio::llm::types::RetryDeclineCause::RetryAfterExceedsCap)
     );
 }
 

@@ -254,14 +254,21 @@ pub enum RemoteProcessObservationGapReason {
     RoutingUnavailable,
     CrossProcess,
     InvalidCursor,
-    PublisherJoinedMidRun,
-    IncompleteGraph,
-    ProjectionTruncated,
     /// Retained live evidence cannot bridge the cursor's durable sequence to
     /// the durable high-water mark.
     SequenceUnbridged,
     /// The requested process lifetime is unknown or no longer retained.
     HistoryUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessLiveIncompleteness {
+    RoutingUnavailable,
+    PublisherReplaced,
+    PublisherJoinedMidRun,
+    IncompleteGraph,
+    ProjectionTruncated,
 }
 
 /// Live-graph completeness, reported apart from durable-summary completeness.
@@ -270,7 +277,7 @@ pub enum RemoteProcessObservationGapReason {
 pub enum RemoteProcessObservationCompleteness {
     Complete,
     Incomplete {
-        reason: RemoteProcessObservationGapReason,
+        reason: RemoteProcessLiveIncompleteness,
     },
 }
 

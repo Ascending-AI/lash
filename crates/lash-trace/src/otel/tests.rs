@@ -79,6 +79,7 @@ fn wait_facts_export_closed_otel_attributes() {
 
 #[test]
 fn correlation_fields_are_exported_as_otel_attributes() {
+    let call_id = lash_sansio::ToolCallId::fixture("call-1");
     let identity = crate::TraceLanguageExecutionIdentity {
         scope: crate::TraceRuntimeScope::new("session-1"),
         subject: crate::TraceRuntimeSubject::Process {
@@ -104,7 +105,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
                     node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
                     label: "tool".to_string(),
                     occurrence: 1,
-                    call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
+                    call_id: Some(call_id.clone()),
                 },
             },
         },
@@ -123,7 +124,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
     );
     assert_eq!(
         attribute_value(&language_attrs, "lash.language_execution.call_id"),
-        &OtelValue::String("call-1".into())
+        &OtelValue::String(call_id.to_string().into())
     );
     assert_eq!(
         attribute_value(&language_attrs, "lash.language_execution.attempt"),
@@ -132,14 +133,14 @@ fn correlation_fields_are_exported_as_otel_attributes() {
 
     for event in [
         TraceEvent::ToolCallStarted {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: call_id.clone(),
             provider_call_id: None,
             name: "search".to_string(),
             args: serde_json::json!({}),
             issuing_node_id: Some("node-1".to_string()),
         },
         TraceEvent::ToolCallCompleted {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: call_id.clone(),
             provider_call_id: None,
             name: "search".to_string(),
             args: serde_json::json!({}),
@@ -188,7 +189,7 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
                     identity: identity.clone(),
                     payload: crate::TraceLanguageExecutionPayload::NodeFailed {
                         node_id: "node".into(),
-                        node_kind: "resource_operation".into(),
+                        node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
                         label: "read".into(),
                         occurrence: 1,
                         call_id: Some(lash_sansio::ToolCallId::fixture("effect-1")),
@@ -459,10 +460,11 @@ fn otel_sink_accepts_turn_and_llm_lifecycle() {
         TraceEvent::LlmCallFailed {
             error: crate::TraceError {
                 retryable: false,
-                terminal_reason: None,
-                failure_kind: None,
-                code: Some("test".to_string()),
-                code_namespace: None,
+                terminal_reason: crate::TraceLlmTerminalReason::Unknown,
+                failure_kind: crate::TraceProviderFailureKind::Unknown,
+                code: Some(crate::TraceFailureCode::lash(
+                    lash_sansio::session_model::TurnFailureCode::from_wire("test"),
+                )),
             },
             stream_summary: None,
             attempts: None,
@@ -502,10 +504,9 @@ fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
         TraceEvent::LlmCallFailed {
             error: crate::TraceError {
                 retryable: true,
-                terminal_reason: Some("provider_error".to_string()),
-                failure_kind: Some("timeout".to_string()),
-                code: Some("insufficient_quota".to_string()),
-                code_namespace: Some("provider".to_string()),
+                terminal_reason: crate::TraceLlmTerminalReason::ProviderError,
+                failure_kind: crate::TraceProviderFailureKind::Timeout,
+                code: Some(crate::TraceFailureCode::provider("insufficient_quota")),
             },
             stream_summary: None,
             attempts: None,
@@ -517,10 +518,9 @@ fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
         TraceEvent::LlmCallFailed {
             error: crate::TraceError {
                 retryable: false,
-                terminal_reason: Some("provider_error".to_string()),
-                failure_kind: None,
+                terminal_reason: crate::TraceLlmTerminalReason::ProviderError,
+                failure_kind: crate::TraceProviderFailureKind::Unknown,
                 code: None,
-                code_namespace: None,
             },
             stream_summary: None,
             attempts: None,
@@ -550,7 +550,7 @@ fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
     assert_eq!(
         attribute(&spans[1], "error.type"),
         OtelValue::String("_OTHER".into()),
-        "an absent failure kind demotes to _OTHER"
+        "an explicit unknown failure kind demotes to _OTHER"
     );
 }
 

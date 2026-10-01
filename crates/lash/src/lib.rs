@@ -986,7 +986,9 @@ pub mod remote {
             RemoteAttemptUsageOutcome, RemoteCacheControlDialect, RemoteProjectionMode,
             RemoteSamplingCapability, RemoteStreamTermination,
         };
-        pub use lash_sansio::llm::types::{ChargeSafetyDecision, RetryDecision};
+        pub use lash_sansio::llm::types::{
+            ChargeSafetyDecision, RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+        };
 
         pub use lash_remote_protocol::llm::{
             RemoteAnthropicThinkingRetention, RemoteAttachmentAcceptanceRule,
@@ -1007,8 +1009,9 @@ pub mod remote {
             RemoteProviderRouteIdentity, RemoteReasoningCapability, RemoteReasoningEncoding,
             RemoteReasoningRetentionCapability, RemoteReasoningRetentionPolicy,
             RemoteReasoningRetentionSelection, RemoteReasoningSelection, RemoteResponseTextMeta,
-            RemoteRetryDecision, RemoteSchemaContract, RemoteSchemaProjectionOverride,
-            RemoteSchemaProjectionPolicy, RemoteToolResultBlock,
+            RemoteRetryClass, RemoteRetryDecision, RemoteRetryDeclineCause, RemoteRetryWait,
+            RemoteSchemaContract, RemoteSchemaProjectionOverride, RemoteSchemaProjectionPolicy,
+            RemoteToolResultBlock,
         };
     }
 
@@ -1025,12 +1028,13 @@ pub mod remote {
         };
 
         pub use lash_remote_protocol::observations::{
-            RemoteLiveReplayGap, RemoteLiveReplayGapReason, RemoteProcessObservationCompleteness,
-            RemoteProcessObservationGapReason, RemoteProcessObservationItem,
-            RemoteProcessObservationProjection, RemoteProcessObservationRequest,
-            RemoteSessionCursor, RemoteSessionObservation, RemoteSessionObservationEvent,
-            RemoteSessionObservationEventPayload, RemoteSessionProcessEventKind,
-            RemoteSessionQueueEventKind, RemoteTurnInputApplication, RemoteTurnInputCheckpoint,
+            RemoteLiveReplayGap, RemoteLiveReplayGapReason, RemoteProcessLiveIncompleteness,
+            RemoteProcessObservationCompleteness, RemoteProcessObservationGapReason,
+            RemoteProcessObservationItem, RemoteProcessObservationProjection,
+            RemoteProcessObservationRequest, RemoteSessionCursor, RemoteSessionObservation,
+            RemoteSessionObservationEvent, RemoteSessionObservationEventPayload,
+            RemoteSessionProcessEventKind, RemoteSessionQueueEventKind, RemoteTurnInputApplication,
+            RemoteTurnInputCheckpoint,
         };
     }
 
@@ -1165,9 +1169,9 @@ pub mod process {
     pub use crate::process_observation::{
         ProcessCursor, ProcessCursorError, ProcessCursorReference, ProcessDurableCompleteness,
         ProcessDurableGapReason, ProcessDurableSnapshot, ProcessEventsFrom, ProcessEventsRead,
-        ProcessObservationCompleteness, ProcessObservationConfig, ProcessObservationGapReason,
-        ProcessObservationHub, ProcessObservationItem, ProcessObservationProjection,
-        ProcessObservationSnapshot, ProcessObservationSubscription,
+        ProcessLiveIncompleteness, ProcessObservationCompleteness, ProcessObservationConfig,
+        ProcessObservationGapReason, ProcessObservationHub, ProcessObservationItem,
+        ProcessObservationProjection, ProcessObservationSnapshot, ProcessObservationSubscription,
     };
     /// The origin of a lifecycle cancellation submitted to a registry.
     pub use lash_core::CancelOrigin;
@@ -1397,17 +1401,17 @@ pub mod tracing {
     #[cfg(feature = "otel-trace")]
     pub use lash_core::{OtelTraceOptions, OtelTraceSink};
     pub use lash_core::{
-        TraceAttachment, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason,
-        TraceContentBlock, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-        TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-        TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
-        TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
-        TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
-        TraceTokenUsage, TraceToolResultBlock, TraceToolSpec, facade_support::JsonlTraceReadError,
-        facade_support::JsonlTraceSink, facade_support::TraceBranchSelection,
-        facade_support::TraceLabelMetadata, facade_support::TraceRecord,
-        facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
-        facade_support::TraceSinkError, facade_support::parse_jsonl_records,
+        TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry,
+        TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
+        TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
+        TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
+        TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
+        TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolResultBlock, TraceToolSpec,
+        facade_support::JsonlTraceReadError, facade_support::JsonlTraceSink,
+        facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
+        facade_support::TraceRecord, facade_support::TraceRuntimeScope,
+        facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
+        facade_support::parse_jsonl_records,
     };
     pub use lash_sansio::ExecutionNodeKind;
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
@@ -1419,7 +1423,7 @@ pub mod tracing {
         DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
         TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageOutcome,
         TraceBranchMembership, TraceDurableTimerStatus, TraceDurableWaitResolution,
-        TraceExecToolCall, TraceExecutionEvidence, TraceJournaledEffectStatus,
+        TraceExecToolCall, TraceExecutionEvidence, TraceFailureCode, TraceJournaledEffectStatus,
         TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
         TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
         TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
@@ -1429,10 +1433,13 @@ pub mod tracing {
         TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
         TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
         TraceLashlangNodeObservation, TraceLashlangNodeReport, TraceLashlangNodeTerminalRecord,
-        TraceLashlangNodeTerminalStatus, TraceNodeAwaited, TraceNodeWaitKind,
-        TraceNodeWaitResolution, TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome,
-        TraceToolCallStatus, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
-        TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
+        TraceLashlangNodeTerminalStatus, TraceLlmAttemptOutcome, TraceLlmTerminalReason,
+        TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution, TraceNormalizedError,
+        TraceProviderFailureKind, TraceRetryAttempt, TraceRetryAttemptDetail, TraceRetryClass,
+        TraceRetryDecision, TraceRetryDeclineCause, TraceRetryWait, TraceRlmStepOutcome,
+        TraceStoreErrorClass, TraceToolAttemptOutcome, TraceToolCallStatus,
+        TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
+        TraceTurnOutcome, fold_lashlang_graph,
     };
     pub use lash_trace::{
         StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,

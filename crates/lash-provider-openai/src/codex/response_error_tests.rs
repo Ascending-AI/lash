@@ -93,7 +93,7 @@ async fn codex_non_sse_body_read_failure_preserves_observed_response_evidence() 
     );
     let recorded = attempt.error.as_ref().expect("failed attempt error");
     assert_eq!(recorded.http_status, Some(200));
-    assert_eq!(recorded.class, ProviderFailureKind::Timeout.code());
+    assert_eq!(recorded.class, ProviderFailureKind::Timeout);
     assert_eq!(
         recorded.code.as_ref().map(|code| code.namespaced()),
         Some("provider:body_timeout".to_string())

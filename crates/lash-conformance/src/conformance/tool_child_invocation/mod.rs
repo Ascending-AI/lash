@@ -837,7 +837,7 @@ fn law_billed_completion() -> crate::DirectCompletion {
                     retry_budget_consumed: false,
                     retry_decision: None,
                     error: Some(crate::NormalizedError {
-                        class: "provider_error".to_string(),
+                        class: lash_sansio::llm::types::ProviderFailureKind::Unknown,
                         code: None,
                         http_status: Some(503),
                         provider_request_id: None,

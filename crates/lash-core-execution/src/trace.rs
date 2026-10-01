@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-    TraceRecord, TraceRetryAttempt, TraceRetryAttemptOutcome, TraceSink, TraceTokenUsage,
-    TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id, sha256_hex, tool_node_id,
-    turn_node_id,
+    TraceRecord, TraceRetryAttempt, TraceRetryAttemptDetail, TraceSink, TraceTokenUsage,
+    TraceToolAttemptOutcome, TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id,
+    sha256_hex, tool_node_id, turn_node_id,
 };
 
 use crate::llm::types::{
@@ -134,20 +134,20 @@ pub fn emit_store_error(
     error: &crate::StoreError,
     clock: &dyn crate::Clock,
 ) {
-    if !matches!(
-        error,
-        crate::StoreError::StoredDataCorrupt { .. }
-            | crate::StoreError::MonotonicCounterOverflow { .. }
-    ) {
+    let error_class = if let crate::StoreError::StoredDataCorrupt { .. } = error {
+        lash_trace::TraceStoreErrorClass::StoredDataCorrupt
+    } else if let crate::StoreError::MonotonicCounterOverflow { .. } = error {
+        lash_trace::TraceStoreErrorClass::MonotonicCounterOverflow
+    } else {
         return;
-    }
+    };
     emit_trace(
         sink,
         base_context,
         context,
         TraceEvent::StoreErrorObserved {
             operation: operation.to_string(),
-            error_class: error.variant_name().to_string(),
+            error_class,
             message: error.to_string(),
         },
         clock,
@@ -650,27 +650,25 @@ pub(crate) fn trace_tool_attempt(
     record: &crate::ToolCallRecord,
     delay_ms: Option<u64>,
 ) -> TraceRetryAttempt {
-    let (outcome, reason) = match &record.output.outcome {
-        crate::ToolCallOutcome::Success(_) => (TraceRetryAttemptOutcome::Completed, None),
-        crate::ToolCallOutcome::Failure(failure) => (
-            TraceRetryAttemptOutcome::Failed,
-            Some(format!("{}: {}", failure.code, failure.message)),
-        ),
-        crate::ToolCallOutcome::Cancelled(cancellation) => (
-            TraceRetryAttemptOutcome::Cancelled,
-            Some(cancellation.message.clone()),
-        ),
+    let outcome = match &record.output.outcome {
+        crate::ToolCallOutcome::Success(_) => TraceToolAttemptOutcome::Completed,
+        crate::ToolCallOutcome::Failure(failure) => TraceToolAttemptOutcome::Failed {
+            class: failure.class.clone(),
+            code: failure.code.clone(),
+            message: failure.message.clone(),
+            source: failure.source.clone(),
+            retry: failure.retry.clone(),
+        },
+        crate::ToolCallOutcome::Cancelled(cancellation) => TraceToolAttemptOutcome::Cancelled {
+            message: cancellation.message.clone(),
+            source: cancellation.source.clone(),
+            origin: cancellation.origin,
+        },
     };
     TraceRetryAttempt {
         ordinal,
-        outcome,
-        reason,
         delay_ms,
-        execution_evidence: None,
-        charge_safety: None,
-        generation_disposition: None,
-        usage: None,
-        usage_disposition: None,
+        detail: TraceRetryAttemptDetail::Tool { outcome },
     }
 }
 
@@ -953,14 +951,13 @@ mod span_identity_tests {
                     outcome: crate::AttemptOutcome::Failed,
                     protocol_position: crate::ProtocolPosition::ResponseObserved,
                     retry_budget_consumed: true,
-                    retry_decision: Some(crate::RetryDecision {
-                        scheduled: true,
-                        delay: Some(std::time::Duration::from_millis(250)),
-                        reason: Some("provider_retry_after".to_string()),
-                        charge_safety: None,
+                    retry_decision: Some(crate::RetryDecision::Scheduled {
+                        delay: std::time::Duration::from_millis(250),
+                        wait: lash_sansio::llm::types::RetryWait::Throttle,
+                        class: lash_sansio::llm::types::RetryClass::RejectedHttpResponse,
                     }),
                     error: Some(crate::NormalizedError {
-                        class: "rate_limited".to_string(),
+                        class: lash_sansio::llm::types::ProviderFailureKind::Http,
                         code: Some(crate::FailureCode::provider("rate_limit_exceeded")),
                         http_status: Some(429),
                         provider_request_id: None,
@@ -1022,16 +1019,33 @@ mod span_identity_tests {
         let ladder = attempts.expect("emitted attempt ladder");
         assert_eq!(ladder.len(), 2);
         assert_eq!(ladder[0].ordinal, 1);
-        assert_eq!(ladder[0].outcome, TraceRetryAttemptOutcome::Failed);
-        assert!(ladder[0].reason.as_deref().is_some_and(|reason| {
-            reason.contains("rate_limited")
-                && reason.contains("http 429")
-                && reason.contains("rate_limit_exceeded")
-                && reason.contains("provider_retry_after")
-        }));
+        let TraceRetryAttemptDetail::Llm {
+            outcome,
+            error: Some(error),
+            retry_decision: Some(lash_trace::TraceRetryDecision::Scheduled { wait, class }),
+            ..
+        } = &ladder[0].detail
+        else {
+            panic!("typed failed LLM attempt")
+        };
+        assert_eq!(*outcome, lash_trace::TraceLlmAttemptOutcome::Failed);
+        assert_eq!(error.class, crate::ProviderFailureKind::Http);
+        assert_eq!(error.http_status, Some(429));
+        assert_eq!(
+            error.code,
+            Some(crate::FailureCode::provider("rate_limit_exceeded"))
+        );
+        assert_eq!(*wait, lash_trace::TraceRetryWait::Throttle);
+        assert_eq!(*class, lash_trace::TraceRetryClass::RejectedHttpResponse);
         assert_eq!(ladder[0].delay_ms, Some(250));
         assert_eq!(ladder[1].ordinal, 2);
-        assert_eq!(ladder[1].outcome, TraceRetryAttemptOutcome::Completed);
+        assert!(matches!(
+            ladder[1].detail,
+            TraceRetryAttemptDetail::Llm {
+                outcome: lash_trace::TraceLlmAttemptOutcome::Completed,
+                ..
+            }
+        ));
         assert_eq!(ladder[1].delay_ms, None);
     }
 
@@ -1087,12 +1101,12 @@ mod span_identity_tests {
         assert!(matches!(
             &records[0].event,
             TraceEvent::StoreErrorObserved { error_class, .. }
-                if error_class == "StoredDataCorrupt"
+                if *error_class == lash_trace::TraceStoreErrorClass::StoredDataCorrupt
         ));
         assert!(matches!(
             &records[1].event,
             TraceEvent::StoreErrorObserved { error_class, .. }
-                if error_class == "MonotonicCounterOverflow"
+                if *error_class == lash_trace::TraceStoreErrorClass::MonotonicCounterOverflow
         ));
     }
 }

@@ -503,16 +503,11 @@ impl RuntimeTurnDriver<'_> {
                                     outcome: crate::AttemptOutcome::Failed,
                                     protocol_position: crate::ProtocolPosition::NoResponse,
                                     retry_budget_consumed: true,
-                                    retry_decision: Some(crate::RetryDecision {
-                                        scheduled: false,
-                                        delay: None,
-                                        reason: Some("not_retryable".to_string()),
-                                        charge_safety: None,
-                                    }),
+                                    retry_decision: Some(crate::RetryDecision::Declined(
+                                        crate::RetryDeclineCause::NotRetryable,
+                                    )),
                                     error: Some(crate::NormalizedError {
-                                        class: crate::ProviderFailureKind::Unknown
-                                            .code()
-                                            .to_string(),
+                                        class: crate::ProviderFailureKind::Unknown,
                                         code: Some(FailureCode::lash(
                                             TurnFailureCode::ProviderPanicked,
                                         )),
@@ -814,13 +809,9 @@ impl RuntimeTurnDriver<'_> {
                     TraceEvent::LlmCallFailed {
                         error: TraceError {
                             retryable,
-                            terminal_reason: Some(terminal_reason.code().to_string()),
-                            failure_kind: (kind != crate::ProviderFailureKind::Unknown)
-                                .then(|| kind.code().to_string()),
-                            code: code.as_ref().map(|code| code.spelling().to_string()),
-                            code_namespace: code
-                                .as_ref()
-                                .map(|code| code.namespace().as_str().to_string()),
+                            terminal_reason,
+                            failure_kind: kind,
+                            code,
                         },
                         // The call's own trace carries its stream summary.
                         stream_summary: None,

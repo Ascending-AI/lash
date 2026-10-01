@@ -264,7 +264,7 @@ fn wire_snapshot(
                 RemoteProcessObservationCompleteness::Complete
             } else {
                 RemoteProcessObservationCompleteness::Incomplete {
-                    reason: RemoteProcessObservationGapReason::RoutingUnavailable,
+                    reason: RemoteProcessLiveIncompleteness::RoutingUnavailable,
                 }
             },
             graph,
@@ -426,7 +426,7 @@ fn process_observation_gap_wire_contract() {
                 live: RemoteProcessObservationProjection {
                     graph: None,
                     completeness: RemoteProcessObservationCompleteness::Incomplete {
-                        reason: RemoteProcessObservationGapReason::HistoryUnavailable,
+                        reason: RemoteProcessLiveIncompleteness::RoutingUnavailable,
                     },
                 },
             },

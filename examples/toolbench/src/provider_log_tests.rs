@@ -102,7 +102,7 @@ async fn retries_honor_count_and_exponential_backoff() {
             .call_record
             .attempts
             .iter()
-            .filter_map(|a| a.retry_decision.as_ref().and_then(|d| d.delay))
+            .filter_map(|a| a.retry_decision.as_ref().and_then(|d| d.delay()))
             .collect::<Vec<_>>();
         assert_eq!(
             delays,
@@ -119,7 +119,7 @@ async fn retries_honor_count_and_exponential_backoff() {
                 .retry_decision
                 .as_ref()
                 .unwrap()
-                .scheduled
+                .is_scheduled()
         );
     }
     assert_eq!(retry_policy(3).max_delay_ms, 10_000);
@@ -159,7 +159,7 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
         assert_eq!(rows[0]["error"]["status"], status);
         assert_eq!(rows[0]["error"]["raw"], "provider body verbatim");
         assert_eq!(rows[0]["error"]["provider_request_id"], "req-17");
-        assert_eq!(rows[0]["retry_decision"]["scheduled"], false);
+        assert_eq!(rows[0]["retry_decision"]["outcome"], "declined");
         // Forensic captures retain the complete redacted request, including Unicode.
         let body: Value =
             serde_json::from_str(rows[0]["error"]["request_body"].as_str().unwrap()).unwrap();
@@ -187,7 +187,7 @@ async fn retry_after_is_honored_without_extra_courtesy_attempts() {
             .retry_decision
             .as_ref()
             .unwrap()
-            .delay,
+            .delay(),
         Some(Duration::from_secs(1))
     );
 }
@@ -217,12 +217,9 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
     )
     .await;
     let rows = telemetry.rows(&[], false);
-    assert_eq!(rows[0]["retry_decision"]["scheduled"], false);
-    assert_eq!(
-        rows[0]["retry_decision"]["charge_safety"]["outcome"],
-        "denied"
-    );
-    assert!(rows[0]["retry_decision"]["reason"].is_string());
+    assert_eq!(rows[0]["retry_decision"]["outcome"], "declined");
+    assert_eq!(rows[0]["retry_decision"]["cause"], "charge_safety");
+    assert_eq!(rows[0]["retry_decision"]["reason"], "guarantee_required");
     assert_eq!(crate::summary::Usage::from_attempts(&rows).cost, Some(0.02));
 
     let telemetry = crate::telemetry::Telemetry::default();
@@ -360,7 +357,7 @@ async fn empty_response_keeps_cost_from_raw_usage_even_without_partial_response(
     .await;
     let rows = telemetry.rows(&[], true);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["retry_decision"]["reason"], "not_retryable");
+    assert_eq!(rows[0]["retry_decision"]["cause"], "not_retryable");
     assert_eq!(rows[0]["cost_unknown"], false);
     assert_eq!(
         crate::summary::Usage::from_attempts(&rows).cost,

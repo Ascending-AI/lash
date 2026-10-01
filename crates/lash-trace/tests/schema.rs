@@ -16,12 +16,37 @@ use lash_trace::{
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
     TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
     TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord,
-    TraceRetryAttemptOutcome, TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeSubject,
-    TraceTokenUsage, TraceToolCallOutcome, TraceToolCallOutput, TraceToolCallStatus,
-    TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
-    TraceTurnOutcome,
+    TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage,
+    TraceToolCallOutcome, TraceToolCallOutput, TraceToolCallStatus, TraceTurnCancellationEvidence,
+    TraceTurnCompletionReason, TraceTurnFailureReason, TraceTurnOutcome,
 };
 use serde_json::json;
+
+#[test]
+fn trace_error_refuses_unknown_failure_and_terminal_classes() {
+    for field in ["failure_kind", "terminal_reason"] {
+        let mut bytes = json!({
+            "retryable": false,
+            "terminal_reason": "provider_error",
+            "failure_kind": "http"
+        });
+        bytes[field] = json!("rate_limited");
+        assert!(
+            serde_json::from_value::<TraceError>(bytes).is_err(),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn trace_retry_attempt_refuses_the_shared_llm_tool_shape() {
+    let bytes = json!({
+        "ordinal": 1,
+        "outcome": "cancelled",
+        "usage_disposition": "unreported_after_failure"
+    });
+    assert!(serde_json::from_value::<lash_trace::TraceRetryAttempt>(bytes).is_err());
+}
 
 #[test]
 fn trace_schema_version_is_pinned_at_36() {
@@ -427,10 +452,9 @@ fn event_samples() -> Vec<TraceEvent> {
         TraceEvent::LlmCallFailed {
             error: TraceError {
                 retryable: true,
-                terminal_reason: None,
-                failure_kind: None,
+                terminal_reason: lash_trace::TraceLlmTerminalReason::Unknown,
+                failure_kind: lash_trace::TraceProviderFailureKind::Unknown,
                 code: None,
-                code_namespace: None,
             },
             stream_summary: None,
             attempts: None,
@@ -568,7 +592,7 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::StoreErrorObserved {
             operation: "session_restore".to_string(),
-            error_class: "StoredDataCorrupt".to_string(),
+            error_class: lash_trace::TraceStoreErrorClass::StoredDataCorrupt,
             message: "stored SessionHeadMeta data is corrupt".to_string(),
         },
         TraceEvent::RlmStep {
@@ -1556,9 +1580,7 @@ fn unknown_attempt_usage_disposition_is_refused() {
     // free-form string, so any capitalisation or invention decoded silently.
     let attempt = json!({
         "ordinal": 1,
-        "outcome": "completed",
-        "duration_ms": 0,
-        "usage_disposition": "REPORTED",
+        "detail": {"kind": "llm", "outcome": "aborted", "usage_disposition": "REPORTED"},
     });
     let error = serde_json::from_value::<lash_trace::TraceRetryAttempt>(attempt)
         .expect_err("an unknown usage disposition must be refused");
@@ -1570,97 +1592,109 @@ fn unknown_attempt_usage_disposition_is_refused() {
 
     let legal = json!({
         "ordinal": 1,
-        "outcome": "completed",
-        "duration_ms": 0,
-        "usage_disposition": "unreported_after_abort",
+        "detail": {"kind": "llm", "outcome": "aborted", "usage_disposition": "unreported_after_abort"},
     });
     let decoded =
         serde_json::from_value::<lash_trace::TraceRetryAttempt>(legal).expect("legal spelling");
     assert_eq!(
-        serde_json::to_value(&decoded).expect("re-encode")["usage_disposition"],
+        serde_json::to_value(&decoded).expect("re-encode")["detail"]["usage_disposition"],
         json!("unreported_after_abort"),
     );
 }
 
 #[test]
-fn retry_attempts_are_optional_additive_event_fields() {
+fn retry_attempts_carry_typed_llm_evidence() {
     let attempts = Some(vec![
         lash_trace::TraceRetryAttempt {
             ordinal: 1,
-            outcome: TraceRetryAttemptOutcome::Failed,
-            reason: Some("http_429".to_string()),
             delay_ms: Some(250),
-            execution_evidence: Some(lash_trace::TraceExecutionEvidence {
-                served_model: Some("served-model".to_string()),
-                provider_response_id: Some("provider-response-1".to_string()),
-                reasoning_output_tokens: Some(0),
-                provider_finish_reason: Some("stop".to_string()),
-                ..Default::default()
-            }),
-            charge_safety: Some(lash_trace::TraceChargeSafetyDecision::Authorized {
-                tokens_at_stake: 42,
-                attempt_number: 1,
-            }),
-            generation_disposition: Some(lash_trace::GenerationReceipt {
-                output_token_cap: lash_sansio::llm::types::GenerationOptionOutcome::Applied,
-                ..Default::default()
-            }),
-            usage: Some(token_usage_sample()),
-            usage_disposition: Some(lash_trace::TraceAttemptUsageOutcome::Reported),
+            detail: lash_trace::TraceRetryAttemptDetail::Llm {
+                outcome: lash_trace::TraceLlmAttemptOutcome::Failed,
+                error: Some(lash_trace::TraceNormalizedError {
+                    class: lash_trace::TraceProviderFailureKind::Http,
+                    code: Some(lash_trace::TraceFailureCode::provider(
+                        "rate_limit_exceeded",
+                    )),
+                    http_status: Some(429),
+                    provider_request_id: None,
+                    retry_after: None,
+                }),
+                retry_decision: Some(lash_trace::TraceRetryDecision::Scheduled {
+                    wait: lash_trace::TraceRetryWait::Backoff,
+                    class: lash_trace::TraceRetryClass::ChargeAuthorized {
+                        tokens_at_stake: 42,
+                        attempt_number: 1,
+                    },
+                }),
+                execution_evidence: Some(Box::new(lash_trace::TraceExecutionEvidence {
+                    served_model: Some("served-model".to_string()),
+                    provider_response_id: Some("provider-response-1".to_string()),
+                    reasoning_output_tokens: Some(0),
+                    provider_finish_reason: Some("stop".to_string()),
+                    ..Default::default()
+                })),
+                generation_disposition: Some(lash_trace::GenerationReceipt {
+                    output_token_cap: lash_sansio::llm::types::GenerationOptionOutcome::Applied,
+                    ..Default::default()
+                }),
+                usage: Some(token_usage_sample()),
+                usage_disposition: lash_trace::TraceAttemptUsageOutcome::Reported,
+            },
         },
         lash_trace::TraceRetryAttempt {
             ordinal: 2,
-            outcome: TraceRetryAttemptOutcome::Completed,
-            reason: None,
             delay_ms: None,
-            execution_evidence: None,
-            charge_safety: None,
-            generation_disposition: None,
-            usage: None,
-            usage_disposition: None,
+            detail: lash_trace::TraceRetryAttemptDetail::Llm {
+                outcome: lash_trace::TraceLlmAttemptOutcome::Completed,
+                error: None,
+                retry_decision: None,
+                execution_evidence: None,
+                generation_disposition: None,
+                usage: None,
+                usage_disposition: lash_trace::TraceAttemptUsageOutcome::UnreportedByProvider,
+            },
         },
     ]);
-    let event = TraceEvent::ToolCallCompleted {
-        call_id: lash_sansio::ToolCallId::fixture("call-1"),
-        provider_call_id: None,
-        name: "retry_probe".to_string(),
-        args: json!({}),
-        output: TraceToolCallOutput {
-            outcome: TraceToolCallOutcome::Success(json!("ok")),
-            control: None,
+    let event = TraceEvent::LlmCallCompleted {
+        response: TraceLlmResponse {
+            text: "ok".into(),
+            duration_ms: 280,
+            request_model: "request-model".into(),
+            terminal_reason: Some("stop".into()),
+            parts: None,
+            generation_disposition: None,
         },
-        duration_ms: 280,
-        issuing_node_id: None,
+        usage: None,
+        provider_usage: None,
+        stream_summary: None,
         attempts,
     };
-    let json = serde_json::to_value(event).expect("serialize retry ladder");
-    assert_eq!(json["type"], "tool_call_completed");
-    assert_eq!(json["attempts"].as_array().map(Vec::len), Some(2));
-    assert_eq!(json["attempts"][0]["reason"], "http_429");
-    assert_eq!(json["attempts"][0]["delay_ms"], 250);
+    let bytes = serde_json::to_value(event).expect("serialize retry ladder");
+    assert_eq!(bytes["attempts"].as_array().map(Vec::len), Some(2));
+    let first = &bytes["attempts"][0];
+    assert_eq!(first["delay_ms"], 250);
+    let detail = &first["detail"];
+    assert_eq!(detail["kind"], "llm");
+    assert_eq!(detail["error"]["class"], "http");
+    assert_eq!(detail["error"]["http_status"], 429);
+    assert_eq!(detail["error"]["code"], "provider:rate_limit_exceeded");
     assert_eq!(
-        json["attempts"][0]["charge_safety"]["outcome"],
-        "authorized"
+        detail["retry_decision"]["class"]["class"],
+        "charge_authorized"
     );
-    assert_eq!(json["attempts"][0]["charge_safety"]["tokens_at_stake"], 42);
-    assert_eq!(json["attempts"][0]["charge_safety"]["attempt_number"], 1);
+    assert_eq!(detail["retry_decision"]["class"]["tokens_at_stake"], 42);
+    assert_eq!(detail["retry_decision"]["class"]["attempt_number"], 1);
     assert_eq!(
-        json["attempts"][0]["generation_disposition"]["output_token_cap"],
+        detail["generation_disposition"]["output_token_cap"],
         "applied"
     );
-    assert_eq!(json["attempts"][0]["usage"], json!(token_usage_sample()));
-    assert_eq!(
-        json["attempts"][0]["execution_evidence"]["served_model"],
-        "served-model"
-    );
-    assert_eq!(
-        json["attempts"][0]["execution_evidence"]["reasoning_output_tokens"],
-        0
-    );
-    assert!(json["attempts"][1].get("reason").is_none());
-    assert!(json["attempts"][1].get("delay_ms").is_none());
-    assert!(json["attempts"][1].get("generation_disposition").is_none());
-    assert!(json["attempts"][1].get("usage").is_none());
+    assert_eq!(detail["usage"], json!(token_usage_sample()));
+    assert_eq!(detail["execution_evidence"]["served_model"], "served-model");
+    assert_eq!(detail["execution_evidence"]["reasoning_output_tokens"], 0);
+    let second = &bytes["attempts"][1];
+    assert!(second.get("delay_ms").is_none());
+    assert!(second["detail"].get("generation_disposition").is_none());
+    assert!(second["detail"].get("usage").is_none());
     assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 36);
 }
 
@@ -2054,7 +2088,7 @@ fn durable_step_events_round_trip_at_schema_version_six() {
         },
         TraceEvent::StoreErrorObserved {
             operation: "session_restore".to_string(),
-            error_class: "StoredDataCorrupt".to_string(),
+            error_class: lash_trace::TraceStoreErrorClass::StoredDataCorrupt,
             message: "stored SessionHeadMeta data is corrupt".to_string(),
         },
     ];

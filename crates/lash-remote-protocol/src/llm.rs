@@ -363,21 +363,32 @@ pub enum RemoteProtocolPosition {
     TerminalObserved,
 }
 
+pub use lash_sansio::llm::types::{
+    RetryClass as RemoteRetryClass, RetryDeclineCause as RemoteRetryDeclineCause,
+    RetryWait as RemoteRetryWait,
+};
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteRetryDecision {
-    pub scheduled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delay_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteRetryDecision {
+    Scheduled {
+        delay_ms: u64,
+        wait: RemoteRetryWait,
+        class: RemoteRetryClass,
+    },
+    Declined(RemoteRetryDeclineCause),
+}
+
+impl RemoteRetryDecision {
+    pub fn is_scheduled(&self) -> bool {
+        matches!(self, Self::Scheduled { .. })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteNormalizedError {
-    pub class: String,
+    pub class: RemoteProviderFailureKind,
     /// The attempt's namespaced failure code (`<namespace>:<spelling>`).
-    /// Pre-cutover rows carried `provider_code`/`adapter_code`/`refusal_code`
-    /// columns instead; they decode with `code: None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<lash_sansio::FailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -421,9 +432,6 @@ pub(crate) fn validate_llm_call_record(
                 ),
             });
         }
-        if let Some(error) = &attempt.error {
-            require_non_empty("RemoteNormalizedError", "class", &error.class)?;
-        }
         match attempt.outcome {
             RemoteAttemptOutcome::Completed => {
                 if attempt.protocol_position != RemoteProtocolPosition::TerminalObserved {
@@ -447,7 +455,7 @@ pub(crate) fn validate_llm_call_record(
                 if attempt
                     .retry_decision
                     .as_ref()
-                    .is_some_and(|decision| decision.scheduled)
+                    .is_some_and(|decision| decision.is_scheduled())
                 {
                     return Err(RemoteProtocolError::InvalidEnvelope {
                         type_name: "RemoteLlmCallRecord",
@@ -471,7 +479,7 @@ pub(crate) fn validate_llm_call_record(
         if attempt
             .retry_decision
             .as_ref()
-            .is_some_and(|decision| decision.scheduled)
+            .is_some_and(|decision| decision.is_scheduled())
             && index + 1 == record.attempts.len()
         {
             return Err(RemoteProtocolError::InvalidEnvelope {

@@ -1103,11 +1103,12 @@ async fn standard_runtime_trace_records_stream_event_entries() {
         Some("mock-model")
     );
     assert_eq!(
-        response_entry["attempts"][0]["execution_evidence"]["served_model"].as_str(),
+        response_entry["attempts"][0]["detail"]["execution_evidence"]["served_model"].as_str(),
         Some("served-model")
     );
     assert_eq!(
-        response_entry["attempts"][0]["execution_evidence"]["reasoning_output_tokens"].as_u64(),
+        response_entry["attempts"][0]["detail"]["execution_evidence"]["reasoning_output_tokens"]
+            .as_u64(),
         Some(0)
     );
     let stream_summary = response_entry
@@ -1555,10 +1556,9 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
         .find(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("llm_call_failed"))
         .expect("llm error entry");
     assert!(error_entry["error"].get("message").is_none());
-    assert_eq!(error_entry["error"]["code"].as_str(), Some("builder"));
     assert_eq!(
-        error_entry["error"]["code_namespace"].as_str(),
-        Some("provider")
+        error_entry["error"]["code"].as_str(),
+        Some("provider:builder")
     );
     assert!(error_entry["error"].get("raw").is_none());
     let request_entry = entries

@@ -35,6 +35,26 @@
         }
       ]
     },
+    "AttemptOutcome": {
+      "enum": [
+        "completed",
+        "failed",
+        "aborted",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "CancelOrigin": {
+      "description": "The runtime or actor decision that requested cancellation of a process.",
+      "enum": [
+        "turn_stopped",
+        "parent_ended",
+        "operator_requested",
+        "model_requested",
+        "start_failed"
+      ],
+      "type": "string"
+    },
     "CellFailure": {
       "description": "Structured failure returned by a code executor.",
       "properties": {
@@ -103,6 +123,45 @@
           "type": "string"
         }
       ]
+    },
+    "ChargeSafetyDenialReason": {
+      "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nRuntime and reporting implementors exhaustively render these host-policy\noutcomes; provider adapters never construct them.",
+      "oneOf": [
+        {
+          "const": "guarantee_required",
+          "description": "Host policy requires a provider idempotency or resume guarantee.",
+          "type": "string"
+        },
+        {
+          "const": "unsafe_retry_limit_exceeded",
+          "description": "The per-call unsafe retry allowance is exhausted.",
+          "type": "string"
+        },
+        {
+          "const": "duplicate_cost_limit_exceeded",
+          "description": "Provider-reported tokens exceed the host's duplicate-cost bound.",
+          "type": "string"
+        }
+      ]
+    },
+    "Duration": {
+      "properties": {
+        "nanos": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "secs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "secs",
+        "nanos"
+      ],
+      "type": "object"
     },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
@@ -363,15 +422,91 @@
         }
       ]
     },
+    "LlmTerminalReason": {
+      "enum": [
+        "stop",
+        "tool_use",
+        "output_limit",
+        "context_overflow",
+        "content_filter",
+        "provider_error",
+        "cancelled",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "MaxToolCalls": {
       "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
       "format": "uint",
       "minimum": 1,
       "type": "integer"
     },
+    "NormalizedError": {
+      "description": "A journal-safe projection of a provider/transport failure.",
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/ProviderFailureKind"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The failure code, namespaced by who authored the spelling: `lash:` for\nworkspace-authored codes, `provider:` for provider wire vocabulary,\nand a host's own namespace for host-authored codes."
+        },
+        "http_status": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "provider_request_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "class"
+      ],
+      "type": "object"
+    },
     "ProcessCursor": {
       "description": "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.",
       "pattern": "^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$",
+      "type": "string"
+    },
+    "ProviderFailureKind": {
+      "description": "Classification of a provider/transport failure.\n\nThis is the single canonical failure-kind vocabulary: provider transports\nclassify failures into it (`lash-core` re-exports it from\n`llm::transport`), the turn machine carries it on\n[`ErrorEnvelope`](crate::session_model::ErrorEnvelope), and hosts read it\nback from `TurnIssue`s without scraping traces.\n\n`Unknown` is an explicit classification, never a decoder fallback.\nPersisted failure records reject unrecognized kind literals.",
+      "enum": [
+        "transport",
+        "timeout",
+        "http",
+        "stream",
+        "auth",
+        "validation",
+        "quota",
+        "unsupported",
+        "unknown"
+      ],
       "type": "string"
     },
     "RemoteProcessDurableCompleteness": {
@@ -619,6 +754,16 @@
         }
       ]
     },
+    "RemoteProcessLiveIncompleteness": {
+      "enum": [
+        "routing_unavailable",
+        "publisher_replaced",
+        "publisher_joined_mid_run",
+        "incomplete_graph",
+        "projection_truncated"
+      ],
+      "type": "string"
+    },
     "RemoteProcessObservationCompleteness": {
       "description": "Live-graph completeness, reported apart from durable-summary completeness.",
       "oneOf": [
@@ -639,7 +784,7 @@
           "additionalProperties": false,
           "properties": {
             "reason": {
-              "$ref": "#/$defs/RemoteProcessObservationGapReason"
+              "$ref": "#/$defs/RemoteProcessLiveIncompleteness"
             },
             "state": {
               "const": "incomplete",
@@ -664,10 +809,7 @@
             "publisher_replaced",
             "routing_unavailable",
             "cross_process",
-            "invalid_cursor",
-            "publisher_joined_mid_run",
-            "incomplete_graph",
-            "projection_truncated"
+            "invalid_cursor"
           ],
           "type": "string"
         },
@@ -742,6 +884,109 @@
           "type": "string"
         }
       ]
+    },
+    "RetryClass": {
+      "description": "Evidence that permits another provider attempt.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "no_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "rejected_http_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "empty_stream_partial",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "provider_idempotency",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "provider_resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempt_number": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "class": {
+              "const": "charge_authorized",
+              "type": "string"
+            },
+            "tokens_at_stake": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "class",
+            "tokens_at_stake",
+            "attempt_number"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RetryWait": {
+      "enum": [
+        "throttle",
+        "backoff"
+      ],
+      "type": "string"
     },
     "TextProjectionMetadata": {
       "properties": {
@@ -1013,95 +1258,6 @@
         "else"
       ],
       "type": "string"
-    },
-    "TraceChargeSafetyDecision": {
-      "description": "Typed trace projection of one host charge-safety decision.\n\n# Integrator class\n\nReporting integrations consume this optional component on an LLM retry\nattempt.",
-      "oneOf": [
-        {
-          "description": "Host policy permits this otherwise unsafe retry.",
-          "properties": {
-            "attempt_number": {
-              "description": "One-based unsafe retry number within the logical LLM call.",
-              "format": "uint8",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "outcome": {
-              "const": "authorized",
-              "type": "string"
-            },
-            "tokens_at_stake": {
-              "description": "Provider-reported tokens billed for the abandoned generation.",
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "outcome",
-            "tokens_at_stake",
-            "attempt_number"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Host policy refuses this otherwise unsafe retry.",
-          "properties": {
-            "attempt_number": {
-              "description": "One-based unsafe retry number within the logical LLM call.",
-              "format": "uint8",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "outcome": {
-              "const": "denied",
-              "type": "string"
-            },
-            "reason": {
-              "$ref": "#/$defs/TraceChargeSafetyDenialReason",
-              "description": "Typed policy bound that refused the retry."
-            },
-            "tokens_at_stake": {
-              "description": "Provider-reported tokens billed for the abandoned generation.",
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "outcome",
-            "tokens_at_stake",
-            "attempt_number",
-            "reason"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TraceChargeSafetyDenialReason": {
-      "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nReporting integrations exhaustively render these typed denial reasons.",
-      "oneOf": [
-        {
-          "const": "guarantee_required",
-          "description": "Host policy requires a provider idempotency or resume guarantee.",
-          "type": "string"
-        },
-        {
-          "const": "unsafe_retry_limit_exceeded",
-          "description": "The per-call unsafe retry allowance is exhausted.",
-          "type": "string"
-        },
-        {
-          "const": "duplicate_cost_limit_exceeded",
-          "description": "Provider-reported tokens exceed the host's duplicate-cost bound.",
-          "type": "string"
-        },
-        {
-          "const": "retry_after_exceeds_cap",
-          "description": "The provider's requested retry delay exceeds the host cap.",
-          "type": "string"
-        }
-      ]
     },
     "TraceContentBlock": {
       "oneOf": [
@@ -1504,38 +1660,29 @@
     "TraceError": {
       "properties": {
         "code": {
-          "description": "The failure code's spelling within its namespace \u2014 never the\nnamespaced form. OTel `lash.error.code` projects this verbatim.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "code_namespace": {
-          "description": "The namespace owning `code`'s spelling, when a code is present.",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureCode"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "failure_kind": {
-          "description": "The transport's failure classification (`timeout`, `auth`, \u2026), when\nthe failure carried a known one. OTel `error.type` projects this \u2014\nan absent or unrecognized kind projects `_OTHER`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "$ref": "#/$defs/ProviderFailureKind"
         },
         "retryable": {
           "type": "boolean"
         },
         "terminal_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "$ref": "#/$defs/LlmTerminalReason"
         }
       },
       "required": [
-        "retryable"
+        "retryable",
+        "terminal_reason",
+        "failure_kind"
       ],
       "type": "object"
     },
@@ -1559,7 +1706,6 @@
       "type": "object"
     },
     "TraceExecutionEvidence": {
-      "description": "Provider-reported facts attached to one sealed LLM attempt.",
       "properties": {
         "collection_interruption": {
           "type": [
@@ -4044,7 +4190,7 @@
           "description": "The runtime received a typed, non-retryable store integrity failure.",
           "properties": {
             "error_class": {
-              "type": "string"
+              "$ref": "#/$defs/TraceStoreErrorClass"
             },
             "message": {
               "type": "string"
@@ -4220,19 +4366,9 @@
       "type": "object"
     },
     "TraceRetryAttempt": {
-      "description": "One provider or tool retry attempt projected from the retry owner's sealed\nrecord. The trace does not own retry bookkeeping; it only renders it.",
+      "additionalProperties": false,
+      "description": "One attempt projected from its retry owner's sealed record.",
       "properties": {
-        "charge_safety": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TraceChargeSafetyDecision"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Typed host risk-appetite outcome when this attempt considered an\notherwise unsafe duplicate generation."
-        },
         "delay_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -4241,97 +4377,214 @@
             "null"
           ]
         },
-        "execution_evidence": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TraceExecutionEvidence"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "generation_disposition": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GenerationReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Which caller-requested generation options this attempt carried."
+        "detail": {
+          "$ref": "#/$defs/TraceRetryAttemptDetail"
         },
         "ordinal": {
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
-        },
-        "outcome": {
-          "$ref": "#/$defs/TraceRetryAttemptOutcome"
-        },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "usage": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TraceTokenUsage"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Provider-reported usage for this attempt. Absence is not zero usage."
-        },
-        "usage_disposition": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TraceAttemptUsageOutcome"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Why `usage` is absent when it is. LLM attempts only; tool attempts\ncarry none."
         }
       },
       "required": [
         "ordinal",
-        "outcome"
+        "detail"
       ],
       "type": "object"
     },
-    "TraceRetryAttemptOutcome": {
-      "description": "Terminal state of one provider or tool attempt in a trace retry ladder.\n\n# Integrator class\n\nTrace consumers exhaustively render these outcomes when explaining which\nattempt completed a call and why earlier attempts did not.",
+    "TraceRetryAttemptDetail": {
       "oneOf": [
         {
-          "const": "completed",
-          "description": "The attempt completed successfully.",
-          "type": "string"
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NormalizedError"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "execution_evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceExecutionEvidence"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "generation_disposition": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GenerationReceipt"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "llm",
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/AttemptOutcome"
+            },
+            "retry_decision": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceRetryDecision"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "usage": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceTokenUsage"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "usage_disposition": {
+              "$ref": "#/$defs/TraceAttemptUsageOutcome"
+            }
+          },
+          "required": [
+            "kind",
+            "outcome",
+            "usage_disposition"
+          ],
+          "type": "object"
         },
         {
-          "const": "failed",
-          "description": "The attempt failed.",
-          "type": "string"
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "tool",
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/TraceToolAttemptOutcome"
+            }
+          },
+          "required": [
+            "kind",
+            "outcome"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceRetryDecision": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "$ref": "#/$defs/RetryClass"
+            },
+            "outcome": {
+              "const": "scheduled",
+              "type": "string"
+            },
+            "wait": {
+              "$ref": "#/$defs/RetryWait"
+            }
+          },
+          "required": [
+            "outcome",
+            "wait",
+            "class"
+          ],
+          "type": "object"
         },
         {
-          "const": "aborted",
-          "description": "Protocol handling aborted after observing the provider response.",
-          "type": "string"
-        },
-        {
-          "const": "interrupted",
-          "description": "The attempt was interrupted before it could complete.",
-          "type": "string"
-        },
-        {
-          "const": "cancelled",
-          "description": "A tool attempt was cancelled.",
-          "type": "string"
+          "oneOf": [
+            {
+              "properties": {
+                "cause": {
+                  "const": "not_retryable",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "cause": {
+                  "const": "retry_budget_exhausted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "cause": {
+                  "const": "retry_after_exceeds_cap",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "attempt_number": {
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cause": {
+                  "const": "charge_safety",
+                  "type": "string"
+                },
+                "reason": {
+                  "$ref": "#/$defs/ChargeSafetyDenialReason"
+                },
+                "tokens_at_stake": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "cause",
+                "tokens_at_stake",
+                "attempt_number",
+                "reason"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "outcome": {
+              "const": "declined",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -4486,6 +4739,13 @@
         }
       ]
     },
+    "TraceStoreErrorClass": {
+      "enum": [
+        "stored_data_corrupt",
+        "monotonic_counter_overflow"
+      ],
+      "type": "string"
+    },
     "TraceTokenUsage": {
       "properties": {
         "cache_read_input_tokens": {
@@ -4517,6 +4777,87 @@
         "reasoning_output_tokens"
       ],
       "type": "object"
+    },
+    "TraceToolAttemptOutcome": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "$ref": "#/$defs/ToolFailureClass"
+            },
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "outcome": {
+              "const": "failed",
+              "type": "string"
+            },
+            "retry": {
+              "$ref": "#/$defs/ToolRetryStatus"
+            },
+            "source": {
+              "$ref": "#/$defs/ToolFailureSource"
+            }
+          },
+          "required": [
+            "outcome",
+            "class",
+            "code",
+            "message",
+            "source",
+            "retry"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "origin": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CancelOrigin"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "outcome": {
+              "const": "cancelled",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ToolFailureSource"
+            }
+          },
+          "required": [
+            "outcome",
+            "message",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TraceToolCallOutcome": {
       "oneOf": [

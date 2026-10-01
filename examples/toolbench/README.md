@@ -189,9 +189,10 @@ Upstream transport failures at the recorder surface to Lash as HTTP 502 JSON
 The adapter can refuse malformed/empty responses or other errors, and Lash can
 refuse retries after a response/output was observed without an idempotency
 or resume guarantee. Toolbench preserves these verdicts instead of overriding
-them. Each attempt includes `retry_decision` (scheduled, delay, reason,
-charge_safety), adapter/classifier verdicts, protocol position and normalized
-error. `retries` on an attempt is its retry ordinal; task and summary `retries`
+them. Each attempt includes a tagged `retry_decision`: scheduled retries carry
+delay, wait and class; declined retries carry a typed cause and any charge-safety
+evidence. Attempts also retain adapter/classifier verdicts, protocol position
+and normalized error. `retries` on an attempt is its retry ordinal; task and summary `retries`
 count actual additional provider invocations, not scheduled sleeps.
 
 `--trace-log PATH` defaults to `<results-file>.trace.log`. A file-only tracing

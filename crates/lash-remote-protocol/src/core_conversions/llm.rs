@@ -749,16 +749,13 @@ impl From<core_llm::ProtocolPosition> for RemoteProtocolPosition {
 
 impl From<core_llm::RetryDecision> for RemoteRetryDecision {
     fn from(value: core_llm::RetryDecision) -> Self {
-        let core_llm::RetryDecision {
-            scheduled,
-            delay,
-            reason,
-            charge_safety: _,
-        } = value;
-        Self {
-            scheduled,
-            delay_ms: delay.map(|value| value.as_millis().try_into().unwrap_or(u64::MAX)),
-            reason,
+        match value {
+            core_llm::RetryDecision::Scheduled { delay, wait, class } => Self::Scheduled {
+                delay_ms: delay.as_millis().try_into().unwrap_or(u64::MAX),
+                wait,
+                class,
+            },
+            core_llm::RetryDecision::Declined(cause) => Self::Declined(cause),
         }
     }
 }
@@ -773,7 +770,7 @@ impl From<core_llm::NormalizedError> for RemoteNormalizedError {
             retry_after,
         } = value;
         Self {
-            class,
+            class: class.into(),
             code,
             http_status,
             provider_request_id,

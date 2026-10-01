@@ -265,19 +265,22 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
             .error
             .as_ref()
             .expect("failed retry attempt keeps its normalized error");
-        assert_eq!(failed_error.class, "transport");
+        assert_eq!(
+            failed_error.class,
+            lash::provider::ProviderFailureKind::Transport
+        );
         let retry = failed_attempt
             .retry_decision
             .as_ref()
             .expect("failed first attempt records its retry decision");
-        assert!(retry.scheduled);
+        assert!(retry.is_scheduled());
         assert!(
             retry
-                .delay
+                .delay()
                 .is_some_and(|delay| (Duration::ZERO..=Duration::from_millis(500))
                     .contains(&delay)),
             "retry delay must stay within the bounded jitter envelope, got {:?}",
-            retry.delay
+            retry.delay()
         );
         assert_eq!(first_record.attempts[1].ordinal, 2);
         assert_eq!(

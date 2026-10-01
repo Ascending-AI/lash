@@ -498,7 +498,7 @@ async fn l8_idle_reconnect_after_a_lost_publication_folds_through_the_high_water
     assert_eq!(
         snapshot.live.completeness,
         ProcessObservationCompleteness::Incomplete {
-            reason: ProcessObservationGapReason::RoutingUnavailable
+            reason: ProcessLiveIncompleteness::RoutingUnavailable
         },
         "absent live telemetry is reported, never a Skipped graph"
     );
@@ -809,7 +809,7 @@ async fn publisher_joined_mid_run_never_claims_a_complete_live_graph() {
     assert_eq!(
         snapshot.live.completeness,
         ProcessObservationCompleteness::Incomplete {
-            reason: ProcessObservationGapReason::PublisherJoinedMidRun
+            reason: ProcessLiveIncompleteness::PublisherJoinedMidRun
         }
     );
     assert_eq!(
@@ -850,7 +850,7 @@ async fn a_long_loops_observations_fold_in_batches_into_the_same_live_graph() {
     assert_eq!(
         capture.live.completeness,
         ProcessObservationCompleteness::Incomplete {
-            reason: ProcessObservationGapReason::ProjectionTruncated
+            reason: ProcessLiveIncompleteness::ProjectionTruncated
         }
     );
     let state = capture.state.lock_recover();

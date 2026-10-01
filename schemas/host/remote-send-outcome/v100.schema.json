@@ -246,6 +246,26 @@
         }
       ]
     },
+    "ChargeSafetyDenialReason": {
+      "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nRuntime and reporting implementors exhaustively render these host-policy\noutcomes; provider adapters never construct them.",
+      "oneOf": [
+        {
+          "const": "guarantee_required",
+          "description": "Host policy requires a provider idempotency or resume guarantee.",
+          "type": "string"
+        },
+        {
+          "const": "unsafe_retry_limit_exceeded",
+          "description": "The per-call unsafe retry allowance is exhausted.",
+          "type": "string"
+        },
+        {
+          "const": "duplicate_cost_limit_exceeded",
+          "description": "Provider-reported tokens exceed the host's duplicate-cost bound.",
+          "type": "string"
+        }
+      ]
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -1166,7 +1186,7 @@
     "RemoteNormalizedError": {
       "properties": {
         "class": {
-          "type": "string"
+          "$ref": "#/$defs/RemoteProviderFailureKind"
         },
         "code": {
           "anyOf": [
@@ -1177,7 +1197,7 @@
               "type": "null"
             }
           ],
-          "description": "The attempt's namespaced failure code (`<namespace>:<spelling>`).\nPre-cutover rows carried `provider_code`/`adapter_code`/`refusal_code`\ncolumns instead; they decode with `code: None`."
+          "description": "The attempt's namespaced failure code (`<namespace>:<spelling>`)."
         },
         "http_status": {
           "format": "uint16",
@@ -1607,29 +1627,114 @@
       "type": "object"
     },
     "RemoteRetryDecision": {
-      "properties": {
-        "delay_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "$ref": "#/$defs/RetryClass"
+            },
+            "delay_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "outcome": {
+              "const": "scheduled",
+              "type": "string"
+            },
+            "wait": {
+              "$ref": "#/$defs/RetryWait"
+            }
+          },
+          "required": [
+            "outcome",
+            "delay_ms",
+            "wait",
+            "class"
+          ],
+          "type": "object"
         },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "scheduled": {
-          "type": "boolean"
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "cause": {
+                  "const": "not_retryable",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "cause": {
+                  "const": "retry_budget_exhausted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "cause": {
+                  "const": "retry_after_exceeds_cap",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cause"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "attempt_number": {
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cause": {
+                  "const": "charge_safety",
+                  "type": "string"
+                },
+                "reason": {
+                  "$ref": "#/$defs/ChargeSafetyDenialReason"
+                },
+                "tokens_at_stake": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "cause",
+                "tokens_at_stake",
+                "attempt_number",
+                "reason"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "outcome": {
+              "const": "declined",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "scheduled"
-      ],
-      "type": "object"
+      ]
     },
     "RemoteStalledDelivery": {
       "additionalProperties": false,
@@ -3554,6 +3659,109 @@
         "reasoning_output_tokens"
       ],
       "type": "object"
+    },
+    "RetryClass": {
+      "description": "Evidence that permits another provider attempt.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "no_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "rejected_http_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "empty_stream_partial",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "provider_idempotency",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "provider_resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempt_number": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "class": {
+              "const": "charge_authorized",
+              "type": "string"
+            },
+            "tokens_at_stake": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "class",
+            "tokens_at_stake",
+            "attempt_number"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RetryWait": {
+      "enum": [
+        "throttle",
+        "backoff"
+      ],
+      "type": "string"
     },
     "RuntimeOwner": {
       "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the\nplugin session, the tool catalog, the attachment facade, the authority a\ntool intent is declared under \u2014 and those interfaces take a\n`RuntimeOwner`. A process runtime is never handed a session id as a\nstand-in for its own identity.",

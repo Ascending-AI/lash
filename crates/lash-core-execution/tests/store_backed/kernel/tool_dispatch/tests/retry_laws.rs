@@ -55,22 +55,23 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(outcome.attempts.len(), 2);
     assert_eq!(outcome.attempts[0].ordinal, 1);
-    assert_eq!(
-        outcome.attempts[0].outcome,
-        lash_trace::TraceRetryAttemptOutcome::Failed
-    );
+    assert!(matches!(
+        outcome.attempts[0].detail,
+        lash_trace::TraceRetryAttemptDetail::Tool {
+            outcome: lash_trace::TraceToolAttemptOutcome::Failed { .. }
+        }
+    ));
     assert!(
-        outcome.attempts[0]
-            .reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("transient"))
+        matches!(&outcome.attempts[0].detail, lash_trace::TraceRetryAttemptDetail::Tool { outcome: lash_trace::TraceToolAttemptOutcome::Failed { message, .. } } if message.contains("transient"))
     );
     assert_eq!(outcome.attempts[0].delay_ms, Some(0));
     assert_eq!(outcome.attempts[1].ordinal, 2);
-    assert_eq!(
-        outcome.attempts[1].outcome,
-        lash_trace::TraceRetryAttemptOutcome::Completed
-    );
+    assert!(matches!(
+        outcome.attempts[1].detail,
+        lash_trace::TraceRetryAttemptDetail::Tool {
+            outcome: lash_trace::TraceToolAttemptOutcome::Completed
+        }
+    ));
     assert_eq!(outcome.attempts[1].delay_ms, None);
     let directory = tempfile::tempdir().expect("trace tempdir");
     let path = directory.path().join("tool-retry.trace.jsonl");

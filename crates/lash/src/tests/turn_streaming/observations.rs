@@ -721,15 +721,15 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
             attempt
                 .retry_decision
                 .as_ref()
-                .map(|decision| decision.scheduled),
+                .map(|decision| decision.is_scheduled()),
             Some(false)
         );
         assert_eq!(
             attempt
                 .retry_decision
                 .as_ref()
-                .and_then(|decision| decision.reason.as_deref()),
-            Some("output_started_without_retry_guarantee")
+                .and_then(|decision| decision.denial_reason()),
+            Some(lash_sansio::llm::types::ChargeSafetyDenialReason::GuaranteeRequired)
         );
         let issue = first.result.errors.first().expect("typed provider issue");
         assert_eq!(

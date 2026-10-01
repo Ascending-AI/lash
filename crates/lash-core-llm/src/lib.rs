@@ -30,8 +30,7 @@ pub mod core_internal {
 pub(crate) use lash_core_ids::clock::{Clock, SystemClock};
 pub(crate) use lash_core_ids::{operational_metrics, panic_containment};
 pub(crate) use lash_sansio::llm::types::{
-    AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
-    ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
+    AttemptUsageOutcome, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     GenerationReceipt, LlmCallRecord, LlmTerminalReason, NonNegativeFiniteF64, ProviderFailureKind,
     ProviderReplayDrop,
 };
@@ -43,6 +42,7 @@ pub(crate) use session_model::ChargeSafetyPolicy;
 pub(crate) use lash_core_ids::clock::ClockWallTime;
 #[cfg(test)]
 pub(crate) use lash_sansio::llm::types::{
+    AttemptOutcome, AttemptRecord, ChargeSafetyDecision, ChargeSafetyDenialReason,
     GenerationOptionOutcome, GenerationOptions, LlmCallId, LlmRequestScope, ProtocolPosition,
     ProviderReplayDropReason,
 };

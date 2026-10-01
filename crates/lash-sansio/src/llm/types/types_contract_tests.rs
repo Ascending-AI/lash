@@ -237,3 +237,18 @@ fn provider_file_media_type_is_optional_and_omitted_when_absent() {
     assert_eq!(with_hint_json["media_type"], "image/png");
     assert_eq!(with_hint.media_type().unwrap().as_str(), "image/png");
 }
+#[test]
+fn sealed_retry_decision_refuses_the_contradictory_boolean_shape() {
+    let bytes = serde_json::json!({
+        "scheduled": false,
+        "delay": {"secs": 0, "nanos": 0},
+        "reason": "not_retryable"
+    });
+    assert!(serde_json::from_value::<super::RetryDecision>(bytes).is_err());
+}
+
+#[test]
+fn sealed_normalized_error_refuses_unknown_failure_classes() {
+    let bytes = serde_json::json!({"class": "rate_limited"});
+    assert!(serde_json::from_value::<super::NormalizedError>(bytes).is_err());
+}

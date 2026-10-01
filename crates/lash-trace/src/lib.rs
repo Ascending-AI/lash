@@ -131,10 +131,8 @@ pub use lashlang_graph::{
 /// provider item's sub-blocks — e.g. OpenAI `rs_*:summary:0` / `:summary:1` —
 /// stay distinguishable; `item_id` alone collapses them to the item.
 /// Version 25 uses generic compaction and prompt-view event names.
-/// Version 26 (FIG-3435) splits `TraceError.code` into the spelling plus a
-/// `code_namespace` and adds `failure_kind`: `code` now carries the
-/// failure code's spelling alone, never the namespaced form, and the kind
-/// carries the failure classification OTel `error.type` projects.
+/// Trace failures retain typed terminal and provider-failure vocabularies,
+/// plus one namespaced failure code. OTel derives `error.type` from the kind.
 /// Version 27 (FIG-3460) unifies workflow node identity and adds structured
 /// execution sites, language-node/tool cross-links, and Restate correlation.
 /// Version 28 (FIG-3461) adds generation-qualified observation identity,
@@ -649,7 +647,7 @@ pub enum TraceEvent {
     /// The runtime received a typed, non-retryable store integrity failure.
     StoreErrorObserved {
         operation: String,
-        error_class: String,
+        error_class: TraceStoreErrorClass,
         message: String,
     },
     /// Compile/link evidence emitted before executing an RLM program step.
@@ -689,32 +687,89 @@ pub enum TraceRlmStepOutcome {
     },
 }
 
-/// One provider or tool retry attempt projected from the retry owner's sealed
-/// record. The trace does not own retry bookkeeping; it only renders it.
+pub use lash_sansio::FailureCode as TraceFailureCode;
+pub use lash_sansio::llm::types::{
+    AttemptOutcome as TraceLlmAttemptOutcome, LlmTerminalReason as TraceLlmTerminalReason,
+    NormalizedError as TraceNormalizedError, ProviderFailureKind as TraceProviderFailureKind,
+    RetryClass as TraceRetryClass, RetryDeclineCause as TraceRetryDeclineCause,
+    RetryWait as TraceRetryWait,
+};
+
+/// One attempt projected from its retry owner's sealed record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TraceRetryAttempt {
     pub ordinal: u32,
-    pub outcome: TraceRetryAttemptOutcome,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_evidence: Option<TraceExecutionEvidence>,
-    /// Typed host risk-appetite outcome when this attempt considered an
-    /// otherwise unsafe duplicate generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub charge_safety: Option<TraceChargeSafetyDecision>,
-    /// Which caller-requested generation options this attempt carried.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_disposition: Option<GenerationReceipt>,
-    /// Provider-reported usage for this attempt. Absence is not zero usage.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TraceTokenUsage>,
-    /// Why `usage` is absent when it is. LLM attempts only; tool attempts
-    /// carry none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage_disposition: Option<TraceAttemptUsageOutcome>,
+    pub detail: TraceRetryAttemptDetail,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TraceRetryAttemptDetail {
+    Llm {
+        outcome: TraceLlmAttemptOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<TraceNormalizedError>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_decision: Option<TraceRetryDecision>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        execution_evidence: Option<Box<TraceExecutionEvidence>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generation_disposition: Option<GenerationReceipt>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<TraceTokenUsage>,
+        usage_disposition: TraceAttemptUsageOutcome,
+    },
+    Tool {
+        outcome: TraceToolAttemptOutcome,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TraceRetryDecision {
+    Scheduled {
+        wait: TraceRetryWait,
+        class: TraceRetryClass,
+    },
+    Declined(TraceRetryDeclineCause),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TraceToolAttemptOutcome {
+    Completed,
+    Failed {
+        class: lash_sansio::ToolFailureClass,
+        code: String,
+        message: String,
+        source: lash_sansio::ToolFailureSource,
+        retry: lash_sansio::ToolRetryStatus,
+    },
+    Cancelled {
+        message: String,
+        source: lash_sansio::ToolFailureSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<lash_sansio::CancelOrigin>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceStoreErrorClass {
+    StoredDataCorrupt,
+    MonotonicCounterOverflow,
+}
+
+impl TraceStoreErrorClass {
+    pub fn wire_tag(self) -> &'static str {
+        match self {
+            Self::StoredDataCorrupt => "stored_data_corrupt",
+            Self::MonotonicCounterOverflow => "monotonic_counter_overflow",
+        }
+    }
 }
 
 /// Why an attempt's provider-reported usage is present or absent.
@@ -740,76 +795,6 @@ pub enum TraceAttemptUsageOutcome {
     UnreportedAfterFailure,
 }
 
-/// Terminal state of one provider or tool attempt in a trace retry ladder.
-///
-/// # Integrator class
-///
-/// Trace consumers exhaustively render these outcomes when explaining which
-/// attempt completed a call and why earlier attempts did not.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceRetryAttemptOutcome {
-    /// The attempt completed successfully.
-    Completed,
-    /// The attempt failed.
-    Failed,
-    /// Protocol handling aborted after observing the provider response.
-    Aborted,
-    /// The attempt was interrupted before it could complete.
-    Interrupted,
-    /// A tool attempt was cancelled.
-    Cancelled,
-}
-
-/// Why host charge-safety policy denied an otherwise transport-retryable
-/// generation.
-///
-/// # Integrator class
-///
-/// Reporting integrations exhaustively render these typed denial reasons.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceChargeSafetyDenialReason {
-    /// Host policy requires a provider idempotency or resume guarantee.
-    GuaranteeRequired,
-    /// The per-call unsafe retry allowance is exhausted.
-    UnsafeRetryLimitExceeded,
-    /// Provider-reported tokens exceed the host's duplicate-cost bound.
-    DuplicateCostLimitExceeded,
-    /// The provider's requested retry delay exceeds the host cap.
-    RetryAfterExceedsCap,
-}
-
-/// Typed trace projection of one host charge-safety decision.
-///
-/// # Integrator class
-///
-/// Reporting integrations consume this optional component on an LLM retry
-/// attempt.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "outcome", rename_all = "snake_case")]
-pub enum TraceChargeSafetyDecision {
-    /// Host policy permits this otherwise unsafe retry.
-    Authorized {
-        /// Provider-reported tokens billed for the abandoned generation.
-        tokens_at_stake: u64,
-        /// One-based unsafe retry number within the logical LLM call.
-        #[schemars(transform = crate::omit_schema_integer_maximum)]
-        attempt_number: u8,
-    },
-    /// Host policy refuses this otherwise unsafe retry.
-    Denied {
-        /// Provider-reported tokens billed for the abandoned generation.
-        tokens_at_stake: u64,
-        /// One-based unsafe retry number within the logical LLM call.
-        #[schemars(transform = crate::omit_schema_integer_maximum)]
-        attempt_number: u8,
-        /// Typed policy bound that refused the retry.
-        reason: TraceChargeSafetyDenialReason,
-    },
-}
-
-/// Provider-reported facts attached to one sealed LLM attempt.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceExecutionEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1778,20 +1763,10 @@ pub struct TraceLanguageExecutionMapEdge {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceError {
     pub retryable: bool,
+    pub terminal_reason: TraceLlmTerminalReason,
+    pub failure_kind: TraceProviderFailureKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal_reason: Option<String>,
-    /// The transport's failure classification (`timeout`, `auth`, …), when
-    /// the failure carried a known one. OTel `error.type` projects this —
-    /// an absent or unrecognized kind projects `_OTHER`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_kind: Option<String>,
-    /// The failure code's spelling within its namespace — never the
-    /// namespaced form. OTel `lash.error.code` projects this verbatim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-    /// The namespace owning `code`'s spelling, when a code is present.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code_namespace: Option<String>,
+    pub code: Option<TraceFailureCode>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1988,7 +1963,3 @@ pub fn json_hash(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests;
-
-fn omit_schema_integer_maximum(schema: &mut schemars::Schema) {
-    schema.remove("maximum");
-}

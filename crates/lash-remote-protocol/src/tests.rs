@@ -17,6 +17,40 @@ mod reasoning_retention;
 
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
+#[test]
+fn live_completeness_refuses_subscription_gap_reasons() {
+    for reason in [
+        "overflow",
+        "expired",
+        "subscriber_lagged",
+        "cross_process",
+        "invalid_cursor",
+        "sequence_unbridged",
+        "history_unavailable",
+    ] {
+        let bytes = serde_json::json!({"state": "incomplete", "reason": reason});
+        assert!(
+            serde_json::from_value::<RemoteProcessObservationCompleteness>(bytes).is_err(),
+            "{reason}"
+        );
+    }
+}
+
+#[test]
+fn subscription_gap_refuses_graph_incompleteness_reasons() {
+    for reason in [
+        "publisher_joined_mid_run",
+        "incomplete_graph",
+        "projection_truncated",
+    ] {
+        assert!(
+            serde_json::from_value::<RemoteProcessObservationGapReason>(serde_json::json!(reason))
+                .is_err(),
+            "{reason}"
+        );
+    }
+}
+
 #[path = "tests/version_refusal.rs"]
 mod version_refusal_tests;
 use version_refusal_tests::decode_empty_envelope;
@@ -378,13 +412,11 @@ fn remote_turn_result_json_round_trips() {
             outcome: RemoteAttemptOutcome::Interrupted,
             protocol_position: RemoteProtocolPosition::OutputStarted,
             retry_budget_consumed: true,
-            retry_decision: Some(RemoteRetryDecision {
-                scheduled: false,
-                delay_ms: Some(0),
-                reason: Some("partial output is not retryable".to_string()),
-            }),
+            retry_decision: Some(RemoteRetryDecision::Declined(
+                lash_sansio::llm::types::RetryDeclineCause::NotRetryable,
+            )),
             error: Some(RemoteNormalizedError {
-                class: "stream_interrupted".to_string(),
+                class: RemoteProviderFailureKind::Stream,
                 code: Some(lash_sansio::FailureCode::provider("eof")),
                 http_status: None,
                 provider_request_id: Some("provider-request".to_string()),
@@ -471,12 +503,11 @@ fn remote_turn_result_json_round_trips() {
             "protocol_position": "output_started",
             "retry_budget_consumed": true,
             "retry_decision": {
-                "scheduled": false,
-                "delay_ms": 0,
-                "reason": "partial output is not retryable",
+                "outcome": "declined",
+                "cause": "not_retryable",
             },
             "error": {
-                "class": "stream_interrupted",
+                "class": "stream",
                 "code": "provider:eof",
                 "provider_request_id": "provider-request",
                 "retry_after_ms": 0,

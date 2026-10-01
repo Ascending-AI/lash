@@ -143,12 +143,6 @@ mod tests {
         let documents = documents().expect("schemas generate");
         for (shape, name, mut value, path) in [
             (
-                "remote-process-observation-item",
-                "TraceChargeSafetyDecision",
-                json!({"outcome": "authorized", "tokens_at_stake": 0, "attempt_number": 256}),
-                "/attempt_number",
-            ),
-            (
                 "remote-process-events-response",
                 "AttachmentSource",
                 json!({"source": "inline", "media_type": "application/octet-stream", "bytes": [256]}),

@@ -150,15 +150,17 @@ where
                             ProtocolPosition::TerminalObserved
                         },
                         retry_budget_consumed: ordinal == 0,
-                        retry_decision: Some(crate::RetryDecision {
-                            scheduled: ordinal == 0,
-                            delay: (ordinal == 0).then(|| Duration::from_millis(31)),
-                            reason: Some("transport".into()),
-                            charge_safety: None,
+                        retry_decision: (ordinal == 0).then_some(crate::RetryDecision::Scheduled {
+                            delay: Duration::from_millis(31),
+                            wait: lash_sansio::llm::types::RetryWait::Backoff,
+                            class: lash_sansio::llm::types::RetryClass::ChargeAuthorized {
+                                tokens_at_stake: 0,
+                                attempt_number: 1,
+                            },
                         }),
                         error: (outcome == AttemptOutcome::Failed).then(|| {
                             crate::NormalizedError {
-                                class: "transport".into(),
+                                class: crate::ProviderFailureKind::Transport,
                                 code: Some(crate::FailureCode::provider("overloaded")),
                                 http_status: Some(503),
                                 provider_request_id: Some(format!("provider-{index}-{ordinal}")),

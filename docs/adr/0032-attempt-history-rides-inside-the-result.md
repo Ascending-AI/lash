@@ -17,14 +17,16 @@ An attempt is a transport invocation, not a retry-budget unit or an admission
 wait. A courtesy retry can produce another attempt without consuming retry
 budget. Each record has an ordinal, `Completed`, `Failed`, `Aborted` or
 `Interrupted` outcome, protocol position, budget-consumption fact and optional
-retry decision. `Aborted` means explicit cancellation; `Interrupted` means
+retry decision. A scheduled retry owns its delay, throttle/backoff wait and
+typed retry class; a declined retry owns its typed cause. Host charge-safety
+evidence belongs to the corresponding class or cause. `Aborted` means explicit cancellation; `Interrupted` means
 observation ends without a provider terminal or declared cancellation.
 
 A Lash-minted `LlmCallId` identifies the logical call above retries. The pair
 `(call_id, ordinal)` identifies an attempt. Provider request and response ids
 remain evidence, not call identity. Records retain observed evidence and
 usage with absence intact, plus structured errors. A normalized error records
-failure kind, HTTP status, transport request id, retry-after and an opaque
+a typed provider failure kind, HTTP status, transport request id, retry-after and an opaque
 namespaced failure code. It does not persist the provider's diagnostic prose.
 Raw diagnostic text that Lash exposes is live observation for host sinks.
 

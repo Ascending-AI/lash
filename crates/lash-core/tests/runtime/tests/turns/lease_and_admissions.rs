@@ -539,15 +539,15 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         preserved_attempt
             .retry_decision
             .as_ref()
-            .map(|decision| decision.scheduled),
+            .map(|decision| decision.is_scheduled()),
         Some(false)
     );
     assert_eq!(
         preserved_attempt
             .retry_decision
             .as_ref()
-            .and_then(|decision| decision.reason.as_deref()),
-        Some("output_started_without_retry_guarantee")
+            .and_then(|decision| decision.denial_reason()),
+        Some(lash_sansio::llm::types::ChargeSafetyDenialReason::GuaranteeRequired)
     );
     let issue = assembled.errors.first().expect("typed provider issue");
     assert_eq!(

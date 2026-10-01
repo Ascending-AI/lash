@@ -177,8 +177,7 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("original_provider_code")
-                && error.code_namespace.as_deref() == Some("provider")
+            if error.code.as_ref().map(FailureCode::namespaced).as_deref() == Some("provider:original_provider_code")
     )));
 }
 
@@ -246,8 +245,7 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("provider_replay_origin_conflict")
-                && error.code_namespace.as_deref() == Some("lash")
+            if error.code.as_ref().map(FailureCode::namespaced).as_deref() == Some("lash:provider_replay_origin_conflict")
     )));
     assert!(
         !events
@@ -318,8 +316,7 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("cancelled")
-                && error.code_namespace.as_deref() == Some("lash")
+            if error.code.as_ref().map(FailureCode::namespaced).as_deref() == Some("lash:cancelled")
     )));
 }
 
@@ -407,10 +404,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
         .error
         .as_ref()
         .expect("original provider failure evidence remains attached");
-    assert_eq!(
-        original.class,
-        lash_core::ProviderFailureKind::Stream.code()
-    );
+    assert_eq!(original.class, lash_core::ProviderFailureKind::Stream);
     assert_eq!(
         original.code.as_ref().map(|code| code.namespaced()),
         Some("provider:confirm2_original_code".to_string())
@@ -419,8 +413,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("provider_replay_origin_conflict")
-                && error.code_namespace.as_deref() == Some("lash")
+            if error.code.as_ref().map(FailureCode::namespaced).as_deref() == Some("lash:provider_replay_origin_conflict")
     )));
 }
 
@@ -485,10 +478,7 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
         .error
         .as_ref()
         .expect("tail provider failure remains in the sealed call record");
-    assert_eq!(
-        original.class,
-        lash_core::ProviderFailureKind::Stream.code()
-    );
+    assert_eq!(original.class, lash_core::ProviderFailureKind::Stream);
     assert_eq!(
         original.code.as_ref().map(|code| code.namespaced()),
         Some("provider:tail_transport_failure".to_string())

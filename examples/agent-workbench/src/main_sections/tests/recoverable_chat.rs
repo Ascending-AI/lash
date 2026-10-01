@@ -1023,13 +1023,9 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 outcome: lash::remote::llm::RemoteAttemptOutcome::Failed,
                 protocol_position: lash::remote::llm::RemoteProtocolPosition::NoResponse,
                 retry_budget_consumed: true,
-                retry_decision: Some(lash::remote::llm::RemoteRetryDecision {
-                    scheduled: true,
-                    delay_ms: Some(1),
-                    reason: Some("retry".to_string()),
-                }),
+                retry_decision: Some(lash::remote::llm::RemoteRetryDecision::Scheduled { delay_ms: 1, wait: lash::remote::llm::RemoteRetryWait::Backoff, class: lash::remote::llm::RemoteRetryClass::NoResponse }),
                 error: Some(lash::remote::llm::RemoteNormalizedError {
-                    class: "transport".to_string(),
+                    class: lash::remote::llm::RemoteProviderFailureKind::Transport,
                     code: Some(lash::provider::FailureCode::provider("connection_reset")),
                     http_status: Some(503),
                     provider_request_id: Some("request-1".to_string()),
