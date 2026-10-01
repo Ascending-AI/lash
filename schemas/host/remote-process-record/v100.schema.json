@@ -985,6 +985,13 @@
             "message": {
               "type": "string"
             },
+            "model_key": {
+              "description": "The recorded model key the failing attempts could not bind.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "const": "engine_retry_exhausted",
               "type": "string"

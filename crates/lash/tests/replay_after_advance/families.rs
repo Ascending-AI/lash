@@ -356,7 +356,7 @@ pub async fn trigger_route_unavailable_at_start(kind: StorageKind, live: bool) {
             assert!(matches!(
                 report.deliveries[0].outcome,
                 lash::triggers::TriggerDeliveryEmitOutcome::Failed {
-                    code: lash::triggers::RuntimeErrorCode::TriggerRouteUnavailable,
+                    code: lash::runtime::RuntimeErrorCode::TriggerRouteUnavailable,
                     ..
                 }
             ));

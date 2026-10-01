@@ -341,20 +341,19 @@ pub mod triggers {
     pub use lash_core::TriggerEventCatalog;
     pub use lash_core::facade_support::deterministic_subscription_id;
     pub use lash_core::{
-        LashSchema, RuntimeErrorCode, TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS,
-        TriggerCommandOutcome, TriggerDeliveryReservation, TriggerDeliveryRetentionCandidate,
-        TriggerEffectResult, TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome,
-        TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceOutcome,
-        TriggerOccurrenceReclamationReport, TriggerOccurrenceReclamationResult,
-        TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOperationError,
-        TriggerOwnerScope, TriggerProviderRoute, TriggerRetentionReconciliationReport,
-        TriggerRouteRefusal, TriggerRouteRestore, TriggerRouteRestorer, TriggerSourceCapture,
-        TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle,
-        TriggerSubscriptionRecord, facade_support::TriggerDeliveryEmitOutcome,
-        facade_support::TriggerDeliveryEmitReceipt, facade_support::TriggerEmitReport,
-        facade_support::TriggerEvent, facade_support::TriggerEventType,
-        facade_support::TriggerRegistration, facade_support::TriggerTarget,
-        facade_support::empty_trigger_source_key,
+        LashSchema, TRIGGER_OCCURRENCE_REDELIVERY_HORIZON_MS, TriggerCommandOutcome,
+        TriggerDeliveryReservation, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
+        TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
+        TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
+        TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
+        TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
+        TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestore,
+        TriggerRouteRestorer, TriggerSourceCapture, TriggerSubscriptionDraft,
+        TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, TriggerSubscriptionRecord,
+        facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReceipt,
+        facade_support::TriggerEmitReport, facade_support::TriggerEvent,
+        facade_support::TriggerEventType, facade_support::TriggerRegistration,
+        facade_support::TriggerTarget, facade_support::empty_trigger_source_key,
     };
     /// The fenced, receipted verb vocabulary for subscription mutation,
     /// including [`TriggerCommand::Enable`] for re-enable, executed by

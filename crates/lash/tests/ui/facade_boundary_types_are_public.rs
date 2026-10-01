@@ -273,8 +273,8 @@ fn trigger_route_service_is_installable(
     let _ = matches!(
         outcome,
         lash::triggers::TriggerDeliveryEmitOutcome::Failed {
-            code: lash::triggers::RuntimeErrorCode::TriggerRouteUnavailable
-                | lash::triggers::RuntimeErrorCode::TriggerRouteRevoked,
+            code: lash::runtime::RuntimeErrorCode::TriggerRouteUnavailable
+                | lash::runtime::RuntimeErrorCode::TriggerRouteRevoked,
             ..
         }
     );

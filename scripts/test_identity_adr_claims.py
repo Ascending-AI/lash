@@ -18,8 +18,8 @@ def public_outcome_inventory_matches_adr_0068():
 
 def public_outcome_names_follow_declared_suffix_roles():
     witnesses = [
-        ("crates/lash-core-execution/src/triggers.rs", "TriggerEmitReport", "struct", "pub deliveries: Vec<TriggerDeliveryEmitReceipt>"),
-        ("crates/lash-core-execution/src/triggers.rs", "TriggerDeliveryEmitReceipt", "struct", "pub outcome: TriggerDeliveryEmitOutcome"),
+        ("crates/lash-core-execution/src/triggers/report.rs", "TriggerEmitReport", "struct", "pub deliveries: Vec<TriggerDeliveryEmitReceipt>"),
+        ("crates/lash-core-execution/src/triggers/report.rs", "TriggerDeliveryEmitReceipt", "struct", "pub outcome: TriggerDeliveryEmitOutcome"),
         ("crates/lash-core-execution/src/runtime/process/model.rs", "ProcessRegistrationOutcome", "enum", "Existing"),
         ("crates/lash-sansio/src/tool_output.rs", "ToolRetryStatus", "enum", "Exhausted"),
     ]
