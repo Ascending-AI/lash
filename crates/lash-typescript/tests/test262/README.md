@@ -112,9 +112,12 @@ To re-record after a deliberate change, run:
 
 ```sh
 . ./env.sh
-BUILD_WORKSPACE_DIRECTORY="$PWD" TEST262_BLESS=1 \
-  TEST262_EVIDENCE=/tmp/test262-evidence.tsv \
-  cargo test -p lash-internal-typescript --locked --test test262_full
+kiln test //crates/lash-typescript:test262_full__test \
+  --test_arg=--exact --test_arg=full_selection_matches_the_ratchet \
+  --local-test-execution --nocache_test_results \
+  --test_env=BUILD_WORKSPACE_DIRECTORY="$PWD" \
+  --test_env=TEST262_BLESS=1 \
+  --test_env=TEST262_EVIDENCE="$PWD/.buck2/test262-evidence.tsv"
 ```
 
 This rewrites every `outcomes/**/*.tsv` shard from a full run and prints
@@ -126,6 +129,14 @@ nothing.
 - a divergence keeps its recorded owner;
 - a new one is recorded as `UNTRIAGED`, which the record checks refuse until a
   ticket owns it.
+
+Unbound dotted calls use the dialect's unresolved tool-call path, including
+`$262.evalScript(...)`; this harness does not implement script evaluation.
+A discarded call therefore refuses as `TS_UNAWAITED_TOOL` before later
+unknown-binding or `this` refusals. Its diagnostic span must name the call,
+and unused ordinary declarations must remain legal. The focused
+`fig_4570_unused_declarations_and_unresolved_calls_have_distinct_outcomes`
+law checks both boundaries and the four affected global-code records.
 
 ## The cost register and the wall-clock backstop
 

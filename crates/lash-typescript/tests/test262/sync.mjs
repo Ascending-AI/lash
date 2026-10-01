@@ -212,6 +212,7 @@ const typescriptNames = [
   "array-index-delete",
   "array-named-properties",
   "async-calls-unawaited",
+  "tool-calls-unawaited",
   "binding-reassignment",
   "builtin-arity",
   // A call to a member a built-in namespace lacks: tsc --strict rejects the

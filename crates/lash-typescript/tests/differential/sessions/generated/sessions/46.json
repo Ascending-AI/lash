@@ -52,8 +52,8 @@
       }
     },
     {
-      "source": "class A { static #m() { } }\n",
-      "reject": "TS_CLASS_UNSUPPORTED",
+      "source": "const o: any = {}; o.__defineSetter__('x', (v: number) => v);\n",
+      "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],
@@ -121,8 +121,8 @@
       }
     },
     {
-      "source": "Error.isError(new Error('x'));\n",
-      "reject": "TS_METHOD_UNSUPPORTED",
+      "source": "isNaN(1, 2);\n",
+      "reject": "TS_EXPRESSION_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

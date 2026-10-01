@@ -20,8 +20,8 @@
       }
     },
     {
-      "source": "const c = 1; c = 2; // tsc TS2588\n",
-      "reject": "TS_ASSIGN_CONST",
+      "source": "function f() { } function f() { }\n",
+      "reject": "TS_FUNCTION_REDECLARATION_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

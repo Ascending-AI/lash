@@ -113,8 +113,8 @@
       }
     },
     {
-      "source": "class A { x = 1; }\n",
-      "reject": "TS_CLASS_UNSUPPORTED",
+      "source": "const m = import('mod');\n",
+      "reject": "TS_DYNAMIC_IMPORT_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

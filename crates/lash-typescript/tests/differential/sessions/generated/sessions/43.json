@@ -146,8 +146,8 @@
       }
     },
     {
-      "source": "const x = arguments;\n",
-      "reject": "TS_ARGUMENTS_UNSUPPORTED",
+      "source": "const r = new RegExp(null);\n",
+      "reject": "TS_NEW_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

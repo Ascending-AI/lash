@@ -93,8 +93,8 @@
       }
     },
     {
-      "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
-      "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
+      "source": "const r = new RegExp(null);\n",
+      "reject": "TS_NEW_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

@@ -43,8 +43,8 @@
       }
     },
     {
-      "source": "outer: while (true) { break outer; }\n",
-      "reject": "TS_LABEL_UNSUPPORTED",
+      "source": "const r = /a/d;\n",
+      "reject": "TS_REGEX_INDICES_FLAG_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

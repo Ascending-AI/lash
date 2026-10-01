@@ -63,7 +63,7 @@
       }
     },
     {
-      "source": "const x = Math.extra();\n",
+      "source": "Uint8Array.fromBase64('AAA=');\n",
       "reject": "TS_METHOD_UNSUPPORTED",
       "node": {
         "outcome": "rejected",

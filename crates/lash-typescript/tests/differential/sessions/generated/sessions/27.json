@@ -95,8 +95,8 @@
       }
     },
     {
-      "source": "eval('1');\n",
-      "reject": "TS_EVAL_UNSUPPORTED",
+      "source": "isNaN(1, 2);\n",
+      "reject": "TS_EXPRESSION_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

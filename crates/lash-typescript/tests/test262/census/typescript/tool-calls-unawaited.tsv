@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	tool-calls-unawaited	rejected	TS_UNAWAITED_TOOL	tools.x({});

@@ -48,8 +48,8 @@
       }
     },
     {
-      "source": "import defer * as ns from 'mod';\n",
-      "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
+      "source": "function f() { return new.target; }\n",
+      "reject": "TS_META_PROPERTY_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

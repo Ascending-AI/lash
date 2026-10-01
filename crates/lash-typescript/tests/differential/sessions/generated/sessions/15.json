@@ -53,8 +53,8 @@
       }
     },
     {
-      "source": "const c = 1; c = 2; // tsc TS2588\n",
-      "reject": "TS_ASSIGN_CONST",
+      "source": "Error.isError(new Error('x'));\n",
+      "reject": "TS_METHOD_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

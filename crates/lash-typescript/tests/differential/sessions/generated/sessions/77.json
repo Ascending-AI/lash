@@ -78,8 +78,8 @@
       }
     },
     {
-      "source": "isNaN(1, 2);\n",
-      "reject": "TS_EXPRESSION_UNSUPPORTED",
+      "source": "'a'.isWellFormed();\n",
+      "reject": "TS_METHOD_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

@@ -102,8 +102,8 @@
       }
     },
     {
-      "source": "const o = { m() { super.x; } };\n",
-      "reject": "TS_SUPER_UNSUPPORTED",
+      "source": "JSON.stringify('\\ud800');\n",
+      "reject": "TS_LONE_SURROGATE_LITERAL_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

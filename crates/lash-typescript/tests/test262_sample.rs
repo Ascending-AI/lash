@@ -332,6 +332,54 @@ fn sample_matches_the_ratchet() {
         mismatches.join("\n")
     );
 }
+
+#[test]
+fn fig_4570_unused_declarations_and_unresolved_calls_have_distinct_outcomes() {
+    for source in [
+        "const ignored = 1; finish(42);",
+        "let ignored = 1; ignored = 2; finish(42);",
+        "var ignored; function unused() { return 1; } finish(42);",
+        "const ignored = Math.max(1, 2); finish(42);",
+        "const local = { x() { return 1; } }; const ignored = local.x(); local.x(); void local.x(); finish(42);",
+    ] {
+        let compiled = runner::admit(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+        assert_eq!(
+            futures::executor::block_on(lashlang::execute(
+                &compiled,
+                &mut State::new(),
+                &Host::default()
+            ))
+            .expect(source),
+            ExecutionOutcome::Finished(Value::Number(42.0)),
+            "{source}"
+        );
+    }
+
+    let recorded = runner::recorded_outcomes();
+    for name in [
+        "script-decl-func-dups.js",
+        "script-decl-func.js",
+        "script-decl-lex-var.js",
+        "script-decl-var.js",
+    ] {
+        let relative = format!("test/language/global-code/{name}");
+        let source = std::fs::read_to_string(data_path(&relative)).expect("vendored script");
+        let diagnostic = lash_typescript::parse(&source).expect_err("discarded unresolved call");
+        assert_eq!(diagnostic.code, DiagnosticCode::UnawaitedTool, "{relative}");
+        let span = diagnostic.span.expect("the refusal names its call");
+        assert!(
+            source[span.start..span.end].starts_with("$262.evalScript("),
+            "{relative}: {diagnostic:?}"
+        );
+        let observed = runner::run(&relative);
+        assert!(
+            observed.matches(recorded.get(&relative).expect("recorded outcome")),
+            "{relative}: recorded {}, observed {observed}",
+            recorded[&relative]
+        );
+    }
+}
+
 #[test]
 fn program_bounds_bypass_guest_catch_and_finally() {
     let source = r#"

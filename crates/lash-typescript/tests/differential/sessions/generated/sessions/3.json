@@ -39,8 +39,8 @@
       }
     },
     {
-      "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
-      "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
+      "source": "const x = this;\n",
+      "reject": "TS_THIS_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],

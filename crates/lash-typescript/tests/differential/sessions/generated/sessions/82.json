@@ -111,8 +111,8 @@
       }
     },
     {
-      "source": "const b = delete 1;\n",
-      "reject": "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
+      "source": "const f = Function('return 1');\n",
+      "reject": "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED",
       "node": {
         "outcome": "rejected",
         "prints": [],
