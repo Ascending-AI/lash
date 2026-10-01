@@ -131,7 +131,9 @@ async fn settle_without_the_note(
 /// An append over the commit budget, on a head its creator has not
 /// committed, settles failed with the budget refusal, and its nodes stay out
 /// of the head (FIG-4492). A drive under a budget below any head measures
-/// the bare settlement; under a budget of exactly that size (its refusal
+/// the bare settlement of a fixed initial-head fixture; both drives clone
+/// that fixture so the initial frame's timestamp has the same encoded size
+/// (FIG-4621). Under a budget of exactly that size (its refusal
 /// receipt is not charged, FIG-4471), the append is refused and its failed
 /// settlement commits the creator's head alone.
 pub async fn an_over_budget_append_on_an_uncommitted_head_leaves_nothing_of_it(
@@ -140,7 +142,11 @@ pub async fn an_over_budget_append_on_an_uncommitted_head_leaves_nothing_of_it(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let parts = DriveParts::new(prefix, "uncommitted-over-budget", &effect_host, &stores, 1).await;
+    let mut parts =
+        DriveParts::new(prefix, "uncommitted-over-budget", &effect_host, &stores, 1).await;
+    let mut initial_head = parts.initial_state();
+    initial_head.ensure_agent_frame_initialized_with_clock(&crate::testing::TestClock::new(0));
+    parts.initial_head = Some(initial_head);
     assert_uncommitted(&parts).await;
     let note = REFUSED_NOTE.repeat(256);
     let command = queue_append(&parts, &note, None).await;

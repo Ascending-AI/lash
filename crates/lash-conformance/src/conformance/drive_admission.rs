@@ -36,6 +36,8 @@ pub(super) struct DriveParts {
     /// The protocol session the law's runtime runs, in place of the
     /// standard test protocol's.
     pub(super) protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
+    /// A law's explicit creator head, cloned unchanged when the runtime reopens.
+    pub(super) initial_head: Option<crate::RuntimeSessionState>,
     calls: Arc<AtomicUsize>,
 }
 
@@ -80,6 +82,7 @@ impl DriveParts {
             host,
             store,
             protocol: None,
+            initial_head: None,
             calls,
         }
     }
@@ -141,6 +144,9 @@ impl DriveParts {
 
     /// The session state every run of the law's runtime starts from.
     pub(super) fn initial_state(&self) -> crate::RuntimeSessionState {
+        if let Some(state) = &self.initial_head {
+            return state.clone();
+        }
         let mut policy = crate::testing::mock_session_policy();
         policy.session_id = Some(self.session_id.clone());
         crate::RuntimeSessionState {
