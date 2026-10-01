@@ -1,6 +1,10 @@
 {{- define "loadtest.name" -}}
 {{- .Values.nameOverride | trunc 40 | trimSuffix "-" -}}
 {{- end -}}
+{{- define "loadtest.placement" -}}
+nodeSelector: {{ toJson (.nodeSelector | default dict) }}
+tolerations: {{ toJson (.tolerations | default list) }}
+{{- end -}}
 {{- define "loadtest.s3" -}}
 {{- if eq .Values.s3.mode "external" -}}
 {{- required "s3.externalEndpoint is required in external mode" .Values.s3.externalEndpoint -}}

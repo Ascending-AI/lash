@@ -1,17 +1,3 @@
-# Local proof keeps the topology and replication; it is not a release baseline.
-restate:
-  resources:
-    requests: {cpu: 250m, memory: 512Mi}
-    limits: {cpu: "2", memory: 2Gi}
-workers:
-  resources:
-    requests: {cpu: 250m, memory: 512Mi}
-    limits: {cpu: "2", memory: 2Gi}
-postgres:
-  resources:
-    requests: {cpu: 250m, memory: 256Mi}
-    limits: {cpu: "2", memory: 1Gi}
-s3:
-  resources:
-    requests: {cpu: 100m, memory: 128Mi}
-    limits: {cpu: "1", memory: 512Mi}
+# Local kind on the quiet host is the 1.0 performance baseline target.
+# Resources, topology, workload and faults come unchanged from values.yaml.
+{}

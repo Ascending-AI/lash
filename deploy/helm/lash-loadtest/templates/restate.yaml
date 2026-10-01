@@ -55,7 +55,7 @@ spec:
   template:
     metadata: {labels: {app: {{ $name }}-restate}}
     spec:
-      nodeSelector: {{ toJson .Values.restate.nodeSelector }}
+      {{- include "loadtest.placement" .Values.restate | nindent 6 }}
       affinity:
         podAntiAffinity:
           {{ if eq .Values.restate.antiAffinity "required" }}requiredDuringSchedulingIgnoredDuringExecution:

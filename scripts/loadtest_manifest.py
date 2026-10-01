@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Assemble the FIG-3790 results manifest and durable archive (L6)."""
 import argparse
+import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 import tarfile
 
 import yaml
+from check_loadtest_cluster import TARGET_KEYS
 
 TARGETS = {'local', 'scaleway'}
 RESULT_JSONL = ('operations.jsonl', 'samples.jsonl', 'metrics.jsonl', 'faults.jsonl',
@@ -16,7 +19,7 @@ RESULT_JSON = ('witness.json', 'collection.json', 'summary.json', 'histograms.js
 # Topology, build and placement evidence copied beside the measurement files so
 # the archive is self-contained. Files absent from a run are skipped; the
 # required set must always exist.
-EVIDENCE = ('run-values.yaml', 'driver-values.yaml', 'load-values.yaml', 'rolling-values.yaml',
+EVIDENCE = ('definition.json', 'run-values.yaml', 'driver-values.yaml', 'load-values.yaml', 'rolling-values.yaml',
             'retired-values.yaml', 'topology.yaml', 'build-settings.json', 'kind.yaml',
             'sources.json', 'image-digests.json', 'hardware.json', 'placement.json',
             'node-ids.txt', 'nodes.json', 'logs.json', 'partitions.json', 'replication.txt',
@@ -35,6 +38,58 @@ def require(condition, message):
 
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def rendered_definition(values, workload):
+    """Canonical effective Helm values and driver config, without target access or run identity."""
+    values = copy.deepcopy(values)
+    for section, keys in TARGET_KEYS.items():
+        if keys is None:
+            values.pop(section, None)
+        elif isinstance(values.get(section), dict):
+            for key in keys:
+                values[section].pop(key, None)
+    for section, keys in {'image': ('tag',), 'workers': ('generationImages',),
+                          'load': ('run', 'definitionHash', 'target')}.items():
+        for key in keys:
+            values.get(section, {}).pop(key, None)
+    return {'values': values, 'workload': workload}
+
+
+def definition_hash(values, workload):
+    definition = rendered_definition(values, workload)
+    return hashlib.sha256(json.dumps(definition, sort_keys=True, separators=(',', ':'),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def compare_release(baseline, candidate, measurements, budgets):
+    """Compare qualified runs against frozen bounds selected by definition, across targets."""
+    digest = baseline.get('definition_hash')
+    require(isinstance(digest, str) and len(digest) == 64 and
+            all(char in '0123456789abcdef' for char in digest), 'missing or invalid baseline definition hash')
+    require(candidate.get('definition_hash') == digest, 'runs have different or missing definition hashes')
+    for run in (baseline, candidate):
+        require(run.get('target') in TARGETS, 'unknown comparison target')
+        require(run.get('qualification') == 'PASSED', 'run qualification must be PASSED')
+    require(budgets.get('schema_version') == 1, 'unsupported budget schema')
+    bounds = budgets.get('definitions', {}).get(digest)
+    require(isinstance(bounds, dict) and bounds, f'missing budgets for definition {digest}')
+    violations = []
+    for metric, limits in bounds.items():
+        value = measurements
+        for key in metric.split('.'):
+            value = value.get(key) if isinstance(value, dict) else None
+        require(type(value) in (int, float) and math.isfinite(value), f'missing or invalid measurement {metric}')
+        require(isinstance(limits, dict) and limits and set(limits) <= {'min', 'max'}, f'invalid budget {metric}')
+        require(not {'min', 'max'} <= set(limits) or limits['min'] <= limits['max'], f'inverted budget {metric}')
+        for direction, limit in limits.items():
+            require(type(limit) in (int, float) and math.isfinite(limit), f'invalid budget {metric}.{direction}')
+            require(direction != 'min' or limit > 0, f'inconclusive nonpositive floor budget {metric}')
+            if (direction == 'max' and value > limit) or (direction == 'min' and value < limit):
+                violations.append({'metric': metric, 'value': value, direction: limit})
+    return {'schema_version': 1, 'definition_hash': digest,
+            'targets': {'baseline': baseline['target'], 'candidate': candidate['target']},
+            'verdict': 'FAILED' if violations else 'PASSED', 'violations': violations}
 
 
 def versioned_files(directory):
@@ -96,6 +151,17 @@ def build(run_dir, results_root, run_id, target, workload_path):
     require(placement['target'] == target, 'recorded placement target differs from the recipe target')
     require(placement['nodes'] and placement['pods'], 'incomplete pod placement')
     values = yaml.safe_load((output / 'evidence/run-values.yaml').read_text())
+    load_values = output / 'evidence/load-values.yaml'
+    if load_values.is_file():
+        values['load'].update(yaml.safe_load(load_values.read_text())['load'])
+    digest_definition = definition_hash(values, spec)
+    require(collection['definition_hash'] == digest_definition, 'recorded definition differs from rendered run values')
+    require(collection['target'] == target, 'recorded run target differs from recipe target')
+    definition_path = output / 'evidence/definition.json'
+    if definition_path.is_file():
+        definition = json.loads(definition_path.read_text())
+        require(definition['definition_hash'] == digest_definition and definition['target'] == target,
+                'definition evidence differs from the run record')
     network = values['network']
     inventory = spec.get('inventory', {})
     files = {str(path.relative_to(output)): sha256(path)
@@ -104,6 +170,7 @@ def build(run_dir, results_root, run_id, target, workload_path):
         'schema_version': 1,
         'run': run_id,
         'target': target,
+        'definition_hash': digest_definition,
         'scope': collection['scope'],
         'mode': summary.get('mode'),
         'qualification': summary.get('qualification', {}).get('status', summary.get('verdict')),
@@ -162,12 +229,27 @@ def build(run_dir, results_root, run_id, target, workload_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--run-dir', type=Path, required=True, help='the recipe evidence directory')
-    parser.add_argument('--results', type=Path, required=True, help='the reconciled results root')
-    parser.add_argument('--run-id', required=True)
-    parser.add_argument('--target', required=True, choices=sorted(TARGETS))
-    parser.add_argument('--workload', type=Path, required=True, help='the checked-in workload JSON file')
+    parser.add_argument('--compare', nargs=2, type=Path, metavar=('BASELINE', 'CANDIDATE'),
+                        help='release result directories, including manifest.json and summary.json')
+    parser.add_argument('--budgets', type=Path, help='frozen budgets keyed by definition hash')
+    parser.add_argument('--run-dir', type=Path, help='the recipe evidence directory')
+    parser.add_argument('--results', type=Path, help='the reconciled results root')
+    parser.add_argument('--run-id')
+    parser.add_argument('--target', choices=sorted(TARGETS))
+    parser.add_argument('--workload', type=Path, help='the checked-in workload JSON file')
     args = parser.parse_args()
+    if args.compare:
+        require(args.budgets is not None, '--compare requires --budgets')
+        baseline, candidate = args.compare
+        result = compare_release(json.loads((baseline / 'manifest.json').read_text()),
+                                 json.loads((candidate / 'manifest.json').read_text()),
+                                 json.loads((candidate / 'summary.json').read_text()),
+                                 json.loads(args.budgets.read_text()))
+        print(json.dumps(result, indent=1))
+        require(result['verdict'] == 'PASSED', 'release budget violations')
+        return
+    if any(getattr(args, name) is None for name in ('run_dir', 'results', 'run_id', 'target', 'workload')):
+        parser.error('archive requires --run-dir, --results, --run-id, --target and --workload')
     result = build(args.run_dir, args.results, args.run_id, args.target, args.workload)
     print(f"load manifest run={args.run_id} target={args.target} qualification={result['qualification']} "
           f"files={result['files']} bundle={result['bundle']}")

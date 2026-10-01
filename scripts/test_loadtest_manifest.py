@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 import hashlib
+import copy
 import json
+import subprocess
+import re
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+import check_loadtest_cluster as proof
 import loadtest_manifest as m
+
+ROOT = Path(__file__).resolve().parents[1]
 
 WORKLOAD = {
     'format_version': 1, 'seed': 3790, 'generator': {'algorithm': 'ChaCha20', 'version': 1},
@@ -62,6 +69,7 @@ def fixture(root):
     workload.parent.mkdir()
     workload.write_text(json.dumps(WORKLOAD))
     collection['workload_sha256'] = hashlib.sha256(workload.read_bytes()).hexdigest()
+    collection.update(definition_hash=m.definition_hash(yaml.safe_load(RUN_VALUES), WORKLOAD), target='local')
     for name in m.RESULT_JSONL:
         (results / name).write_text(json.dumps({'schema_version': 1, 'run': 'smoke-v1-1'}) + '\n')
     for name, document in [('witness.json', {'schema_version': 1, 'record': 'witness', 'run': 'smoke-v1-1'}),
@@ -83,6 +91,8 @@ class ManifestTests(unittest.TestCase):
             manifest = json.loads((output / 'manifest.json').read_text())
             self.assertEqual(manifest['schema_version'], 1)
             self.assertEqual(manifest['target'], 'local')
+            self.assertEqual(manifest['definition_hash'],
+                             m.definition_hash(yaml.safe_load(RUN_VALUES), WORKLOAD))
             self.assertEqual(manifest['sources']['lash_sha'], 'd' * 40)
             self.assertEqual(manifest['sources']['inventory_figments_sha'], 'b' * 40)
             self.assertFalse(manifest['sources']['lash_dirty'])
@@ -191,6 +201,128 @@ class ManifestTests(unittest.TestCase):
             (run_dir / 'hardware.json').write_text(json.dumps({'arch': 'x86_64'}))
             with self.assertRaisesRegex(ValueError, 'hardware field'):
                 m.build(run_dir, results, 'smoke-v1-1', 'local', workload)
+
+
+class DefinitionTests(unittest.TestCase):
+    def values(self):
+        return yaml.safe_load((ROOT / 'deploy/helm/lash-loadtest/values.yaml').read_text())
+
+    def test_controller_preserves_the_shared_postgres_capacity(self):
+        script = (ROOT / 'scripts/multi-node-load.sh').read_text()
+        prepare = re.search(r"<<'PYVALUES'\n(.*?)\nPYVALUES", script, re.S).group(1)
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(['python3', '-', str(ROOT / 'deploy/helm/lash-loadtest/values.yaml'),
+                            str(ROOT / 'deploy/helm/lash-loadtest/values-local.yaml'),
+                            tmp, 'smoke', 'faults'], input=prepare, text=True, cwd=ROOT, check=True)
+            actual = yaml.safe_load((Path(tmp) / 'run-values.yaml').read_text())
+            self.assertEqual(actual['postgres']['maxConnections'], self.values()['postgres']['maxConnections'])
+
+    def test_target_file_cannot_override_resources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'values-target.yaml'
+            path.write_text('workers:\n  resources:\n    requests: {cpu: 250m}\n')
+            result = subprocess.run(['bash', str(ROOT / 'scripts/check-loadtest-chart.sh'), str(path)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn('workers.resources', result.stderr)
+
+    def test_target_validation_is_an_exact_allowlist(self):
+        proof.target_values({'credentialsSecret': 'private', 'image': {'repository': 'registry/lash'},
+                             'restate': {'storageClass': 'disk', 'nodeSelector': {'custom': 'node'},
+                                         'antiAffinity': 'required', 'tolerations': [{'key': 'pool'}]},
+                             's3': {'mode': 'external', 'externalEndpoint': 'https://s3', 'region': 'fr-par'}})
+        for override in [{'load': {'sessions': 20}}, {'restate': {'replication': 3}},
+                         {'network': {'delayMs': 20}}, {'faults': {'rollingGeneration': 'other'}},
+                         {'image': {'tag': 'other'}}, {'workers': {'nodeSelectorr': {}}}]:
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                proof.target_values(override)
+
+    def test_rendered_targets_share_resource_caps(self):
+        def resources(target):
+            text = subprocess.check_output([str(ROOT / 'target/loadtest-tools/helm'), 'template',
+                                            'topology', str(ROOT / 'deploy/helm/lash-loadtest'),
+                                            '-f', str(ROOT / f'deploy/helm/lash-loadtest/values-{target}.yaml')], text=True)
+            documents = [row for row in yaml.safe_load_all(text) if row]
+            definition = next(row for row in documents if row['metadata']['name'].endswith('-definition'))
+            digest = m.definition_hash(json.loads(definition['data']['values.json']), WORKLOAD)
+            return digest, {row['metadata']['name']: [container.get('resources') for container in
+                    row['spec']['template']['spec']['containers']]
+                    for row in documents if row['kind'] in {'Deployment', 'StatefulSet', 'Job'}}
+        self.assertEqual(resources('local'), resources('scaleway'))
+
+    def test_definition_identity_ignores_placement_access_and_run_ids(self):
+        values = self.values()
+        changed = copy.deepcopy(values)
+        changed['restate'].update(storageClass='other', nodeSelector={'pool': 'r'}, antiAffinity='required')
+        changed['s3'].update(mode='external', externalEndpoint='https://s3', region='fr-par')
+        changed['credentialsSecret'] = 'other'
+        changed['image'].update(repository='registry/other', tag='fresh-build')
+        changed['load']['run'] = 'fresh-run'
+        self.assertEqual(m.definition_hash(values, WORKLOAD), m.definition_hash(changed, WORKLOAD))
+        reordered = dict(reversed(list(changed.items())))
+        self.assertEqual(m.definition_hash(values, WORKLOAD), m.definition_hash(reordered, WORKLOAD))
+
+    def test_definition_identity_changes_with_each_definition_dimension(self):
+        values = self.values()
+        digest = m.definition_hash(values, WORKLOAD)
+        for section, key, value in [('workers', 'count', 3), ('restate', 'replication', 3),
+                                    ('workers', 'resources', {'requests': {'cpu': '3'}}),
+                                    ('load', 'sessions', 2), ('load', 'faultCampaign', True),
+                                    ('network', 'delayMs', 2), ('faults', 'rollingGeneration', 'third')]:
+            changed = copy.deepcopy(values)
+            changed[section][key] = value
+            with self.subTest(section=section, key=key):
+                self.assertNotEqual(digest, m.definition_hash(changed, WORKLOAD))
+        self.assertNotEqual(digest, m.definition_hash(values, {**WORKLOAD, 'seed': 0}))
+
+    def manifests(self):
+        return ({'definition_hash': 'a' * 64, 'target': 'local', 'qualification': 'PASSED'},
+                {'definition_hash': 'a' * 64, 'target': 'scaleway', 'qualification': 'PASSED'})
+
+    def budgets(self):
+        return {'schema_version': 1, 'definitions': {'a' * 64: {'deployment_memory_peak_bytes': {'max': 100}}}}
+
+    def test_release_comparison_labels_both_targets_for_one_definition(self):
+        baseline, candidate = self.manifests()
+        result = m.compare_release(baseline, candidate, {'deployment_memory_peak_bytes': 90}, self.budgets())
+        self.assertEqual(result['targets'], {'baseline': 'local', 'candidate': 'scaleway'})
+        self.assertEqual(result['definition_hash'], 'a' * 64)
+        self.assertEqual(result['verdict'], 'PASSED')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, manifest in [('baseline', baseline), ('candidate', candidate)]:
+                (root / name).mkdir()
+                (root / name / 'manifest.json').write_text(json.dumps(manifest))
+            (root / 'candidate/summary.json').write_text(json.dumps({'deployment_memory_peak_bytes': 90}))
+            (root / 'budgets.json').write_text(json.dumps(self.budgets()))
+            command = ['python3', str(ROOT / 'scripts/loadtest_manifest.py'), '--compare',
+                       str(root / 'baseline'), str(root / 'candidate'), '--budgets', str(root / 'budgets.json')]
+            compared = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(compared.returncode, 0, compared.stderr)
+            self.assertEqual(json.loads(compared.stdout)['targets'], result['targets'])
+            candidate['definition_hash'] = 'b' * 64
+            (root / 'candidate/manifest.json').write_text(json.dumps(candidate))
+            refused = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn('different or missing definition', refused.stderr)
+
+    def test_release_comparison_refuses_different_or_missing_definitions(self):
+        baseline, candidate = self.manifests()
+        for digest in ['b' * 64, None, 'invalid']:
+            with self.subTest(digest=digest), self.assertRaisesRegex(ValueError, 'definition'):
+                m.compare_release(baseline, {**candidate, 'definition_hash': digest}, {}, self.budgets())
+
+    def test_release_budgets_are_selected_by_definition_and_fail_closed(self):
+        baseline, candidate = self.manifests()
+        with self.assertRaisesRegex(ValueError, 'budget'):
+            m.compare_release(baseline, candidate, {}, {'schema_version': 1, 'definitions': {'b' * 64: {}}})
+        result = m.compare_release(baseline, candidate, {'deployment_memory_peak_bytes': 101}, self.budgets())
+        self.assertEqual(result['verdict'], 'FAILED')
+        self.assertEqual(result['violations'][0]['metric'], 'deployment_memory_peak_bytes')
+        with self.assertRaisesRegex(ValueError, 'measurement'):
+            m.compare_release(baseline, candidate, {}, self.budgets())
+        with self.assertRaisesRegex(ValueError, 'qualification'):
+            m.compare_release(baseline, {**candidate, 'qualification': 'INCOMPLETE'}, {}, self.budgets())
 
 
 if __name__ == '__main__':

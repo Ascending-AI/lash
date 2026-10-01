@@ -20,6 +20,7 @@
 //! `LASH_LOAD_SESSIONS` (default: the workload's population),
 //! `LASH_LOAD_RUN` (default: a fresh run ID) and `LASH_LOAD_FAULT_CAMPAIGN`,
 //! `RESTATE_INGRESS_URL`, `WORKER_CONTROL_URLS` and `WITNESS_DATABASE_URL`.
+//! `LASH_LOAD_DEFINITION_HASH` and `LASH_LOAD_TARGET` identify the rendered run.
 
 use anyhow::{Context, Result, ensure};
 use lash_restate_postgres_workers_e2e::load::{
@@ -757,6 +758,19 @@ async fn main() -> Result<()> {
         .map(str::to_owned)
         .collect();
     ensure!(!workers.is_empty(), "WORKER_CONTROL_URLS names no worker");
+    let definition_hash = required_env("LASH_LOAD_DEFINITION_HASH")?;
+    ensure!(
+        definition_hash.len() == 64
+            && definition_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "LASH_LOAD_DEFINITION_HASH must be a lowercase SHA-256 digest"
+    );
+    let target = required_env("LASH_LOAD_TARGET")?;
+    ensure!(
+        matches!(target.as_str(), "local" | "scaleway"),
+        "LASH_LOAD_TARGET must be local or scaleway"
+    );
     let witness = witness::connect_witness().await?;
     let started = Instant::now();
     let before = started.elapsed().as_nanos();
@@ -803,6 +817,7 @@ async fn main() -> Result<()> {
     lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
         "schema_version": 1, "record": "run", "run": run, "mode": if campaign.is_some() { "fault_campaign" } else { "smoke" },
         "workload": workload_name, "workload_sha256": load.sha256(),
+        "definition_hash": definition_hash, "target": target,
         "seed": load.workload.spec().seed, "sessions": sessions, "turns_per_session": turns,
         "workers": workers, "fault_campaign": campaign.is_some(), "pool": "PENDING", "pool_dependencies": ["FIG-4161", "FIG-4162"],
         "invocation_scope": "isolated topology, one driver; census before admission",

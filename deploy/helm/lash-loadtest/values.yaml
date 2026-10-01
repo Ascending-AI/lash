@@ -38,7 +38,7 @@ workers:
 postgres:
   # Every database on this server shares this capacity. A rollback campaign
   # overrides maxGenerations to 3 and sizes maxConnections from the budget.
-  maxConnections: 100
+  maxConnections: 94
   maxGenerations: 2
   otherWorkers: 12
   adminHeadroom: 10
@@ -89,6 +89,9 @@ load:
   faultCampaign: false
   # The run ID the driver and the fault controller share; empty picks one.
   run: ""
+  # Filled by the recipe from the rendered definition and workload before admission.
+  definitionHash: ""
+  target: ""
   activeDeadlineSeconds: 900
   # Preserve completed journals for L5 evidence; differs from deployment defaults.
   journalRetention: 5m

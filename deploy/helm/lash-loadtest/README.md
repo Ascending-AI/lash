@@ -7,7 +7,12 @@ Restate/PostgreSQL runbook's worker and provider binaries. Restate uses the
 existing official 1.7.12 image pinned by digest, without adding an operator or
 changing runtime formats.
 
-Run the local proof in a build-enabled Kiln fork:
+Local kind on the quiet host is the 1.0 performance baseline target.
+The separate-machines Scaleway baseline follows after 1.0 under FIG-4540.
+Both targets use the same definition in `values.yaml` and the checked-in driver
+workload. FIG-4172 owns the repeated baseline and measured release budgets.
+
+Run a local smoke in a build-enabled Kiln fork:
 
 ```sh
 . ./env.sh
@@ -48,9 +53,8 @@ Each Restate node, PostgreSQL and Garage has its own persistent volume claim.
 Attachments and Restate snapshots use separate object prefixes. When enabled,
 network shaping applies delay, jitter and bandwidth once at each worker,
 Restate, PostgreSQL and Garage pod's outbound interface. The synthetic provider,
-proxy, driver and collector have separate resource budgets. The local values
-reduce resource requests and limits for development; they do not establish a
-release performance baseline.
+proxy, driver and collector have separate resource budgets. Both targets use
+the resource requests and limits in `values.yaml` unchanged.
 
 The recipe uses an explicit run kubeconfig for every Kubernetes command. Names
 come from `KILN_GATE_ID`. Logs, rendered manifests and cluster evidence remain in
@@ -85,14 +89,33 @@ figments SHAs), the workload name/hash/format, the seed and generator, the
 built image digests and pinned Restate/kind images, host hardware, cluster and
 pod placement, the shaped link settings, the installed settings hash,
 warmup/prefill/session parameters, the reconciliation qualification and the
-baseline ID — null today, because no baseline exists. Set
+baseline ID, null today because no baseline exists. Set
 `LASH_LOADTEST_RESULTS` to a durable path to write the archive somewhere other
 than the run directory. A smoke archive establishes no baseline, saturation
-estimate or budgets; compare only runs with matching target, profile, hardware
-and settings.
+estimate or budgets. Each run records `definition_hash` and `target` in the
+driver's run record, collection, summary and manifest. Before admission the
+recipe archives `definition.json`, including the canonical definition. The
+hash covers the rendered effective Helm values and complete driver workload,
+including topology, replication, resource caps, workload mix and rates, link
+shaping and fault plan. Placement/access fields and per-run IDs and build tags
+are excluded. Source images, hardware and placement remain separate provenance.
 
-Override local resources through a values file with `LASH_LOADTEST_VALUES`.
+`LASH_LOADTEST_VALUES` selects a placement/access overlay. Target files may set
+only storageClass, nodeSelector, antiAffinity, tolerations, s3 mode/endpoint/region,
+image repository and credentialsSecret. The chart check and live recipe refuse
+other keys, including resource overrides. Change the shared definition in
+`values.yaml` or the driver workload when changing performance conditions.
 The v1 proof requires three Restate nodes, 24 partitions, replication two and run-owned Garage.
+
+Release comparison selects frozen budgets by `definition_hash` and refuses
+different or missing hashes and incomplete runs. Different targets with the
+same definition are comparable; the report labels both targets. Run it through
+`kiln gate lash <fork> -- python3 scripts/loadtest_manifest.py --compare <baseline-dir> <candidate-dir> --budgets <budgets-file>`.
+The budget file has `schema_version: 1` and a `definitions` mapping keyed by
+hash. Each entry maps a dotted numeric summary path to `min` and/or `max`.
+For example, `deployment_memory_peak_bytes: {max: <measured-ceiling>}`.
+Missing measurements, invalid bounds and budget violations fail the command.
+FIG-4172 derives the bounds; this smoke creates none.
 
 Check the chart without starting services:
 
@@ -108,7 +131,7 @@ profiles. The live topology is on demand and is not dispatched by these gates.
 
 `values.yaml` sets the topology, resources, pinned infrastructure images,
 storage sizes/classes, shaping and scrape interval. `values-local.yaml` is the
-local proof profile. The schema rejects malformed topology settings before
+local baseline target's placement/access profile. The schema rejects malformed topology settings before
 installation. `driver.enabled` controls the bounded smoke Job; it is disabled
 until the local controller has provisioned Restate. Schema setup is an install
 hook and is not reapplied during compatible upgrades. The bounded driver is an
@@ -261,8 +284,8 @@ runbook is `runbooks/rolling-upgrade/`.
 
 # Scaleway profile
 
-Scaleway provisioning and release qualification are PENDING until the account
-and credentials are supplied. No cloud resources are provisioned by this lane.
+The Scaleway separate-machines baseline is post-1.0 and pending the account,
+cluster and credentials. No cloud resources are provisioned by this lane.
 `values-scaleway.yaml` selects `sbs-5k` and separate node pools through the
 operator-created `lash-loadtest-pool` labels. Provide at least three Restate
 nodes because this profile requires pod anti-affinity. Size the pools to satisfy
@@ -285,13 +308,13 @@ helm install topology deploy/helm/lash-loadtest --namespace "$namespace" \
 After the schema Job and three Restate pods are ready, provision the cluster
 once with `restatectl provision --replication 2 --num-partitions 24 --yes` in
 Restate pod zero. Use the replication and partition counts from the installed
-values if overridden. Verify all three metadata members and committed log and
+shared definition. Verify all three metadata members and committed log and
 partition placement, then enable the driver with a Helm upgrade using the same
 values. The local recipe demonstrates this sequence and archives its evidence.
 
 The default Scaleway profile uses in-cluster Garage. For Scaleway Object
-Storage, override `s3.mode: external`, `s3.externalEndpoint`, `s3.region` and
-`s3.bucket`; create the bucket first and supply its credentials through the
+Storage, override `s3.mode: external`, `s3.externalEndpoint` and `s3.region`.
+Create the bucket named in `values.yaml` first and supply its credentials through the
 same Secret. Restate uses HTTPS for this profile. Do not store keys in values.
 
 The server settings and metadata checks follow the
@@ -302,7 +325,7 @@ node image follows the [kind 0.29.0 release](https://github.com/kubernetes-sigs/
 The Scaleway profile uses the documented `sbs-5k` class from
 [Scaleway CSI storage guidance](https://www.scaleway.com/en/docs/kubernetes/api-cli/managing-storage/).
 Confirm that class and the operator-created pool labels on the actual cluster
-before provisioning the pending release baseline.
+before provisioning the post-1.0 baseline.
 
 # Measurements
 

@@ -101,6 +101,12 @@
             "preferred",
             "required"
           ]
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       },
       "additionalProperties": false
@@ -178,6 +184,12 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 1000000
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       },
       "additionalProperties": false
@@ -249,6 +261,12 @@
           "type": "integer",
           "minimum": 3,
           "maximum": 1000000
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       },
       "additionalProperties": false
@@ -322,6 +340,12 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       },
       "additionalProperties": false
@@ -358,6 +382,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -397,6 +433,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -440,6 +488,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -509,6 +569,30 @@
             }
           },
           "additionalProperties": false
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "definitionHash": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{64})?$"
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "",
+            "local",
+            "scaleway"
+          ]
         }
       },
       "required": [
@@ -556,6 +640,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -601,6 +697,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false

@@ -2,9 +2,10 @@
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+chart=deploy/helm/lash-loadtest
+python3 scripts/check_loadtest_cluster.py target-values "$chart/values-local.yaml" "$chart/values-scaleway.yaml" "$@"
 bash scripts/ensure-loadtest-tools.sh
 helm_bin="$repo/target/loadtest-tools/helm"
-chart=deploy/helm/lash-loadtest
 for profile in values-local.yaml values-scaleway.yaml; do
   "$helm_bin" lint "$chart" -f "$chart/$profile"
   "$helm_bin" template topology "$chart" -f "$chart/$profile" > "target/loadtest-tools/$profile.rendered.yaml"

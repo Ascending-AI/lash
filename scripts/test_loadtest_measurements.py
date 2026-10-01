@@ -26,7 +26,8 @@ def operation(key='one', outcome='answered', **fields):
 
 
 def evidence():
-    run = dict(schema_version=1, record='run', run='r', workers=['worker'], sessions=1, turns_per_session=1)
+    run = dict(schema_version=1, record='run', run='r', workers=['worker'], sessions=1, turns_per_session=1,
+               definition_hash='a' * 64, target='local')
     witness = dict(schema_version=1, record='witness', run='r', sent=1, terminal=1,
                    provider_calls=1, provider_retryable_failures=0, effect_attempts=1, effect_commits=1,
                    verdict={'absorbed_effect_attempts': 0, 'classes': {name: {'witnessed': 1, 'violations': []} for name in m.WITNESS_CLASSES}})
@@ -81,6 +82,23 @@ def witness_evidence(operations=None):
 
 
 class MeasurementsTests(unittest.TestCase):
+    def test_summary_preserves_definition_and_target(self):
+        run, operations, samples, witness = evidence()
+        run.update(definition_hash='a' * 64, target='local')
+        result = m.summarize(run, operations, samples, witness)
+        self.assertEqual(result['definition_hash'], run['definition_hash'])
+        self.assertEqual(result['target'], 'local')
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'load.log'
+            rows = [run, *operations, *samples, *witness_evidence(), witness]
+            log.write_text(''.join('load measurement ' + json.dumps(row) + '\n' for row in rows))
+            output = Path(tmp) / 'results'
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.archive(log, output, recovery_only=True)
+            summary = json.loads((output / 'fig-3790/r/summary.json').read_text())
+            self.assertEqual(summary['definition_hash'], run['definition_hash'])
+            self.assertEqual(summary['target'], 'local')
+
     def test_all_behavior_classes_are_required(self):
         required = ('provider-streams', 'history-prefill', 'admin-compaction', 'context-pressure',
                     'auxiliary-requests', 'external-occurrences', 'trigger-edits', 'promotion-reads')

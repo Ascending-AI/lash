@@ -39,6 +39,7 @@ python3 - "$chart/values.yaml" "$profile" "$run" "$name" "$campaign" <<'PYVALUES
 import json, pathlib, sys, yaml
 sys.path.insert(0, 'scripts')
 from loadtest_connection_budget import peak_connections
+from check_loadtest_cluster import target_values
 base, profile, directory, tag, campaign = sys.argv[1:]
 values = yaml.safe_load(open(base))
 def merge(target, overlay):
@@ -47,7 +48,9 @@ def merge(target, overlay):
             merge(target[key], value)
         else:
             target[key] = value
-merge(values, yaml.safe_load(open(profile)))
+overlay = yaml.safe_load(open(profile)) or {}
+target_values(overlay)
+merge(values, overlay)
 if (values['restate']['replicas'] != 3 or values['restate']['partitions'] != 24
         or values['restate']['replication'] != 2):
     raise SystemExit('the v1 topology proof requires three Restate nodes, 24 partitions and replication two')
@@ -355,6 +358,26 @@ load_run="$workload-$(date -u +%Y%m%d%H%M%S)"
 if [[ "$campaign" == rolling-upgrade ]]; then load_deadline=1800; fi
 printf 'load:\n  enabled: true\n  faultCampaign: %s\n  run: %s\n  activeDeadlineSeconds: %s\n' \
   "$fault_campaign" "$load_run" "$load_deadline" > "$run/load-values.yaml"
+helm template topology "$chart" "${values[@]}" -f "$run/load-values.yaml" \
+  --show-only templates/definition.yaml > "$run/rendered-definition.yaml"
+python3 - "$run" "$target" "crates/lash-perf/workloads/$workload.json" <<'PYDEFINITION'
+import json, pathlib, sys, yaml
+sys.path.insert(0, 'scripts')
+from loadtest_manifest import definition_hash, rendered_definition
+directory, target, workload = sys.argv[1:]
+path = pathlib.Path(directory)
+values = json.loads(yaml.safe_load((path/'rendered-definition.yaml').read_text())['data']['values.json'])
+spec = json.loads(pathlib.Path(workload).read_text())
+digest = definition_hash(values, spec)
+(path/'definition.json').write_text(json.dumps({
+    'schema_version': 1, 'target': target, 'definition_hash': digest,
+    'definition': rendered_definition(values, spec),
+}, sort_keys=True, indent=1) + '\n')
+overlay = yaml.safe_load((path/'load-values.yaml').read_text())
+overlay['load'].update(definitionHash=digest, target=target)
+(path/'load-values.yaml').write_text(yaml.safe_dump(overlay))
+print(f'load definition_hash={digest} target={target}')
+PYDEFINITION
 helm template topology "$chart" --namespace "$namespace" "${values[@]}" -f "$run/load-values.yaml" \
   --show-only templates/jobs.yaml | python3 scripts/check_loadtest_cluster.py job load | "${k[@]}" apply -f -
 "${k[@]}" rollout status "deployment/${resource}-fault-probe" --timeout=120s
@@ -421,7 +444,9 @@ else
 import json, pathlib, sys
 output = pathlib.Path(sys.argv[1])
 if output.is_dir():
+    identity = json.loads((output / 'collection.json').read_text())
     (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'verdict': 'failed',
+        'definition_hash': identity['definition_hash'], 'target': identity['target'],
         'error': 'driver exited before final metric census completed; recovery evidence is retained separately'}) + '\n')
 PYFAILED
   measure_status=1

@@ -20,7 +20,7 @@ spec:
   template:
     metadata: {labels: {app: {{ $name }}-{{ $component }}}}
     spec:
-      nodeSelector: {{ toJson $config.nodeSelector }}
+      {{- include "loadtest.placement" $config | nindent 6 }}
       {{- include "loadtest.network" $ | nindent 6 }}
       containers:
         - name: {{ $component }}

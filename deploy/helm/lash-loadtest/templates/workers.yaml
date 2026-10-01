@@ -39,7 +39,7 @@ spec:
       labels: {app: {{ $name }}-worker-{{ $index }}, generation: {{ $generation | quote }}}
       annotations: {lash-loadtest/generation: {{ $generation | quote }}}
     spec:
-      nodeSelector: {{ toJson $.Values.workers.nodeSelector }}
+      {{- include "loadtest.placement" $.Values.workers | nindent 6 }}
       # The fault controller kills the worker process from inside the pod;
       # a shared namespace keeps it from being the unkillable PID 1.
       shareProcessNamespace: true
@@ -98,6 +98,7 @@ spec:
   template:
     metadata: {labels: {app: {{ $name }}-proxy-{{ $generation }}}}
     spec:
+      {{- include "loadtest.placement" $.Values.proxy | nindent 6 }}
       containers:
         - name: proxy
           image: {{ $.Values.proxy.image }}

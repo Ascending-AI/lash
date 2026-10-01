@@ -744,6 +744,7 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
     normalized = {name: row['observed_delta'] / completed if completed else None
                   for name, row in delta_summary.items() if name.startswith('postgres_')}
     return {'schema_version': 1, 'run': run['run'], 'mode': run.get('mode', 'smoke'), 'population': count,
+            'definition_hash': run['definition_hash'], 'target': run['target'],
             'qualification': qualification, 'collection_gaps': gaps,
             'cancellations': cancellations,
             'histograms': histograms, 'counters': delta_summary, 'retry_epochs': epoch_rows,
@@ -834,6 +835,7 @@ def archive(log, output, recovery_only=False):
     runs = [row for row in records if row['record'] == 'run']
     witnesses = [row for row in records if row['record'] == 'witness']
     require(len(runs) == len(witnesses) == 1, 'missing or duplicate run/witness record')
+    identity = {key: runs[0][key] for key in ('definition_hash', 'target')}
     require(all(row['run'] == runs[0]['run'] for row in records), 'mixed archive run identities')
     operations = [row for row in records if row['record'] == 'operation']
     samples = [row for row in records if row['record'] == 'sample']
@@ -864,6 +866,7 @@ def archive(log, output, recovery_only=False):
     (output / 'collection_gaps.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in gaps))
     if recovery_only:
         (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'run': runs[0]['run'],
+                                                       **identity,
                                                        'verdict': 'INCOMPLETE', 'error': 'final metric census pending'}) + '\n')
         (output / 'histograms.json').write_text(json.dumps({'schema_version': 1, 'status': 'INCOMPLETE', 'histograms': []}) + '\n')
         (output / 'metrics.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in metric_rows(samples)))
@@ -875,7 +878,7 @@ def archive(log, output, recovery_only=False):
         if isinstance(error, CounterEpochGapError):
             gaps = error.collection_gaps
             (output / 'collection_gaps.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in gaps))
-        (output / 'summary.json').write_text(json.dumps({'schema_version': 1, 'verdict': 'failed', 'error': str(error), 'collection_gaps': gaps}) + '\n')
+        (output / 'summary.json').write_text(json.dumps({'schema_version': 1, **identity, 'verdict': 'failed', 'error': str(error), 'collection_gaps': gaps}) + '\n')
         raise
     (output / 'collection_gaps.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in summary['collection_gaps']))
     (output / 'metrics.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in metric_rows(samples)))

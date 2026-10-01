@@ -11,6 +11,7 @@ spec:
   activeDeadlineSeconds: 180
   template:
     spec:
+      {{- include "loadtest.placement" .Values.driver | nindent 6 }}
       restartPolicy: Never
       containers:
         - name: schema
@@ -46,6 +47,7 @@ spec:
   activeDeadlineSeconds: 30
   template:
     spec:
+      {{- include "loadtest.placement" .Values.driver | nindent 6 }}
       restartPolicy: Never
       containers:
         - name: preflight
@@ -74,6 +76,7 @@ spec:
   activeDeadlineSeconds: 180
   template:
     spec:
+      {{- include "loadtest.placement" .Values.driver | nindent 6 }}
       restartPolicy: Never
       containers:
         - name: migrate
@@ -101,6 +104,7 @@ spec:
   template:
     metadata: {labels: {app: {{ $name }}-provider}}
     spec:
+      {{- include "loadtest.placement" .Values.provider | nindent 6 }}
       containers:
         - name: provider
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -124,6 +128,7 @@ spec:
   activeDeadlineSeconds: {{ .Values.driver.activeDeadlineSeconds }}
   template:
     spec:
+      {{- include "loadtest.placement" .Values.driver | nindent 6 }}
       restartPolicy: Never
       initContainers:
         - name: wait-for-topology
@@ -156,6 +161,7 @@ spec:
   activeDeadlineSeconds: {{ .Values.load.activeDeadlineSeconds }}
   template:
     spec:
+      {{- include "loadtest.placement" .Values.load | nindent 6 }}
       restartPolicy: Never
       initContainers:
         - name: wait-for-topology
@@ -174,6 +180,8 @@ spec:
           command: [lash-loadtest-driver]
           {{- include "loadtest.env" . | nindent 10 }}
             - {name: LASH_LOAD_SESSIONS, value: {{ .Values.load.sessions | quote }}}
+            - {name: LASH_LOAD_DEFINITION_HASH, value: {{ .Values.load.definitionHash | quote }}}
+            - {name: LASH_LOAD_TARGET, value: {{ .Values.load.target | quote }}}
             - {name: LASH_LOAD_TURNS_PER_SESSION, value: {{ .Values.load.turnsPerSession | quote }}}
             - {name: LASH_LOAD_FAULT_CAMPAIGN, value: {{ ternary "1" "0" .Values.load.faultCampaign | quote }}}
             {{- if .Values.load.run }}

@@ -8,6 +8,35 @@ import re
 import subprocess
 import sys
 
+TARGET_KEYS = {
+    'credentialsSecret': None,
+    'image': {'repository'},
+    'restate': {'storageClass', 'nodeSelector', 'antiAffinity', 'tolerations'},
+    'workers': {'nodeSelector', 'tolerations'},
+    'postgres': {'storageClass', 'nodeSelector', 'tolerations'},
+    's3': {'storageClass', 'nodeSelector', 'tolerations', 'mode', 'externalEndpoint', 'region'},
+    **{name: {'nodeSelector', 'tolerations'} for name in ('provider', 'proxy', 'driver', 'load', 'probe', 'metrics')},
+}
+
+
+def target_values(values):
+    """Target overlays carry placement and access only; unknown keys fail closed."""
+    if not isinstance(values, dict):
+        raise ValueError('target values must be a mapping')
+    for section, value in values.items():
+        if section not in TARGET_KEYS:
+            raise ValueError(f'target override is not placement or access: {section}')
+        allowed = TARGET_KEYS[section]
+        if allowed is None:
+            if not isinstance(value, str):
+                raise ValueError(f'target {section} must be a string')
+            continue
+        if not isinstance(value, dict):
+            raise ValueError(f'target {section} must be a mapping')
+        for key in value:
+            if key not in allowed:
+                raise ValueError(f'target override is not placement or access: {section}.{key}')
+
 
 def nodes(document):
     entries = [(key, value['Node']) for key, value in document['nodes'] if 'Node' in value]
@@ -216,6 +245,12 @@ def image_helper(bin_dir, testing):
 
 def main():
     mode, *paths = sys.argv[1:]
+    if mode == 'target-values':
+        import yaml
+        for path in paths:
+            target_values(yaml.safe_load(Path(path).read_text()) or {})
+        print(f'placement-only target files={len(paths)}')
+        return
     if mode == 'helper':
         root, worker = paths
         label, testing = vm_helper(root, worker)

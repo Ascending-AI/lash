@@ -1,4 +1,4 @@
-# PENDING account/credentials and measured release qualification.
+# Post-1.0 separate-machines baseline; pending account and credentials.
 # Create these labeled Kapsule pools before installation. Pool sizes and
 # instance types must provide the resource requests in values.yaml.
 restate:
