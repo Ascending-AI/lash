@@ -5,6 +5,25 @@ repo := justfile_directory()
 default:
   @just --list
 
+# FIG-4495 cut tooling. Call inside kiln gate lash <fork> -- just ...
+release-fixtures-capture tag dest:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${KILN_GATE_ID:?release capture requires kiln gate}"
+  cd "{{repo}}"
+  source ./env.sh
+  export LASH_VM_WORKER="$(python3 scripts/ci/restate_suite.py build //crates/lash-vm-worker:lash-vm-worker__bin)"
+  test -x "$LASH_VM_WORKER"
+  scripts/ci/with-service.sh pg16 -- bash -c 'python3 scripts/capture_release_fixtures.py --tag "$1" --dest "$2" --regenerate && python3 scripts/verify_release_fixtures.py "$2"' bash "{{tag}}" "{{dest}}"
+
+release-fixtures-read-back corpus *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${KILN_GATE_ID:?release read-back requires kiln gate}"
+  cd "{{repo}}"
+  source ./env.sh
+  scripts/ci/with-service.sh pg16 -- python3 scripts/read_release_fixtures.py "{{corpus}}" {{args}}
+
 agent-workbench port='3030':
   ./scripts/agent-workbench-dev.sh up --port "{{port}}"
 

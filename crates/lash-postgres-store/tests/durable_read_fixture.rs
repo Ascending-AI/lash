@@ -103,6 +103,54 @@ async fn regenerate_postgres_durable_fixture() {
     drop_fixture_schema(&database_url).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-4495 release cut: requires an explicit tagged LASH_RELEASE_FIXTURES_DIR and owned PostgreSQL"]
+async fn release_postgres_fixture_reads_retained_semantics() {
+    let source =
+        PathBuf::from(std::env::var_os("LASH_RELEASE_FIXTURES_DIR").expect(
+            "release read-back requires LASH_RELEASE_FIXTURES_DIR; no source-tree fallback",
+        ))
+        .join("postgres-store");
+    let expected: fixture::ExpectedFixture = serde_json::from_slice(
+        &std::fs::read(source.join("expected.json"))
+            .expect("read retained PostgreSQL expectations"),
+    )
+    .expect("decode retained PostgreSQL expectations");
+    let version: PostgresVersion = serde_json::from_slice(
+        &std::fs::read(source.join("version.json")).expect("read retained PostgreSQL version"),
+    )
+    .expect("decode retained PostgreSQL version");
+    assert!(
+        version.schema > 0,
+        "retained schema version must be nonzero"
+    );
+    let dump = std::fs::read_to_string(source.join("fixture.sql"))
+        .expect("read the retained PostgreSQL dump");
+    let database_url =
+        support::database_url().expect("release read-back requires owned PostgreSQL");
+    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
+    drop_fixture_schema(&database_url).await;
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await
+        .expect("connect to restore the release fixture");
+    sqlx::raw_sql(&dump)
+        .execute(&pool)
+        .await
+        .expect("restore the retained PostgreSQL dump without reseeding");
+    pool.close().await;
+    let storage = PostgresStorage::connect(&fixture_database_url(&database_url))
+        .await
+        .expect("open the restored release catalog");
+    let handles = open_handles(&storage, fixture::FIXTURE_READ_MS);
+    Box::pin(fixture::assert_semantics(&handles, &expected)).await;
+    drop(handles);
+    storage.pool().close().await;
+    drop_fixture_schema(&database_url).await;
+    println!("release PostgreSQL read-back: 1 dump fixture, retained semantics matched");
+}
+
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
     let processes = Arc::new(

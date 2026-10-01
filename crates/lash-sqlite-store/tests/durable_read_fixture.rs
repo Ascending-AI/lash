@@ -74,6 +74,42 @@ async fn sqlite_seed_round_trip_refuses_a_mutated_seed() {
 /// One way a seed's expectations can drift from what the store holds.
 type Mutation = fn(&mut fixture::ExpectedFixture);
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-4495 release cut: requires an explicit tagged LASH_RELEASE_FIXTURES_DIR"]
+async fn release_sqlite_fixture_reads_retained_semantics() {
+    let corpus =
+        PathBuf::from(std::env::var_os("LASH_RELEASE_FIXTURES_DIR").expect(
+            "release read-back requires LASH_RELEASE_FIXTURES_DIR; no source-tree fallback",
+        ));
+    let source = corpus.join("sqlite-stores");
+    let expected: fixture::ExpectedFixture = serde_json::from_slice(
+        &std::fs::read(source.join("expected.json")).expect("read retained SQLite expectations"),
+    )
+    .expect("decode retained SQLite expectations");
+    let versions: SqliteVersions = serde_json::from_slice(
+        &std::fs::read(source.join("versions.json")).expect("read retained SQLite versions"),
+    )
+    .expect("decode retained SQLite versions");
+    let session_bytes = std::fs::read(corpus.join("session-at-rest/durable-core.db"))
+        .expect("read the retained session catalog");
+    assert_eq!(
+        session_bytes,
+        std::fs::read(source.join("durable-core.db")).expect("read the retained core catalog")
+    );
+    let temp = tempfile::tempdir().expect("release SQLite read-back tempdir");
+    for name in database_names() {
+        std::fs::copy(source.join(name), temp.path().join(name))
+            .expect("copy the immutable release catalog for read-back");
+    }
+    assert_eq!(versions_at(temp.path()), versions);
+    // Read the separately named session artifact through the same typed stores.
+    std::fs::write(temp.path().join("durable-core.db"), session_bytes)
+        .expect("install the retained session catalog copy");
+    let handles = open_handles(temp.path(), fixture::FIXTURE_READ_MS).await;
+    Box::pin(fixture::assert_semantics(&handles, &expected)).await;
+    println!("release SQLite read-back: 4 catalog fixtures, retained semantics matched");
+}
+
 async fn seed_fresh_store(root: &Path) -> fixture::ExpectedFixture {
     let handles = open_handles(root, fixture::FIXTURE_WRITE_MS).await;
     Box::pin(fixture::seed(&handles)).await
