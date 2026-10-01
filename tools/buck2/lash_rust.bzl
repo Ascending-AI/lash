@@ -580,7 +580,7 @@ def lash_rust_feature_test(
         None,
         None,
         kwargs.pop("rustc_env", {}),
-        0,
+        kwargs.pop("shard_count", 0),
         kwargs.pop("test_env", {}),
         kwargs.pop("tags", []),
         kwargs.pop("timeout", None),

@@ -1159,6 +1159,53 @@ def check_feature_lane_dependency_edges() -> None:
     assert not failures, "; ".join(failures)
 
 
+def check_feature_lane_test_policy() -> None:
+    """A test variant runs under its ordinary label's shard count and timeout.
+
+    The variant is the same binary at another resolution. Run whole with the
+    default bound, a suite that package-policy.toml shards because it does not
+    fit one action times out in the lane (the RLM unit tests did, at 300 s).
+    """
+    inventory = load_json("target-inventory.json")
+    ordinary, variant_labels = labels(inventory)
+    calls = {}
+    for directory in sorted({label[2:].split(":", 1)[0] for label in ordinary | variant_labels}):
+        tree = ast.parse((ROOT / directory / "BUCK").read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in (
+                        "lash_rust_unit_test", "lash_rust_integration_test",
+                        "lash_rust_feature_test",
+                    )):
+                continue
+            args = {
+                keyword.arg: ast.literal_eval(keyword.value)
+                for keyword in node.value.keywords
+                if keyword.arg in ("name", "shard_count", "timeout")
+            }
+            calls[f"//{directory}:{args['name']}"] = args
+    sharded = 0
+    for label in sorted(variant_labels & set(calls)):
+        base = calls.get(label.split("__fv_", 1)[0])
+        if base is None:
+            continue
+        for key in ("shard_count", "timeout"):
+            assert calls[label].get(key) == base.get(key), (
+                f"{label} has {key} {calls[label].get(key)}, its ordinary label {base.get(key)}"
+            )
+        sharded += "shard_count" in base
+    assert sharded, "no feature-lane variant of a sharded test was checked"
+    units = {unit["label"]: unit for unit in inventory["feature_lane_units"]}
+    for label, args in calls.items():
+        if label in units:
+            assert units[label].get("shard_count") == args.get("shard_count"), label
+    rules = (HERE / "test_rules.bzl").read_text(encoding="utf-8")
+    wrapper = rules[rules.index("def lash_test_wrapper("):]
+    # Every shard wrapper carries the lane's libtest arguments.
+    assert "for index in range(count):" in wrapper and "args = args," in wrapper
+
+
 def check_no_first_party_build_dependency() -> None:
     """No first-party package is a build-dependency of another.
 
@@ -1199,6 +1246,7 @@ def main() -> int:
         check_feature_lane_executable_selection,
         check_documentation_targets_are_not_tests,
         check_feature_lane_dependency_edges,
+        check_feature_lane_test_policy,
         check_no_first_party_build_dependency,
     ]
     for check in checks:

@@ -2193,6 +2193,10 @@ class FeatureLaneGraph:
             )
             unit_extra_data = unit_policy.data
             unit_env = unit_policy.env
+            # The variant is the ordinary binary under another resolution, so
+            # it runs under the ordinary label's policy: a suite sharded or
+            # given a longer bound because it does not fit one action does not
+            # fit one here either. A lane's name filter reaches every shard.
             self.add_chunk(
                 package_name,
                 name,
@@ -2217,12 +2221,14 @@ class FeatureLaneGraph:
                 )
                 + f"    manifest_dir = {quote(directory)},\n"
                 f"    package_name = {quote(package_name)},\n"
+                + (f"    shard_count = {unit_policy.shards},\n" if unit_policy.shards else "")
                 + (
                     f"    test_env = {json.dumps(unit_env, sort_keys=True)},\n"
                     if unit_env
                     else ""
                 )
                 + f"    tags = {string_list(tags)},\n"
+                + (f"    timeout = {quote(unit_policy.timeout)},\n" if unit_policy.timeout else "")
                 + self.extra_deps_argument(package_name, features, resolution)
                 + self.pruned_deps_argument(package_name, features, with_dev=True)
                 + self.variant_deps_argument(package_name, resolution, unit_test=True)
@@ -2279,6 +2285,7 @@ class FeatureLaneGraph:
         # kind == "test": an integration test target.
         base = label_name(target, False)
         name = f"{base}__fv_{suffix}"
+        shards = test_shard_count(package_name, kind, target["name"])
         self.add_chunk(
             package_name,
             name,
@@ -2303,7 +2310,8 @@ class FeatureLaneGraph:
             f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
             f"    manifest_dir = {quote(directory)},\n"
             f"    package_name = {quote(package_name)},\n"
-            f"    srcs_patterns = {json.dumps(test_source_patterns(directory, target['name']))},\n"
+            + (f"    shard_count = {shards},\n" if shards else "")
+            + f"    srcs_patterns = {json.dumps(test_source_patterns(directory, target['name']))},\n"
             + (
                 f"    rustc_env = {json.dumps(rustc_env, sort_keys=True)},\n"
                 if rustc_env
@@ -2417,14 +2425,16 @@ class FeatureLaneGraph:
                 package_name, resolution, library, "unit-test", runnable, args
             )
             labels.append(label)
-            self.units.append(
-                {
-                    "features": resolution[package_name],
-                    "kind": "unit-test",
-                    "label": label,
-                    "package": package_name,
-                }
-            )
+            unit = {
+                "features": resolution[package_name],
+                "kind": "unit-test",
+                "label": label,
+                "package": package_name,
+            }
+            shards = test_shard_count(package_name, "unit-test", library["name"])
+            if shards:
+                unit["shard_count"] = shards
+            self.units.append(unit)
             tags = cargo_test_policy(package_name, "unit-test", library["name"])[0]
             if runnable and args:
                 self.test_args[label] = args
@@ -2446,16 +2456,18 @@ class FeatureLaneGraph:
                 package_name, resolution, target, kind, runnable, args
             )
             labels.append(label)
-            self.units.append(
-                {
-                    "features": sorted(
-                        features | set(target.get("required-features", []))
-                    ),
-                    "kind": kind,
-                    "label": label,
-                    "package": package_name,
-                }
-            )
+            unit = {
+                "features": sorted(
+                    features | set(target.get("required-features", []))
+                ),
+                "kind": kind,
+                "label": label,
+                "package": package_name,
+            }
+            shards = test_shard_count(package_name, kind, target["name"]) if kind == "test" else 0
+            if shards:
+                unit["shard_count"] = shards
+            self.units.append(unit)
             if kind == "test" and runnable:
                 if args:
                     self.test_args[label] = args

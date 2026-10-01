@@ -175,7 +175,9 @@ Published `rust-version` retains its existing compatibility floor.
 
 `scripts/feature-coverage.toml` remains the canonical lane board. The generator
 emits first-party variants for each distinct package, resolved feature set and
-Cargo target kind, with dependencies pointing to the correct variants.
+Cargo target kind, with dependencies pointing to the correct variants. A
+variant links only the dependencies its resolution activates, and a test
+variant runs under its ordinary label's shard count and timeout.
 `tools/buck2/feature_variants.py` computes the feature closures from locked
 metadata for the workspace's Cargo resolver 3. `sync.py --verify-resolution` reconciles them with Cargo's resolution.
 `scripts/check_feature_coverage.py check` rejects missing lane units.

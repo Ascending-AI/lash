@@ -20428,7 +20428,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:conformance__test__fv_0873c7ac",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 6
     },
     {
       "build_label": "//crates/lash-postgres-store:conformance__test__fv_1aed8a2f",
@@ -20439,7 +20440,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:conformance__test__fv_1aed8a2f",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 6
     },
     {
       "build_label": "//crates/lash-postgres-store:conformance__test__fv_1aed8a2f",
@@ -20450,7 +20452,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:conformance__test__fv_1aed8a2f",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 6
     },
     {
       "build_label": "//crates/lash-postgres-store:conformance__test__fv_308f2166",
@@ -20462,7 +20465,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:conformance__test__fv_308f2166",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 6
     },
     {
       "build_label": "//crates/lash-postgres-store:conformance__test__fv_308f2166",
@@ -20474,7 +20478,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:conformance__test__fv_308f2166",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 6
     },
     {
       "build_label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_0873c7ac",
@@ -20605,7 +20610,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:integration__test__fv_0873c7ac",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 2
     },
     {
       "build_label": "//crates/lash-postgres-store:integration__test__fv_1aed8a2f",
@@ -20616,7 +20622,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:integration__test__fv_1aed8a2f",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 2
     },
     {
       "build_label": "//crates/lash-postgres-store:integration__test__fv_1aed8a2f",
@@ -20627,7 +20634,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:integration__test__fv_1aed8a2f",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 2
     },
     {
       "build_label": "//crates/lash-postgres-store:integration__test__fv_308f2166",
@@ -20639,7 +20647,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:integration__test__fv_308f2166",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 2
     },
     {
       "build_label": "//crates/lash-postgres-store:integration__test__fv_308f2166",
@@ -20651,7 +20660,8 @@
       ],
       "kind": "test",
       "label": "//crates/lash-postgres-store:integration__test__fv_308f2166",
-      "package": "lash-internal-postgres-store"
+      "package": "lash-internal-postgres-store",
+      "shard_count": 2
     },
     {
       "build_label": "//crates/lash-postgres-store:lash-postgres-store[static]",
@@ -21942,7 +21952,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_2a6406d9",
-      "package": "lash-internal-protocol-rlm"
+      "package": "lash-internal-protocol-rlm",
+      "shard_count": 8
     },
     {
       "build_label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_78568fbe",
@@ -21954,7 +21965,8 @@
       ],
       "kind": "unit-test",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_78568fbe",
-      "package": "lash-internal-protocol-rlm"
+      "package": "lash-internal-protocol-rlm",
+      "shard_count": 8
     },
     {
       "build_label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_78568fbe",

@@ -24,8 +24,9 @@
 #   args          libtest arguments.
 #   bin_env       Env var -> a Cargo binary of the same package, passed as its
 #                 runfiles path and added to the test's data.
-#   shards        Buck2 test shards (ordinary label only).
-#   timeout       Buck2 test timeout (ordinary label only).
+#   shards        Buck2 test shards; a feature-lane variant inherits them.
+#   timeout       Buck2 test timeout (unit tests); a feature-lane variant
+#                 inherits it.
 #
 # Rules apply in file order; list values accumulate in that order.
 

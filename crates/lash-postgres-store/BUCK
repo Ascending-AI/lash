@@ -423,6 +423,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
+    shard_count = 6,
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
@@ -457,6 +458,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
+    shard_count = 6,
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
@@ -492,6 +494,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
+    shard_count = 6,
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
@@ -730,6 +733,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
+    shard_count = 2,
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
@@ -762,6 +766,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
+    shard_count = 2,
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
@@ -795,6 +800,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
+    shard_count = 2,
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
