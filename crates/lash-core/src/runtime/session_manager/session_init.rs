@@ -414,30 +414,43 @@ fn build_session_plugins<'a>(
     }
 }
 
+/// Admit the session's catalog row with the config its creation resolved
+/// baked in as the created head, in the catalog's own transaction
+/// (FIG-4553). A creator that dies before its first commit leaves a session
+/// that opens with exactly this config: the complete config that commit
+/// writes, taken from the same initial state.
 async fn bind_session_store(
     current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
 ) -> Result<crate::store::SessionStore, crate::PluginError> {
-    let mut config = crate::PersistedSessionConfig::from(&plan.policy);
-    config.plugin_config = plan.initial_runtime_state.authority.plugin_config.clone();
-    let store = crate::runtime::admit_session_view(
-        &current.host.core.session_store_factory(),
-        &SessionStoreCreateRequest {
-            session_id: plan.session_id.clone(),
-            relation: plan.relation.clone(),
-            pending_observer_intents: plan.pending_observer_intents.clone(),
-            config,
-            head: crate::SessionCreationHead::CommittedByCreator,
-            owning_process_id: plan.owning_process_id.clone(),
-        },
-    )
-    .await
-    .map_err(|message| {
+    let catalog = current.host.core.session_store_factory();
+    let request = SessionStoreCreateRequest {
+        session_id: plan.session_id.clone(),
+        relation: plan.relation.clone(),
+        pending_observer_intents: plan.pending_observer_intents.clone(),
+        config: crate::store::persisted_session_config_from_state(&plan.initial_runtime_state),
+        head: crate::SessionCreationHead::Config,
+        owning_process_id: plan.owning_process_id.clone(),
+    };
+    let creation_error = |error: crate::StoreError| {
         crate::PluginError::Session(session_creation_store_factory_error(
             &plan.session_id,
-            message.to_string(),
+            error.to_string(),
         ))
-    })?;
+    };
+    // The created head is written outside any runtime commit, so it is
+    // measured against the commit budget here (FIG-4393).
+    crate::store::admit_created_session(
+        catalog.as_ref(),
+        &request,
+        current.host.core.durability.commit_budget,
+        catalog.fleet_format(),
+    )
+    .await
+    .map_err(creation_error)?;
+    let runtime: Arc<dyn crate::store::RuntimeStore> = catalog;
+    let store = crate::store::SessionStore::new(runtime, plan.session_id.clone())
+        .map_err(creation_error)?;
     validate_created_session_store_binding(&store, &plan.session_id).await?;
     Ok(store)
 }
@@ -636,12 +649,13 @@ async fn initialize_session(
     match durable_session_store(current, &plan.session_id).await? {
         Some(store) => match recorded_session_state(&plan, &store).await? {
             Some(state) => reopen_committed_session(current, &plan, store, state).await,
-            // A catalog row without a committed head is a metadata-only
-            // partial create: a previous attempt committed the row and
-            // crashed before the initial head landed. The recorded request
-            // finishes the create — `create_store`'s metadata insert is
-            // idempotent and the head commit completes what the crashed
-            // attempt started — so the session is not stranded retry-proof.
+            // A catalog row whose head no commit has written is a partial
+            // create: a previous attempt admitted the row, with the
+            // creation's config as its created head, and crashed before the
+            // initial head landed. The recorded request finishes the create
+            // — the admission is idempotent and the head commit completes
+            // what the crashed attempt started — so the session is not
+            // stranded retry-proof.
             None => Box::pin(commit_fresh_session_init(current, plan)).await,
         },
         None => Box::pin(commit_fresh_session_init(current, plan)).await,
@@ -665,9 +679,10 @@ async fn commit_fresh_session_init(
 
 /// Inspect the durable session behind an existing catalog row for a
 /// redelivery: replay-check the recorded relation, then load the committed
-/// head. `None` means the row is a metadata-only partial create — a crash
-/// landed between the metadata insert and the initial head commit — which
-/// the caller finishes as a create rather than reopening.
+/// head. `None` means the row is a partial create — a crash landed between
+/// the admission, which wrote the created head at revision `0`, and the
+/// initial head commit — which the caller finishes as a create rather than
+/// reopening.
 async fn recorded_session_state(
     plan: &SessionInitPlan,
     store: &crate::store::SessionStore,
@@ -691,7 +706,11 @@ async fn recorded_session_state(
     }
     crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
         .await
-        .map(|loaded| loaded.map(|loaded| loaded.state))
+        .map(|loaded| {
+            loaded
+                .map(|loaded| loaded.state)
+                .filter(|state| state.head_revision > 0)
+        })
         .map_err(|error| {
             crate::PluginError::Session(format!(
                 "failed to load session `{}` for reopen: {error}",

@@ -1530,7 +1530,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 }
                 .into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             },
         )
         .await?;

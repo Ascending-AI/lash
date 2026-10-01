@@ -118,6 +118,8 @@ impl RuntimeErrorCode {
             Self::SessionCatalogLookupUnsupported => Terminal,
             // the deployment's config owners refused the recorded request.
             Self::SessionConfigRefused => Terminal,
+            // the row has no head; a redrive reads the same row.
+            Self::SessionCreationUnrecorded => Terminal,
             // the granted session is gone or never existed; its admission recorded that.
             Self::HostSessionNotLive => Terminal,
             // the session's generation marker is older than this build admits; a redrive reads the same marker.

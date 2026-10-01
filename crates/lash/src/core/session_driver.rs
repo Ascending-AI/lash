@@ -12,8 +12,6 @@ pub(crate) struct CoreSessionDriverConfig {
     pub(super) drive_owner: lash_core::LeaseOwnerIdentity,
     pub(super) env: RuntimeEnvironment,
     pub(super) policy: SessionPolicy,
-    /// What a catalog row with no head mints when the engine opens it.
-    pub(super) default_selection: crate::session::DefaultSelection,
     pub(super) protocol_factory: Option<Arc<dyn PluginFactory>>,
     pub(super) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(super) store_factory: Arc<dyn DeploymentStore>,
@@ -155,15 +153,7 @@ impl CoreSessionDriver {
                     )));
                 }
             };
-        let state = match crate::session::load_state_from_store(
-            session_id,
-            &policy,
-            &self.config.default_selection,
-            self.config.env.core.providers.models.as_ref(),
-            &store,
-        )
-        .await
-        {
+        let state = match crate::session::load_state_from_store(session_id, &policy, &store).await {
             Ok(state) => state,
             Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
                 return Err(OpenFailure::Contended);
@@ -175,6 +165,16 @@ impl CoreSessionDriver {
                 return Err(OpenFailure::SessionRetired(session_retired_error(
                     session_id, error,
                 )));
+            }
+            // A row with no head recorded no config: the drive is refused
+            // with the typed code, never run on defaults (FIG-4553).
+            Err(error @ crate::EmbedError::SessionCreationUnrecorded { .. }) => {
+                return Err(OpenFailure::CreationUnrecorded(
+                    lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::SessionCreationUnrecorded,
+                        error.to_string(),
+                    ),
+                ));
             }
             Err(error) => {
                 return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
@@ -278,6 +278,9 @@ enum OpenFailure {
     /// diverge from a `run` command an earlier attempt journaled, and that
     /// step's recorded body answers the retirement (ADR 0104 O1, FIG-3630).
     SessionRetired(lash_core::RuntimeError),
+    /// The session's catalog row has no head, so its creation recorded no
+    /// config to open with (FIG-4553).
+    CreationUnrecorded(lash_core::RuntimeError),
     Terminal(lash_core::PluginError),
 }
 
@@ -288,7 +291,9 @@ impl OpenFailure {
                 lash_core::RuntimeErrorCode::StoreCommitContended,
                 "the session's runtime is contended; the drive is retried",
             )),
-            Self::SessionRetired(error) => lash_core::engine::DriveAbort::Refused(error),
+            Self::SessionRetired(error) | Self::CreationUnrecorded(error) => {
+                lash_core::engine::DriveAbort::Refused(error)
+            }
             Self::Terminal(error) => {
                 lash_core::engine::DriveAbort::Refused(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::PluginSessionManager,

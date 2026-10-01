@@ -50,9 +50,10 @@ root and `RawFinalValue` for a child. Termination has no default fill, so its
 absence survives. The fill runs once, in `RlmConfigOwner::create`, and the
 result is recorded as the RLM namespace of the session's plugin config
 (FIG-4379). Recorded options are read strictly and
-delivered unchanged on every open, which never defaults again. The kernel's creation path for state
-bound by its creator uses `SessionCreationHead::CommittedByCreator`; its creator
-commits the head.
+delivered unchanged on every open, which never defaults again. The kernel's creation path
+admits with `SessionCreationHead::Config` too: the catalog records the complete
+config its first commit writes with the row, so a creator that dies before
+that commit leaves a session that opens with what its creation recorded.
 
 ### No write after creation
 

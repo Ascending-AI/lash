@@ -127,14 +127,7 @@ async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()
         .await?;
     assert_eq!(*owner.resolved.lock_recover(), vec![false]);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    let state = crate::session::load_state_from_store(
-        &id,
-        &core.policy,
-        &core.default_selection,
-        core.env.core.providers.models.as_ref(),
-        &store,
-    )
-    .await?;
+    let state = crate::session::load_state_from_store(&id, &core.policy, &store).await?;
     assert!(state.authority.subagent.is_none());
     assert_eq!(
         state.authority.plugin_config.get(LINEAGE),
@@ -219,14 +212,7 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
                 .await?;
             let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
             let policy = core.policy.clone();
-            let state = crate::session::load_state_from_store(
-                &id,
-                &policy,
-                &core.default_selection,
-                core.env.core.providers.models.as_ref(),
-                &store,
-            )
-            .await?;
+            let state = crate::session::load_state_from_store(&id, &policy, &store).await?;
             assert!(state.authority.subagent.is_none());
             assert_eq!(
                 lash_protocol_rlm::rlm_session_config(&state.effective_protocol_turn_options())

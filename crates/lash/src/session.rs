@@ -88,9 +88,9 @@ struct ResolvedSessionStore {
 }
 
 /// The model a session takes when nothing it states or recorded names one:
-/// the core's default key and reasoning. A creation spec without a key, and a
-/// catalog row whose creator never committed its head, mint it at that
-/// moment, so a catalog change reaches only sessions that mint afterwards.
+/// the core's default key and reasoning. A creation spec without a key mints
+/// it at that moment, so a catalog change reaches only sessions created
+/// afterwards. No open mints it (FIG-4553).
 #[derive(Clone, Debug)]
 pub(crate) struct DefaultSelection {
     pub(crate) model: lash_core::ModelKey,
@@ -121,16 +121,6 @@ impl DefaultSelection {
                     EmbedError::MissingModel
                 }
             })
-    }
-}
-
-fn empty_runtime_session_state(
-    session_id: impl Into<SessionId>,
-    policy: SessionPolicy,
-) -> RuntimeSessionState {
-    RuntimeSessionState {
-        session_id: session_id.into(),
-        ..RuntimeSessionState::new(policy)
     }
 }
 
@@ -436,18 +426,17 @@ impl SessionBuilder {
     /// The state an existing session opens with: what it recorded, as
     /// recorded (FIG-4099), its execution controls included (FIG-4376). Only
     /// the session binding follows this open; nothing is written. A catalog
-    /// row with no head — one its creator commits itself and has not yet —
-    /// has recorded no config, so it starts from the core's default
-    /// selection, minted now as [`create`](Self::create) would mint it.
+    /// row with no head recorded no config and is refused with
+    /// [`EmbedError::SessionCreationUnrecorded`]: no open stands defaults in
+    /// for it (FIG-4553).
     async fn recorded_state(
         &self,
         store: &lash_core::store::SessionStore,
     ) -> Result<RuntimeSessionState> {
         let Some(loaded) = load_persisted_window(store).await? else {
-            return Ok(empty_runtime_session_state(
-                self.session_id.clone(),
-                self.minted_policy(SessionSpec::new())?,
-            ));
+            return Err(EmbedError::SessionCreationUnrecorded {
+                session_id: self.session_id.clone(),
+            });
         };
         let policy = self.opening_policy();
         let mut state = loaded.state;
@@ -604,13 +593,12 @@ pub(crate) async fn resolve_existing_session(
 
 /// The state the engine opens `session_id` with: what the session recorded,
 /// as recorded (FIG-4099, FIG-4376), bound to `session_id`. A catalog row
-/// with no head recorded no config: it starts from `policy` with `defaults`
-/// minted by `models` now, as a creation would mint them.
+/// with no head recorded no config and is refused with
+/// [`EmbedError::SessionCreationUnrecorded`]: the engine never opens a
+/// session with defaults (FIG-4553).
 pub(crate) async fn load_state_from_store(
     session_id: &SessionId,
     policy: &SessionPolicy,
-    defaults: &DefaultSelection,
-    models: &dyn lash_core::RuntimeModels,
     store: &lash_core::store::SessionStore,
 ) -> Result<RuntimeSessionState> {
     let Some(loaded) = lash_core::store::load_session_window_state(
@@ -620,9 +608,9 @@ pub(crate) async fn load_state_from_store(
     .await
     .map_err(EmbedError::Store)?
     else {
-        let mut minted = defaults.mint(SessionSpec::new(), policy, models)?;
-        minted.session_id = Some(session_id.clone());
-        return Ok(empty_runtime_session_state(session_id, minted));
+        return Err(EmbedError::SessionCreationUnrecorded {
+            session_id: session_id.clone(),
+        });
     };
     let mut state = loaded.state;
     if state.session_id != session_id {

@@ -1816,19 +1816,9 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
 
-    // The head exists, so the fallback selection is never minted.
-    let defaults = crate::session::DefaultSelection {
-        model: lash_core::ModelKey::new("builder-model"),
-        reasoning: None,
-    };
-    let state = crate::session::load_state_from_store(
-        &SessionId::from(session_id),
-        &policy,
-        &defaults,
-        &lash_core::EmptyModels,
-        &store,
-    )
-    .await?;
+    let state =
+        crate::session::load_state_from_store(&SessionId::from(session_id), &policy, &store)
+            .await?;
     // A stateless worker's load carries no host spec at all: the durable
     // head's recorded model is authoritative over the resolved fallback.
     assert_eq!(state.policy.model, durable_model);

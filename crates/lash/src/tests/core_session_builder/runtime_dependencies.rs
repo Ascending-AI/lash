@@ -1097,7 +1097,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
                 ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             }
             .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await?;
@@ -1220,7 +1220,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 }
                 .into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             },
         )
         .await?;

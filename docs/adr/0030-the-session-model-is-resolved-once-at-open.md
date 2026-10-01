@@ -13,9 +13,11 @@ The creator supplies the session configuration, including its model: a key
 the core's registry mints into the recorded binding. Catalog admission
 records the initial configuration head in the
 same transaction as a new session row. `SessionCreationHead::Config` requests
-that head; `CommittedByCreator` leaves publication of the supplied runtime
-state to the creator's first commit. Rebinding an existing catalog id writes
-no new configuration.
+that head, and every session creator states it: the host's `create` and the
+session manager's create, whose first commit publishes over it. A catalog row
+with no head recorded no configuration; opening it is refused as
+`SessionCreationUnrecorded`, never served from defaults. Rebinding an existing
+catalog id writes no new configuration.
 
 The facade separates `create(SessionCreation)` from `open()`. Create refuses
 an existing id with `SessionAlreadyExists`. Open resolves an existing id,

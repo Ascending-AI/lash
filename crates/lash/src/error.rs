@@ -89,6 +89,17 @@ pub enum EmbedError {
         /// Session identifier the catalog already holds.
         session_id: SessionId,
     },
+    #[error(
+        "session `{session_id}` has a catalog row and no head: its creation recorded no config, and a session never opens with defaults"
+    )]
+    /// The session's catalog row has no head, so its creation recorded no
+    /// config (FIG-4553). A creating admission writes the creator's config
+    /// with the row, and every open reads it back; a row without one is
+    /// refused, never opened with the core's defaults.
+    SessionCreationUnrecorded {
+        /// Session whose catalog row has no head.
+        session_id: SessionId,
+    },
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
     /// A loaded store belongs to a different session than requested.
     StoreSessionMismatch {
@@ -312,6 +323,7 @@ impl EmbedError {
             | Self::SessionDeleteStorage { .. }
             | Self::Store(_)
             | Self::StoreSessionMismatch { .. }
+            | Self::SessionCreationUnrecorded { .. }
             | Self::WorkCadence(_)
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
@@ -365,6 +377,7 @@ impl EmbedError {
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::StoreSessionMismatch { .. }
+            | Self::SessionCreationUnrecorded { .. }
             | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }

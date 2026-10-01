@@ -404,8 +404,14 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            // The session's creation recorded its config with the row; a
+            // row with no head is never driven (FIG-4553).
+            config: lash_core::SessionPolicy {
+                model: Some(recorded_model(mock_model_spec())),
+                ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            }
+            .into(),
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await?;

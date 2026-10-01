@@ -221,14 +221,7 @@ async fn recorded_config(core: &LashCore, id: &str) -> Result<lash_core::Persist
 async fn reopened_config(core: &LashCore, id: &str) -> Result<lash_core::PersistedSessionConfig> {
     let id = SessionId::from(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    let state = crate::session::load_state_from_store(
-        &id,
-        &core.policy,
-        &core.default_selection,
-        core.env.core.providers.models.as_ref(),
-        &store,
-    )
-    .await?;
+    let state = crate::session::load_state_from_store(&id, &core.policy, &store).await?;
     Ok(lash_core::PersistedSessionConfig::from(&state.policy))
 }
 

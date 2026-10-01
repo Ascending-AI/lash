@@ -722,11 +722,16 @@ pub enum SessionCreationHead {
     /// session's initial config head in the same transaction as the catalog
     /// row, so every later open — and the engine's own drive-open — runs with
     /// the config the creator stated. The host API's one creating verb,
-    /// `create`, states this (FIG-4112).
+    /// `create`, states this (FIG-4112), and so does the session manager's
+    /// create, whose first commit publishes over this head (FIG-4553).
     Config,
-    /// The creator commits the session's first head itself — a runtime
-    /// binding the complete state it was handed, or a child session's
-    /// initialisation — so the store writes only the catalog row.
+    /// The store writes only the catalog row: the caller commits the
+    /// session's first head itself, and until it does the session has
+    /// recorded no config. No session creator states this (FIG-4553): a row
+    /// left without a head is refused by every facade open and engine drive
+    /// (`SessionCreationUnrecorded`), never opened with defaults. It remains
+    /// for a store-level caller that commits a complete head of its own
+    /// straight after admission.
     CommittedByCreator,
 }
 

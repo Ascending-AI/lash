@@ -120,6 +120,11 @@ pub enum RuntimeErrorCode {
     /// The deployment's plugin set and the recorded request decide it, so
     /// retrying the identical creation cannot change the answer (FIG-4396).
     SessionConfigRefused,
+    /// A session's catalog row has no head, so its creation recorded no
+    /// config (FIG-4553). A session opens with the config its creation
+    /// recorded and never with defaults, so the open is refused; a redrive
+    /// reads the same row.
+    SessionCreationUnrecorded,
     /// A root process start holds a host session-lookup grant for a session
     /// the catalog does not hold live when the start's recorded admission
     /// runs. The admission records the refusal, so a replay answers it too.
@@ -672,6 +677,7 @@ impl RuntimeErrorCode {
             Self::SessionDeleted => "session_deleted",
             Self::SessionCatalogLookupUnsupported => "session_catalog_lookup_unsupported",
             Self::SessionConfigRefused => "session_config_refused",
+            Self::SessionCreationUnrecorded => "session_creation_unrecorded",
             Self::HostSessionNotLive => "host_session_not_live",
             Self::SessionStateVersionUnsupported => "session_state_version_unsupported",
             Self::SessionStateVersionNewerThanRuntime => "session_state_version_newer_than_runtime",
@@ -938,6 +944,7 @@ impl RuntimeErrorCode {
         Self::SessionDeleted,
         Self::SessionCatalogLookupUnsupported,
         Self::SessionConfigRefused,
+        Self::SessionCreationUnrecorded,
         Self::HostSessionNotLive,
         Self::SessionStateVersionUnsupported,
         Self::SessionStateVersionNewerThanRuntime,
@@ -1138,6 +1145,7 @@ impl RuntimeErrorCode {
             "session_deleted" => Self::SessionDeleted,
             "session_catalog_lookup_unsupported" => Self::SessionCatalogLookupUnsupported,
             "session_config_refused" => Self::SessionConfigRefused,
+            "session_creation_unrecorded" => Self::SessionCreationUnrecorded,
             "host_session_not_live" => Self::HostSessionNotLive,
             "session_state_version_unsupported" => Self::SessionStateVersionUnsupported,
             "session_state_version_newer_than_runtime" => Self::SessionStateVersionNewerThanRuntime,

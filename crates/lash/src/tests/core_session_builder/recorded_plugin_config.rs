@@ -226,14 +226,7 @@ fn stating(cap: u64) -> Result<lash_core::PluginOptions> {
 async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeSessionState> {
     let id = SessionId::from(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    crate::session::load_state_from_store(
-        &id,
-        &core.policy,
-        &core.default_selection,
-        core.env.core.providers.models.as_ref(),
-        &store,
-    )
-    .await
+    crate::session::load_state_from_store(&id, &core.policy, &store).await
 }
 
 /// The turn budget the session's durable config head records.
