@@ -203,7 +203,7 @@ pub(crate) async fn backend_seeded_with_config(
             session_id: state.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             config: state.policy.clone().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await

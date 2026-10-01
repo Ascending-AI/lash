@@ -138,7 +138,10 @@ pub async fn an_obsolete_executor_never_ends_its_successors_root(
                 let overtake = !overtaken.swap(true, Ordering::SeqCst);
                 async move {
                     if overtake {
-                        lash_core::testing::runtime_helpers::advance_session_head(
+                        // Another writer, outside every drive: the lane-less
+                        // commit races the bound root's first commit, which
+                        // the created head still admits (FIG-4202).
+                        lash_core::testing::runtime_helpers::advance_session_head_unfenced(
                             &recording,
                             |state| state.policy = policy,
                         )

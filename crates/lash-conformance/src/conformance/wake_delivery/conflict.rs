@@ -79,7 +79,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("create conflict target");

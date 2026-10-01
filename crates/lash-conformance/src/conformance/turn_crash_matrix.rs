@@ -955,6 +955,15 @@ fn runtime_policy() -> crate::SessionPolicy {
     }
 }
 
+/// Admit the reference scenario's session, recording the policy its runtimes
+/// build with: a `Config` admission's recorded config is what a reopen runs
+/// under (FIG-4553), so the recorded model must be the one the fixture's
+/// provider serves — not the conformance default.
+async fn admit_reference_session(store: &Arc<dyn RuntimeStore>, identity: &ReferenceIdentity) {
+    super::admit_conformance_session_with_policy(store, &identity.session_id, runtime_policy())
+        .await;
+}
+
 fn provider_handle(control: SeamControl) -> ProviderHandle {
     let scripted: Box<dyn Provider> = Box::new(ScriptedProvider {
         control: control.clone(),
@@ -1130,7 +1139,7 @@ async fn try_build_runtime_over_host_with_delivery_failure(
     tools: ReferenceRuntimeTools,
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
-    super::admit_conformance_session(&store, &identity.session_id).await;
+    admit_reference_session(&store, identity).await;
     let mut host = crate::LawBackend::over_stores(stores, effect_host)
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1234,7 +1243,7 @@ async fn seed_reference_ingress_as(
     identity: &ReferenceIdentity,
     root: Option<&TurnId>,
 ) {
-    super::admit_conformance_session(store, &identity.session_id).await;
+    admit_reference_session(store, identity).await;
     let draft = PendingTurnInputDraft::new(
         &identity.session_id,
         crate::TurnInputIngress::NextTurn,

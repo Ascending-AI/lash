@@ -158,7 +158,7 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
     );
 
     let reader = make(scenario);
-    super::super::admit_conformance_session(&reader, &identity.session_id).await;
+    super::admit_reference_session(&reader, &identity).await;
     let committed = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
         .await
         .expect("read the committed head")

@@ -23,7 +23,7 @@ pub(crate) mod helpers {
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         };
         crate::store::SessionCatalogStore::admit_session(&factory, &request)
             .await

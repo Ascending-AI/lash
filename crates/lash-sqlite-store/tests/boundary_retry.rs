@@ -175,12 +175,15 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
         commit_state(&format!("content:{content_hash}"), "initial-park", state)
     };
     let first = park_commit(&state);
-    assert!(
+    assert_eq!(
         store
             .load_session_head_meta(&lash_sansio::SessionId::from("root"))
             .await
             .expect("preview has no store effects")
-            .is_none()
+            .expect("admission wrote the created head")
+            .head_revision,
+        0,
+        "the preview leaves the created head untouched"
     );
     let original = store
         .commit_runtime_state(first.clone())

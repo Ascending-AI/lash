@@ -641,6 +641,27 @@ pub async fn advance_session_head(
     store: &RecordingStore,
     change: impl FnOnce(&mut RuntimeSessionState),
 ) -> crate::SessionHeadMeta {
+    advance_session_head_fenced(store, change, true).await
+}
+
+/// [`advance_session_head`], except the commit presents no drive fence: the
+/// way a writer outside every drive moves the head. The head-ownership check
+/// admits a lane-less write only onto a head no commit has published over yet
+/// (FIG-4202), so this is a first commit racing a bound root; the published
+/// head is not `published_by_drive`, and a resumed root's head inspection
+/// meets it as another writer's, `Overtaken` (FIG-4200).
+pub async fn advance_session_head_unfenced(
+    store: &RecordingStore,
+    change: impl FnOnce(&mut RuntimeSessionState),
+) -> crate::SessionHeadMeta {
+    advance_session_head_fenced(store, change, false).await
+}
+
+async fn advance_session_head_fenced(
+    store: &RecordingStore,
+    change: impl FnOnce(&mut RuntimeSessionState),
+    fenced: bool,
+) -> crate::SessionHeadMeta {
     let session_id = store
         .session_id()
         .expect("recording store has a session id");
@@ -673,14 +694,20 @@ pub async fn advance_session_head(
         }
     };
     change(&mut state);
-    // The bound turn owns the head (FIG-4202): a writer that moves it while
-    // a root is bound presents the root's own drive fence, as a second
-    // execution of that root would. Before the first seal nothing owns it.
+    // The bound turn owns the head (FIG-4202): a writer that moves it once
+    // a commit has published over the created head must present the root's
+    // own drive fence, as a second execution of that root would. Over the
+    // created head a lane-less write is still admitted, which is what an
+    // unfenced advance exercises. Before the first seal nothing owns it.
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
-    commit.drive_fence = crate::store::current_drive_fence(store, &session_id)
-        .await
-        .expect("read the session's drive fence")
-        .map(Box::new);
+    commit.drive_fence = if fenced {
+        crate::store::current_drive_fence(store, &session_id)
+            .await
+            .expect("read the session's drive fence")
+            .map(Box::new)
+    } else {
+        None
+    };
     crate::SessionCommitStore::commit_runtime_state(store, commit)
         .await
         .expect("commit the advanced head");
@@ -697,6 +724,22 @@ pub async fn create_runtime_fixture_session(
     session_id: &SessionId,
     policy: &crate::SessionPolicy,
 ) -> Result<(), crate::StoreError> {
+    create_runtime_fixture_session_with_config(
+        store,
+        session_id,
+        crate::PersistedSessionConfig::from(policy),
+    )
+    .await
+}
+
+/// [`create_runtime_fixture_session`], except the created head records
+/// `config`: a fixture whose runtime installs config-owning plugins records
+/// the namespaces they resolve, the way a creator does (FIG-4379, FIG-4553).
+pub async fn create_runtime_fixture_session_with_config(
+    store: &dyn crate::RuntimeStore,
+    session_id: &SessionId,
+    config: crate::PersistedSessionConfig,
+) -> Result<(), crate::StoreError> {
     match store.lookup_session(session_id).await? {
         crate::store::SessionLookup::Live(_) => return Ok(()),
         crate::store::SessionLookup::Deleted => {
@@ -712,8 +755,8 @@ pub async fn create_runtime_fixture_session(
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::Root,
                 pending_observer_intents: Vec::new(),
-                config: policy.clone().into(),
-                head: crate::SessionCreationHead::CommittedByCreator,
+                config,
+                head: crate::SessionCreationHead::Config,
                 owning_process_id: None,
             })
             .await?,
@@ -756,7 +799,7 @@ pub async fn recording_session_store(
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("create a session store from the backend catalog");
@@ -925,9 +968,17 @@ impl TestRuntime {
         let attachment_store = Arc::clone(&self.host.core.durability.attachment_store);
         let process_env_store = Arc::clone(&self.host.core.durability.process_env_store);
         if let Some(store) = self.store.as_ref() {
-            create_runtime_fixture_session(store.as_ref(), &initial_state.session_id, &policy)
-                .await
-                .expect("create the runtime fixture session");
+            // The created head records the same plugin config the runtime's
+            // initial state carries, so a reopen adopts it (FIG-4553).
+            let mut config = crate::PersistedSessionConfig::from(&policy);
+            config.plugin_config = initial_state.authority.plugin_config.clone();
+            create_runtime_fixture_session_with_config(
+                store.as_ref(),
+                &initial_state.session_id,
+                config,
+            )
+            .await
+            .expect("create the runtime fixture session");
         }
         let store = self.store.map(|store| {
             crate::store::SessionStore::new(store, initial_state.session_id.clone())

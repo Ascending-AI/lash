@@ -34,7 +34,7 @@ lash_conformance::cancelled_turn_withheld_input_tests!({
                     lash_core::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             },
         )
         .await

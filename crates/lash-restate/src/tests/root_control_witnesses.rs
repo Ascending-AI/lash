@@ -323,7 +323,7 @@ impl Fixture {
                 relation: lash_core::SessionRelation::Root,
                 pending_observer_intents: vec![],
                 config: lash_core::testing::mock_session_policy().into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
                 owning_process_id: None,
             },
         )
@@ -1610,7 +1610,7 @@ async fn recovery_tick_keeps_cadence_with_slow_control_rpc(server: HarnessServer
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: vec![],
             config: lash_core::testing::mock_session_policy().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
             owning_process_id: None,
         })
         .await
@@ -1912,7 +1912,7 @@ async fn missing_started_root(server: HarnessServer, admin_outage: bool) {
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: vec![],
             config: lash_core::testing::mock_session_policy().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
             owning_process_id: None,
         },
     )
@@ -2230,7 +2230,7 @@ async fn process_root(server: HarnessServer, which: ProcessRoot) {
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: vec![],
             config: lash_core::testing::mock_session_policy().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
             owning_process_id: Some(process_id.clone()),
         },
     )

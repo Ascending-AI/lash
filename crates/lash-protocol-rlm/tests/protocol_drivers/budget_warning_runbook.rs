@@ -60,7 +60,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
                     config: policy.clone().into(),
-                    head: SessionCreationHead::CommittedByCreator,
+                    head: SessionCreationHead::Config,
                 },
             )
             .await

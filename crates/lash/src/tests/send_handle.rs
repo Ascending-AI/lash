@@ -792,7 +792,7 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             config: (&policy).into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await?;

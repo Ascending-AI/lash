@@ -50,7 +50,7 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("create fork session with pending observer intent");

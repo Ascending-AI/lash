@@ -158,8 +158,10 @@ impl ModeledRoot {
 
 #[derive(Default)]
 struct ReferenceModel {
+    /// The durable head's revision. The created head admission writes
+    /// (FIG-4553) is revision 0, so `0` also models "admitted, nothing
+    /// committed": a head exists from the session's first modeled step.
     head_revision: u64,
-    has_session: bool,
     current_fence: Option<DriveFence>,
     stale_fences: Vec<DriveFence>,
     work: BTreeMap<String, ModeledWork>,
@@ -988,14 +990,16 @@ async fn commit_operation(
 
     // The bound turn owns the head (FIG-4202): while a root is unfinished its
     // drive makes the head's commits, under its live fence; a commit outside
-    // every drive onto an existing head is refused.
+    // every drive onto an existing head is refused. The created head is no
+    // head to own (FIG-4099): the first commit is creation, never refused.
     if ending.is_none()
         && model.root.is_some()
         && let Some(fence) = model.current_fence.as_ref()
     {
         commit.drive_fence = Some(Box::new(fence.clone()));
     }
-    let owned_by_root = commit.drive_fence.is_none() && model.has_session && model.root.is_some();
+    let owned_by_root =
+        commit.drive_fence.is_none() && model.root.is_some() && model.head_revision > 0;
     let before = session_snapshot(store).await?;
     let result = store.commit_runtime_state(commit).await;
     if stale_head {
@@ -1029,7 +1033,6 @@ async fn commit_operation(
         return Err("commit returned different turn-input applications".to_string());
     }
     model.head_revision = result.head_revision;
-    model.has_session = true;
     update_components_after_commit(
         model,
         &before_components,
@@ -1495,19 +1498,22 @@ async fn assert_model_agreement(
         return Err("turn-input applications differ from exactly-once order model".to_string());
     }
 
+    // Admission writes the created head (FIG-4553): the session answers a
+    // window from its first modeled step, at revision 0 with no checkpoint
+    // until a commit lands.
     let loaded = store
         .load_session_window(&session_id(), crate::store::WindowSelector::Current)
         .await
-        .map_err(|error| error.to_string())?;
-    if !model.has_session {
-        if loaded.is_some() {
-            return Err("rejected/non-commit operations materialized a session head".to_string());
-        }
-        return Ok(());
-    }
-    let loaded = loaded.ok_or_else(|| "modeled session head disappeared".to_string())?;
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "the admitted session's created head disappeared".to_string())?;
     if loaded.head_revision != model.head_revision {
         return Err("head revision differs from the reference model".to_string());
+    }
+    if model.head_revision == 0 {
+        if loaded.checkpoint.is_some() {
+            return Err("the created head carried a checkpoint".to_string());
+        }
+        return Ok(());
     }
     let checkpoint = loaded
         .checkpoint

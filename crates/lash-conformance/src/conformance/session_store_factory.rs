@@ -1501,7 +1501,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             session_id: fork_request.session_id.clone(),
             relation: fork_request.relation.clone(),
             config: fork_request.policy.clone().into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("open fork")

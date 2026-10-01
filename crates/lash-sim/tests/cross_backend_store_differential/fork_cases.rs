@@ -386,7 +386,7 @@ pub(super) async fn selected_observer_intents(
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         };
         let source_id = SessionId::from(format!("selected-history-{nonce}-{index}"));
         let source_request = SessionStoreCreateRequest {
@@ -395,7 +395,7 @@ pub(super) async fn selected_observer_intents(
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             config: request.config.clone(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         };
         let source = admit_test_session(factory.clone(), &source_request)
             .await

@@ -108,8 +108,9 @@ pub struct ReopenableTriggerStore {
 /// resident leaf. Pair with [`commit_conformance_state`] to advance a session's
 /// durable head from outside any runtime.
 pub(crate) use lash_core::testing::store_fixtures::{
-    admit_conformance_session, append_conformance_event_node, commit_conformance_state,
-    durable_turn_address, durable_turn_scope,
+    admit_conformance_session, admit_conformance_session_with_policy,
+    append_conformance_event_node, commit_conformance_state, durable_turn_address,
+    durable_turn_scope,
 };
 
 /// `session_id`'s view of `store` (ADR 0112 §3): what a law's runtime is
@@ -456,7 +457,7 @@ mod law_tick_tests {
                     crate::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: crate::SessionCreationHead::CommittedByCreator,
+                head: crate::SessionCreationHead::Config,
             })
             .await
             .expect("create the session whose catalog row carries the obligation");

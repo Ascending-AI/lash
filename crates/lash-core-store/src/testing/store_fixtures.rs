@@ -29,6 +29,26 @@ pub async fn admit_conformance_session(store: &Arc<dyn RuntimeStore>, session_id
         .expect("admit the conformance session");
 }
 
+/// [`admit_conformance_session`] recording `policy`: a law whose runtime
+/// serves its own model or plugin configuration records the configuration it
+/// runs under, as `SessionCreationHead::Config` admission does for a created
+/// session — a reopen runs under the recorded config, not the deployment's
+/// ambient one (FIG-4553).
+pub async fn admit_conformance_session_with_policy(
+    store: &Arc<dyn RuntimeStore>,
+    session_id: &SessionId,
+    policy: crate::SessionPolicy,
+) {
+    store
+        .admit_session(&session_store_request_with_policy(
+            session_id,
+            crate::SessionRelation::Root,
+            policy,
+        ))
+        .await
+        .expect("admit the conformance session");
+}
+
 /// A root admission request for `session_id`, under the conformance model.
 pub fn root_session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
     session_store_request(
@@ -36,6 +56,14 @@ pub fn root_session_request(session_id: &SessionId) -> crate::SessionStoreCreate
         "conformance-model",
         crate::SessionRelation::Root,
     )
+}
+
+/// A root admission request for `session_id` recording `policy`.
+pub fn root_session_request_with_policy(
+    session_id: &SessionId,
+    policy: crate::SessionPolicy,
+) -> crate::SessionStoreCreateRequest {
+    session_store_request_with_policy(session_id, crate::SessionRelation::Root, policy)
 }
 
 pub fn append_conformance_event_node(
@@ -86,12 +114,10 @@ pub fn session_store_request(
     model_id: &str,
     relation: crate::SessionRelation,
 ) -> crate::SessionStoreCreateRequest {
-    crate::SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+    session_store_request_with_policy(
+        session_id,
         relation,
-        config: crate::SessionPolicy {
+        crate::SessionPolicy {
             model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
                 crate::ModelKey::new(model_id),
                 lash_core_llm::model::ModelMetadata::builder(model_id)
@@ -107,9 +133,24 @@ pub fn session_store_request(
             no_progress_budget: Default::default(),
             charge_safety: Default::default(),
             generation: crate::GenerationOptions::default(),
-        }
-        .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        },
+    )
+}
+
+/// [`session_store_request`] recording `policy` rather than the
+/// conformance-model default.
+pub fn session_store_request_with_policy(
+    session_id: &SessionId,
+    relation: crate::SessionRelation,
+    policy: crate::SessionPolicy,
+) -> crate::SessionStoreCreateRequest {
+    crate::SessionStoreCreateRequest {
+        owning_process_id: None,
+        pending_observer_intents: Vec::new(),
+        session_id: SessionId::from(session_id.to_string()),
+        relation,
+        config: policy.into(),
+        head: SessionCreationHead::Config,
     }
 }
 

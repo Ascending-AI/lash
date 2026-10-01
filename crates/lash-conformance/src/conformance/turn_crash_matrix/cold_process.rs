@@ -243,7 +243,7 @@ async fn recover_turn_cancel_closure(
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) {
-    super::super::admit_conformance_session(&store, &identity.session_id).await;
+    super::admit_reference_session(&store, identity).await;
     let owner = LeaseOwnerIdentity::opaque(
         "cold-process-cancel-recovery",
         format!("{}:cancel-recovery", identity.turn_id),
@@ -555,7 +555,7 @@ pub async fn cold_process_real_turn_driver(
             LeaseOwnerIdentity::opaque("cold-process-peer", format!("{scenario}:peer-reclaim"));
         let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
             loop {
-                super::super::admit_conformance_session(&store, &identity.session_id).await;
+                super::admit_reference_session(&store, &identity).await;
                 // The killed helper ran on a term wide enough that no
                 // scheduling delay could lapse it before the crash point;
                 // expire what it abandoned rather than waiting the term out.
@@ -610,7 +610,7 @@ pub async fn cold_process_real_turn_driver(
         );
         tokio::time::timeout(RECOVERY_TIMEOUT, async {
             loop {
-                super::super::admit_conformance_session(&store, &identity.session_id).await;
+                super::admit_reference_session(&store, &identity).await;
                 // Same collapse as the peer-reclaim probe above: the crashed
                 // helper's lease is expired on demand, so displacement stays a
                 // real store decision instead of a wall-clock race.

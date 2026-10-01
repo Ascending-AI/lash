@@ -165,7 +165,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                     lash_core::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: SessionCreationHead::CommittedByCreator,
+                head: SessionCreationHead::Config,
             })
             .await
             .with_context(|| format!("create retarget session `{session_id}`"))?;
@@ -308,7 +308,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         })
         .await
         .context("create crash-recovery wake target")?;

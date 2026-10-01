@@ -128,16 +128,15 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         expected_config,
         "a rebinding admission never writes config"
     );
-    // A creator that commits its own first head writes only the row.
+    // `Config` is the only creation head (FIG-4553, FIG-4561): every
+    // creating admission writes the created head in the row's transaction —
+    // there is no headless admission mode for a creator to commit over.
     let self_committing = session_store_request(
         &SessionId::from("admission-self-committing"),
         "admission-model",
         crate::SessionRelation::Root,
     );
-    assert_eq!(
-        self_committing.head,
-        crate::SessionCreationHead::CommittedByCreator
-    );
+    assert_eq!(self_committing.head, crate::SessionCreationHead::Config);
     assert_eq!(
         factory
             .admit_session(&self_committing)
@@ -145,18 +144,19 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
             .expect("admit a self-committing session"),
         crate::SessionAdmission::Created
     );
-    assert!(
-        factory
-            .live_view(&self_committing.session_id)
-            .await
-            .expect("look up the self-committing session")
-            .expect("the admitted session is live")
-            .load_session_head_meta()
-            .await
-            .expect("load its head")
-            .is_none(),
-        "a self-committing creator's admission writes no head"
-    );
+    let self_committing_head = factory
+        .live_view(&self_committing.session_id)
+        .await
+        .expect("look up the self-committing session")
+        .expect("the admitted session is live")
+        .load_session_head_meta()
+        .await
+        .expect("load its head")
+        .expect("every creating admission writes the created head");
+    assert_eq!(self_committing_head.head_revision, 0);
+    assert_eq!(self_committing_head.current_frame_node_id, None);
+    assert_eq!(self_committing_head.checkpoint_ref, None);
+    assert_eq!(self_committing_head.leaf_node_id, None);
     let loaded =
         crate::store::load_session_window_state(&store, crate::store::WindowSelector::Current)
             .await

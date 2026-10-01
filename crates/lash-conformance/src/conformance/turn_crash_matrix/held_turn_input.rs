@@ -68,7 +68,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
     );
 
     let reader = make(scenario);
-    super::super::admit_conformance_session(&reader, &identity.session_id).await;
+    super::admit_reference_session(&reader, &identity).await;
     let during_crash = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await

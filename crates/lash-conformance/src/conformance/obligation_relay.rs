@@ -241,7 +241,7 @@ async fn armed_session(
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("create the session whose catalog row carries the obligation");

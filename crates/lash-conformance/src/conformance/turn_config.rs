@@ -618,6 +618,29 @@ async fn law_session(
     stores: &Arc<dyn crate::StoreSet>,
     models: Arc<dyn crate::RuntimeModels>,
 ) -> ConfigParts {
+    law_session_recording(
+        prefix,
+        name,
+        effect_host,
+        stores,
+        models,
+        crate::testing::mock_session_policy(),
+    )
+    .await
+}
+
+/// [`law_session`], except the created head records `policy`: the session is
+/// created under the policy a creating deployment would mint, so a runtime
+/// that opens it later adopts exactly the config the law means to record
+/// (FIG-4553).
+async fn law_session_recording(
+    prefix: &str,
+    name: &str,
+    effect_host: &Arc<dyn crate::EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+    models: Arc<dyn crate::RuntimeModels>,
+    policy: crate::SessionPolicy,
+) -> ConfigParts {
     let session_id = SessionId::from(format!("{prefix}-turn-config-{name}-session"));
     let mut host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
         .host_config(
@@ -625,7 +648,13 @@ async fn law_session(
             crate::QueuedWorkBatchingConfig::new(1),
         );
     host.providers.models = models;
-    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
+    // These laws run the standard fake protocol, which owns no plugin
+    // configuration; a creator would record only its protocol pointer.
+    let mut config = crate::PersistedSessionConfig::from(&policy);
+    config.plugin_config = crate::PluginConfig::for_protocol(Some("test_protocol".to_string()));
+    let store =
+        crate::conformance::law_session_store_with_config(stores.as_ref(), &session_id, config)
+            .await;
     ConfigParts {
         session_id,
         host,
@@ -1741,20 +1770,22 @@ fn looping_model(calls: &Arc<AtomicUsize>) -> crate::ProviderHandle {
 }
 
 /// A looping-model law's session: [`LookupTool`] installed and `calls`
-/// counting the model's calls.
+/// counting the model's calls, the created head recording `recorded`.
 async fn looping_session(
     prefix: &str,
     name: &str,
     effect_host: &Arc<dyn crate::EffectHost>,
     stores: &Arc<dyn crate::StoreSet>,
     calls: &Arc<AtomicUsize>,
+    recorded: crate::SessionPolicy,
 ) -> ConfigParts {
-    let mut parts = law_session(
+    let mut parts = law_session_recording(
         prefix,
         name,
         effect_host,
         stores,
         turn_config_models(looping_model(calls)),
+        recorded,
     )
     .await;
     parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
@@ -1835,12 +1866,15 @@ pub async fn a_redrive_runs_under_the_execution_controls_its_root_recorded(
     const RECORDED_TURNS: usize = 2;
     const REDEPLOYED_TURNS: usize = 5;
     let calls = Arc::new(AtomicUsize::new(0));
+    // The session is created under the crashing execution's bound: the
+    // created head records it, and the redrive's open adopts it (FIG-4553).
     let parts = looping_session(
         prefix,
         "recorded-controls-redrive",
         &effect_host,
         &stores,
         &calls,
+        policy_with_budget(crate::TurnBudget::bounded(RECORDED_TURNS)),
     )
     .await;
     let root = TurnId::from(format!("{prefix}-turn-config-recorded-controls-root"));

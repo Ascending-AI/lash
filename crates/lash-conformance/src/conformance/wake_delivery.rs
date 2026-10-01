@@ -329,7 +329,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             generation: crate::GenerationOptions::default(),
         }
         .into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
+        head: crate::SessionCreationHead::Config,
     };
     let target = factory
         .admit_view(&request)
@@ -424,7 +424,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
                 ..request.config.session_policy()
             }
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("create authority wake target");
@@ -1198,7 +1198,7 @@ async fn missing_target_is_deferred_and_rearmed(
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("create missing-target retry receiver");
@@ -1253,7 +1253,7 @@ async fn sender_floor_lifetime(
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("create sender-floor lifetime target");
@@ -1994,7 +1994,7 @@ async fn target_gone_is_a_typed_discard(
             crate::MaxToolCalls::new(1024),
         )
         .into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
+        head: crate::SessionCreationHead::Config,
     };
     factory
         .admit_view(&target_request)

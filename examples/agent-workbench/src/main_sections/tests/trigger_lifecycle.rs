@@ -239,7 +239,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
                 lash::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash::persistence::SessionCreationHead::CommittedByCreator,
+            head: lash::persistence::SessionCreationHead::Config,
         })
         .await
         .expect("open session store");

@@ -107,7 +107,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::default(),
                 config: (&policy).into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             },
         )
         .await
@@ -252,7 +252,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::default(),
             config: (&policy).into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await
@@ -524,7 +524,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await
@@ -705,7 +705,7 @@ async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() 
                 crate::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await

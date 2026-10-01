@@ -48,6 +48,10 @@ impl FrameLawProtocol for WorkerPromptProtocol {
         ]
     }
 
+    fn protocol_plugin_id(&self) -> &'static str {
+        "test_protocol"
+    }
+
     fn answer(&self, text: &str) -> crate::LlmOutputPart {
         standard_answer(text)
     }

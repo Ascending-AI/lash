@@ -519,7 +519,7 @@ impl GeneratedBackendFaultHarness {
                     lash_core::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: SessionCreationHead::CommittedByCreator,
+                head: SessionCreationHead::Config,
             })
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;

@@ -452,7 +452,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         session_id: SessionId::from("orphaned-fork-source"),
         relation: lash_core::SessionRelation::Root,
         config: source_policy.clone().into(),
-        head: lash_core::SessionCreationHead::CommittedByCreator,
+        head: lash_core::SessionCreationHead::Config,
     };
     let source = lash_core::runtime::admit_session_view(&factory, &source_request)
         .await
@@ -570,7 +570,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             session_id: SessionId::from("fork-observer-source"),
             relation: lash_core::SessionRelation::Root,
             config: policy.clone().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await
@@ -1004,7 +1004,7 @@ async fn duplicate_only_fork_intents_are_canonical(
             session_id: source_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             config: policy.clone().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await?;
@@ -1434,7 +1434,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
             session_id: SessionId::from("generation-fork-source"),
             relation: lash_core::SessionRelation::Root,
             config: source_policy.clone().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await

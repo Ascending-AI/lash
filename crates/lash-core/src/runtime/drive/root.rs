@@ -1183,17 +1183,17 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
             // Whether a fenced commit published the live head the attempt
             // refreshed: read from the head's own row, and only when it is
             // still that head.
-            let published_by_drive = self
+            let meta = self
                 .store
                 .load_session_head_meta()
                 .await
-                .map_err(store_fault)?
-                .is_some_and(|head| {
-                    head.published_by_drive
-                        && head.head_revision == self.live.revision
-                        && head.leaf_node_id == self.live.leaf
-                        && head.checkpoint_ref == self.live.checkpoint
-                });
+                .map_err(store_fault)?;
+            let published_by_drive = meta.is_some_and(|head| {
+                head.published_by_drive
+                    && head.head_revision == self.live.revision
+                    && head.leaf_node_id == self.live.leaf
+                    && head.checkpoint_ref == self.live.checkpoint
+            });
             self.moved_head_verdict(published_by_drive)
         };
         Ok(crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict })

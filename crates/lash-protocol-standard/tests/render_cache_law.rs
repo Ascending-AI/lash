@@ -466,7 +466,7 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
                     config: policy().into(),
-                    head: SessionCreationHead::CommittedByCreator,
+                    head: SessionCreationHead::Config,
                 },
             )
             .await
@@ -626,7 +626,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
                     config: policy().into(),
-                    head: SessionCreationHead::CommittedByCreator,
+                    head: SessionCreationHead::Config,
                 },
             )
             .await

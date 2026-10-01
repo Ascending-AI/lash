@@ -561,7 +561,7 @@ impl PostgresStore {
         // commit would drop, a moved head) answer before the ownership's.
         let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
             commit.drive_fence.is_some(),
-            existing.is_some(),
+            existing.as_ref().is_some_and(|head| !head.is_created()),
         ) {
             match super::drive_epoch::drive_epoch_locked_tx(&mut tx, &commit.session_id).await {
                 Ok(_) | Err(StoreError::DriveEpochUnavailable { .. }) => {}

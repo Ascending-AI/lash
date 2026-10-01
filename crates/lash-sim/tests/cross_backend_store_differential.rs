@@ -1064,7 +1064,7 @@ impl BackendRunner {
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         }
     }
 
@@ -1948,7 +1948,7 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
             lash_core::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
 
     let sqlite_case_root = sqlite_root.join("storage-failure-mapping");
@@ -2130,7 +2130,7 @@ async fn runners_for_case_with_clock(
             lash_core::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
     let expected_meta = SessionMeta {
         owning_process_id: Some(differential_process_owner_id()),

@@ -344,7 +344,7 @@ impl RuntimePerfStore {
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         };
         self.admit_session(&request).await?;
         Ok(Arc::new(self.clone()))

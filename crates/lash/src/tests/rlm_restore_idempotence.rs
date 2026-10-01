@@ -572,18 +572,6 @@ impl Backend {
             uuid::Uuid::new_v4().simple()
         ));
         register_session_engine(&session_id, &self._double);
-        let request = SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: SessionRelation::Root,
-            config: policy().into(),
-            head: SessionCreationHead::CommittedByCreator,
-        };
-        let base = lash_core::runtime::admit_session_view(&self.factory, &request)
-            .await
-            .expect("create store");
-        let store = FaultStore::over(base.clone());
         let initial = under_rlm_options(
             RuntimeSessionState {
                 session_id: session_id.clone(),
@@ -592,6 +580,32 @@ impl Backend {
             ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras::default())
                 .expect("rlm options"),
         );
+        // The created head is what a reopen adopts, so admission records the
+        // same resolved plugin configuration the first open resolves
+        // (production `create` resolves it before admitting; FIG-4379).
+        let store_host = plugin_host_with_plugins(extra_plugins, script.native).await;
+        let mut recorded = initial.clone();
+        lash_core::testing::runtime_helpers::record_creation_plugin_config(
+            &store_host,
+            lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+            &mut recorded,
+        );
+        let admitted: lash_core::PersistedSessionConfig = policy().into();
+        let request = SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: SessionRelation::Root,
+            config: lash_core::PersistedSessionConfig {
+                plugin_config: recorded.authority.plugin_config,
+                ..admitted
+            },
+            head: SessionCreationHead::Config,
+        };
+        let base = lash_core::runtime::admit_session_view(&self.factory, &request)
+            .await
+            .expect("create store");
+        let store = FaultStore::over(base.clone());
         let (mut runtime, plugins) = open_with_plugins(
             &self.backend,
             Arc::clone(&store),
@@ -1012,7 +1026,7 @@ async fn storeless_runtime(
                 session_id: SessionId::from("fig2521-detached"),
                 relation: SessionRelation::Root,
                 config: policy().into(),
-                head: SessionCreationHead::CommittedByCreator,
+                head: SessionCreationHead::Config,
             },
         )
         .await

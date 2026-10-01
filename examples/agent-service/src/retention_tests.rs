@@ -29,7 +29,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         session_id: SessionId::from("retention-session"),
         relation: SessionRelation::Root,
         config: SessionPolicy::new(TurnBudget::Unbounded, lash::MaxToolCalls::new(1024)).into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
     let catalog: Arc<dyn DeploymentStore> = factory.clone();
     let session_store = {

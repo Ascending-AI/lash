@@ -20,7 +20,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                     crate::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: crate::SessionCreationHead::CommittedByCreator,
+                head: crate::SessionCreationHead::Config,
             })
             .await
             .expect("create queue session");

@@ -209,7 +209,7 @@ impl RuntimeScenarioContext {
                 session_id: self.session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
                 config: self.state.policy.clone().into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             })
             .await
             .expect("bind runtime scenario session");

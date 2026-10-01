@@ -922,8 +922,8 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
             )
             .await
             .expect("load after guard rejection")
-            .is_none(),
-        "guard rejection must happen before any durable write"
+            .is_some_and(|window| window.head_revision == 0),
+        "guard rejection must happen before any write past the created head"
     );
 }
 
@@ -1045,8 +1045,8 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore
             )
             .await
             .expect("load after duplicate rejection")
-            .is_none(),
-        "duplicate rejection must happen before any durable write"
+            .is_some_and(|window| window.head_revision == 0),
+        "duplicate rejection must leave the created head untouched"
     );
 }
 

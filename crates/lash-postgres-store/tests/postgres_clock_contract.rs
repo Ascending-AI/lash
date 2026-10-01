@@ -256,7 +256,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         })
         .await
         .expect("create skewed-clock session store");
@@ -612,7 +612,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         })
         .await
         .expect("create final-commit session store");

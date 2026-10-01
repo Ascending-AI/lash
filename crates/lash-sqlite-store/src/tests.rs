@@ -357,7 +357,7 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                     lash_core_execution::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+                head: lash_core_execution::SessionCreationHead::Config,
             })
             .await
             .expect("create session listing fixture");
@@ -449,7 +449,7 @@ async fn durable_state(
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
             config: state.policy.clone().into(),
-            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+            head: lash_core_execution::SessionCreationHead::Config,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
         })
@@ -681,7 +681,7 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+        head: lash_core_execution::SessionCreationHead::Config,
     };
     assert!(matches!(
         store.admit_session(&request).await.expect("admit session"),
@@ -718,7 +718,7 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+        head: lash_core_execution::SessionCreationHead::Config,
     };
 
     store
@@ -1033,7 +1033,7 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+        head: lash_core_execution::SessionCreationHead::Config,
         pending_observer_intents: Vec::new(),
         owning_process_id: None,
     };

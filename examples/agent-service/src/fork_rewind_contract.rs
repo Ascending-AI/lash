@@ -78,7 +78,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             session_id: SessionId::from(SOURCE_SESSION.to_string()),
             relation: SessionRelation::Root,
             config: source_policy.clone().into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         },
     )
     .await;
@@ -94,7 +94,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
                 ..source_policy.clone()
             }
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         },
     )
     .await;

@@ -96,6 +96,9 @@ pub trait FrameLawProtocol: Send + Sync {
     /// The session's plugins: the protocol and anything its frame switch
     /// needs.
     fn plugins(&self) -> Vec<Arc<dyn PluginFactory>>;
+    /// The protocol plugin's id: the owner whose namespace the session's
+    /// protocol turn options are recorded under (FIG-4379).
+    fn protocol_plugin_id(&self) -> &'static str;
     /// A model response that ends the turn with `text`.
     fn answer(&self, text: &str) -> crate::LlmOutputPart;
     /// A model response that switches the turn to a new frame running
@@ -167,6 +170,10 @@ impl FrameLawProtocol for StandardFrameLawProtocol {
             .into_iter()
             .chain([switch_tool_plugin()])
             .collect()
+    }
+
+    fn protocol_plugin_id(&self) -> &'static str {
+        "test_protocol"
     }
 
     fn answer(&self, text: &str) -> crate::LlmOutputPart {
@@ -1066,6 +1073,10 @@ struct LawSession {
 }
 
 impl LawSession {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: a protocol's own creation plugin config always resolves"
+    )]
     async fn open(
         prefix: &str,
         law: &str,
@@ -1083,7 +1094,22 @@ impl LawSession {
                     crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
                 );
         host.providers.models = crate::testing::standard_test_models(provider);
-        let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
+        // The created head records what a creator on this plugin set resolves:
+        // the canonical test policy and every installed owner's namespace —
+        // the protocol's among them — so a later open's rematerialization
+        // reads the same recorded configuration (FIG-4553, FIG-4379).
+        let mut config = crate::PersistedSessionConfig::from(crate::testing::mock_session_policy());
+        config.plugin_config = crate::plugin::PluginHost::new(protocol.plugins())
+            .resolve_creation_plugin_config(
+                Some(protocol.protocol_plugin_id()),
+                &crate::PluginOptions::default(),
+                None,
+                true,
+            )
+            .expect("the law protocol's creation plugin config resolves");
+        let store =
+            crate::conformance::law_session_store_with_config(stores.as_ref(), &session_id, config)
+                .await;
         Self {
             parts: LawParts {
                 session_id: session_id.clone(),

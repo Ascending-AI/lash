@@ -323,7 +323,7 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
                     config: policy().into(),
-                    head: SessionCreationHead::CommittedByCreator,
+                    head: SessionCreationHead::Config,
                 },
             )
             .await

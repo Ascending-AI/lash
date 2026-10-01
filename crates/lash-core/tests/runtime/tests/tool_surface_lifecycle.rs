@@ -682,7 +682,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             config: standard_test_policy().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await

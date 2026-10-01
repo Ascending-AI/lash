@@ -44,7 +44,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
                     lash_core::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: SessionCreationHead::CommittedByCreator,
+                head: SessionCreationHead::Config,
             },
         )
         .await

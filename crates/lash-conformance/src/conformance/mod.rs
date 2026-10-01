@@ -43,7 +43,9 @@ pub use attachment_read_budgets::*;
 mod await_event_cold;
 mod bound_trigger_duplicate;
 mod law_backend;
-pub(crate) use law_backend::{LawBackend, StoreLawBackend, law_session_store};
+pub(crate) use law_backend::{
+    LawBackend, StoreLawBackend, law_session_store, law_session_store_with_config,
+};
 pub use law_backend::{backend_over, recording_backend_over};
 mod admission_support;
 mod admitted_head_redrive;

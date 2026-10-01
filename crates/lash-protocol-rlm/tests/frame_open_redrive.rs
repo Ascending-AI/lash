@@ -60,6 +60,10 @@ impl lash_conformance::FrameLawProtocol for RlmFrameLawProtocol {
         vec![Arc::clone(&self.factory)]
     }
 
+    fn protocol_plugin_id(&self) -> &'static str {
+        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID
+    }
+
     fn answer(&self, text: &str) -> lash_core::LlmOutputPart {
         cell(&format!("finish({text:?});"))
     }

@@ -23,7 +23,7 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
                     lash_core_execution::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+                head: lash_core_execution::SessionCreationHead::Config,
             })
             .await
             .unwrap();
@@ -67,7 +67,7 @@ async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+            head: lash_core_execution::SessionCreationHead::Config,
         })
         .await
         .unwrap();

@@ -98,7 +98,7 @@ pub(crate) fn state_store_request(
         session_id: SessionId::from(session_id.to_string()),
         relation: lash::persistence::SessionRelation::Root,
         config: (&policy).into(),
-        head: lash::persistence::SessionCreationHead::CommittedByCreator,
+        head: lash::persistence::SessionCreationHead::Config,
     }
 }
 

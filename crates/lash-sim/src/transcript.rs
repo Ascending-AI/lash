@@ -624,7 +624,7 @@ mod tests {
                     lash_core::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: SessionCreationHead::CommittedByCreator,
+                head: SessionCreationHead::Config,
             })
             .await
             .expect("create observed store");

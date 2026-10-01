@@ -234,7 +234,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
             session_id: state.session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
             config: state.policy.clone().into(),
-            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+            head: lash_core_execution::SessionCreationHead::Config,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
         })
@@ -577,7 +577,7 @@ async fn process_record_is_a_root_without_registry_liveness() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+        head: lash_core_execution::SessionCreationHead::Config,
     };
     store.admit_session(&request).await.expect("admit session");
     let attachment_id = lash_core_execution::AttachmentId::parse("unwired-process-attachment")

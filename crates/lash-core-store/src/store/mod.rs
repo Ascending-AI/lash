@@ -441,6 +441,15 @@ impl SessionHeadMeta {
         }
     }
 
+    /// Whether this head is the created head [`Self::created`] writes: the
+    /// creator's config at head revision `0`, with no commit published over
+    /// it yet. The first commit treats it like an absent head.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    pub fn is_created(&self) -> bool {
+        self.head_revision == 0 && self.leaf_node_id.is_none() && self.checkpoint_ref.is_none()
+    }
+
     /// The session's identity is owned by the row key the caller bound the
     /// query to, never by the payload: `session_id` is taken from
     /// `session_id` and the payload's copy is a checked redundancy. A payload

@@ -111,6 +111,33 @@ struct CrashedCreate {
     creation: lash_core::PersistedSessionConfig,
 }
 
+/// A catalog row with no head, written at store level (FIG-4561): the row a
+/// catalog write orphaned before any admission recorded a head.
+/// `save_session_meta` creates the metadata row without touching the head
+/// table, which is exactly the corrupt state the law exercises — every
+/// admission path now writes the created head in the row's transaction, so
+/// no public seam can produce it.
+async fn headless_row(core: &LashCore, session: &str) -> Result<lash_core::store::SessionStore> {
+    let session_id = SessionId::from(session);
+    core.store_factory
+        .save_session_meta(lash_core::SessionMeta {
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            owning_process_id: None,
+        })
+        .await
+        .map_err(EmbedError::Store)?;
+    lash_core::runtime::live_session_view(&core.store_factory, &session_id)
+        .await
+        .map_err(EmbedError::Store)?
+        .ok_or_else(|| {
+            EmbedError::Store(lash_core::StoreError::Backend(
+                "the headless row the fixture wrote is absent".to_string(),
+            ))
+        })
+}
+
 /// The session's head, when any admission or commit wrote one.
 async fn head_of(
     store: &lash_core::store::SessionStore,
@@ -447,23 +474,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
         return Ok(());
     };
     let core = core_over(&double, NODE_BUDGET)?;
-    let store = lash_core::runtime::admit_session_view(
-        &core.store_factory,
-        &lash_core::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(ID),
-            relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            )
-            .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
-        },
-    )
-    .await
-    .map_err(EmbedError::Store)?;
+    let store = headless_row(&core, ID).await?;
     assert!(head_of(&store).await?.is_none(), "the row has no head");
 
     let opened = core.session(ID).open().await;
@@ -527,23 +538,7 @@ async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
         return Ok(());
     };
     let core = core_over(&double, NODE_BUDGET)?;
-    let store = lash_core::runtime::admit_session_view(
-        &core.store_factory,
-        &lash_core::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(ID),
-            relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-                lash_core::MaxToolCalls::new(1024),
-            )
-            .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
-        },
-    )
-    .await
-    .map_err(EmbedError::Store)?;
+    let store = headless_row(&core, ID).await?;
 
     let sent = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         core.session(ID)

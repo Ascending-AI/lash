@@ -270,7 +270,7 @@ async fn committed_factory_attachment() -> (
             crate::MaxToolCalls::new(1024),
         )
         .into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
+        head: crate::SessionCreationHead::Config,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
         .await
@@ -1304,7 +1304,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
             crate::MaxToolCalls::new(1024),
         )
         .into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
+        head: crate::SessionCreationHead::Config,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
         .await

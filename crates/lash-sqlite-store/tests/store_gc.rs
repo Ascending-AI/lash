@@ -91,7 +91,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
             session_id: state.session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
             config: state.policy.clone().into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         })
         .await
         .expect("bind session to store");
@@ -170,7 +170,7 @@ async fn sqlite_catalog_indexes_usage_by_owner() {
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         },
     )
     .await
@@ -209,7 +209,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             )
         }
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
 
     let store = admit_store(&factory, &request).await.expect("create store");
@@ -265,7 +265,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
             )
         }
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
     let deleted_store = admit_store(&factory, &request(&SessionId::from("delete/me")))
         .await
@@ -357,7 +357,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
     let first = admit_store(&factory, &store_for(&SessionId::from("first")))
         .await
@@ -445,7 +445,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
     let first = admit_store(&factory, &request(&SessionId::from("leaf-a")))
         .await
@@ -523,7 +523,7 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
     let first = admit_store(&factory, &request(&SessionId::from("maintenance-a")))
         .await
@@ -618,7 +618,7 @@ async fn commit_single_root_node(
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         },
     )
     .await

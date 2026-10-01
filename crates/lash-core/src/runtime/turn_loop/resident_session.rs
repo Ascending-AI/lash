@@ -7,9 +7,7 @@
 //! lease generation its last commit ran under, and which turn produced the
 //! revision an observation should attribute. They are one type here because
 //! their rules only make sense together: invalidation clears four of them at
-//! once, and a full durable adoption settles the same four. Beside them it
-//! keeps the head a reload gives way to while the store has none: the
-//! creator's, which it has not committed yet (FIG-4492).
+//! once, and a full durable adoption settles the same four.
 
 use super::*;
 use crate::TurnId;
@@ -63,9 +61,6 @@ pub(in crate::runtime) enum ResidentReloadHeadFreshness {
     StoreUnavailable,
     /// The durable head was refreshed from the store.
     ReloadedFromStore,
-    /// The store has no head yet: its creator commits the first one, and
-    /// the reload gave way to the creator's head as this runtime opened it.
-    CreatorUncommitted,
     /// The durable refresh was attempted and failed.
     RefreshFailed,
 }
@@ -77,7 +72,6 @@ impl ResidentReloadHeadFreshness {
             Self::RefreshPending => "refresh_pending",
             Self::StoreUnavailable => "store_unavailable",
             Self::ReloadedFromStore => "reloaded_from_store",
-            Self::CreatorUncommitted => "creator_uncommitted",
             Self::RefreshFailed => "refresh_failed",
         }
     }
@@ -171,13 +165,6 @@ pub struct ResidentSessionContinuity {
     /// not a random draw — names each incident's decision id, so a replay of
     /// the same drive traces the same ids.
     invalidation_incidents: u64,
-    /// The head this runtime opened while its creator had not committed it
-    /// (`SessionCreationHead::CommittedByCreator`), with the live plugin
-    /// state it opened with. While the store has no head, a reload gives way
-    /// to this one, so nothing a refused command put in resident state
-    /// reaches the first commit (FIG-4492). Forgotten once a committed head
-    /// is installed.
-    uncommitted_head: Option<Box<crate::RuntimeSessionState>>,
 }
 
 impl ResidentSessionContinuity {
@@ -189,28 +176,7 @@ impl ResidentSessionContinuity {
             graph_head_stale: Arc::new(AtomicBool::new(false)),
             last_committed_observation_turn: None,
             invalidation_incidents: 0,
-            uncommitted_head: None,
         }
-    }
-
-    /// This handle, opened on `head`, which its creator has not committed.
-    pub(in crate::runtime) fn with_uncommitted_head(
-        mut self,
-        head: crate::RuntimeSessionState,
-    ) -> Self {
-        self.uncommitted_head = Some(Box::new(head));
-        self
-    }
-
-    /// The creator's head this handle opened, while it is uncommitted.
-    pub(in crate::runtime) fn uncommitted_head(&self) -> Option<&crate::RuntimeSessionState> {
-        self.uncommitted_head.as_deref()
-    }
-
-    /// A committed head is resident: the creator's uncommitted one is no
-    /// longer the head any reload gives way to.
-    pub(in crate::runtime) fn forget_uncommitted_head(&mut self) {
-        self.uncommitted_head = None;
     }
 
     pub fn validity(&self) -> &ResidentSessionState {
@@ -553,32 +519,22 @@ impl LashRuntime {
                             ),
                         )
                     })?;
-                durable_head_freshness = if headed {
-                    ResidentReloadHeadFreshness::ReloadedFromStore
-                } else {
-                    // The creator commits the session's first head, and has
-                    // not yet: resident state gives way to the head this
-                    // runtime opened, never keeps what was put in it since
-                    // (FIG-4492).
-                    durable_state = self
-                        .resident_session
-                        .uncommitted_head()
-                        .cloned()
-                        .ok_or_else(|| {
-                            (
-                                ResidentReloadStage::DurableHeadRefresh,
-                                RuntimeError::new(
-                                    RuntimeErrorCode::ResidentSessionReloadFailed,
-                                    format!(
-                                        "session `{}` has no durable head to reload, and this \
-                                         runtime did not open its creator's uncommitted one",
-                                        self.state.session_id
-                                    ),
-                                ),
-                            )
-                        })?;
-                    ResidentReloadHeadFreshness::CreatorUncommitted
-                };
+                // The store has no head to reload: every creating admission
+                // writes one with the catalog row (FIG-4553), so an opened
+                // session whose head is now absent has nothing to adopt.
+                if !headed {
+                    Err((
+                        ResidentReloadStage::DurableHeadRefresh,
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            format!(
+                                "session `{}` has no durable head to reload",
+                                self.state.session_id
+                            ),
+                        ),
+                    ))?;
+                }
+                durable_head_freshness = ResidentReloadHeadFreshness::ReloadedFromStore;
                 durable_head_revision = durable_state.head_revision;
             }
 

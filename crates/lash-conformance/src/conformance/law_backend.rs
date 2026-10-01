@@ -110,14 +110,33 @@ impl crate::EffectEngine for HostOverStores {
 }
 
 /// `stores`' session catalog with `session_id` admitted as a fresh root:
-/// where a law's runtime commits, on the substrate under test.
+/// where a law's runtime commits, on the substrate under test. The admission
+/// writes the canonical test policy as the created head (FIG-4553): it is
+/// what the law's runtime opens, so a later open adopts exactly it.
+pub(crate) async fn law_session_store(
+    stores: &dyn crate::StoreSet,
+    session_id: &crate::SessionId,
+) -> Arc<dyn crate::RuntimeStore> {
+    law_session_store_with_config(
+        stores,
+        session_id,
+        crate::testing::mock_session_policy().into(),
+    )
+    .await
+}
+
+/// [`law_session_store`], except the created head records `config`: a law
+/// whose runtime runs a plugin that owns recorded configuration, or a policy
+/// other than the canonical test one, admits the session the way a creator
+/// would (FIG-4553) so a later open adopts exactly it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: a fresh catalog admits a fresh session"
 )]
-pub(crate) async fn law_session_store(
+pub(crate) async fn law_session_store_with_config(
     stores: &dyn crate::StoreSet,
     session_id: &crate::SessionId,
+    config: crate::PersistedSessionConfig,
 ) -> Arc<dyn crate::RuntimeStore> {
     let deployment = stores.session_store_factory();
     deployment
@@ -126,12 +145,8 @@ pub(crate) async fn law_session_store(
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            )
-            .into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            config,
+            head: crate::SessionCreationHead::Config,
         })
         .await
         .expect("admit the law's session on the backend under test");

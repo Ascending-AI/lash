@@ -32,7 +32,7 @@ lash_conformance::direct_turn_acceptance_tests!({
                     lash_core::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             },
         )
         .await

@@ -359,7 +359,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
             session_id: SessionId::from("preopened-session"),
             relation: lash_core::SessionRelation::Root,
             config: policy.clone().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await

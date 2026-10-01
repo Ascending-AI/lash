@@ -986,7 +986,7 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
             lash_core::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     }
 }
 

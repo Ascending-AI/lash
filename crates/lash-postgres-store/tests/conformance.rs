@@ -645,7 +645,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                         lash_core_execution::MaxToolCalls::new(1024),
                     )
                     .into(),
-                    head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+                    head: lash_core_execution::SessionCreationHead::Config,
                 };
                 let open_factory = open_storage
                     .session_store_factory()
@@ -1130,7 +1130,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+            head: lash_core_execution::SessionCreationHead::Config,
         })
         .await
         .expect("admit source-lock target");
@@ -1531,7 +1531,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+            head: lash_core_execution::SessionCreationHead::Config,
         })
         .await
         .expect("admit clocked Postgres session");

@@ -403,7 +403,7 @@ async fn measured_commit_size_curve() {
                                     lash_core_execution::MaxToolCalls::new(1024),
                                 )
                                 .into(),
-                                head: SessionCreationHead::CommittedByCreator,
+                                head: SessionCreationHead::Config,
                             })
                             .await
                             .expect("create SQLite benchmark store");
@@ -422,7 +422,7 @@ async fn measured_commit_size_curve() {
                                     lash_core_execution::MaxToolCalls::new(1024),
                                 )
                                 .into(),
-                                head: SessionCreationHead::CommittedByCreator,
+                                head: SessionCreationHead::Config,
                             })
                             .await
                             .expect("create PostgreSQL benchmark session");

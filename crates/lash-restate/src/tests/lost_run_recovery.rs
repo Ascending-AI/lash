@@ -230,7 +230,7 @@ async fn seed(stores: &dyn StoreSet, start: usize, count: usize) {
                 relation: lash_core::SessionRelation::Root,
                 pending_observer_intents: vec![],
                 config: lash_core::testing::mock_session_policy().into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
                 owning_process_id: None,
             })
             .await

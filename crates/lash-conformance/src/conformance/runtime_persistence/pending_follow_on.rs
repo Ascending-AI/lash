@@ -312,8 +312,8 @@ pub async fn pending_follow_on_frame_is_current_on_every_head_write(store: Arc<d
             )
             .await
             .expect("load after refused switch")
-            .is_none(),
-        "the refused switch wrote nothing"
+            .is_some_and(|window| window.head_revision == 0),
+        "the refused switch leaves the created head untouched"
     );
 }
 

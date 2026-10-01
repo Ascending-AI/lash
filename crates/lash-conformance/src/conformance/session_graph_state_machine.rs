@@ -1241,22 +1241,20 @@ impl SessionGraphScenario {
                 .live
                 .get(slot)
                 .ok_or_else(|| format!("modeled session slot {slot} has no live handle"))?;
+            // Admission writes the created head (FIG-4553): every live
+            // session answers a window, and a session nothing committed yet
+            // answers its created head at revision 0 with an empty path.
             let read = live
                 .store
                 .load_session_window(crate::store::WindowSelector::Current)
                 .await
-                .map_err(|error| error.to_string())?;
-            if expected.path.is_empty() {
-                if read.is_some() {
-                    return Err(format!(
-                        "uncommitted session `{}` unexpectedly has a durable head",
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| {
+                    format!(
+                        "admitted session `{}` lost its created head",
                         expected.physical_id
-                    ));
-                }
-                continue;
-            }
-            let read = read
-                .ok_or_else(|| format!("modeled session `{}` disappeared", expected.physical_id))?;
+                    )
+                })?;
             if read.session_id != expected.physical_id {
                 return Err(format!(
                     "session identity differs: actual={}, expected={}",

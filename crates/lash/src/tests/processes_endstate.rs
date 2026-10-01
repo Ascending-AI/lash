@@ -293,7 +293,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await?;
@@ -410,7 +410,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await?;

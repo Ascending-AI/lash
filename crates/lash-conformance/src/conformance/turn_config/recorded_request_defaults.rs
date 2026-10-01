@@ -81,12 +81,17 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let parts = law_session(
+    // The session is created under the policy the crashing execution's
+    // deployment would mint: the created head records its model binding,
+    // request defaults included, and the redeployed worker's open adopts it
+    // (FIG-4553).
+    let parts = law_session_recording(
         prefix,
         "recorded-request-defaults-redrive",
         &effect_host,
         &stores,
         turn_config_models(capturing_model(&requests)),
+        policy_with_request_defaults(recorded_defaults()),
     )
     .await;
     let root = TurnId::from(format!(

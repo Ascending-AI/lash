@@ -408,7 +408,7 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+        head: lash_core_execution::SessionCreationHead::Config,
     };
     factory
         .admit_session(&request)
@@ -540,7 +540,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+        head: lash_core_execution::SessionCreationHead::Config,
     };
     factory
         .admit_session(&request)
@@ -812,7 +812,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+        head: lash_core_execution::SessionCreationHead::Config,
     };
     live_store
         .admit_session(&request)
@@ -1784,7 +1784,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
                 lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+            head: lash_core_execution::SessionCreationHead::Config,
         };
         factory
             .admit_session(&request)

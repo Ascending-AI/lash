@@ -282,7 +282,7 @@ async fn abandoned_branch_scenario(
         session_id: branch_request.session_id.clone(),
         relation: branch_request.relation.clone(),
         config: branch_request.policy.clone().into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
+        head: crate::SessionCreationHead::Config,
     };
     let branch = factory
         .live_view_for(&branch_open_request)

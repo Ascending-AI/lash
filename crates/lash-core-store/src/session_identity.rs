@@ -701,8 +701,9 @@ pub struct SessionStoreCreateRequest {
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     /// The session's config as its creator states it.
     pub config: crate::PersistedSessionConfig,
-    /// What a creating admission writes beside the catalog row: whether
-    /// [`Self::config`] is baked in as the session's initial head.
+    /// What a creating admission writes beside the catalog row:
+    /// [`SessionCreationHead::Config`] bakes [`Self::config`] in as the
+    /// session's initial head.
     pub head: SessionCreationHead,
     /// The process that runs this session as its own: the `SessionTurn`
     /// process whose start created it (FIG-3607 R1). Recorded once, at
@@ -723,16 +724,10 @@ pub enum SessionCreationHead {
     /// row, so every later open — and the engine's own drive-open — runs with
     /// the config the creator stated. The host API's one creating verb,
     /// `create`, states this (FIG-4112), and so does the session manager's
-    /// create, whose first commit publishes over this head (FIG-4553).
+    /// create, whose first commit publishes over this head (FIG-4553). It is
+    /// the only creation head: a catalog row left without one recorded no
+    /// config and is refused as `SessionCreationUnrecorded` (FIG-4561).
     Config,
-    /// The store writes only the catalog row: the caller commits the
-    /// session's first head itself, and until it does the session has
-    /// recorded no config. No session creator states this (FIG-4553): a row
-    /// left without a head is refused by every facade open and engine drive
-    /// (`SessionCreationUnrecorded`), never opened with defaults. It remains
-    /// for a store-level caller that commits a complete head of its own
-    /// straight after admission.
-    CommittedByCreator,
 }
 
 impl SessionStoreCreateRequest {

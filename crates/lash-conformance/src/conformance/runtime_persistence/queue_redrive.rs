@@ -630,8 +630,8 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             )
             .await
             .expect("load after rejected atomic commit")
-            .is_none(),
-        "a rejected settlement must not persist session state"
+            .is_some_and(|window| window.head_revision == 0),
+        "a rejected settlement must not move the created head"
     );
     assert_eq!(
         store
@@ -665,8 +665,8 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             )
             .await
             .expect("load after rejected follow-on")
-            .is_none(),
-        "a rejected follow-on must roll back session state"
+            .is_some_and(|window| window.head_revision == 0),
+        "a rejected follow-on must leave the created head untouched"
     );
     assert_eq!(
         store

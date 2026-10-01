@@ -170,7 +170,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                     relation: lash_core::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
                     config: lash_core::testing::mock_session_policy().into(),
-                    head: lash_core::SessionCreationHead::CommittedByCreator,
+                    head: lash_core::SessionCreationHead::Config,
                     owning_process_id: None,
                 },
             )

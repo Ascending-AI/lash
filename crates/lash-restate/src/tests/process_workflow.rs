@@ -1350,7 +1350,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::default(),
             config: recovery_session_policy().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await
@@ -1479,7 +1479,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                 )
             }
             .into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await

@@ -41,7 +41,7 @@ async fn authorize_restate_completion_closure(
                 lash::MaxToolCalls::new(1024),
             )
             .into(),
-            head: lash::persistence::SessionCreationHead::CommittedByCreator,
+            head: lash::persistence::SessionCreationHead::Config,
         })
         .await
         .expect("create live Restate catalog session");
@@ -597,7 +597,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                         lash::MaxToolCalls::new(1024),
                     )
                     .into(),
-                    head: lash::persistence::SessionCreationHead::CommittedByCreator,
+                    head: lash::persistence::SessionCreationHead::Config,
                 })
                 .await
                 .expect("create late live Restate catalog session");

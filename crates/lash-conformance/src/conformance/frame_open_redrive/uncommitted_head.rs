@@ -1,12 +1,11 @@
 //! FIG-4492: a refused host append over a head its creator has not yet
 //! committed leaves nothing of it in the head.
 //!
-//! A session admitted `CommittedByCreator` has no durable head until its
-//! first commit: the head the runtime opened is the creator's, and it is
-//! the head a refused command's settlement gives way to. Whether the
-//! commit budget, the protocol or the store's ancestor check refuses the
-//! append, the command settles with its refusal over that head, and none of
-//! the append's nodes reach it.
+//! A session admitted `Config` has only its created head — the creator's
+//! config at revision 0, no committed graph — until its first commit
+//! (FIG-4553): whether the commit budget, the protocol or the store's
+//! ancestor check refuses the append, the command settles with its refusal
+//! over that head, and none of the append's nodes reach it.
 
 use std::sync::Arc;
 
@@ -54,18 +53,26 @@ async fn queue_append(parts: &DriveParts, text: &str, ancestor: Option<&str>) ->
         .batch_id
 }
 
-/// The law's session has no durable head: its creator has not committed it.
+/// The law's session's only durable head is the created head its admission
+/// wrote: its creator has not committed a head.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the store reads its own head"
 )]
 async fn assert_uncommitted(parts: &DriveParts) {
-    assert!(
-        crate::conformance::helpers::load_window_state(&parts.store, &parts.session_id)
-            .await
-            .expect("read the session's head")
-            .is_none(),
+    let head = crate::conformance::helpers::load_window_state(&parts.store, &parts.session_id)
+        .await
+        .expect("read the session's head")
+        .expect("the admission wrote the session's created head");
+    assert_eq!(
+        head.head_revision, 0,
         "the creator has not committed the session's head"
+    );
+    // The resident graph's synthesized initial frame is not durable content:
+    // the created head owns no committed node or checkpoint.
+    assert!(
+        head.persisted_node_ids.is_empty() && head.checkpoint_ref.is_none(),
+        "the created head carries no committed graph"
     );
 }
 

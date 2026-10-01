@@ -178,7 +178,7 @@ async fn parent_runtime_with_models(
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             config: policy.clone().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await
@@ -339,7 +339,7 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
                 .relation,
             pending_observer_intents: Vec::new(),
             config: recovery_session_policy().into(),
-            head: lash_core::SessionCreationHead::CommittedByCreator,
+            head: lash_core::SessionCreationHead::Config,
         },
     )
     .await
@@ -348,13 +348,14 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
         .await
         .expect("open metadata-only child")
         .expect("metadata-only child exists");
+    let created = partial
+        .load_session_window(lash_core::store::WindowSelector::Current)
+        .await
+        .expect("load partial session")
+        .expect("creating admission wrote the child's head");
     assert!(
-        partial
-            .load_session_window(lash_core::store::WindowSelector::Current)
-            .await
-            .expect("load partial session")
-            .is_none(),
-        "precondition: the child has no committed head"
+        created.head_revision == 0 && created.current_frame_node_id.is_none(),
+        "precondition: the child's head is still the create's revision-0 head"
     );
     let worker = worker_for(
         memory_engine_backend().await,
@@ -376,12 +377,13 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     .await
     .expect("run SessionTurn after metadata-only create");
     assert_completed(&outcome);
+    let finished = partial
+        .load_session_window(lash_core::store::WindowSelector::Current)
+        .await
+        .expect("load completed session")
+        .expect("redelivery published over the created head");
     assert!(
-        partial
-            .load_session_window(lash_core::store::WindowSelector::Current)
-            .await
-            .expect("load completed session")
-            .is_some(),
+        finished.head_revision > 0,
         "redelivery finishes initialisation before the turn"
     );
 }

@@ -1223,7 +1223,7 @@ mod tests {
                     lash_core::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             })
             .await
             .expect("create the probe's inner store");

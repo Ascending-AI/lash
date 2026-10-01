@@ -979,7 +979,8 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
             )
             .await
             .expect("load failed append")
-            .is_none()
+            .is_some_and(|window| window.head_revision == 0),
+        "a refused commit leaves the created head untouched"
     );
 
     commit_runtime_state_for_test(&store, clean, "atomic-append-retry")

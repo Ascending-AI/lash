@@ -60,7 +60,7 @@ pub(super) async fn run_crash_matrix_case(
         .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
 
     let reader = make(scenario);
-    super::super::admit_conformance_session(&reader, &identity.session_id).await;
+    super::admit_reference_session(&reader, &identity).await;
     let recovered_pending = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
@@ -93,7 +93,7 @@ pub(super) async fn run_crash_matrix_case(
     let mut drain_turns = 0;
     loop {
         let reader = make(scenario);
-        super::super::admit_conformance_session(&reader, &identity.session_id).await;
+        super::admit_reference_session(&reader, &identity).await;
         let pending = reader
             .list_pending_turn_inputs(&identity.session_id)
             .await

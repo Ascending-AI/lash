@@ -412,7 +412,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                     crate::MaxToolCalls::new(1024),
                 )
                 .into(),
-                head: lash_core::SessionCreationHead::CommittedByCreator,
+                head: lash_core::SessionCreationHead::Config,
             },
         )
         .await?;

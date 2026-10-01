@@ -90,8 +90,8 @@ pub async fn head_and_window_reads_agree_for_each_named_session(store: Arc<dyn R
     );
     assert_eq!(
         assert_reads_agree(store.as_ref(), &admitted_only).await,
-        None,
-        "an admitted session with no commit has no head, whatever its neighbours hold"
+        Some(0),
+        "an admitted session reads its created head at revision 0, whatever its neighbours hold"
     );
     assert_eq!(
         assert_reads_agree(store.as_ref(), &absent).await,

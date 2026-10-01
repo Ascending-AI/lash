@@ -744,7 +744,7 @@ pub(super) async fn verify_independent_session_meta_layout(
                 lash_core::MaxToolCalls::new(1024),
             )
             .into(),
-            head: SessionCreationHead::CommittedByCreator,
+            head: SessionCreationHead::Config,
         };
         sqlite_stores.push(
             admit_test_session(sqlite_factory.clone(), &request)

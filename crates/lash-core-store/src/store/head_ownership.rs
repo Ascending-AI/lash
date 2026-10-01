@@ -19,8 +19,8 @@
 //!   boundary, and a command root that sealed and read it holds no binding a
 //!   narrower check would see.
 //!
-//! A session's first commit has no head to own, so creation is never
-//! refused.
+//! A session's first commit publishes over the created head, which is no
+//! head to own (FIG-4099), so creation is never refused.
 
 use crate::{SessionId, TurnId};
 

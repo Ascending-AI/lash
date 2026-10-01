@@ -655,7 +655,9 @@ impl SqliteStore {
                     // drop, a moved head) answer first.
                     if lash_core_execution::store::head_write_needs_ownership(
                         commit.drive_fence.is_some(),
-                        existing.is_some(),
+                        existing
+                            .as_ref()
+                            .is_some_and(|head| !head.is_created()),
                     ) {
                         let facts = crate::session_roots::head_ownership_facts_conn(
                             tx,

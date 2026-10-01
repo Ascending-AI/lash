@@ -65,7 +65,7 @@ impl PostgresStore {
             self.fence.fleet(),
         )
         .await?;
-        if inserted && request.head == lash_core_execution::SessionCreationHead::Config {
+        if inserted {
             // The creator's config is baked in with the catalog row, in this
             // transaction (FIG-4099).
             let created_head = lash_core_execution::store::SessionHeadMeta::created(
@@ -79,7 +79,7 @@ impl PostgresStore {
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
-        } else if !inserted {
+        } else {
             let recorded =
                 crate::session_meta::load_recorded_lineage_tx(&mut tx, &request.session_id)
                     .await?

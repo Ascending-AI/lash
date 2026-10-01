@@ -121,7 +121,7 @@ async fn durable_attachment_context<'h>(
             crate::MaxToolCalls::new(1024),
         )
         .into(),
-        head: crate::SessionCreationHead::CommittedByCreator,
+        head: crate::SessionCreationHead::Config,
     };
     crate::SessionCatalogStore::admit_session(factory.as_ref(), &request)
         .await

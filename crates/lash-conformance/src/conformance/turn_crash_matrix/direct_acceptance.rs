@@ -162,7 +162,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
         .await;
 
     let reader = make(scenario);
-    super::super::admit_conformance_session(&reader, &identity.session_id).await;
+    super::admit_reference_session(&reader, &identity).await;
     let admitted = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await

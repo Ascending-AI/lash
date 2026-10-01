@@ -293,16 +293,7 @@ impl LashRuntime {
             ))
             .await
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        // A head no commit has written is its creator's, which commits it
-        // (`SessionCreationHead::CommittedByCreator`): until then it is the
-        // head a reload gives way to, with the plugin state it opened with
-        // (FIG-4492).
-        let mut resident_session = ResidentSessionContinuity::fresh();
-        if state.head_revision == 0 && session.history_store().is_some() {
-            let mut head = state.clone();
-            head.capture_plugin_states(session.plugins());
-            resident_session = resident_session.with_uncommitted_head(head);
-        }
+        let resident_session = ResidentSessionContinuity::fresh();
         Ok(Self {
             session: Some(session),
             host,
@@ -872,7 +863,7 @@ mod tests {
             session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             config: policy.clone().into(),
-            head: crate::SessionCreationHead::CommittedByCreator,
+            head: crate::SessionCreationHead::Config,
         };
         let backend = crate::testing::sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
@@ -950,7 +941,7 @@ mod tests {
                 session_id: SessionId::from(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
                 config: policy.clone().into(),
-                head: crate::SessionCreationHead::CommittedByCreator,
+                head: crate::SessionCreationHead::Config,
             },
         )
         .await

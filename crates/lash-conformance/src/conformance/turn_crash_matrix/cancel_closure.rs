@@ -128,7 +128,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
             )
             .await;
         let recovery = make(&scenario);
-        super::super::admit_conformance_session(&recovery, &identity.session_id).await;
+        super::admit_reference_session(&recovery, &identity).await;
 
         let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
         runner

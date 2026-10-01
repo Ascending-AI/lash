@@ -32,7 +32,7 @@ fn request(session_id: impl Into<SessionId>) -> SessionStoreCreateRequest {
             lash_core_execution::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     }
 }
 

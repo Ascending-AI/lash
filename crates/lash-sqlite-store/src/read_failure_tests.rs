@@ -661,11 +661,17 @@ async fn absent_rows_remain_honest_successful_outcomes() {
             .is_none()
     );
 
+    // Every admission writes the created head in the row's transaction
+    // (FIG-4553), so the catalog row with no head this read-honesty check
+    // exercises is seeded at store level (FIG-4561).
     let admitted = SessionId::from("admitted-without-a-head");
     store
-        .admit_session(
-            &lash_core_execution::testing::store_fixtures::root_session_request(&admitted),
-        )
+        .save_session_meta(lash_core_execution::SessionMeta {
+            session_id: admitted.clone(),
+            relation: lash_core_execution::SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            owning_process_id: None,
+        })
         .await
         .expect("admit a session");
     assert!(

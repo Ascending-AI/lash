@@ -438,7 +438,7 @@ async fn surface_runners(
             lash_core::MaxToolCalls::new(1024),
         )
         .into(),
-        head: SessionCreationHead::CommittedByCreator,
+        head: SessionCreationHead::Config,
     };
     let sqlite_store = Arc::new(SqliteStore::open(&sqlite_runtime_root).await.unwrap());
     sqlite_store.admit_session(&session_request).await.unwrap();

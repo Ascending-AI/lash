@@ -106,7 +106,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
                 session_id: SessionId::from(session_id.to_string()),
                 relation: lash_core_execution::SessionRelation::Root,
                 config: policy.clone().into(),
-                head: lash_core_execution::SessionCreationHead::CommittedByCreator,
+                head: lash_core_execution::SessionCreationHead::Config,
             })
             .await
             .expect("create store");
