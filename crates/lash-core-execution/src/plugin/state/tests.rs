@@ -419,11 +419,11 @@ fn live_hydration_adopts_the_recorded_head_over_an_uncommitted_tail() {
     let recorded = state.state.lock_recover().data.clone();
     state.set("value", serde_json::json!(2)).unwrap();
     state.state.lock_recover().hydrate_live(&recorded);
-    assert_eq!(state.generation(), 1);
+    assert_eq!(state.generation(), 3);
     assert_eq!(state.get("value"), Some(serde_json::json!(1)));
     assert!(matches!(
         state.apply_guarded(2, vec![]),
-        Err(PluginStateError::GenerationConflict { actual: 1, .. })
+        Err(PluginStateError::GenerationConflict { actual: 3, .. })
     ));
 
     let mut diverged = recorded.clone();
@@ -435,7 +435,7 @@ fn live_hydration_adopts_the_recorded_head_over_an_uncommitted_tail() {
     state.state.lock_recover().hydrate_live(&diverged);
     assert_eq!(
         (state.generation(), state.get("value")),
-        (1, Some(serde_json::json!(3))),
+        (5, Some(serde_json::json!(3))),
         "an equal-generation tail yields to the recorded head's values"
     );
 
@@ -445,8 +445,8 @@ fn live_hydration_adopts_the_recorded_head_over_an_uncommitted_tail() {
         .hydrate_live(&PluginState::default());
     assert_eq!(
         (state.generation(), state.keys()),
-        (0, Vec::<String>::new()),
-        "a bound namespace the head does not carry stays bound at its default"
+        (6, Vec::<String>::new()),
+        "a bound namespace the head does not carry retains its acceptance token"
     );
 }
 
@@ -483,7 +483,7 @@ fn live_hydration_from_the_unchanged_source_head_drops_the_uncommitted_tail() {
     registry.lock_recover().hydrate_live(&recorded);
     assert_eq!(
         (state.generation(), state.get("value"), state.keys().len()),
-        (1, Some(serde_json::json!(1)), 1),
+        (5, Some(serde_json::json!(1)), 2),
         "the head the runtime was built from does not carry the accepted writes"
     );
 
@@ -491,7 +491,7 @@ fn live_hydration_from_the_unchanged_source_head_drops_the_uncommitted_tail() {
     registry.lock_recover().hydrate_live(&recorded);
     assert_eq!(
         (state.generation(), state.get("value")),
-        (1, Some(serde_json::json!(1))),
+        (7, Some(serde_json::json!(1))),
         "a removal is a tail as a set is"
     );
 }
@@ -545,4 +545,152 @@ fn register_remove_rebuilt_generation_five() {
         "register remove must delete the durable key"
     );
     assert_eq!(state.generation(), 6);
+}
+
+fn hydration_fixture(
+    snapshot: &PluginState,
+) -> (PluginStateStore, Arc<Mutex<PluginStateRegistry>>) {
+    let registry = Arc::new(Mutex::new(PluginStateRegistry::registering(Some(snapshot))));
+    let state = PluginStateStore::bind(
+        &crate::RuntimeOwner::Session(SessionId::from("session")),
+        "mock",
+        registry.clone(),
+    );
+    state.set("registered", Value::Bool(true)).unwrap();
+    registry.lock_recover().initialize(Some(snapshot)).unwrap();
+    (state, registry)
+}
+
+fn hydration_head() -> PluginState {
+    PluginState {
+        plugins: BTreeMap::from([(
+            "mock".into(),
+            PluginNamespaceState {
+                generation: 5,
+                values: BTreeMap::from([("seed".into(), Value::Bool(true))]),
+            },
+        )]),
+    }
+}
+
+fn assert_hydration_predicate_sees_ready_writes(
+    predicate: impl Fn(&PluginStateRegistry, &PluginState) -> bool,
+) {
+    let snapshot = hydration_head();
+    for mutation in 0..5 {
+        let (state, registry) = hydration_fixture(&snapshot);
+        assert!(predicate(&registry.lock_recover(), &snapshot));
+        let before = state.generation();
+        assert!(state.set("invalid/key", Value::Null).is_err());
+        assert!(state.apply_guarded(before + 1, vec![]).is_err());
+        state.remove("absent").unwrap();
+        assert!(
+            predicate(&registry.lock_recover(), &snapshot),
+            "refusals and absent removes leave hydration intact"
+        );
+        match mutation {
+            0 => {
+                state.set("tail", Value::Bool(true)).unwrap();
+            }
+            1 => {
+                state.remove("seed").unwrap();
+            }
+            2 => {
+                state.apply(vec![]).unwrap();
+            }
+            3 => {
+                state.apply_guarded(before, vec![]).unwrap();
+            }
+            4 => {
+                state.set("registered", Value::Bool(true)).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            !predicate(&registry.lock_recover(), &snapshot),
+            "accepted mutation {mutation} invalidates hydration"
+        );
+    }
+}
+
+#[test]
+fn hydration_law_was_hydrated_from_sees_ready_writes() {
+    assert_hydration_predicate_sees_ready_writes(|registry, snapshot| {
+        registry.was_hydrated_from(snapshot)
+    });
+}
+
+#[test]
+fn hydration_law_matches_ref_sees_ready_writes() {
+    assert_hydration_predicate_sees_ready_writes(|registry, snapshot| {
+        registry.matches_ref(&state_ref(snapshot))
+    });
+}
+
+#[test]
+fn hydration_law_live_adoption_sees_ready_writes() {
+    let snapshot = hydration_head();
+    let (state, registry) = hydration_fixture(&snapshot);
+    state.remove("registered").unwrap();
+    registry.lock_recover().hydrate_live(&snapshot);
+    assert_eq!(
+        state.get("registered"),
+        Some(Value::Bool(true)),
+        "adoption restores the registration edit after a Ready write"
+    );
+    assert!(registry.lock_recover().was_hydrated_from(&snapshot));
+    assert!(registry.lock_recover().matches_ref(&state_ref(&snapshot)));
+}
+
+#[test]
+fn hydration_law_live_adoption_equals_a_cold_rebuild() {
+    let snapshot = hydration_head();
+    let (state, registry) = hydration_fixture(&snapshot);
+    let newcomer = PluginStateStore::bind(state.owner(), "newcomer", registry.clone());
+    state.set("tail", Value::Bool(true)).unwrap();
+    newcomer.set("tail", Value::Bool(true)).unwrap();
+    for head in [snapshot.clone(), PluginState::default(), snapshot] {
+        let (_, cold) = hydration_fixture(&head);
+        PluginStateStore::bind(state.owner(), "newcomer", cold.clone());
+        registry.lock_recover().hydrate_live(&head);
+        assert_eq!(
+            registry.lock_recover().data,
+            cold.lock_recover().data,
+            "live checkpoint includes the same registration edits and bound namespaces as a cold rebuild"
+        );
+        state.set("tail", Value::Bool(true)).unwrap();
+    }
+}
+
+#[test]
+fn hydration_law_generations_never_reuse_a_guard_token() {
+    let snapshot = hydration_head();
+    let (state, registry) = hydration_fixture(&snapshot);
+    let mut stale = Vec::new();
+    for head in [snapshot.clone(), PluginState::default(), snapshot] {
+        let accepted = state.set("tail", Value::Bool(true)).unwrap();
+        stale.push(accepted);
+        registry.lock_recover().hydrate_live(&head);
+        let adopted = state.generation();
+        assert!(
+            adopted > accepted,
+            "changing content invalidates every previously observed generation"
+        );
+        for expected in &stale {
+            assert_eq!(
+                state.apply_guarded(*expected, vec![]),
+                Err(PluginStateError::GenerationConflict {
+                    expected: *expected,
+                    actual: adopted
+                })
+            );
+        }
+        registry.lock_recover().hydrate_live(&head);
+        assert_eq!(
+            state.generation(),
+            adopted,
+            "repeating the same hydration is idempotent"
+        );
+        assert_eq!(state.apply_guarded(adopted, vec![]).unwrap(), adopted + 1);
+    }
 }

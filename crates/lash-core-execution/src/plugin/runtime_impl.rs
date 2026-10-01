@@ -300,7 +300,6 @@ impl PluginHost {
             forked,
         });
         self.register_session(&owner, &session)?;
-        session.state.lock_recover().initialize(snapshot)?;
         for plugin in &session.plugins {
             let state =
                 PluginStateStore::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
@@ -316,6 +315,9 @@ impl PluginHost {
                     .store(true, std::sync::atomic::Ordering::SeqCst);
             }
         }
+        // Registration and readiness both contribute to a cold materialization.
+        // Freeze their replay log before later writes become an uncommitted tail.
+        session.state.lock_recover().initialize(snapshot)?;
         Ok(session)
     }
 

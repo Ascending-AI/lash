@@ -115,8 +115,10 @@ impl PluginStateStore {
     pub fn plugin_id(&self) -> &str {
         &self.plugin_id
     }
+    /// A resident acceptance token. Hydration never reuses a token for changed
+    /// content, even when it restores an older checkpoint generation.
     pub fn generation(&self) -> u64 {
-        self.state.lock_recover().data.plugins[self.plugin_id()].generation
+        self.state.lock_recover().generation(self.plugin_id())
     }
     pub fn get(&self, key: &str) -> Option<Value> {
         self.state.lock_recover().data.plugins[self.plugin_id()]
@@ -166,6 +168,7 @@ impl PluginStateStore {
     pub fn remove(&self, key: &str) -> Result<u64, PluginStateError> {
         validate_key(key)?;
         let mut state = self.state.lock_recover();
+        let accepted_generation = state.generation(self.plugin_id());
         let namespace = state
             .data
             .plugins
@@ -173,15 +176,21 @@ impl PluginStateStore {
             .expect("bound namespace");
         let removed = namespace.values.contains_key(key);
         if removed {
-            let generation = namespace
-                .generation
+            let generation = accepted_generation
                 .checked_add(1)
                 .expect("plugin generation exhausted");
             namespace.values.remove(key);
             namespace.generation = generation;
         }
-        let generation = namespace.generation;
+        let generation = if removed {
+            namespace.generation
+        } else {
+            accepted_generation
+        };
         if removed {
+            state
+                .acceptance_generations
+                .insert(self.plugin_id().into(), generation);
             state.record(
                 self.plugin_id(),
                 vec![PluginStateEdit::Remove { key: key.into() }],
@@ -211,20 +220,19 @@ impl PluginStateStore {
         edits: Vec<PluginStateEdit>,
     ) -> Result<u64, PluginStateError> {
         let mut state = self.state.lock_recover();
-        let namespace = state
-            .data
-            .plugins
-            .get_mut(self.plugin_id())
-            .expect("bound namespace");
+        let accepted_generation = state.generation(self.plugin_id());
         if let Some(expected) = expected
-            && expected != namespace.generation
+            && expected != accepted_generation
         {
             return Err(PluginStateError::GenerationConflict {
                 expected,
-                actual: namespace.generation,
+                actual: accepted_generation,
             });
         }
-        let recorded_edits = edits.clone();
+        let recorded_edits = match state.phase {
+            StatePhase::Registering(_) => edits.clone(),
+            StatePhase::Ready(_) => Vec::new(),
+        };
         let namespace = state
             .data
             .plugins
@@ -261,12 +269,14 @@ impl PluginStateStore {
                 limit: STORE_LIMIT,
             });
         }
-        let generation = namespace
-            .generation
+        let generation = accepted_generation
             .checked_add(1)
             .expect("plugin generation exhausted");
         namespace.values = values;
         namespace.generation = generation;
+        state
+            .acceptance_generations
+            .insert(self.plugin_id().into(), generation);
         state.record(self.plugin_id(), recorded_edits);
         Ok(generation)
     }
@@ -298,7 +308,7 @@ mod tests;
 #[derive(Debug)]
 enum StatePhase {
     Registering(Vec<(String, Vec<PluginStateEdit>)>),
-    Ready,
+    Ready(Vec<(String, Vec<PluginStateEdit>)>),
 }
 
 #[derive(Debug)]
@@ -306,9 +316,9 @@ pub(super) struct PluginStateRegistry {
     pub(super) data: PluginState,
     phase: StatePhase,
     source: Option<crate::BlobRef>,
-    /// An accepted write landed since `data` was hydrated from `source`:
-    /// `data` no longer equals that hydration.
-    tail: bool,
+    /// Resident guards outlive checkpoint adoption. Checkpoint generations
+    /// describe restored data; these tokens must never authorize another value.
+    acceptance_generations: BTreeMap<String, u64>,
 }
 impl Default for PluginStateRegistry {
     fn default() -> Self {
@@ -316,7 +326,7 @@ impl Default for PluginStateRegistry {
             data: PluginState::default(),
             phase: StatePhase::Registering(Vec::new()),
             source: None,
-            tail: false,
+            acceptance_generations: BTreeMap::new(),
         }
     }
 }
@@ -329,36 +339,37 @@ impl PluginStateRegistry {
             ..Self::default()
         }
     }
-    /// Registration writes are replayed over every hydration, so they are
+    /// Materialization writes are replayed over every hydration, so they are
     /// part of it; a write accepted once ready is a tail the source lacks.
     fn record(&mut self, id: &str, edits: Vec<PluginStateEdit>) {
         match &mut self.phase {
             StatePhase::Registering(log) => log.push((id.into(), edits)),
-            StatePhase::Ready => self.tail = true,
+            StatePhase::Ready(_) => self.source = None,
         }
     }
     pub(super) fn initialize(
         &mut self,
         snapshot: Option<&PluginState>,
     ) -> Result<(), PluginStateError> {
-        let StatePhase::Registering(log) = std::mem::replace(&mut self.phase, StatePhase::Ready)
+        let StatePhase::Registering(log) =
+            std::mem::replace(&mut self.phase, StatePhase::Ready(Vec::new()))
         else {
             unreachable!("initialize once")
         };
         if let Some(snapshot) = snapshot {
             let candidate = Arc::new(Mutex::new(Self {
                 data: snapshot.clone(),
-                phase: StatePhase::Ready,
+                phase: StatePhase::Ready(Vec::new()),
                 source: None,
-                tail: false,
+                acceptance_generations: BTreeMap::new(),
             }));
-            for (id, edits) in log {
+            for (id, edits) in &log {
                 PluginStateStore::bind(
                     &crate::RuntimeOwner::Session(SessionId::from("")),
-                    &id,
+                    id,
                     candidate.clone(),
                 )
-                .apply(edits)?;
+                .apply(edits.clone())?;
             }
             let mut hydrated = candidate.lock_recover().data.clone();
             for id in self.data.plugins.keys() {
@@ -367,7 +378,14 @@ impl PluginStateRegistry {
             self.data = hydrated;
             self.source = Some(state_ref(snapshot));
         }
+        self.phase = StatePhase::Ready(log);
         Ok(())
+    }
+    fn generation(&self, id: &str) -> u64 {
+        self.acceptance_generations
+            .get(id)
+            .copied()
+            .unwrap_or(self.data.plugins[id].generation)
     }
     pub(super) fn matches_ref(&self, reference: &crate::BlobRef) -> bool {
         self.source.as_ref() == Some(reference) || state_ref(&self.data) == *reference
@@ -375,38 +393,78 @@ impl PluginStateRegistry {
     pub(super) fn was_hydrated_from(&self, snapshot: &PluginState) -> bool {
         self.source.as_ref() == Some(&state_ref(snapshot)) || self.data == *snapshot
     }
-    /// Adopt a recorded head's plugin state as the live state. The recorded
-    /// head is durable truth: the drive that committed it owned the head
-    /// (FIG-4202), so an accepted write the head does not carry is an
-    /// uncommitted tail, and the live state drops it exactly as a cold
-    /// rebuild from that head would (ADR 0078 §5). A namespace bound live
-    /// but absent from the head stays bound, at its default. Only a live
-    /// state still equal to its hydration from this head is left as it is:
-    /// a head the bound turn left unchanged still drops the tail.
+    /// Reconstruct the head plus accepted materialization edits. Those edits
+    /// were validated during materialization; replay changes no acceptance decision.
+    #[expect(
+        clippy::expect_used,
+        reason = "a u64 plugin generation counter cannot be exhausted"
+    )]
+    fn hydrated_data(&self, snapshot: &PluginState) -> PluginState {
+        let mut hydrated = snapshot.clone();
+        let log = match &self.phase {
+            StatePhase::Registering(log) | StatePhase::Ready(log) => log,
+        };
+        for (id, edits) in log {
+            let namespace = hydrated.plugins.entry(id.clone()).or_default();
+            for edit in edits {
+                match edit {
+                    PluginStateEdit::Set { key, value } => {
+                        let mut value = value.clone();
+                        value.sort_all_objects();
+                        namespace.values.insert(key.clone(), value);
+                    }
+                    PluginStateEdit::Remove { key } => {
+                        namespace.values.remove(key);
+                    }
+                }
+            }
+            namespace.generation = namespace
+                .generation
+                .checked_add(1)
+                .expect("plugin generation exhausted");
+        }
+        for id in self.data.plugins.keys() {
+            hydrated.plugins.entry(id.clone()).or_default();
+        }
+        hydrated
+    }
+
+    /// Adopt the same checkpoint data as a cold materialization, discarding
+    /// uncommitted Ready writes. Resident guard tokens remain monotonic and
+    /// changing content invalidates guards issued before the adoption.
+    #[expect(
+        clippy::expect_used,
+        reason = "a u64 plugin generation counter cannot be exhausted"
+    )]
     pub(super) fn hydrate_live(&mut self, snapshot: &PluginState) {
-        if !self.tail && self.was_hydrated_from(snapshot) {
+        if self.was_hydrated_from(snapshot) {
             return;
         }
-        let empty = PluginNamespaceState::default();
-        for (id, live) in &self.data.plugins {
-            let recorded = snapshot.plugins.get(id).unwrap_or(&empty);
-            if recorded.generation <= live.generation && recorded != live {
-                tracing::info!(
-                    event = "plugin_state.uncommitted_tail_dropped",
-                    plugin_id = %id,
-                    live_generation = live.generation,
-                    recorded_generation = recorded.generation,
-                    "live plugin state adopted a recorded head that does not carry its accepted writes"
-                );
+        let hydrated = self.hydrated_data(snapshot);
+        for (id, recorded) in &hydrated.plugins {
+            let Some(live) = self.data.plugins.get(id) else {
+                continue;
+            };
+            let mut generation = self.generation(id);
+            if recorded != live {
+                if recorded.generation <= generation {
+                    tracing::info!(
+                        event = "plugin_state.uncommitted_tail_dropped",
+                        plugin_id = %id,
+                        live_generation = generation,
+                        recorded_generation = recorded.generation,
+                        "live plugin state adopted a recorded head that does not carry its accepted writes"
+                    );
+                }
+                generation = generation
+                    .checked_add(1)
+                    .expect("plugin generation exhausted");
             }
+            self.acceptance_generations
+                .insert(id.clone(), generation.max(recorded.generation));
         }
-        let resident_ids = self.data.plugins.keys().cloned().collect::<Vec<_>>();
-        self.data = snapshot.clone();
-        for id in resident_ids {
-            self.data.plugins.entry(id).or_default();
-        }
+        self.data = hydrated;
         self.source = Some(state_ref(snapshot));
-        self.tail = false;
     }
 }
 #[expect(

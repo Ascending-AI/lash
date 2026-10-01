@@ -51,8 +51,13 @@ A namespace begins at generation zero. `set` and an accepted `apply` or
 `apply_guarded` advance it once, regardless of batch size or equal values.
 `remove` advances it only when the key exists. Removing an absent key returns
 the current generation. Guards compare the expected generation under the same
-mutex as the write. Counters are local to an owner and plugin, except that a
-fork inherits the captured counter.
+mutex as the write. Counters are local to a resident owner and plugin. Hydration
+restores the checkpoint generation and retains a resident acceptance-token
+high-water mark.
+Changing the restored namespace advances that token, so `apply_guarded` never
+accepts a token observed for different content. The next accepted write carries
+the advanced token into the checkpoint. A cold rebuild or fork inherits the
+captured counter without the old resident's uncommitted tokens.
 
 ### 4. Where the store is exposed
 
@@ -61,8 +66,10 @@ fork inherits the captured counter.
 registration handle; shared hook contexts need no plugin-id selector.
 
 Materialization hydrates namespaces before registration so reads and size checks
-see durable data. Initialization applies accepted registration edits to that
-snapshot once, then `session_ready` observes the resulting state. The plugin
+see durable data. `session_ready` observes registration's accepted edits on
+that snapshot.
+Initialization finalizes the accepted registration and readiness edits as one
+materialization log. Later writes invalidate its hydration source. The plugin
 view of the host cannot export other namespaces.
 
 ### 5. Read-your-writes, and the durability boundary
@@ -86,9 +93,11 @@ Per-key generations add no useful invalidation boundary because capture writes
 the whole component. A resident hydration adopts the recorded head's
 namespaces. The head is durable truth, committed by the drive that owned it
 (ADR 0105), so accepted writes it does not carry are an uncommitted tail: the
-hydration drops them, as a cold rebuild from that head does (§5), and traces
-the drop. A namespace bound live but absent from the head stays bound at its
-default.
+hydration drops them, replays the materialization log as a cold rebuild from
+that head does (§5), and traces the drop. A namespace bound live but absent
+from the head stays bound with its materialization edits or its default values.
+Resident acceptance tokens do not alter the restored checkpoint bytes, so an
+unchanged recorded head still parks without a write.
 
 ### 7. Fork
 

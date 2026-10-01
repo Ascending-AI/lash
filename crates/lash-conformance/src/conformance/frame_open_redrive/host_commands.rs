@@ -1218,6 +1218,7 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
     .await;
     let recorded_before = recorded_host_plugin_namespace(&law).await;
     let refused_runtime = std::sync::OnceLock::new();
+    let refused_state = std::sync::OnceLock::new();
     let while_held = hold.while_held(async {
         let before = law.head().await.head_revision;
         let dirty = build_runtime(&law.parts, None).await;
@@ -1228,6 +1229,11 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
             )
             .expect("the plugin write is accepted");
         assert_eq!(accepted, recorded_before.generation + 1);
+        assert!(
+            refused_state
+                .set((host_plugin_state(&dirty), accepted))
+                .is_ok()
+        );
         let Err(refused) = Box::pin(dirty.park()).await else {
             panic!("a plugin-state-dirty park while the bound turn owns the head is busy");
         };
@@ -1284,6 +1290,18 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
         after_turn,
         "a re-park rehydrated from the recorded head writes nothing"
     );
+    let (resident, accepted) = refused_state
+        .into_inner()
+        .expect("the refused runtime's state");
+    assert!(
+        resident.generation() > accepted,
+        "adopting a head never rewinds or reuses a resident guard token"
+    );
+    assert!(matches!(
+        resident.apply_guarded(accepted, vec![]),
+        Err(lash_core::PluginStateError::GenerationConflict { .. })
+    ));
+    assert_eq!(resident.get(TAIL_KEY), None);
     let recorded = recorded_host_plugin_namespace(&law).await;
     assert_eq!(
         (recorded.values.get(TAIL_KEY), recorded.generation),
