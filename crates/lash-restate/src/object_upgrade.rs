@@ -38,7 +38,7 @@ pub struct UpgradableFamily {
 }
 
 impl UpgradableFamily {
-    const fn of(service: &'static str, family: &ObjectFamily) -> Self {
+    pub(crate) const fn of(service: &'static str, family: &ObjectFamily) -> Self {
         Self {
             service,
             component: family.component,
@@ -47,28 +47,7 @@ impl UpgradableFamily {
     }
 }
 
-/// Every Lash object family that keeps a `_compat` record, and so binds an
-/// `upgrade` handler. A `LashTurn` outcome is workflow state no handler may
-/// rewrite once the workflow ends, so it is read through its permanent
-/// history floor instead and is never swept.
-pub const UPGRADABLE_OBJECT_FAMILIES: [UpgradableFamily; 4] = [
-    UpgradableFamily::of(
-        "EffectGroupIndex",
-        &crate::effect_group::EFFECT_GROUP_STATE_FAMILY,
-    ),
-    UpgradableFamily::of(
-        "EffectGroupDrainIndex",
-        &crate::effect_group::EFFECT_GROUP_STATE_FAMILY,
-    ),
-    UpgradableFamily::of(
-        "EffectGroupPayload",
-        &crate::effect_group::EFFECT_GROUP_PAYLOAD_FAMILY,
-    ),
-    UpgradableFamily::of(
-        "LashDurableWaitIndex",
-        &crate::durable_wait::DURABLE_WAIT_REGISTRY_FAMILY,
-    ),
-];
+pub use crate::services::UPGRADABLE_OBJECT_FAMILIES;
 
 /// One object still at an older family format.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -573,16 +552,6 @@ mod tests {
 
     #[test]
     fn every_object_family_binds_an_upgrade_and_its_newest_format() {
-        let services = UPGRADABLE_OBJECT_FAMILIES.map(|family| family.service);
-        assert_eq!(
-            services,
-            [
-                "EffectGroupIndex",
-                "EffectGroupDrainIndex",
-                "EffectGroupPayload",
-                "LashDurableWaitIndex"
-            ]
-        );
         for family in UPGRADABLE_OBJECT_FAMILIES {
             let declared = lash_core_store::compat::descriptor(family.component)
                 .expect("every family declares a descriptor");

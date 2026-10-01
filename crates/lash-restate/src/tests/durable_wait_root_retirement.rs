@@ -1,5 +1,6 @@
 use super::process_await_redrive::{fig1943_apply_state_commands, fig1943_invocation_with_state};
 use super::*;
+use crate::durable_wait::IndexedWait;
 use crate::object_state::StampedValue;
 
 #[tokio::test]
@@ -39,11 +40,13 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
         let address = RestateDurableWaitAddress::for_key(&key);
         state.insert(
             durable_wait_index_state_key(&address),
-            stamped(serde_json::to_value(&key).expect("encode key")),
-        );
-        state.insert(
-            format!("wait-index/v2/resolution/{}", address.workflow_key),
-            stamped(serde_json::to_value(Resolution::Cancelled).expect("encode terminal")),
+            stamped(
+                serde_json::to_value(IndexedWait {
+                    key,
+                    terminal: Some(Resolution::Cancelled),
+                })
+                .expect("encode the indexed wait"),
+            ),
         );
         let output = invoke_endpoint_body(
             &endpoint,
@@ -100,16 +103,17 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
         .expect("derive a concurrent root's key");
         let address = RestateDurableWaitAddress::for_key(&key);
         let wait_key = durable_wait_index_state_key(&address);
-        let resolution_key = format!("wait-index/v2/resolution/{}", address.workflow_key);
         state.insert(
             wait_key.clone(),
-            stamped(serde_json::to_value(&key).expect("encode key")),
+            stamped(
+                serde_json::to_value(IndexedWait {
+                    key,
+                    terminal: Some(Resolution::Cancelled),
+                })
+                .expect("encode the indexed wait"),
+            ),
         );
-        state.insert(
-            resolution_key.clone(),
-            stamped(serde_json::to_value(Resolution::Cancelled).expect("encode terminal")),
-        );
-        keys.push((wait_key, resolution_key));
+        keys.push(wait_key);
     }
     let close = |state: &BTreeMap<String, Vec<u8>>| {
         fig1943_invocation_with_state(
@@ -131,12 +135,11 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
     .await
     .expect("retire the closed root");
     fig1943_apply_state_commands(&mut state, &output);
-    for key in [&keys[0].0, &keys[0].1] {
-        assert!(!state.contains_key(key), "the closed root's row is retired");
-    }
-    for key in [&keys[1].0, &keys[1].1] {
-        assert!(state.contains_key(key), "the live root's row survives");
-    }
+    assert!(
+        !state.contains_key(&keys[0]),
+        "the closed root's row is retired"
+    );
+    assert!(state.contains_key(&keys[1]), "the live root's row survives");
     let before_retry = state.clone();
     let retry = invoke_endpoint_body(
         &endpoint,
@@ -436,10 +439,9 @@ pub(super) async fn late_terminal_attach_does_not_restore_a_closed_roots_index_r
         "the settled terminal registration must be retired"
     );
     assert!(
-        !state.contains_key(&format!(
-            "wait-index/v2/resolution/{}",
-            address.workflow_key
-        )),
+        !state
+            .keys()
+            .any(|key| key.starts_with("wait-index/v2/wait/")),
         "the workflow promise owns the terminal result"
     );
 }

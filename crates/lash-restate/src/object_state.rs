@@ -2,7 +2,7 @@
 //! §3.2–3.3; FIG-4041).
 //!
 //! Every value a Lash Restate object retains — the durable-wait index's
-//! metadata, wait, resolution, marker and membership rows, the effect-group
+//! metadata, indexed wait, marker and membership rows, the effect-group
 //! index record, and the effect-group payload's bytes and retirement fence —
 //! is stored under an explicit [`StampedValue`] envelope. Readers dispatch on
 //! the `format` stamp: the newest format decodes directly, an older stamp the

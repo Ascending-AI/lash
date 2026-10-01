@@ -219,6 +219,53 @@ async fn the_endpoint_builder_binds_every_lash_service() {
 }
 
 #[tokio::test]
+async fn every_bound_upgrade_is_declared_in_the_service_table() {
+    let (backend, worker) = backend_and_process_worker().await;
+    let endpoint = backend.endpoint_builder(worker).build();
+    let document = discovery_document(&endpoint).await;
+    let bound: BTreeSet<_> = document["services"]
+        .as_array()
+        .expect("services")
+        .iter()
+        .filter(|service| {
+            service["handlers"]
+                .as_array()
+                .expect("handlers")
+                .iter()
+                .any(|handler| handler["name"] == "upgrade")
+        })
+        .map(|service| service["name"].as_str().expect("service name").to_string())
+        .collect();
+    let table = include_str!("../services.rs")
+        .split_once("lash_services! {")
+        .expect("the service table")
+        .1
+        .split_once('}')
+        .expect("the service table ends")
+        .0;
+    let declared: BTreeSet<_> = table
+        .lines()
+        .filter(|line| line.contains("object("))
+        .map(|line| {
+            line.split('"')
+                .nth(1)
+                .expect("the service's name")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        declared, bound,
+        "the service table owns every bound upgrade family"
+    );
+    let swept: BTreeSet<_> = crate::UPGRADABLE_OBJECT_FAMILIES
+        .iter()
+        .map(|family| family.service.to_string())
+        .collect();
+    assert_eq!(swept, bound, "the sweep visits every bound upgrade handler");
+    assert_eq!(swept.len(), crate::UPGRADABLE_OBJECT_FAMILIES.len());
+}
+
+#[tokio::test]
 async fn durable_wait_and_effect_group_indexes_load_state_lazily() {
     let (backend, worker) = backend_and_process_worker().await;
     let endpoint = backend.endpoint_builder(worker).build();

@@ -1630,7 +1630,6 @@ pub(super) async fn a_gated_wait_registry_call_reads_no_row_per_retained_fence()
     let metadata =
         serde_json::to_value(crate::durable_wait::RestateDurableWaitIndexMetadata::default())
             .expect("encode the registry metadata");
-    let fence = serde_json::to_value(Resolution::Cancelled).expect("encode a retained fence");
 
     let mut reads = Vec::new();
     for fences in [1_usize, 64] {
@@ -1642,9 +1641,21 @@ pub(super) async fn a_gated_wait_registry_call_reads_no_row_per_retained_fence()
             ),
         ]);
         for index in 0..fences {
+            let key = restate_await_event_key(
+                &durable_turn_scope(object_key, format!("turn-{index:03}")),
+                AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .expect("derive a retained gate");
+            let address = RestateDurableWaitAddress::for_key(&key);
             state.insert(
-                format!("wait-index/v2/resolution/fence-{index:03}"),
-                stamped(fence.clone()),
+                durable_wait_index_state_key(&address),
+                stamped(
+                    serde_json::to_value(crate::durable_wait::IndexedWait {
+                        key,
+                        terminal: Some(Resolution::Cancelled),
+                    })
+                    .expect("encode a retained gate"),
+                ),
             );
         }
         let output = invoke_endpoint_body(
@@ -1804,13 +1815,15 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     );
     fig1943_apply_state_commands(&mut state, &registered);
     let state_key = durable_wait_index_state_key(&RestateDurableWaitAddress::for_key(&key));
-    let indexed_key: AwaitEventKey = serde_json::from_slice::<StampedValue<AwaitEventKey>>(
-        state
-            .get(&state_key)
-            .expect("FIG-2005 index state stores the key preimage"),
-    )
-    .expect("decode FIG-2005 indexed key preimage")
-    .body;
+    let indexed_key: AwaitEventKey =
+        serde_json::from_slice::<StampedValue<crate::durable_wait::IndexedWait>>(
+            state
+                .get(&state_key)
+                .expect("FIG-2005 index state stores the key preimage"),
+        )
+        .expect("decode FIG-2005 indexed key preimage")
+        .body
+        .key;
     assert_eq!(indexed_key, key);
 
     let terminal = Resolution::Ok(serde_json::json!({ "tool_result": "complete" }));

@@ -147,21 +147,17 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
-/// metadata, wait, resolution, marker, and membership rows alike. It is also
+/// metadata, indexed wait, marker, and membership rows alike. It is also
 /// the family format of every `LashDurableWaitIndex` object's `_compat`
 /// record (ADR 0115 §3.2). Bump it when a stored shape under those keys
 /// changes, and register the previous format's lift in
 /// `lash_core::store::RECORD_UPCASTERS`.
 ///
 /// version_guard(
-///     roots(RestateDurableWaitIndexMetadata),
-///     roots(
-///         path = "crates/lash-restate/src/durable_wait/messages.rs",
-///         RestateDurableWaitClassification,
-///     ),
+///     roots(RestateDurableWaitIndexMetadata, IndexedWait),
 ///     items(
 ///         DURABLE_WAIT_REGISTRY_FORMATS, DURABLE_WAIT_INDEX_METADATA_KEY,
-///         DURABLE_WAIT_INDEX_WAIT_PREFIX, DURABLE_WAIT_INDEX_RESOLUTION_PREFIX,
+///         DURABLE_WAIT_INDEX_WAIT_PREFIX,
 ///         DURABLE_WAIT_INDEX_EFFECT_PREFIX, DURABLE_WAIT_INDEX_GROUP_PREFIX,
 ///         DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
 ///     ),
@@ -188,7 +184,12 @@ pub(crate) const DURABLE_WAIT_REGISTRY_FAMILY: ObjectFamily = ObjectFamily {
 };
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
-const DURABLE_WAIT_INDEX_RESOLUTION_PREFIX: &str = "wait-index/v2/resolution/";
+/// One wait's retained authority and mirrored terminal, for every scope kind.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub(crate) struct IndexedWait {
+    pub(crate) key: AwaitEventKey,
+    pub(crate) terminal: Option<Resolution>,
+}
 /// An effect executing under the scope inside a handler, keyed by replay
 /// key: recorded at start, cleared at completion (FIG-2499 quiescence).
 const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
@@ -808,21 +809,7 @@ impl LashDurableWaitRegistryImpl {
 }
 
 pub(crate) fn durable_wait_index_state_key(address: &RestateDurableWaitAddress) -> String {
-    let classification = match address.classification {
-        RestateDurableWaitClassification::DurableWait => "durable",
-        RestateDurableWaitClassification::TurnControl => "control",
-    };
-    format!(
-        "{DURABLE_WAIT_INDEX_WAIT_PREFIX}{classification}/{}",
-        address.workflow_key
-    )
-}
-
-fn durable_wait_index_resolution_key(address: &RestateDurableWaitAddress) -> String {
-    format!(
-        "{DURABLE_WAIT_INDEX_RESOLUTION_PREFIX}{}",
-        address.workflow_key
-    )
+    format!("{DURABLE_WAIT_INDEX_WAIT_PREFIX}{}", address.workflow_key)
 }
 
 pub(crate) fn durable_wait_index_object_key(address: &RestateDurableWaitAddress) -> String {
@@ -871,19 +858,12 @@ pub(crate) fn durable_wait_address_from_state_key(
     key: &AwaitEventKey,
     state_key: &str,
 ) -> Option<RestateDurableWaitAddress> {
-    let suffix = state_key.strip_prefix(DURABLE_WAIT_INDEX_WAIT_PREFIX)?;
-    let (classification, workflow_key) = suffix.split_once('/')?;
+    let workflow_key = state_key.strip_prefix(DURABLE_WAIT_INDEX_WAIT_PREFIX)?;
     if workflow_key.is_empty() || workflow_key.contains('/') {
         return None;
     }
-    let state_classification = match classification {
-        "durable" => RestateDurableWaitClassification::DurableWait,
-        "control" => RestateDurableWaitClassification::TurnControl,
-        _ => return None,
-    };
     let address = RestateDurableWaitAddress::for_key(key);
-    (address.workflow_key == workflow_key && address.classification == state_classification)
-        .then_some(address)
+    (address.workflow_key == workflow_key).then_some(address)
 }
 
 /// Load the index's metadata, initializing it for a pristine object.
@@ -944,7 +924,7 @@ async fn read_durable_wait_index_metadata(
     Ok(Some(RestateDurableWaitIndexMetadata::default()))
 }
 
-async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey>, TerminalError> {
+async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<IndexedWait>, TerminalError> {
     let mut waits = Vec::new();
     for state_key in ctx
         .get_keys()
@@ -952,7 +932,7 @@ async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey
         .into_iter()
         .filter(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_WAIT_PREFIX))
     {
-        let key: AwaitEventKey =
+        let wait: IndexedWait =
             object_state::get_stamped(ctx, &state_key, &DURABLE_WAIT_REGISTRY_FORMATS)
                 .await?
                 .ok_or_else(|| {
@@ -960,11 +940,12 @@ async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey
                         "durable-wait index entry {state_key} has no key preimage"
                     ))
                 })?;
-        let address = durable_wait_address_from_state_key(&key, &state_key).ok_or_else(|| {
-            TerminalError::new(format!(
-                "durable-wait index entry {state_key} does not match its key preimage"
-            ))
-        })?;
+        let address =
+            durable_wait_address_from_state_key(&wait.key, &state_key).ok_or_else(|| {
+                TerminalError::new(format!(
+                    "durable-wait index entry {state_key} does not match its key preimage"
+                ))
+            })?;
         let expected_object_key = address.index_key();
         if expected_object_key != ctx.key() {
             return Err(TerminalError::new(format!(
@@ -972,7 +953,7 @@ async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey
                 ctx.key()
             )));
         }
-        waits.push(key);
+        waits.push(wait);
     }
     Ok(waits)
 }
@@ -988,18 +969,11 @@ async fn read_outstanding_waits(
     }
 
     let mut outstanding = Vec::new();
-    for key in load_indexed_waits(ctx).await? {
-        let address = RestateDurableWaitAddress::for_key(&key);
-        if object_state::get_stamped::<Resolution>(
-            ctx,
-            &durable_wait_index_resolution_key(&address),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
-        )
-        .await?
-        .is_none()
-            && !metadata.is_cancel_decided(&key.scope, &key.wait)?
+    for wait in load_indexed_waits(ctx).await? {
+        if wait.terminal.is_none()
+            && !metadata.is_cancel_decided(&wait.key.scope, &wait.key.wait)?
         {
-            outstanding.push(key);
+            outstanding.push(wait.key);
         }
     }
     outstanding.sort_unstable_by(|left, right| left.key_id.cmp(&right.key_id));
@@ -1046,29 +1020,25 @@ fn mirror_resolve_outcome(
         ResolveOutcome::Accepted => accepted_terminal,
         ResolveOutcome::UnknownOrRevoked => return,
     };
-    retain_turn_wait_preimage(ctx, writer, key, address);
-    object_state::set_stamped(
-        ctx,
-        &durable_wait_index_resolution_key(address),
-        writer,
-        terminal,
-    );
+    store_indexed_wait(ctx, writer, key, address, Some(terminal));
 }
 
-fn retain_turn_wait_preimage(
+fn store_indexed_wait(
     ctx: &ObjectContext<'_>,
     writer: StoredValueWriter,
     key: &AwaitEventKey,
     address: &RestateDurableWaitAddress,
+    terminal: Option<Resolution>,
 ) {
-    if matches!(key.scope, ExecutionScope::Turn { .. }) {
-        object_state::set_stamped(
-            ctx,
-            &durable_wait_index_state_key(address),
-            writer,
-            key.clone(),
-        );
-    }
+    object_state::set_stamped(
+        ctx,
+        &durable_wait_index_state_key(address),
+        writer,
+        IndexedWait {
+            key: key.clone(),
+            terminal,
+        },
+    );
 }
 
 /// Revoke the index: fence it, revoke its awakeables, and cancel its waits.
@@ -1081,7 +1051,12 @@ async fn revoke_index(
     only_if_quiescent: bool,
 ) -> HandlerResult<bool> {
     let mut metadata = load_durable_wait_index_metadata(ctx, object.writer).await?;
-    let waits = load_indexed_waits(ctx).await?;
+    let waits: Vec<_> = load_indexed_waits(ctx)
+        .await?
+        .into_iter()
+        .filter(|wait| wait.terminal.is_none())
+        .map(|wait| wait.key)
+        .collect();
     let keys = ctx.get_keys().await?;
     if keys
         .iter()
@@ -1241,16 +1216,17 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         if metadata.is_some_and(|metadata| metadata.revoked) {
             return Ok(Reply::at(wire, RestateTurnGatePeek::Revoked));
         }
-        let resolution_key = durable_wait_index_resolution_key(&address);
+        let state_key = durable_wait_index_state_key(&address);
         Ok(Reply::at(
             wire,
             RestateTurnGatePeek::Open(
-                object_state::get_stamped_shared(
+                object_state::get_stamped_shared::<IndexedWait>(
                     &ctx,
-                    &resolution_key,
+                    &state_key,
                     &DURABLE_WAIT_REGISTRY_FORMATS,
                 )
-                .await?,
+                .await?
+                .and_then(|wait| wait.terminal),
             ),
         ))
     }
@@ -1276,21 +1252,17 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let registration = if metadata.revoked {
             RestateDurableWaitRegistration::Revoked
-        } else if let Some(resolution) = object_state::get_stamped::<Resolution>(
+        } else if let Some(resolution) = object_state::get_stamped::<IndexedWait>(
             &ctx,
-            &durable_wait_index_resolution_key(&address),
+            &durable_wait_index_state_key(&address),
             &DURABLE_WAIT_REGISTRY_FORMATS,
         )
         .await?
+        .and_then(|wait| wait.terminal)
         {
             RestateDurableWaitRegistration::Resolved(resolution)
         } else {
-            object_state::set_stamped(
-                &ctx,
-                &durable_wait_index_state_key(&address),
-                object.writer,
-                request.key.clone(),
-            );
+            store_indexed_wait(&ctx, object.writer, &request.key, &address, None);
             RestateDurableWaitRegistration::Registered
         };
         #[cfg(test)]
@@ -1306,25 +1278,24 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let (wire, request) = call.open()?;
         let object = self.admit(&ctx).await?;
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
+        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
+        if metadata.revoked {
+            return Ok(Reply::at(wire, ()));
+        }
         if matches!(request.key.wait, AwaitEventWaitIdentity::TurnTerminal) {
             // A late attach may register after CloseRootScope retired the root.
             // Its workflow promise already owns the terminal; settling the
             // attach must not restore a session-lifetime index row.
             ctx.clear(&durable_wait_index_state_key(&address));
-            ctx.clear(&durable_wait_index_resolution_key(&address));
             return Ok(Reply::at(wire, ()));
         }
-        retain_turn_wait_preimage(&ctx, object.writer, &request.key, &address);
-        object_state::set_stamped(
+        store_indexed_wait(
             &ctx,
-            &durable_wait_index_resolution_key(&address),
             object.writer,
-            request.resolution,
+            &request.key,
+            &address,
+            Some(request.resolution),
         );
-        if !matches!(request.key.scope, ExecutionScope::Turn { .. }) {
-            ctx.clear(&durable_wait_index_state_key(&address));
-        }
         Ok(Reply::at(wire, ()))
     }
 
@@ -1340,12 +1311,13 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         if metadata.revoked {
             return Ok(Reply::at(wire, RestateDurableWaitRegistration::Revoked));
         }
-        if let Some(resolution) = object_state::get_stamped::<Resolution>(
+        if let Some(resolution) = object_state::get_stamped::<IndexedWait>(
             &ctx,
-            &durable_wait_index_resolution_key(&address),
+            &durable_wait_index_state_key(&address),
             &DURABLE_WAIT_REGISTRY_FORMATS,
         )
         .await?
+        .and_then(|wait| wait.terminal)
         {
             resolve_durable_wait_awakeable(&ctx, &request, &resolution);
             return Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered));
@@ -1424,13 +1396,14 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 ),
             ));
         }
-        let resolution_key = durable_wait_index_resolution_key(&address);
-        if let Some(terminal) = object_state::get_stamped::<Resolution>(
+        let state_key = durable_wait_index_state_key(&address);
+        if let Some(terminal) = object_state::get_stamped::<IndexedWait>(
             &ctx,
-            &resolution_key,
+            &state_key,
             &DURABLE_WAIT_REGISTRY_FORMATS,
         )
         .await?
+        .and_then(|wait| wait.terminal)
         {
             return Ok(Reply::at(
                 wire,
@@ -1532,14 +1505,13 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let (wire, ()) = call.open()?;
         let object = self.admit(&ctx).await?;
         let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-        let (waits, _controls) = split_cancellable_waits(load_indexed_waits(&ctx).await?);
-        for key in &waits {
-            if !matches!(key.scope, ExecutionScope::Turn { .. }) {
-                ctx.clear(&durable_wait_index_state_key(
-                    &RestateDurableWaitAddress::for_key(key),
-                ));
-            }
-        }
+        let (waits, _controls) = split_cancellable_waits(
+            load_indexed_waits(&ctx)
+                .await?
+                .into_iter()
+                .map(|wait| wait.key)
+                .collect(),
+        );
         resolve_indexed_waits(&ctx, object.writer, &self.namespace, waits, true).await?;
         Ok(Reply::at(wire, ()))
     }

@@ -1,6 +1,6 @@
 use super::process_await_redrive::fig1943_invocation_with_state;
 use super::*;
-use crate::durable_wait::{RestateDurableWaitIndexRequest, RestateTurnGatePeek};
+use crate::durable_wait::{IndexedWait, RestateDurableWaitIndexRequest, RestateTurnGatePeek};
 use crate::object_state::StampedValue;
 
 fn stamped(body: serde_json::Value) -> Vec<u8> {
@@ -78,11 +78,14 @@ pub(super) async fn the_session_index_answers_a_turn_gate_peek_in_one_shared_rea
         "a gate the index holds no terminal for is open"
     );
     state.insert(
-        format!(
-            "wait-index/v2/resolution/{}",
-            RestateDurableWaitAddress::for_key(&gate).workflow_key
+        durable_wait_index_state_key(&RestateDurableWaitAddress::for_key(&gate)),
+        stamped(
+            serde_json::to_value(IndexedWait {
+                key: gate.clone(),
+                terminal: Some(sealed.clone()),
+            })
+            .expect("encode the indexed gate"),
         ),
-        stamped(serde_json::to_value(&sealed).expect("encode the gate's terminal")),
     );
     assert_eq!(
         peek_turn_gate(&gate, &state).await,

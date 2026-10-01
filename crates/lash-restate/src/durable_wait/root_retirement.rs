@@ -59,11 +59,12 @@ pub(super) async fn retire_root(
         .into());
     }
     let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
-    for key in load_indexed_waits(&ctx)
+    for wait in load_indexed_waits(&ctx)
         .await?
         .into_iter()
-        .filter(|key| belongs_to_closed_root(key, &request.session_id, &request.root))
+        .filter(|wait| belongs_to_closed_root(&wait.key, &request.session_id, &request.root))
     {
+        let key = wait.key;
         let address = RestateDurableWaitAddress::for_key(&key);
         if owes_published_terminal(&key, request.committed_turn.as_ref()) {
             // Its commit's terminal wins the promise, not a `Cancelled` from
@@ -78,22 +79,13 @@ pub(super) async fn retire_root(
                 .into_body();
             if landed.is_some() {
                 ctx.clear(&durable_wait_index_state_key(&address));
-                ctx.clear(&durable_wait_index_resolution_key(&address));
             }
             continue;
         }
-        if object_state::get_stamped::<Resolution>(
-            &ctx,
-            &durable_wait_index_resolution_key(&address),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
-        )
-        .await?
-        .is_none()
-        {
+        if wait.terminal.is_none() {
             resolve_indexed_waits(&ctx, object.writer, namespace, vec![key.clone()], false).await?;
         }
         ctx.clear(&durable_wait_index_state_key(&address));
-        ctx.clear(&durable_wait_index_resolution_key(&address));
     }
 
     let before = metadata.cancel_decided.len() + metadata.awakeables.len();

@@ -329,7 +329,7 @@ impl LaneClass {
 /// Declares [`LashService`] and its complete [`LASH_SERVICES`] together, so
 /// a variant cannot exist without being listed, named and classed.
 macro_rules! lash_services {
-    ($($(#[$doc:meta])* $variant:ident => $name:literal, $class:ident;)+) => {
+    ($($(#[$doc:meta])* $variant:ident => $name:literal, $class:ident $(, object($family:path))?;)+) => {
         /// A Restate service lash itself serves.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub(crate) enum LashService {
@@ -338,6 +338,12 @@ macro_rules! lash_services {
 
         /// Every service lash serves, each once.
         pub(crate) const LASH_SERVICES: &[LashService] = &[$(LashService::$variant,)+];
+
+        /// Every mutable object family, derived from the service table.
+        /// Workflow history is immutable and is never swept.
+        pub const UPGRADABLE_OBJECT_FAMILIES: &[crate::object_upgrade::UpgradableFamily] = &[
+            $($(crate::object_upgrade::UpgradableFamily::of($name, &$family),)?)+
+        ];
 
         impl LashService {
             /// The service's stable name in the default namespace. A call
@@ -364,17 +370,17 @@ lash_services! {
     /// Exact-address promises and deadline timers for every await-event key.
     DurableWaitWorkflow => "LashDurableWaitWorkflow", Shared;
     /// The per-scope registry that cancels, revokes and fences a scope's waits.
-    DurableWaitRegistry => "LashDurableWaitIndex", Shared;
+    DurableWaitRegistry => "LashDurableWaitIndex", Shared, object(crate::durable_wait::DURABLE_WAIT_REGISTRY_FAMILY);
     /// The segment runner a process submission starts and awaits.
     ProcessWorkflow => "LashProcessWorkflow", Pinned;
     /// Arms a process terminal for a caller parked on it.
     ProcessAttach => "LashProcessAttach", Shared;
     /// An effect group's lifecycle and settlement rank.
-    EffectGroupState => "EffectGroupIndex", Shared;
+    EffectGroupState => "EffectGroupIndex", Shared, object(crate::effect_group::EFFECT_GROUP_STATE_FAMILY);
     /// The derived group directory keyed by drain generation.
-    EffectGroupDrainIndex => "EffectGroupDrainIndex", Shared;
+    EffectGroupDrainIndex => "EffectGroupDrainIndex", Shared, object(crate::effect_group::EFFECT_GROUP_STATE_FAMILY);
     /// An effect group's successful result bytes.
-    EffectGroupPayload => "EffectGroupPayload", Shared;
+    EffectGroupPayload => "EffectGroupPayload", Shared, object(crate::effect_group::EFFECT_GROUP_PAYLOAD_FAMILY);
     /// Sends an effect group's children and runs each one.
     EffectGroupDispatch => "EffectGroupDispatch", GenerationOnly;
     /// One session's drive: admits roots and runs each in its `LashTurn`

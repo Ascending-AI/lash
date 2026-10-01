@@ -1561,6 +1561,7 @@ mod durable_wait_root_retirement;
 mod durable_wait_turn_gate_peek;
 mod effect_execution;
 mod failure_settlement;
+mod indexed_waits;
 mod ingress_recovery;
 mod observer_intent_on_the_double;
 mod postgres_ingress;
