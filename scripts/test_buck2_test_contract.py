@@ -170,6 +170,77 @@ class SharedActionTests(unittest.TestCase):
                 self.assertEqual(1, malformed.returncode)
                 self.assertIn("CACHE_ENDPOINT", malformed.stderr)
 
+    def configure_client(self, environment: dict[str, str]) -> tuple[str, set[str]]:
+        configure = step(shared_action(), "Configure authenticated Buck2 client")["run"]
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            completed = subprocess.run(
+                ["bash", "-c", configure],
+                cwd=temp,
+                env=os.environ
+                | {
+                    "CACHE_CA": "ca",
+                    "CACHE_CERT": "cert",
+                    "CACHE_KEY": "key",
+                    "POOL_ADDRESS": "cache.example:8443",
+                    "POOL_INSTANCE": "kiln",
+                    "POOL_RUNTIME": "kiln-runtime-sha256-example",
+                    "RUNNER_TEMP": str(temp / "runner-temp"),
+                    "GITHUB_WORKFLOW": "CI",
+                    "GITHUB_JOB": "build",
+                    "GITHUB_ACTOR": "octocat",
+                }
+                | environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            return (
+                (temp / ".buckconfig.local").read_text(encoding="utf-8"),
+                {path.name for path in temp.iterdir()},
+            )
+
+    def test_writes_the_pool_tag_identity_header(self) -> None:
+        config, _ = self.configure_client(
+            {
+                "GITHUB_WORKFLOW": "CI",
+                "GITHUB_JOB": "Feature lanes (4/4)",
+                "GITHUB_ACTOR": "octocat",
+            }
+        )
+        self.assertIn(
+            "http_headers = baggage: "
+            "enduser.id=repo:lash|lane:CI%252FFeature%2520lanes%2520%25284%252F4%2529"
+            "|user:octocat|ci\n",
+            config,
+        )
+
+    def test_tag_values_escape_every_baggage_and_header_separator(self) -> None:
+        config, _ = self.configure_client({"GITHUB_ACTOR": "a%b=c;d,e|f:g h"})
+        self.assertIn(
+            "user:a%2525b%253Dc%253Bd%252Ce%257Cf%253Ag%2520h|ci", config
+        )
+        header = next(
+            line
+            for line in config.splitlines()
+            if line.startswith("http_headers = ")
+        )
+        value = header.split("enduser.id=", 1)[1]
+        self.assertNotRegex(value, r"[\x00-\x20\x7f,;]|%(?!25)")
+
+    def test_tag_values_expand_nothing_in_the_heredoc(self) -> None:
+        marker = "injected-by-tag"
+        config, names = self.configure_client(
+            {"GITHUB_ACTOR": f"$(touch {marker})`touch {marker}2`"}
+        )
+        self.assertNotIn(marker, names)
+        self.assertNotIn(f"{marker}2", names)
+        self.assertIn(
+            "user:%2524%2528touch%2520injected-by-tag%2529"
+            "%2560touch%2520injected-by-tag2%2560|ci",
+            config,
+        )
+
     def test_repository_commits_no_pool_deployment_facts(self) -> None:
         sources = []
         for path in sorted((ROOT / ".github").rglob("*")):

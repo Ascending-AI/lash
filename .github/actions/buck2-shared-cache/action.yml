@@ -101,6 +101,20 @@ runs:
           printf '%s\n' "$CACHE_CERT"
           printf '%s\n' "$CACHE_KEY"
         } > "$RUNNER_TEMP/build-cache/client.pem"
+        # Copied verbatim from kiln_tag_value in the kiln CLI: a tag value
+        # keeps only [A-Za-z0-9._-] and writes every other byte as %XX.
+        tag_value() {
+          local LC_ALL=C value=$1 out='' char i
+          for (( i = 0; i < ${#value}; i++ )); do
+            char=${value:i:1}
+            case $char in
+              [A-Za-z0-9._-]) out+=$char ;;
+              *) printf -v char '%%%02X' "'$char"; out+=$char ;;
+            esac
+          done
+          printf '%s' "$out"
+        }
+        identity="repo:$(tag_value lash)|lane:$(tag_value "${GITHUB_WORKFLOW}/${GITHUB_JOB}")|user:$(tag_value "${GITHUB_ACTOR}")|ci"
         cat > .buckconfig.local <<EOF
         [buck2_re_client]
         engine_address = ${POOL_ADDRESS}
@@ -109,6 +123,7 @@ runs:
         tls_ca_certs = $RUNNER_TEMP/build-cache/ca.crt
         tls_client_cert = $RUNNER_TEMP/build-cache/client.pem
         instance_name = ${POOL_INSTANCE}
+        http_headers = baggage: enduser.id=${identity//%/%25}
         execution_concurrency_limit = 32
         [kiln]
         executor_runtime = ${POOL_RUNTIME}
