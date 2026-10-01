@@ -13,7 +13,18 @@ use lashlang::{
     RuntimeError, State, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
 };
 
-pub(crate) struct Server<'frontend> {
+#[derive(Default)]
+struct ExchangeTiming {
+    active: bool,
+    started: Option<Instant>,
+    serializing: Option<Instant>,
+    response_started_ns: u64,
+    decode_ns: std::cell::Cell<u64>,
+    guest_ns: u64,
+}
+
+pub(crate) struct Server<'frontend, const MEASURE: bool = false> {
+    timing: ExchangeTiming,
     frontend: &'frontend dyn crate::Frontend,
     pipe: UnixStream,
     /// The parent's frames, shared with the run's projection reads.
@@ -104,7 +115,7 @@ impl ParkedRun {
     }
 }
 
-impl<'frontend> Server<'frontend> {
+impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
     pub(crate) fn new(
         pipe: UnixStream,
         codec: FrameCodec,
@@ -113,6 +124,7 @@ impl<'frontend> Server<'frontend> {
     ) -> Result<Self, PoolError> {
         let mut server = Self {
             frontend,
+            timing: ExchangeTiming::default(),
             pipe,
             inbound: Arc::default(),
             wire: None,
@@ -167,6 +179,10 @@ impl<'frontend> Server<'frontend> {
         })
     }
     fn progress(&mut self, phase: WorkerPhase) -> Result<(), PoolError> {
+        if MEASURE && self.timing.active && phase == WorkerPhase::Serializing {
+            self.timing.response_started_ns = lash_vm_client::ipc::monotonic_nanos()?;
+            self.timing.serializing = Some(Instant::now());
+        }
         if phase == WorkerPhase::Computing && self.cpu_ceiling.is_none() {
             let nanos = u128::from(cpu_nanos()?) + u128::from(self.bootstrap.cpu_nanos);
             let seconds = nanos
@@ -214,7 +230,24 @@ impl<'frontend> Server<'frontend> {
                 }
                 Err(error) => return Err(error),
             };
+            if MEASURE {
+                self.timing = ExchangeTiming {
+                    started: Some(Instant::now()),
+                    ..ExchangeTiming::default()
+                };
+            }
             let frame = self.codec.decode_parent(&bytes).map_err(PoolError::from)?;
+            if MEASURE {
+                self.timing.active = matches!(
+                    &frame.message,
+                    ParentMessage::Start(_) | ParentMessage::EffectResponse(_)
+                );
+                self.timing.decode_ns.set(
+                    self.timing
+                        .started
+                        .map_or(0, |start| start.elapsed().as_nanos() as u64),
+                );
+            }
             let mut fences = self
                 .fences
                 .lock()
@@ -317,7 +350,11 @@ impl<'frontend> Server<'frontend> {
                             ));
                         }
                     };
+                    let guest_started = (MEASURE && self.timing.active).then(Instant::now);
                     let step = self.instance.resume(resume).map_err(PoolError::protocol)?;
+                    if let Some(guest_started) = guest_started {
+                        self.timing.guest_ns = guest_started.elapsed().as_nanos() as u64;
+                    }
                     self.deliver(step)?;
                 }
                 ParentMessage::Park => {
@@ -398,8 +435,15 @@ impl<'frontend> Server<'frontend> {
             }
             .into());
         }
+        let measured = (MEASURE && self.timing.active).then(Instant::now);
         self.codec.check_payload(&payload.0)?;
-        rmp_serde::from_slice(&payload.0).map_err(PoolError::protocol)
+        let result = rmp_serde::from_slice(&payload.0).map_err(PoolError::protocol);
+        if let Some(measured) = measured {
+            self.timing
+                .decode_ns
+                .set(self.timing.decode_ns.get() + measured.elapsed().as_nanos() as u64);
+        }
+        result
     }
     fn start(&mut self, start: Start) -> Result<VmStep, PoolError> {
         let mut context = RunContext::default();
@@ -589,6 +633,9 @@ impl<'frontend> Server<'frontend> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .outgoing;
         fence.next_header();
+        if MEASURE && self.timing.active {
+            fence.next_header();
+        }
         let header = fence.next_header();
         let (message, bytes) = match encode_worker(&self.codec, header, message) {
             (
@@ -602,6 +649,13 @@ impl<'frontend> Server<'frontend> {
             ),
             (message, bytes) => (message, bytes?),
         };
+        let encode_ns = if MEASURE && self.timing.active {
+            self.timing
+                .serializing
+                .map_or(0, |start| start.elapsed().as_nanos() as u64)
+        } else {
+            0
+        };
         // Responding and the answer leave in one write: nothing happens
         // between them, and the parent then wakes once for both (FIG-4433).
         let responding = {
@@ -609,6 +663,19 @@ impl<'frontend> Server<'frontend> {
                 .fences
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let telemetry = if MEASURE && self.timing.active {
+                Some(fences.encode(
+                    &self.codec,
+                    WorkerMessage::ExchangeTiming {
+                        response_started_ns: self.timing.response_started_ns,
+                        decode_ns: self.timing.decode_ns.get(),
+                        encode_ns,
+                        guest_ns: self.timing.guest_ns,
+                    },
+                )?)
+            } else {
+                None
+            };
             let responding = fences.encode(
                 &self.codec,
                 WorkerMessage::Progress {
@@ -617,7 +684,12 @@ impl<'frontend> Server<'frontend> {
                 },
             )?;
             fences.outgoing.next_header();
-            responding
+            if let Some(mut bytes) = telemetry {
+                bytes.extend_from_slice(&responding);
+                bytes
+            } else {
+                responding
+            }
         };
         write_frames(&mut self.pipe, responding, &bytes, Duration::from_secs(30))?;
         Ok(message)
@@ -905,7 +977,8 @@ mod tests {
         let (pipe, mut parent) = UnixStream::pair().expect("pipe");
         let frontend = crate::frontend::TypeScriptFrontend::default();
         let mut server =
-            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &frontend).expect("server");
+            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &frontend)
+                .expect("server");
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
         let ready = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
             .expect("ready");
@@ -965,7 +1038,8 @@ mod tests {
             let bootstrap = Bootstrap::from(&config);
             move || {
                 let frontend = crate::frontend::TypeScriptFrontend::default();
-                let mut server = Server::new(pipe, codec, bootstrap, &frontend).expect("server");
+                let mut server =
+                    Server::<false>::new(pipe, codec, bootstrap, &frontend).expect("server");
                 server.run(&mut None).expect("run");
                 lash_vm_client::ipc::socket_calls()
             }

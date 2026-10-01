@@ -7,10 +7,27 @@ use std::time::{Duration, Instant};
 
 use crate::{PoolConfig, PoolError};
 use lash_vm_protocol::{
-    FRAME_HEADER_BYTES, FrameCodec, InfrastructureOutcome, ParentFrame, WorkerFrame,
+    FRAME_HEADER_BYTES, FrameCodec, InfrastructureOutcome, ParentFrame, WorkerFrame, WorkerMessage,
+    WorkerPhase,
 };
 
+/// Counters for one measured exchange, used only by the measured transport specialization.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExchangeTiming {
+    pub response_started_ns: u64,
+    pub response_decode_ns: u64,
+    pub parent_decode_ns: u64,
+    pub parent_encode_ns: u64,
+    pub write_ns: u64,
+    pub read_wait_ns: u64,
+    pub worker_decode_ns: u64,
+    pub worker_encode_ns: u64,
+    pub guest_ns: u64,
+    pub worker_samples: usize,
+}
+
 pub struct Worker {
+    pub(crate) exchange_timing: ExchangeTiming,
     child: Child,
     reaped: bool,
     pub(crate) measurements: Option<crate::measurements::SharedMeasurements>,
@@ -67,6 +84,7 @@ impl Worker {
         let process_epoch = None;
         Ok(Self {
             child,
+            exchange_timing: ExchangeTiming::default(),
             reaped: false,
             measurements: None,
             process_epoch,
@@ -84,16 +102,20 @@ impl Worker {
 
     pub fn send(&mut self, frame: &ParentFrame, timeout: Duration) -> Result<(), PoolError> {
         let bytes = self.codec.encode_parent(frame).map_err(PoolError::from)?;
-        self.send_encoded(&bytes, timeout)
+        self.send_encoded_measured::<false>(&bytes, timeout)
     }
 
     /// Sends a frame this worker's codec has already encoded.
-    pub(crate) fn send_encoded(
+    pub(crate) fn send_encoded_measured<const MEASURE: bool>(
         &mut self,
         bytes: &[u8],
         timeout: Duration,
     ) -> Result<(), PoolError> {
+        let measured = MEASURE.then(Instant::now);
         write_frame(&mut self.pipe, bytes, Instant::now() + timeout)?;
+        if let Some(measured) = measured {
+            self.exchange_timing.write_ns += measured.elapsed().as_nanos() as u64;
+        }
         if let Some(measurements) = &self.measurements {
             let mut measurements = measurements
                 .lock()
@@ -105,6 +127,14 @@ impl Worker {
     }
 
     pub fn receive(&mut self, deadline: Instant) -> Result<WorkerFrame, PoolError> {
+        self.receive_measured::<false>(deadline)
+    }
+
+    pub(crate) fn receive_measured<const MEASURE: bool>(
+        &mut self,
+        deadline: Instant,
+    ) -> Result<WorkerFrame, PoolError> {
+        let measured = MEASURE.then(Instant::now);
         let bytes = match self
             .inbound
             .read_frame(&mut self.pipe, &self.codec, deadline)
@@ -131,7 +161,29 @@ impl Worker {
             measurements.counters.ipc_received_messages += 1;
             measurements.counters.ipc_received_bytes += bytes.len() as u64;
         }
-        self.codec.decode_worker(&bytes).map_err(PoolError::from)
+        if let Some(measured) = measured {
+            self.exchange_timing.read_wait_ns += measured.elapsed().as_nanos() as u64;
+        }
+        let measured = MEASURE.then(Instant::now);
+        let result = self.codec.decode_worker(&bytes).map_err(PoolError::from);
+        if let Some(measured) = measured {
+            let decode_ns = measured.elapsed().as_nanos() as u64;
+            self.exchange_timing.parent_decode_ns += decode_ns;
+            if matches!(
+                &result,
+                Ok(WorkerFrame {
+                    message: WorkerMessage::Progress {
+                        phase: WorkerPhase::Serializing,
+                        ..
+                    },
+                    ..
+                })
+            ) {
+                self.exchange_timing.response_decode_ns = 0;
+            }
+            self.exchange_timing.response_decode_ns += decode_ns;
+        }
+        result
     }
 
     fn exit_evidence(&self) -> lash_vm_protocol::SupervisorEvidence {
@@ -449,4 +501,23 @@ pub fn write_frames(
     }
     first.extend_from_slice(second);
     write_frame(pipe, &first, Instant::now() + timeout)
+}
+
+/// Shared-machine monotonic clock for measured parent/worker intervals.
+/// Ordinary transport specializations never call it.
+pub fn monotonic_nanos() -> Result<u64, PoolError> {
+    let mut clock = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock points to an initialized timespec owned by this call.
+    #[expect(
+        unsafe_code,
+        reason = "measurement reads the kernel's cross-process monotonic clock"
+    )]
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut clock) };
+    if result != 0 {
+        return Err(PoolError::io(std::io::Error::last_os_error()));
+    }
+    Ok(clock.tv_sec as u64 * 1_000_000_000 + clock.tv_nsec as u64)
 }

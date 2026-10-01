@@ -341,6 +341,13 @@ pub enum ParentMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerMessage {
+    /// Developer-only exchange timing. Normal workers never emit it.
+    ExchangeTiming {
+        response_started_ns: u64,
+        decode_ns: u64,
+        encode_ns: u64,
+        guest_ns: u64,
+    },
     /// The worker refused a malformed request. Run limits use `LimitExceeded`.
     Refused {
         outcome: crate::InfrastructureOutcome,
@@ -395,6 +402,7 @@ impl WorkerMessage {
     pub fn kind(&self) -> crate::WorkerFrameKind {
         use crate::WorkerFrameKind;
         match self {
+            Self::ExchangeTiming { .. } => WorkerFrameKind::Progress,
             Self::Refused { .. } => WorkerFrameKind::Refused,
             Self::Progress { .. } => WorkerFrameKind::Progress,
             Self::LimitExceeded { .. } => WorkerFrameKind::LimitExceeded,

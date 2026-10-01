@@ -11,6 +11,8 @@ use std::time::Instant;
 pub struct Observation {
     pub queue_ns: u64,
     pub exchange_ns: Vec<u64>,
+    pub exchange_phases: Vec<super::metrics::Phases>,
+    pub value_fixtures: Vec<(EffectRequest, lashlang::AbilityOutcome)>,
     pub resets_ns: Vec<u64>,
     pub state_bytes: u64,
     pub pid: u32,
@@ -89,7 +91,7 @@ pub fn run_observed(
             observation.pid = worker
                 .pid()
                 .ok_or_else(|| anyhow::anyhow!("worker has no pid"))?;
-            let mut message = worker.start(start)?;
+            let mut message = worker.start_measured(start)?;
             let mut parked = false;
             loop {
                 message = match message {
@@ -109,27 +111,68 @@ pub fn run_observed(
                             request.kind,
                             EffectKind::ResourceOperation | EffectKind::ResourceOperationBatch
                         );
-                        let t = Instant::now();
+                        let initial = worker.exchange_timing()?;
+                        anyhow::ensure!(
+                            initial.response_started_ns > 0,
+                            "missing request serialization start"
+                        );
+                        let mut parent_decode = 0;
+                        let mut parent_encode = 0;
+                        let mut host_ns = 0;
+                        let mut value_answer = None;
                         let result = match request.kind {
                             EffectKind::CancelCheckpoint => {
                                 EffectOutcome::Checkpoint { cancelled: false }
                             }
                             EffectKind::ProcessBoundary => EffectOutcome::Unit,
                             _ => {
+                                let phase = Instant::now();
                                 let op = rmp_serde::from_slice(&request.payload.0)?;
+                                parent_decode = super::nanos(phase) as i64;
+                                let phase = Instant::now();
                                 let answer =
                                     host.perform(op).map_err(|e| anyhow::anyhow!("{e}"))?;
-                                EffectOutcome::Value(EncodedPayload(rmp_serde::to_vec_named(
-                                    &answer,
-                                )?))
+                                host_ns = super::nanos(phase) as i64;
+                                let phase = Instant::now();
+                                let bytes = rmp_serde::to_vec_named(&answer)?;
+                                parent_encode = super::nanos(phase) as i64;
+                                value_answer = Some(answer);
+                                EffectOutcome::Value(EncodedPayload(bytes))
                             }
                         };
-                        let next = worker.effect_result(EffectResponse {
+                        let next = worker.effect_result_measured(EffectResponse {
                             id: request.id,
                             outcome: result,
                         })?;
+                        let elapsed = lash_vm_client::ipc::monotonic_nanos()?
+                            .checked_sub(initial.response_started_ns)
+                            .ok_or_else(|| anyhow::anyhow!("worker clock moved backwards"))?;
                         if timed {
-                            observation.exchange_ns.push(super::nanos(t));
+                            let mut timing = worker.exchange_timing()?;
+                            timing.worker_encode_ns += initial.worker_encode_ns;
+                            anyhow::ensure!(
+                                timing.worker_samples == 1,
+                                "{} missing or duplicate worker timing",
+                                case.name
+                            );
+                            observation.exchange_ns.push(elapsed);
+                            observation
+                                .exchange_phases
+                                .push(super::metrics::Phases::measured(
+                                    elapsed as i64,
+                                    parent_decode + initial.response_decode_ns as i64,
+                                    parent_encode,
+                                    host_ns,
+                                    timing,
+                                ));
+                            if case.name.starts_with("value-") {
+                                observation.value_fixtures.push((
+                                    request,
+                                    value_answer.ok_or_else(|| {
+                                        anyhow::anyhow!("value population has no answer")
+                                    })?,
+                                ));
+                            }
                         }
                         next
                     }

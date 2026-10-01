@@ -121,3 +121,116 @@ impl lashlang::ExecutionHost for ImmediateHost {
             .perform(op)
     }
 }
+
+/// The production payload and frame codecs over a socket pair in this process.
+/// The peer lives for the whole run; thread creation is outside every sample.
+pub struct CodecSocket {
+    pipe: std::os::unix::net::UnixStream,
+    inbound: lash_vm_client::ipc::FrameSource,
+    codec: lash_vm_protocol::FrameCodec,
+    peer: Option<std::thread::JoinHandle<Result<()>>>,
+}
+impl CodecSocket {
+    pub fn new() -> Result<Self> {
+        use lash_vm_protocol::*;
+        let (pipe, mut peer_pipe) = std::os::unix::net::UnixStream::pair()?;
+        let limits = ProtocolBounds::standard().decode;
+        let peer = std::thread::spawn(move || -> Result<()> {
+            let codec = FrameCodec::new(limits);
+            let mut inbound = lash_vm_client::ipc::FrameSource::default();
+            let mut host = super::workload::Host::default();
+            loop {
+                let bytes = match inbound.read_frame(
+                    &mut peer_pipe,
+                    &codec,
+                    std::time::Instant::now() + std::time::Duration::from_secs(86_400),
+                ) {
+                    Ok(bytes) => bytes,
+                    Err(lash_vm_client::PoolError::Infrastructure(
+                        InfrastructureOutcome::WorkerCrashed { .. },
+                    )) => return Ok(()),
+                    Err(error) => return Err(error.into()),
+                };
+                let WorkerMessage::EffectRequest(request) = codec.decode_worker(&bytes)?.message
+                else {
+                    anyhow::bail!("baseline expected value request");
+                };
+                let op: lashlang::AbilityOp = rmp_serde::from_slice(&request.payload.0)?;
+                let answer = host.perform(op).map_err(|e| anyhow::anyhow!("{e}"))?;
+                let response = ParentFrame {
+                    header: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0))
+                        .next_header(),
+                    message: ParentMessage::EffectResponse(EffectResponse {
+                        id: request.id,
+                        outcome: EffectOutcome::Value(EncodedPayload(rmp_serde::to_vec_named(
+                            &answer,
+                        )?)),
+                    }),
+                };
+                let bytes = codec.encode_parent(&response)?;
+                lash_vm_client::ipc::write_frame(
+                    &mut peer_pipe,
+                    &bytes,
+                    std::time::Instant::now() + std::time::Duration::from_secs(30),
+                )?;
+            }
+        });
+        Ok(Self {
+            pipe,
+            inbound: lash_vm_client::ipc::FrameSource::default(),
+            codec: FrameCodec::new(limits),
+            peer: Some(peer),
+        })
+    }
+
+    pub fn measure(
+        &mut self,
+        request: &lash_vm_protocol::EffectRequest,
+        answer: &lashlang::AbilityOutcome,
+    ) -> Result<i64> {
+        use lash_vm_protocol::*;
+        // Decode the fixture outside timing, then encode that identical value
+        // inside it. Both directions also use the production bounded frame codec.
+        let op: lashlang::AbilityOp = rmp_serde::from_slice(&request.payload.0)?;
+        let measured = std::time::Instant::now();
+        let frame = WorkerFrame {
+            header: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0))
+                .next_header(),
+            message: WorkerMessage::EffectRequest(EffectRequest {
+                id: request.id,
+                kind: request.kind,
+                payload: EncodedPayload(rmp_serde::to_vec_named(&op)?),
+            }),
+        };
+        let bytes = self.codec.encode_worker(&frame)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        lash_vm_client::ipc::write_frame(&mut self.pipe, &bytes, deadline)?;
+        let bytes = self
+            .inbound
+            .read_frame(&mut self.pipe, &self.codec, deadline)?;
+        let ParentMessage::EffectResponse(response) = self.codec.decode_parent(&bytes)?.message
+        else {
+            anyhow::bail!("baseline expected value response");
+        };
+        let EffectOutcome::Value(value) = response.outcome else {
+            anyhow::bail!("baseline expected encoded value");
+        };
+        self.codec.check_payload(&value.0)?;
+        let decoded: lashlang::AbilityOutcome = rmp_serde::from_slice(&value.0)?;
+        let elapsed = super::nanos(measured) as i64;
+        anyhow::ensure!(
+            response.id == request.id
+                && matches!((&decoded, answer), (lashlang::AbilityOutcome::Value(actual), lashlang::AbilityOutcome::Value(expected)) if actual == expected),
+            "baseline changed the value"
+        );
+        Ok(elapsed)
+    }
+}
+impl Drop for CodecSocket {
+    fn drop(&mut self) {
+        let _ = self.pipe.shutdown(std::net::Shutdown::Both);
+        if let Some(peer) = self.peer.take() {
+            let _ = peer.join();
+        }
+    }
+}

@@ -60,8 +60,23 @@ fn worker_entry_inner(
         max_nodes: bootstrap.nodes,
         max_allocation_bytes: bootstrap.allocation,
     });
-    let mut server = Server::new(pipe, codec, bootstrap, frontend)?;
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(&mut hook)))
+    if args.iter().any(|arg| arg == "--lash-vm-measure") {
+        run_server::<true>(pipe, codec, bootstrap, frontend, &mut hook)?;
+    } else {
+        run_server::<false>(pipe, codec, bootstrap, frontend, &mut hook)?;
+    }
+    Ok(true)
+}
+
+fn run_server<const MEASURE: bool>(
+    pipe: std::os::unix::net::UnixStream,
+    codec: FrameCodec,
+    bootstrap: Bootstrap,
+    frontend: &dyn crate::Frontend,
+    hook: &mut Option<&mut dyn FnMut(&ParentMessage)>,
+) -> Result<(), PoolError> {
+    let mut server = Server::<MEASURE>::new(pipe, codec, bootstrap, frontend)?;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(hook)))
         .unwrap_or_else(|panic| {
             let reason = panic
                 .downcast_ref::<String>()
@@ -78,5 +93,5 @@ fn worker_entry_inner(
         }
         return Err(error);
     }
-    Ok(true)
+    Ok(())
 }

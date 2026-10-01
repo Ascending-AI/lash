@@ -27,9 +27,8 @@ Run it twenty times and inspect each log. It has no timing population. The
 measurement mode requires 10,000 observations per warm workload and 200 new
 worker processes per cold workload. It does not accept smaller samples.
 
-`--exchanges SAMPLES` runs only the warm effect-exchange populations, with
-`SAMPLES` cases each, and prints each one's nearest-rank p50/p99 with the frames
-and bytes a case moves. It is the paired before/after comparison for a change to
+`--exchanges SAMPLES --out DIRECTORY` runs only the warm effect-exchange populations, with
+`SAMPLES` cases each, and writes raw CSV, summary JSON, budget JSON and a Markdown report. It is the paired before/after comparison for a change to
 the exchange path (FIG-4433): build the two revisions' executables, alternate
 them in one run, and compare the medians of at least five runs a side. The
 timings remain a shared-host population; the acceptance distribution is the full
@@ -58,10 +57,14 @@ not an arrival-rate capacity estimate. No outliers are discarded.
 
 Raw samples are CSV. Summary JSON uses nearest-rank p50/p99/max, explicit units,
 counts and service throughput. Paired overheads retain negative observations.
-Small scalar effect exchanges include parent decode/answer/encode, IPC and guest
-work until the next request; they exclude tools/journaling and are an upper
-boundary for this synthetic IPC population. Aggregate exchanges are whole batches,
-not per-leaf round trips. Queue delay is measured from checkout invocation to
+Exchange samples start at the worker's monotonic timestamp before request
+serialization and end in the parent after the next request arrives. They include
+the current request's encoding, transfer and parent decode, parent answer encoding,
+reply transfer and worker decode, guest work and the next request's serialization.
+Both processes use the same machine's CLOCK_MONOTONIC clock. This aligns the
+value baseline's two directions with the exchange boundary. Exchanges exclude tools/journaling and are an upper
+boundary for this synthetic IPC population. Raw aggregate exchanges are whole batches. Their budget rows divide each sample
+by the batch leaf count and carry the explicit `per_leaf` unit and `leaves` N. Queue delay is measured from checkout invocation to
 admission. Multi-cell or resumed workloads sum their checkout waits. Widths 1/2/4
 measure complete concurrent short-script batches, including thread launch/join,
 with workers prewarmed. A one-slot queue probe holds a checkout
@@ -70,13 +73,36 @@ records the waiter's complete checkout delay. It adds no artificial sleep. Worke
 pages, HWM is a process lifetime peak, and neither is PSS nor an OS memory limit.
 
 Preregistered honesty budgets are 1 ms p50/5 ms p99 for paired warm zero-effect
-overhead and 100 us p50/500 us p99 for effect exchange. Budget JSON checks every
-exchange population, including whole aggregate batches and large values;
-the report explains that those also contain guest work and serialization. The
-report records every failing budget. These are diagnostic acceptance thresholds, not
-portable CI wall-clock gates on a shared executor. No benchmark threshold may
-change to make observed results pass. Host presets stay explicit and inspectable;
-workload measurements do not establish arbitrary-guest deadline guarantees.
+overhead and 100 us p50/500 us p99 per leaf for effect exchange. Parallel-N
+samples are divided by N before judging, while raw batch distributions remain
+in the report. Every value population measures a paired baseline immediately
+after each exchange, in the same process and run. A persistent socket-pair peer
+uses the production MessagePack payload and bounded frame codecs to encode,
+move and decode the identical request and answer in both directions, including
+the same echo value extraction. Thread startup, fixture preparation and answer
+validation are outside baseline timing. Value budgets judge exchange minus
+that baseline, per sample. The baseline and signed subtraction each retain their
+own p50/p99, and budget rows flag every negative sample without clamping it.
+
+Every exchange records parent decode, parent encode, IPC write, IPC read/wait,
+worker decode, worker encode and guest work until the next request. Echo host
+work has its own row. IPC read/wait is the exclusive wall-time remainder after
+the measured parent and worker phases and host work. It includes scheduling,
+protocol bookkeeping and the timing hook's own overhead. Raw blocking reply read/wait
+is retained separately, since it overlaps worker work and cannot be added to it.
+Overlap exceeding the end-to-end interval is explicit. Sample-by-sample phase
+sum minus overlap must reconcile with the total within 1 us; JSON and the report
+show the sums, errors and overlapping sample counts. Summing phase percentiles
+is not a reconciliation. Instrumentation uses const-generic hooks: ordinary
+client calls and worker startup select the false specialization, which compiles
+out all measurement clocks and telemetry emission. The matrix selects the
+measured worker at startup and the measured effect-answer method.
+
+All thresholds stay report-only. Nothing in CI or release gates on them.
+No benchmark threshold may change to make observed results pass. Shared-host
+instrumented results are diagnostic; FIG-4172 owns quiet-host final numbers.
+Host presets stay explicit and inspectable; workload measurements do not
+establish arbitrary-guest deadline guarantees.
 
 RSS probes run separately, once per hundred warm observations and after each
 cold run. They are outside the latency timer. Guest-error workers have already

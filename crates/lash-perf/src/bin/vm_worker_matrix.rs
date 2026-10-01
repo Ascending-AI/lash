@@ -1,6 +1,5 @@
 //! Paired optimized measurements of the production worker pool and protocol.
-#[path = "../vm_worker_matrix/mod.rs"]
-mod matrix;
+use lash_perf::vm_worker_matrix as matrix;
 
 fn main() -> anyhow::Result<()> {
     if lash_vm_worker::worker_entry()? {
@@ -14,7 +13,12 @@ fn main() -> anyhow::Result<()> {
         return matrix::verify();
     }
     if let Some(warm) = args.windows(2).find(|p| p[0] == "--exchanges") {
-        return matrix::exchanges(warm[1].parse()?);
+        let directory = args
+            .windows(2)
+            .find(|p| p[0] == "--out")
+            .map(|p| std::path::PathBuf::from(&p[1]))
+            .ok_or_else(|| anyhow::anyhow!("--exchanges needs --out DIRECTORY"))?;
+        return matrix::exchanges(&directory, warm[1].parse()?);
     }
     let directory = args
         .windows(2)

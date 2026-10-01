@@ -582,7 +582,8 @@ impl Session<'_, '_> {
                 }
                 // Phase reports and worker-reported limits never leave
                 // `next_message`.
-                other @ (WorkerMessage::Observations { .. }
+                other @ (WorkerMessage::ExchangeTiming { .. }
+                | WorkerMessage::Observations { .. }
                 | WorkerMessage::Refused { .. }
                 | WorkerMessage::Ready { .. }
                 | WorkerMessage::ResetDone { .. }
@@ -1206,6 +1207,7 @@ fn name(message: &WorkerMessage) -> &'static str {
         WorkerMessage::Cancelled => "Cancelled",
         WorkerMessage::ResetDone { .. } => "ResetDone",
         WorkerMessage::Prepared { .. } => "Prepared",
+        WorkerMessage::ExchangeTiming { .. } => "ExchangeTiming",
     }
 }
 

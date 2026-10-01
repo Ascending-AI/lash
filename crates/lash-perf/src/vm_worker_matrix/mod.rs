@@ -22,6 +22,7 @@ fn config() -> Result<PoolConfig> {
     let mut config = PoolConfig::standard(WorkerEntry::reexec()?);
     // Fix concurrency at one for the paired service-time population.
     config.max_workers = 1;
+    config.entry.args.push("--lash-vm-measure".into());
     Ok(config)
 }
 
@@ -56,32 +57,92 @@ pub fn verify() -> Result<()> {
 /// Warm effect exchanges only, for a paired before/after comparison in one
 /// run (FIG-4433). The timings are a population on a shared host; the frame
 /// and byte counts per exchange are exact.
-pub fn exchanges(warm: usize) -> Result<()> {
+pub fn exchanges(path: &Path, warm: usize) -> Result<()> {
+    ensure!(warm > 0, "empty exchange population");
     let pool = WorkerPool::new(config()?)?;
+    let mut codec = baseline::CodecSocket::new()?;
+    let mut samples = Samples::new(path)?;
+    let mut budgets = Vec::new();
     for case in workload::cases().into_iter().filter(|c| c.effects > 0) {
         let before = pool.measurements().counters;
         let mut exchange = Vec::new();
+        let mut phases = Vec::new();
+        let mut baseline = Vec::new();
         for index in 0..warm {
             let observation = worker::run(&case, &pool, &VmOwner::new(format!("owner-{index}")))?;
-            exchange.extend(observation.exchange_ns);
+            baseline.extend(
+                observation
+                    .value_fixtures
+                    .iter()
+                    .map(|(request, answer)| codec.measure(request, answer))
+                    .collect::<Result<Vec<_>>>()?,
+            );
+            exchange.extend(observation.exchange_ns.into_iter().map(|v| v as i64));
+            phases.extend(observation.exchange_phases);
         }
+        let mut row = metrics::record_exchanges(
+            &mut samples,
+            &case.name,
+            &exchange,
+            leaves(&case),
+            &baseline,
+            &phases,
+        )?;
         let after = pool.measurements().counters;
-        ensure!(!exchange.is_empty(), "{} timed no exchange", case.name);
-        exchange.sort_unstable();
-        let rank = |percent: usize| exchange[(exchange.len() * percent).div_ceil(100) - 1];
         let per_case = |after: u64, before: u64| (after - before) as f64 / warm as f64;
+        row["sent_frames_per_case"] =
+            serde_json::json!(per_case(after.ipc_sent_messages, before.ipc_sent_messages));
+        row["received_frames_per_case"] = serde_json::json!(per_case(
+            after.ipc_received_messages,
+            before.ipc_received_messages
+        ));
+        row["sent_bytes_per_case"] =
+            serde_json::json!(per_case(after.ipc_sent_bytes, before.ipc_sent_bytes));
+        row["received_bytes_per_case"] = serde_json::json!(per_case(
+            after.ipc_received_bytes,
+            before.ipc_received_bytes
+        ));
         println!(
-            "exchange {} samples={} p50_ns={} p99_ns={} sent_frames_per_case={:.2} received_frames_per_case={:.2} sent_bytes_per_case={:.0} received_bytes_per_case={:.0}",
+            "exchange {} samples={} p50_ns={} p99_ns={} sent_frames_per_case={} received_frames_per_case={} sent_bytes_per_case={} received_bytes_per_case={}",
             case.name,
             exchange.len(),
-            rank(50),
-            rank(99),
-            per_case(after.ipc_sent_messages, before.ipc_sent_messages),
-            per_case(after.ipc_received_messages, before.ipc_received_messages),
-            per_case(after.ipc_sent_bytes, before.ipc_sent_bytes),
-            per_case(after.ipc_received_bytes, before.ipc_received_bytes),
+            row["raw_batch_p50_ns"],
+            row["raw_batch_p99_ns"],
+            row["sent_frames_per_case"],
+            row["received_frames_per_case"],
+            row["sent_bytes_per_case"],
+            row["received_bytes_per_case"]
         );
+        budgets.push(row);
+        samples.finish(path)?;
     }
+    finish_budgets(path, &samples, &budgets)
+}
+
+fn leaves(case: &workload::Case) -> usize {
+    if case.name.starts_with("parallel-") {
+        case.effects
+    } else {
+        1
+    }
+}
+
+fn finish_budgets(path: &Path, samples: &Samples, exchanges: &[serde_json::Value]) -> Result<()> {
+    let zero = samples.summaries.iter().find(|s| s.metric == "warm/zero-effects/paired-overhead").map(|s| serde_json::json!({"p50_ns":s.p50,"p99_ns":s.p99,"over_budget":s.p50>1_000_000 || s.p99>5_000_000,"report_only":true}));
+    let report = serde_json::json!({
+        "zero_effect_overhead":zero,"effect_exchanges":exchanges,
+        "instrumentation":"const_generic_zero_cost_hook",
+        "exchange_boundary":"worker_request_serialization_start_to_next_request_received",
+        "exchange_clock":"CLOCK_MONOTONIC",
+        "baseline_process_id":std::process::id(),
+        "baseline_transport":"same_process_socket_pair",
+        "phase_attribution":"worker_and_parent_phases_measured; ipc_read_wait_is_exclusive_wall_remainder; overlap_reported",
+    });
+    std::fs::write(
+        path.join("budgets.json"),
+        serde_json::to_vec_pretty(&report)?,
+    )?;
+    metrics::write_exchange_report(path, samples, exchanges)?;
     Ok(())
 }
 
@@ -92,6 +153,8 @@ pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
     );
     let pool = WorkerPool::new(config()?)?;
     let reference = baseline::Reference::new()?;
+    let mut codec = baseline::CodecSocket::new()?;
+    let mut budgets = Vec::new();
     let mut samples = Samples::new(path)?;
     for case in workload::cases() {
         println!("measuring {}", case.name);
@@ -99,6 +162,8 @@ pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
         let mut isolated = Vec::with_capacity(warm);
         let mut queue = Vec::with_capacity(warm);
         let mut exchange = Vec::new();
+        let mut exchange_phases = Vec::new();
+        let mut codec_baseline = Vec::new();
         let mut reset = Vec::new();
         let mut parent_rss = Vec::new();
         let mut parent_peak = Vec::new();
@@ -126,7 +191,15 @@ pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
             reference_times.push(base_ns as i64);
             isolated.push(worker_ns as i64);
             queue.push(observation.queue_ns as i64);
+            codec_baseline.extend(
+                observation
+                    .value_fixtures
+                    .iter()
+                    .map(|(request, answer)| codec.measure(request, answer))
+                    .collect::<Result<Vec<_>>>()?,
+            );
             exchange.extend(observation.exchange_ns.into_iter().map(|v| v as i64));
+            exchange_phases.extend(observation.exchange_phases);
             reset.extend(observation.resets_ns.into_iter().map(|v| v as i64));
             if index.is_multiple_of(100) && !case.error {
                 let memory =
@@ -165,11 +238,14 @@ pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
             }
         }
         if !exchange.is_empty() {
-            samples.record(
-                &format!("warm/{}/effect-exchange", case.name),
+            budgets.push(metrics::record_exchanges(
+                &mut samples,
+                &case.name,
                 &exchange,
-                "ns",
-            )?;
+                leaves(&case),
+                &codec_baseline,
+                &exchange_phases,
+            )?);
         }
         let mut cold_ns = Vec::new();
         let mut cold_queue = Vec::new();
@@ -209,23 +285,9 @@ pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
     }
     measure_concurrency(&mut samples, warm)?;
     samples.finish(path)?;
-    let zero = samples
-        .summaries
-        .iter()
-        .find(|s| s.metric == "warm/zero-effects/paired-overhead")
-        .context("missing zero overhead")?;
-    let exchanges: Vec<_> = samples.summaries.iter()
-        .filter(|s| s.metric.ends_with("/effect-exchange"))
-        .map(|s| serde_json::json!({"metric":s.metric,"p50_ns":s.p50,"p99_ns":s.p99,"over_budget":s.p50>100_000 || s.p99>500_000}))
-        .collect();
-    let failures = serde_json::json!({"zero_effect_overhead": {"p50_ns":zero.p50,"p99_ns":zero.p99,"over_budget":zero.p50>1_000_000 || zero.p99>5_000_000},"effect_exchanges": exchanges});
-    std::fs::write(
-        path.join("budgets.json"),
-        serde_json::to_vec_pretty(&failures)?,
-    )?;
+    finish_budgets(path, &samples, &budgets)?;
     Ok(())
 }
-use anyhow::Context;
 
 fn measure_concurrency(samples: &mut Samples, count: usize) -> Result<()> {
     let case = workload::cases()[1].clone();
