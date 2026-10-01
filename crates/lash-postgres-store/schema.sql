@@ -1044,6 +1044,16 @@ CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_reclaimable
     ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
     WHERE reclaimable_at_ms IS NOT NULL;
 
+-- An occurrence retention reclaimed (FIG-4513): written with the delete, so
+-- an ingest that presents the identity again writes nothing back. The
+-- occurrence reclaim pass compacts it once it is older than the pass's cutoff.
+CREATE TABLE IF NOT EXISTS lash_trigger_occurrence_tombstones (
+    occurrence_id TEXT PRIMARY KEY,
+    reclaimed_at_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrence_tombstones_reclaimed
+    ON lash_trigger_occurrence_tombstones(reclaimed_at_ms);
+
 CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
     occurrence_id TEXT NOT NULL REFERENCES lash_trigger_occurrences(occurrence_id) ON DELETE CASCADE,
     subscription_id TEXT NOT NULL,

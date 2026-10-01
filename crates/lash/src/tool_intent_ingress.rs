@@ -139,6 +139,14 @@ pub enum ToolIntentIngressRefusal {
         /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
+    /// Refuses a redelivered trigger emission whose occurrence retention has
+    /// reclaimed (FIG-4513).
+    ///
+    /// The first delivery emitted the occurrence and stopped before its
+    /// outcome was retained. The occurrence and its deliveries have since
+    /// been reclaimed, so the redelivery emits nothing again and has no
+    /// recorded outcome to answer.
+    TriggerOccurrenceReclaimed,
 }
 
 /// Admission result for one host-submitted intent.
@@ -439,6 +447,7 @@ impl ToolIntentIngress {
             ToolIntentIngressRefusal::RecordedOutcomeOutsideIntentProtocol { .. } => {
                 "recorded_outcome_outside_intent_protocol"
             }
+            ToolIntentIngressRefusal::TriggerOccurrenceReclaimed => "trigger_occurrence_reclaimed",
         }
     }
 
@@ -828,6 +837,10 @@ impl ToolIntentIngress {
     /// [`ToolIntentIngressRefusal::DuplicateIdentity`] gives hosts one refusal
     /// vocabulary for every shape (FIG-1489) instead of a generic command
     /// failure.
+    ///
+    /// A trigger store that finds the occurrence's tombstone refuses the
+    /// ingest with [`lash_core::trigger_occurrence_reclaimed`], which maps to
+    /// [`ToolIntentIngressRefusal::TriggerOccurrenceReclaimed`] (FIG-4513).
     fn realization_failure(
         kind: lash_core::ToolIntentKind,
         error: crate::EmbedError,
@@ -838,6 +851,13 @@ impl ToolIntentIngress {
             return RealizationFailure::Refused(ToolIntentIngressRefusal::DuplicateIdentity {
                 kind,
             });
+        }
+        if let crate::EmbedError::Plugin(plugin) = &error
+            && lash_core::is_trigger_occurrence_reclaimed(plugin)
+        {
+            return RealizationFailure::Refused(
+                ToolIntentIngressRefusal::TriggerOccurrenceReclaimed,
+            );
         }
         RealizationFailure::Command(kind, error)
     }

@@ -295,6 +295,8 @@ pub enum RuntimeErrorCode {
     /// and no delivery row (FIG-4369): retention removed the delivery once
     /// its bound process was pruned, and the start registers nothing.
     TriggerDeliveryRetired,
+    /// An ingest named an occurrence retention reclaimed (FIG-4513).
+    TriggerOccurrenceReclaimed,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
@@ -570,8 +572,7 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
                 "{err}; reload the durable head and re-establish lease and claim authority before retrying"
             ),
         ),
-        // A stale drive fence is permanent: a later admission's drive owns
-        // the session and the fence can never commit again (ADR 0105 §9).
+        // A stale drive fence never commits again: a later drive owns the session (ADR 0105 §9).
         err @ (crate::store::StoreError::TurnCancelIntentChanged { .. }
         | crate::store::StoreError::StaleDriveFence { .. }) => {
             RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, err.to_string())
@@ -583,8 +584,7 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
                 },
             )
         }
-        // A closing session is being deleted: its CloseSession intent is the
-        // point of no return, so to a caller it is already gone.
+        // A closing session is past its point of no return: to a caller it is already gone.
         ref err @ crate::store::StoreError::SessionClosing { ref session_id, .. } => {
             RuntimeError::new(RuntimeErrorCode::SessionDeleted, err.to_string()).with_cause(
                 RuntimeErrorCause::SessionDeleted {
@@ -738,6 +738,7 @@ impl RuntimeErrorCode {
             Self::StartKeyFamilyRefused => "start_key_family_refused",
             Self::TriggerDeliveryBound => "trigger_delivery_bound",
             Self::TriggerDeliveryRetired => "trigger_delivery_retired",
+            Self::TriggerOccurrenceReclaimed => "trigger_occurrence_reclaimed",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
@@ -999,6 +1000,7 @@ impl RuntimeErrorCode {
         Self::StartKeyFamilyRefused,
         Self::TriggerDeliveryBound,
         Self::TriggerDeliveryRetired,
+        Self::TriggerOccurrenceReclaimed,
         Self::ProcessNoLongerRetained,
         Self::ProcessRegistryUnavailable,
         Self::ProcessSignalWaitCancelled,
@@ -1202,6 +1204,7 @@ impl RuntimeErrorCode {
             "start_key_family_refused" => Self::StartKeyFamilyRefused,
             "trigger_delivery_bound" => Self::TriggerDeliveryBound,
             "trigger_delivery_retired" => Self::TriggerDeliveryRetired,
+            "trigger_occurrence_reclaimed" => Self::TriggerOccurrenceReclaimed,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,

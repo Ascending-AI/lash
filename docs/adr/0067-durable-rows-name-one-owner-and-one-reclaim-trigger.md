@@ -104,6 +104,7 @@ silently become a whole-catalog blob sweep.
 | Host or platform mutation receipt | Namespace replay eligibility | Explicit host retention through the trigger-store primitive. |
 | Fired occurrence | Committed delivery fan-out | Transactional reconciliation after zero delivery rows remain. |
 | Non-fired occurrence | Factory audit history | Explicit non-fired audit cutoff, never delivery reconciliation. |
+| Occurrence tombstone | Factory redelivery fence for one reclaimed occurrence identity | The host's occurrence reclaim pass, once the tombstone is older than that pass's cutoff (ADR 0021). |
 | Trigger delivery | Process run | Process-retention policy under ADR 0021. |
 | Attachment condemnation | Factory condemnation protocol | Adoption and discharge under §6. |
 
@@ -252,7 +253,7 @@ coverage at the reclamation boundary.
   implement §4. [Outcome laws](../../crates/lash-conformance/src/conformance/store_maintenance_outcome.rs#L1)
   cover failures and witnessed emptiness.
 - [Trigger retention contract](../../crates/lash-core-execution/src/triggers.rs#L1693)
-  and [audit cutoff](../../crates/lash-core-execution/src/triggers.rs#L1917)
+  and [audit cutoff](../../crates/lash-core-execution/src/triggers.rs#L1940)
   separate fired fan-out and non-fired history.
 - [Sweep](../../crates/lash-core-store/src/attachments.rs#L819),
   [enumeration outcomes](../../crates/lash-core-store/src/attachments.rs#L883),

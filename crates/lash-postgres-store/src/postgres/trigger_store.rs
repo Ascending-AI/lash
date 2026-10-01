@@ -14,6 +14,7 @@ use lash_sansio::SessionId;
 use lash_store_sql::Dialect;
 use lash_store_sql::trigger::deliveries::DeliveryStatements;
 use lash_store_sql::trigger::mutation_receipts::MutationReceiptStatements;
+use lash_store_sql::trigger::occurrence_tombstones::OccurrenceTombstoneStatements;
 use lash_store_sql::trigger::occurrences::{
     ListShape as OccurrenceListShape, OccurrenceStatements,
 };
@@ -106,14 +107,24 @@ lash_store_sql::statements! {
              FROM trigger_occurrences
              WHERE idempotency_key = ?1 FOR UPDATE";
 
+        /// Delete every fired occurrence no delivery references, leaving each
+        /// one's tombstone at `?1` (FIG-4513).
+        ///
         /// PostgreSQL reads the outcome with `jsonb #>>`, SQLite with
-        /// `json_extract`.
-        delete_orphan_fired = "DELETE FROM trigger_occurrences AS occurrence
-             WHERE COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
-               AND NOT EXISTS (
-                   SELECT 1 FROM trigger_deliveries AS delivery
-                   WHERE delivery.occurrence_id = occurrence.occurrence_id
-               )";
+        /// `json_extract`. PostgreSQL deletes and tombstones in one statement,
+        /// so no concurrent ingest sees the row gone and its tombstone absent;
+        /// SQLite issues the two under its single writer.
+        delete_orphan_fired = "WITH reclaimed AS (
+                 DELETE FROM trigger_occurrences AS occurrence
+                 WHERE COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM trigger_deliveries AS delivery
+                       WHERE delivery.occurrence_id = occurrence.occurrence_id
+                   )
+                 RETURNING occurrence.occurrence_id
+             )
+             INSERT INTO trigger_occurrence_tombstones (occurrence_id, reclaimed_at_ms)
+             SELECT reclaimed.occurrence_id, ?1 FROM reclaimed";
 
         arm_reclaimable_for_candidates = "UPDATE trigger_occurrences AS occurrence
              SET reclaimable_at_ms = ?2
@@ -160,22 +171,35 @@ lash_store_sql::statements! {
              LEFT JOIN candidates ON TRUE
              ORDER BY candidates.occurrence_id ASC";
 
-        /// Reclaim occurrence `?1` if it is still eligible at cutoff `?2`.
+        /// Reclaim occurrence `?1` if it is still eligible at cutoff `?2`,
+        /// leaving its tombstone at `?3`.
         /// The whole eligibility test is re-proved here, because the worklist was read from an
         /// earlier snapshot.
-        delete_reclaimable_by_id = "DELETE FROM trigger_occurrences AS occurrence
-             WHERE occurrence.occurrence_id = ?1
-               AND occurrence.reclaimable_at_ms IS NOT NULL
-               AND occurrence.reclaimable_at_ms <= ?2
-               AND COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
-               AND NOT EXISTS (
-                   SELECT 1 FROM trigger_deliveries AS delivery
-                   WHERE delivery.occurrence_id = occurrence.occurrence_id
-               )";
+        delete_reclaimable_by_id = "WITH reclaimed AS (
+                 DELETE FROM trigger_occurrences AS occurrence
+                 WHERE occurrence.occurrence_id = ?1
+                   AND occurrence.reclaimable_at_ms IS NOT NULL
+                   AND occurrence.reclaimable_at_ms <= ?2
+                   AND COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM trigger_deliveries AS delivery
+                       WHERE delivery.occurrence_id = occurrence.occurrence_id
+                   )
+                 RETURNING occurrence.occurrence_id
+             )
+             INSERT INTO trigger_occurrence_tombstones (occurrence_id, reclaimed_at_ms)
+             SELECT reclaimed.occurrence_id, ?3 FROM reclaimed";
 
-        prune_non_fired = "DELETE FROM trigger_occurrences
-             WHERE occurred_at_ms < ?1
-               AND COALESCE(record_json::jsonb #>> '{outcome,kind}', 'fired') <> 'fired'";
+        /// Delete every audit row recorded before cutoff `?1`, leaving each
+        /// one's tombstone at `?2`.
+        prune_non_fired = "WITH reclaimed AS (
+                 DELETE FROM trigger_occurrences AS occurrence
+                 WHERE occurrence.occurred_at_ms < ?1
+                   AND COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') <> 'fired'
+                 RETURNING occurrence.occurrence_id
+             )
+             INSERT INTO trigger_occurrence_tombstones (occurrence_id, reclaimed_at_ms)
+             SELECT reclaimed.occurrence_id, ?2 FROM reclaimed";
     }
 }
 
@@ -261,6 +285,9 @@ pub(crate) struct TriggerSql {
     pub(crate) occurrence: OccurrenceStatements,
     /// `trigger_occurrences` statements only PostgreSQL issues.
     occurrence_postgres: OccurrencePostgresStatements,
+    /// `trigger_occurrence_tombstones` statements both backends issue
+    /// verbatim.
+    tombstone: OccurrenceTombstoneStatements,
     /// `trigger_deliveries` statements both backends issue verbatim.
     pub(crate) delivery: DeliveryStatements,
     /// `trigger_deliveries` statements only PostgreSQL issues.
@@ -280,6 +307,7 @@ static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
         subscription_postgres: SubscriptionPostgresStatements::render(dialect),
         occurrence: OccurrenceStatements::render(dialect),
         occurrence_postgres: OccurrencePostgresStatements::render(dialect),
+        tombstone: OccurrenceTombstoneStatements::render(dialect),
         delivery: DeliveryStatements::render(dialect),
         delivery_postgres: DeliveryPostgresStatements::render(dialect),
         receipt: MutationReceiptStatements::render(dialect),
@@ -663,6 +691,20 @@ impl TriggerStore for PostgresTriggerStore {
             }
             (occurrence, false)
         } else {
+            // Retention reclaimed this identity: the ingest is a redelivery,
+            // and writes nothing back (FIG-4513). The key's lock is held, and
+            // a reclaim deletes and tombstones in one statement, so a row
+            // this transaction found absent shows its tombstone here.
+            let reclaimed = sqlx::query(sql.tombstone.select_by_occurrence_id.sql())
+                .bind(&occurrence_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
+            if reclaimed.is_some() {
+                return Err(lash_core_execution::trigger_occurrence_reclaimed(
+                    &occurrence_id,
+                ));
+            }
             let occurrence = TriggerOccurrenceRecord {
                 occurrence_id,
                 source_type: request.source_type,
@@ -913,6 +955,7 @@ impl TriggerStore for PostgresTriggerStore {
         };
         let reclaimed_occurrence_count =
             sqlx::query(sql.occurrence_postgres.delete_orphan_fired.sql())
+                .bind(i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX))
                 .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?
@@ -1046,6 +1089,7 @@ impl TriggerStore for PostgresTriggerStore {
             .filter_map(|row| row.get::<Option<String>, _>(4))
             .collect::<Vec<_>>();
 
+        let reclaimed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         for occurrence_id in candidates {
             let occurrence_id = occurrence_id.as_str();
             let deleted = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
@@ -1053,6 +1097,7 @@ impl TriggerStore for PostgresTriggerStore {
                     sqlx::query(sql.occurrence_postgres.delete_reclaimable_by_id.sql())
                         .bind(occurrence_id)
                         .bind(cutoff_epoch_ms)
+                        .bind(reclaimed_at_ms)
                         .execute(tx.as_mut())
                         .await
                         .map_err(crate::store_sqlx_error)
@@ -1072,6 +1117,26 @@ impl TriggerStore for PostgresTriggerStore {
                 report.reclaimed_occurrence_count += deleted;
             }
         }
+        // After the deletes, so a pass whose cutoff is past this instant
+        // leaves no tombstone of its own behind.
+        report.compacted_tombstone_count =
+            crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+                Box::pin(async move {
+                    sqlx::query(sql.tombstone.compact.sql())
+                        .bind(cutoff_epoch_ms)
+                        .execute(tx.as_mut())
+                        .await
+                        .map_err(crate::store_sqlx_error)
+                })
+            })
+            .await
+            .map_err(|error| {
+                lash_core_execution::MaintenanceFailure::failed(
+                    Box::new(crate::plugin_store_error(error)),
+                    report.clone(),
+                )
+            })?
+            .rows_affected() as usize;
         Ok(report)
     }
 
@@ -1096,10 +1161,12 @@ impl TriggerStore for PostgresTriggerStore {
         cutoff_epoch_ms: u64,
     ) -> Result<usize, PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let reclaimed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         let pruned = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
             Box::pin(async move {
                 sqlx::query(trigger_sql().occurrence_postgres.prune_non_fired.sql())
                     .bind(cutoff_epoch_ms)
+                    .bind(reclaimed_at_ms)
                     .execute(tx.as_mut())
                     .await
                     .map_err(crate::store_sqlx_error)

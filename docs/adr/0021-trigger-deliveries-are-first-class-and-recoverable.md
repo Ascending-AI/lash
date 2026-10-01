@@ -20,6 +20,18 @@ A binding outlives its process, so the binding, not the start key, answers a dup
 
 The receipt holds each binding as the emission's ingest answered it. A start that another emission's bind, and a prune of the bound process, overtake between that ingest and its registration finds nothing under its key. The registrar therefore reads the delivery's binding in the transaction that checks the start key, after the key found nothing. A bound delivery registers nothing and refuses as `TriggerDeliveryBound`. The emission then journals an admission, which reads the binding and records `Bound` with its process, and reports `Started` with that process. Its replay serves the recorded refusal and then that admission. Relay recovery reads the binding again and binds nothing new. A SQLite store set attaches its trigger store to its registry's connection for this read; PostgreSQL reads the table in the same transaction (FIG-4369).
 
+## Reclaimed occurrences stay reclaimed
+
+A journal answers a replay. A host with no journal to answer from runs the emission's ingest again on every redelivery: the tool-intent ingress, whose redelivery arrives on a new invocation with an empty journal, and any host that journals nothing. Once retention has reclaimed the occurrence, that ingest finds no row under the idempotency key, and nothing at the caller can tell an emission that never ran from one that ran and was reclaimed.
+
+The trigger store answers it. Every delete of an occurrence (delivery reconciliation, the occurrence reclaim pass and the non-fired audit prune) writes a payload-free tombstone under the occurrence id in the same transaction. An ingest that finds no occurrence and a tombstone writes nothing and refuses as `TriggerOccurrenceReclaimed`: no occurrence, no reservation and no start. The refusal stays typed to the host. A turn's intent reports it as the intent's refusal code, and the tool-intent ingress as `ToolIntentIngressRefusal::TriggerOccurrenceReclaimed`.
+
+`reclaim_trigger_occurrences(cutoff)` compacts every tombstone written before its cutoff, after its own deletes. The cutoff is therefore the redelivery horizon the host names: an identity presented past it records a new occurrence. A tombstone is factory-owned under ADR 0067.
+
+A store that does not answer an emission's ingest, its bind or its binding read is that attempt's fault and is never recorded: the engine runs the attempt again, which serves the steps already journaled and binds the process the first attempt registered. The pin holds that process until the bind commits, as it does when the attempt dies instead. Only a typed refusal is a step's recorded outcome, so an outage never settles a started delivery as failed.
+
+An emission journals a step whether or not a subscription matches, so on Restate it runs inside a handler. A scope the effect host lends outside one refuses the emission at its ingest step, before the trigger store is reached, and writes nothing. Every production emitter passes its handler's controller.
+
 ## Cross-store retention protocol
 
 Process retention commits a tombstone before delivery cleanup. Reconciliation snapshots exact `(occurrence_id, subscription_id, process_id)` identities, classifies tombstoned processes, revalidates at the action boundary, then deletes only matching observed delivery rows. A live row takes precedence over a stale tombstone. Each trigger-store delete is atomic and idempotent; the two stores need no distributed transaction.

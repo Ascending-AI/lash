@@ -2,12 +2,12 @@
 //! the deliveries a firing reserves, and the receipts that make a mutation
 //! replayable.
 //!
-//! Four tables — [`subscriptions`], [`occurrences`], [`deliveries`] and
-//! [`mutation_receipts`] — and no family-wide shared statement. The one read
-//! that spans all four (the retention sweep's session-owner enumeration) forks
-//! on JSON extraction in both backends, so it is declared twice under the
-//! `trigger_retention` prefix and manifested; the column lists it projects
-//! still live with their tables.
+//! Five tables — [`subscriptions`], [`occurrences`], [`occurrence_tombstones`],
+//! [`deliveries`] and [`mutation_receipts`] — and no family-wide shared
+//! statement. The one read that spans three of them (the retention sweep's
+//! session-owner enumeration) forks on JSON extraction in both backends, so it
+//! is declared twice under the `trigger_retention` prefix and manifested; the
+//! column lists it projects still live with their tables.
 //!
 //! # Where the row types are
 //!
@@ -23,5 +23,6 @@
 
 pub mod deliveries;
 pub mod mutation_receipts;
+pub mod occurrence_tombstones;
 pub mod occurrences;
 pub mod subscriptions;

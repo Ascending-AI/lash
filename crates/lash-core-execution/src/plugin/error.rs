@@ -36,6 +36,37 @@ pub fn is_durable_identity_conflict(error: &PluginError) -> bool {
         _ => false,
     }
 }
+/// The refusal a trigger store answers an ingest whose occurrence identity
+/// retention has reclaimed (FIG-4513).
+///
+/// A reclaimed occurrence leaves a tombstone under its id. An ingest that
+/// finds the tombstone is a redelivery of an emission that already ran, on a
+/// host with no journal to answer it from: the store writes neither the
+/// occurrence nor a delivery back, and refuses with this error. It carries
+/// [`RuntimeErrorCode::TriggerOccurrenceReclaimed`](crate::RuntimeErrorCode::TriggerOccurrenceReclaimed)
+/// for the reason [`durable_identity_conflict`] carries its code.
+pub fn trigger_occurrence_reclaimed(occurrence_id: &str) -> PluginError {
+    PluginError::Runtime(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::TriggerOccurrenceReclaimed,
+        format!(
+            "trigger occurrence `{occurrence_id}` was recorded and has since been reclaimed by retention"
+        ),
+    ))
+}
+
+/// Whether `error` is the refusal minted by [`trigger_occurrence_reclaimed`],
+/// however many conversions it has crossed.
+pub fn is_trigger_occurrence_reclaimed(error: &PluginError) -> bool {
+    match error {
+        PluginError::Runtime(error) => {
+            error.code == crate::RuntimeErrorCode::TriggerOccurrenceReclaimed
+        }
+        PluginError::RuntimeEffectController(error) => {
+            error.code == crate::RuntimeErrorCode::TriggerOccurrenceReclaimed
+        }
+        _ => false,
+    }
+}
 #[derive(Debug, thiserror::Error, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]

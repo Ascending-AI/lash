@@ -1697,6 +1697,10 @@ pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION + 1;
 // arms it and the binding delivers it, so a reservation a crash left unbound
 // is started by the relay rather than by a re-emit. A trigger store written
 // before the change lacks the columns; recreate it.
+// Version 12 also carries `trigger_occurrence_tombstones` (FIG-4513, changed
+// in place under the version freeze): every delete of an occurrence leaves
+// its tombstone, and an ingest that finds one writes nothing back. A trigger
+// store written before the change lacks the table; recreate it.
 const BASE_TRIGGER_SCHEMA_VERSION: i32 = 12;
 /// version_guard(
 ///     shapes(

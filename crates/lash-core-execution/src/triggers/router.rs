@@ -444,6 +444,9 @@ impl TriggerRouter {
     /// host there is no journal to replay it from, so the drain must recompute
     /// the identical value. [`Self::emit`] reports `Started` for every
     /// delivery it started, on the first drive and every redrive alike.
+    /// A redrive after retention reclaimed the occurrence has nothing to
+    /// recompute it from: the store refuses the reclaimed identity, and the
+    /// declaration fails with that typed refusal (FIG-4513).
     ///
     /// A delivery that did not start carries no such statement: its reason is a
     /// live error string, and the next drive may well start it. Reporting that
@@ -541,7 +544,7 @@ impl TriggerRouter {
             let started = match reservation.process_id.clone() {
                 Some(process_id) => Ok(process_id),
                 None => {
-                    self.start_delivery(
+                    self.start_delivery_steps(
                         &reservation,
                         Arc::clone(process_work.registry()),
                         effect_controller,
@@ -551,7 +554,13 @@ impl TriggerRouter {
             };
             let process_id = match started {
                 Ok(process_id) => process_id,
-                Err(err) => {
+                // The bind's store did not answer: the fault is this
+                // attempt's, and the engine runs the emission again. Reported
+                // as a failed delivery, the outage would settle the
+                // emission's answer while the bind's step, unrecorded, binds
+                // on the next replay (FIG-4513).
+                Err(DeliveryStartFault::Attempt(fault)) => return Err(fault.into()),
+                Err(DeliveryStartFault::Delivery(err)) => {
                     deliveries.push(reservation.emit_report(
                         None,
                         TriggerDeliveryEmitOutcome::Failed {
@@ -576,9 +585,14 @@ impl TriggerRouter {
     ///
     /// The first execution writes the occurrence and reserves its
     /// deliveries. Every replay serves the recorded receipt and never
-    /// reaches the store: once retention has reclaimed the occurrence, an
-    /// ingest would write it and its deliveries back. A request the store
-    /// would refuse unread is refused here, before any step.
+    /// reaches the store, so it reports what the first attempt reported
+    /// after retention has reclaimed the occurrence. A host with no journal
+    /// runs the step's body again on a redelivery: the store then refuses a
+    /// reclaimed identity as
+    /// [`TriggerOccurrenceReclaimed`](crate::RuntimeErrorCode::TriggerOccurrenceReclaimed)
+    /// and writes nothing (FIG-4513), and the emission fails with that
+    /// refusal. A request the store would refuse unread is refused here,
+    /// before any step.
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
@@ -725,6 +739,19 @@ impl TriggerRouter {
         process_registry: Arc<dyn crate::ProcessRegistry>,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<ProcessId, PluginError> {
+        self.start_delivery_steps(reservation, process_registry, effect_controller)
+            .await
+            .map_err(DeliveryStartFault::into_error)
+    }
+
+    /// [`Self::start_delivery`], telling a delivery that did not start from
+    /// an attempt whose bind or binding read the store did not answer.
+    async fn start_delivery_steps(
+        &self,
+        reservation: &TriggerDeliveryReservation,
+        process_registry: Arc<dyn crate::ProcessRegistry>,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<ProcessId, DeliveryStartFault> {
         let DeliveryStart {
             command,
             attribution,
@@ -732,7 +759,7 @@ impl TriggerRouter {
         } = self
             .prepare_delivery_start(reservation)
             .await
-            .map_err(DeliveryStartRefusal::into_error)?;
+            .map_err(|refusal| DeliveryStartFault::Delivery(refusal.into_error()))?;
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
         let effect_id = command.effect_id();
@@ -791,11 +818,12 @@ impl TriggerRouter {
             // nothing, and the delivery's process is the bound one. Nothing
             // was pinned, and the binding needs no bind (FIG-4369).
             Err(refusal) if refusal.code == crate::RuntimeErrorCode::TriggerDeliveryBound => {
-                return Ok(self
+                return self
                     .admit_bound_delivery(reservation, effect_controller)
-                    .await?);
+                    .await
+                    .map_err(DeliveryStartFault::of_binding_step);
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(DeliveryStartFault::Delivery(error.into())),
         };
         match outcome {
             crate::RuntimeEffectOutcome::Process {
@@ -808,19 +836,19 @@ impl TriggerRouter {
                 // `TriggerDelivery` obligation in the same write; only then
                 // is the process's pin released. Both are one recorded step,
                 // which a replay never runs again (FIG-4503).
-                Ok(self
-                    .bind_started_delivery(
-                        reservation,
-                        record.id,
-                        process_registry,
-                        effect_controller,
-                    )
-                    .await?)
+                self.bind_started_delivery(
+                    reservation,
+                    record.id,
+                    process_registry,
+                    effect_controller,
+                )
+                .await
+                .map_err(DeliveryStartFault::of_binding_step)
             }
-            other => Err(PluginError::Session(format!(
+            other => Err(DeliveryStartFault::Delivery(PluginError::Session(format!(
                 "trigger process start returned the wrong outcome: {}",
                 other.kind().as_str()
-            ))),
+            )))),
         }
     }
 
@@ -1111,15 +1139,16 @@ fn recorded_store_fault(error: PluginError) -> crate::RuntimeEffectControllerErr
     }
 }
 
-/// A store fault inside an emission's recorded ingest (FIG-4519).
+/// A store fault inside an emission's recorded ingest or bind (FIG-4519,
+/// FIG-4513).
 ///
 /// A store that did not answer reports an opaque session error, which names
 /// no cause. It is the attempt's, under the live code a plugin hook's opaque
-/// failure settles as: recorded, every replay would serve the outage as the
-/// ingest's refusal, and nothing would ever write the occurrence. A lost
-/// bind stays its step's recorded outcome, since the delivery's recovery
-/// binds it.
-fn ingest_store_fault(error: PluginError) -> crate::RuntimeEffectControllerError {
+/// failure settles as. Recorded, every replay would serve the outage as the
+/// step's refusal: nothing would ever write the occurrence, and a delivery
+/// whose process started would answer as failed for good. A typed refusal
+/// is still the step's recorded outcome.
+fn attempt_store_fault(error: PluginError) -> crate::RuntimeEffectControllerError {
     match error {
         error @ PluginError::Session(_) => crate::RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::PluginSessionManager,
@@ -1127,6 +1156,37 @@ fn ingest_store_fault(error: PluginError) -> crate::RuntimeEffectControllerError
         )
         .retryable_uncommitted_derivation(),
         error => recorded_store_fault(error),
+    }
+}
+
+/// Why a delivery's start steps did not answer its process.
+enum DeliveryStartFault {
+    /// The delivery did not start: its emission reports it failed, and its
+    /// obligation recovers it.
+    Delivery(PluginError),
+    /// The store did not answer the delivery's bind, or the read of its
+    /// binding: the fault is the attempt's, and the step runs again.
+    Attempt(crate::RuntimeEffectControllerError),
+}
+
+impl DeliveryStartFault {
+    /// The fault of a delivery's `AdmitTriggerDelivery` step.
+    fn of_binding_step(fault: crate::RuntimeEffectControllerError) -> Self {
+        if fault
+            .journal_disposition(crate::RuntimeEffectKind::AdmitTriggerDelivery)
+            .is_retryable_derivation()
+        {
+            Self::Attempt(fault)
+        } else {
+            Self::Delivery(fault.into())
+        }
+    }
+
+    fn into_error(self) -> PluginError {
+        match self {
+            Self::Delivery(error) => error,
+            Self::Attempt(fault) => fault.into(),
+        }
     }
 }
 
@@ -1164,7 +1224,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for OccurrenceIn
             .store
             .ingest_occurrence(*request)
             .await
-            .map_err(ingest_store_fault)?;
+            .map_err(attempt_store_fault)?;
         Ok(crate::RuntimeEffectOutcome::IngestTriggerOccurrence {
             receipt: Box::new(receipt),
         })
@@ -1197,7 +1257,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for DeliveryBind
         self.store
             .bind_delivery_process(&self.occurrence_id, &self.subscription_id, &self.process_id)
             .await
-            .map_err(recorded_store_fault)?;
+            .map_err(attempt_store_fault)?;
         release_trigger_delivery_pin(self.process_registry.as_ref(), &self.process_id).await;
         Ok(crate::RuntimeEffectOutcome::AdmitTriggerDelivery {
             admission: Box::new(TriggerDeliveryAdmission::Bound {

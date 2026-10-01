@@ -130,6 +130,7 @@ pub const TABLES: &[&str] = &[
     worker_recovery::TABLE,
     trigger::deliveries::TABLE,
     trigger::mutation_receipts::TABLE,
+    trigger::occurrence_tombstones::TABLE,
     trigger::occurrences::TABLE,
     trigger::subscriptions::TABLE,
     turn_ingress::cancel_affected_inputs::TABLE,
@@ -192,6 +193,8 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(trigger::deliveries::DeliveryStatements::NEUTRAL);
     statements.extend_from_slice(trigger::deliveries::DeliveryObligationStatements::NEUTRAL);
     statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
+    statements
+        .extend_from_slice(trigger::occurrence_tombstones::OccurrenceTombstoneStatements::NEUTRAL);
     statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
     statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);
     statements.extend_from_slice(process::events::EventStatements::NEUTRAL);

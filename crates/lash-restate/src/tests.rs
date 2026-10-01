@@ -1593,6 +1593,7 @@ mod substrate_lost;
 mod sync_hooks_retryable_faults;
 mod tool_batch_parallelism_on_the_double;
 mod tool_call_identity_on_the_double;
+mod trigger_emit_outside_a_handler_on_the_double;
 mod trigger_emit_reattach_on_the_double;
 mod vm_broker_on_the_double;
 

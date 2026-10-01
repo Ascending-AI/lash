@@ -8,6 +8,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 mod delivery_starts;
+mod redelivery;
 
 use crate::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessId, ProcessIdentity, ProcessInput,
@@ -110,6 +111,20 @@ where
 {
     delivery_starts::a_delivery_start_registers_nothing_once_its_process_was_pruned(make().await)
         .await;
+}
+
+/// A redelivered emission on a host that journals nothing never writes a
+/// reclaimed occurrence or delivery back (FIG-4513): matched, zero-match and
+/// audit occurrences, each reclaimed by its own retention path.
+pub async fn trigger_occurrence_redelivery_after_reclaim<F, Fut>(make: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ProcessTriggerRetentionHandles>,
+{
+    redelivery::a_redelivered_emission_writes_no_reclaimed_delivery_back(make().await).await;
+    redelivery::a_redelivered_zero_match_emission_writes_no_reclaimed_occurrence_back(make().await)
+        .await;
+    redelivery::a_redelivered_audit_emission_writes_no_pruned_occurrence_back(make().await).await;
 }
 
 /// A reserved Engine target with a non-object payload cannot start. Its

@@ -16,6 +16,7 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_store_sql::trigger::deliveries::DeliveryStatements;
 use lash_store_sql::trigger::mutation_receipts::MutationReceiptStatements;
+use lash_store_sql::trigger::occurrence_tombstones::OccurrenceTombstoneStatements;
 use lash_store_sql::trigger::occurrences::{
     ListShape as OccurrenceListShape, OccurrenceStatements,
 };
@@ -108,6 +109,25 @@ lash_store_sql::statements! {
              FROM trigger_occurrences
              WHERE idempotency_key = ?1";
 
+        /// Tombstone, at `?1`, every occurrence [`delete_orphan_fired`]
+        /// deletes next in the same write transaction.
+        ///
+        /// SQLite writes the tombstone and deletes the row as two statements
+        /// under its single writer; PostgreSQL does both in one statement.
+        ///
+        /// [`delete_orphan_fired`]: Self::delete_orphan_fired
+        tombstone_orphan_fired = "INSERT INTO trigger_occurrence_tombstones (
+                occurrence_id, reclaimed_at_ms
+             )
+             SELECT occurrence_id, ?1
+             FROM trigger_occurrences
+             WHERE COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+               AND NOT EXISTS (
+                   SELECT 1 FROM trigger_deliveries
+                   WHERE trigger_deliveries.occurrence_id =
+                         trigger_occurrences.occurrence_id
+               )";
+
         /// SQLite reads the outcome with `json_extract`, PostgreSQL with
         /// `jsonb #>>`.
         delete_orphan_fired = "DELETE FROM trigger_occurrences
@@ -167,6 +187,25 @@ lash_store_sql::statements! {
              LEFT JOIN candidates ON TRUE
              ORDER BY candidates.occurrence_id ASC";
 
+        /// Tombstone occurrence `?1`, at `?3`, if [`delete_reclaimable_by_id`]
+        /// deletes it next at cutoff `?2`.
+        ///
+        /// [`delete_reclaimable_by_id`]: Self::delete_reclaimable_by_id
+        tombstone_reclaimable_by_id = "INSERT INTO trigger_occurrence_tombstones (
+                occurrence_id, reclaimed_at_ms
+             )
+             SELECT occurrence_id, ?3
+             FROM trigger_occurrences
+             WHERE occurrence_id = ?1
+               AND reclaimable_at_ms IS NOT NULL
+               AND reclaimable_at_ms <= ?2
+               AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') = 'fired'
+               AND NOT EXISTS (
+                   SELECT 1 FROM trigger_deliveries
+                   WHERE trigger_deliveries.occurrence_id =
+                         trigger_occurrences.occurrence_id
+               )";
+
         /// Reclaim occurrence `?1` if it is still eligible at cutoff `?2`.
         /// The whole eligibility test is re-proved here, because the worklist was read from an
         /// earlier snapshot.
@@ -180,6 +219,18 @@ lash_store_sql::statements! {
                    WHERE trigger_deliveries.occurrence_id =
                          trigger_occurrences.occurrence_id
                )";
+
+        /// Tombstone, at `?2`, every audit row [`prune_non_fired`] deletes
+        /// next at cutoff `?1`.
+        ///
+        /// [`prune_non_fired`]: Self::prune_non_fired
+        tombstone_non_fired = "INSERT INTO trigger_occurrence_tombstones (
+                occurrence_id, reclaimed_at_ms
+             )
+             SELECT occurrence_id, ?2
+             FROM trigger_occurrences
+             WHERE occurred_at_ms < ?1
+               AND COALESCE(json_extract(record_json, '$.outcome.kind'), 'fired') != 'fired'";
 
         prune_non_fired = "DELETE FROM trigger_occurrences
              WHERE occurred_at_ms < ?1
@@ -273,6 +324,9 @@ pub(crate) struct TriggerSql {
     occurrence: OccurrenceStatements,
     /// `trigger_occurrences` statements only SQLite issues.
     occurrence_sqlite: OccurrenceSqliteStatements,
+    /// `trigger_occurrence_tombstones` statements both backends issue
+    /// verbatim.
+    tombstone: OccurrenceTombstoneStatements,
     /// `trigger_deliveries` statements both backends issue verbatim.
     delivery: DeliveryStatements,
     /// `trigger_deliveries` statements only SQLite issues.
@@ -292,6 +346,7 @@ static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
         subscription_sqlite: SubscriptionSqliteStatements::render(dialect),
         occurrence: OccurrenceStatements::render(dialect),
         occurrence_sqlite: OccurrenceSqliteStatements::render(dialect),
+        tombstone: OccurrenceTombstoneStatements::render(dialect),
         delivery: DeliveryStatements::render(dialect),
         delivery_sqlite: DeliverySqliteStatements::render(dialect),
         receipt: MutationReceiptStatements::render(dialect),
@@ -874,6 +929,21 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                         }
                         (record, false)
                     } else {
+                        // Retention reclaimed this identity: the ingest is a
+                        // redelivery, and writes nothing back (FIG-4513).
+                        let reclaimed: Option<i64> = tx
+                            .query_row(
+                                sql.tombstone.select_by_occurrence_id.sql(),
+                                params![occurrence_id.as_str()],
+                                |row| row.get(0),
+                            )
+                            .optional()
+                            .map_err(process_sqlite_error)?;
+                        if reclaimed.is_some() {
+                            return Err(lash_core_execution::trigger_occurrence_reclaimed(
+                                &occurrence_id,
+                            ));
+                        }
                         let record = lash_core_execution::TriggerOccurrenceRecord {
                             occurrence_id: occurrence_id.clone(),
                             source_type: request.source_type,
@@ -1153,6 +1223,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
             .collect::<Vec<_>>();
         let deleted_owner_scopes_json =
             serde_json::to_string(&deleted_owner_scopes).map_err(process_decode_error)?;
+        let reclaimed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         self.conn
             .write(move |tx| {
                 let sql = trigger_sql();
@@ -1160,6 +1231,11 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                     tx,
                     sql.delivery_sqlite.delete_retention_candidates.sql(),
                     params![&candidates_json],
+                )?;
+                crate::conn::cached_execute(
+                    tx,
+                    sql.occurrence_sqlite.tombstone_orphan_fired.sql(),
+                    params![reclaimed_at_ms],
                 )?;
                 let reclaimed_occurrence_count = crate::conn::cached_execute(
                     tx,
@@ -1294,16 +1370,20 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                 ))
             })?;
         let (mut report, candidates) = scoped?;
+        let reclaimed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         for occurrence_id in candidates {
             let deleted = self
                 .conn
                 .write(move |tx| {
+                    let sql = trigger_sql();
                     crate::conn::cached_execute(
                         tx,
-                        trigger_sql()
-                            .occurrence_sqlite
-                            .delete_reclaimable_by_id
-                            .sql(),
+                        sql.occurrence_sqlite.tombstone_reclaimable_by_id.sql(),
+                        params![occurrence_id, cutoff_epoch_ms, reclaimed_at_ms],
+                    )?;
+                    crate::conn::cached_execute(
+                        tx,
+                        sql.occurrence_sqlite.delete_reclaimable_by_id.sql(),
                         params![occurrence_id, cutoff_epoch_ms],
                     )
                 })
@@ -1320,6 +1400,24 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                 report.reclaimed_occurrence_count += deleted;
             }
         }
+        // After the deletes, so a pass whose cutoff is past this instant
+        // leaves no tombstone of its own behind.
+        report.compacted_tombstone_count = self
+            .conn
+            .write(move |tx| {
+                crate::conn::cached_execute(
+                    tx,
+                    trigger_sql().tombstone.compact.sql(),
+                    params![cutoff_epoch_ms],
+                )
+            })
+            .await
+            .map_err(|error| {
+                lash_core_execution::MaintenanceFailure::failed(
+                    Box::new(process_sqlite_error(error)),
+                    report.clone(),
+                )
+            })?;
         Ok(report)
     }
 
@@ -1345,11 +1443,18 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         cutoff_epoch_ms: u64,
     ) -> Result<usize, lash_core_execution::PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let reclaimed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         self.conn
             .write(move |tx| {
+                let sql = trigger_sql();
                 crate::conn::cached_execute(
                     tx,
-                    trigger_sql().occurrence_sqlite.prune_non_fired.sql(),
+                    sql.occurrence_sqlite.tombstone_non_fired.sql(),
+                    params![cutoff_epoch_ms, reclaimed_at_ms],
+                )?;
+                crate::conn::cached_execute(
+                    tx,
+                    sql.occurrence_sqlite.prune_non_fired.sql(),
                     params![cutoff_epoch_ms],
                 )
             })

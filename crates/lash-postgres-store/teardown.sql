@@ -122,6 +122,8 @@ DROP TABLE IF EXISTS lash_trigger_subscriptions CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_occurrences CASCADE;
 
+DROP TABLE IF EXISTS lash_trigger_occurrence_tombstones CASCADE;
+
 DROP TABLE IF EXISTS lash_trigger_deliveries CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_mutation_receipts CASCADE;

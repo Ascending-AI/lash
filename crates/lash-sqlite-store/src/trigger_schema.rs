@@ -1,6 +1,6 @@
-//! The trigger store's database: subscriptions, occurrences, the deliveries
-//! an occurrence reserved (each a `TriggerDelivery` obligation, ADR 0109) and
-//! mutation receipts. Its version is `crate::schema::TRIGGER_SCHEMA_VERSION`.
+//! The trigger store's database: subscriptions, occurrences and the
+//! tombstones of reclaimed ones, the deliveries an occurrence reserved (each a
+//! `TriggerDelivery` obligation, ADR 0109) and mutation receipts. Its version is `crate::schema::TRIGGER_SCHEMA_VERSION`.
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS lash_compat (
@@ -53,6 +53,17 @@ CREATE INDEX IF NOT EXISTS idx_trigger_occurrences_source
 CREATE INDEX IF NOT EXISTS idx_trigger_occurrences_reclaimable
     ON trigger_occurrences(reclaimable_at_ms, occurrence_id)
     WHERE reclaimable_at_ms IS NOT NULL;
+
+-- An occurrence retention reclaimed (FIG-4513): written with the delete, so
+-- an ingest that presents the identity again writes nothing back. The
+-- occurrence reclaim pass compacts it once it is older than the pass's cutoff.
+CREATE TABLE IF NOT EXISTS trigger_occurrence_tombstones (
+    occurrence_id    TEXT PRIMARY KEY,
+    reclaimed_at_ms  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trigger_occurrence_tombstones_reclaimed
+    ON trigger_occurrence_tombstones(reclaimed_at_ms);
 
 CREATE TABLE IF NOT EXISTS trigger_deliveries (
     occurrence_id    TEXT NOT NULL,

@@ -724,7 +724,8 @@ mod tests {
     }
 
     /// The immediate producer path pins its child until the bind commits (ADR
-    /// 0021, FIG-4203): an emit whose bind is lost leaves the child pinned,
+    /// 0021, FIG-4203): an emit whose attempt dies at a lost bind leaves the
+    /// child pinned,
     /// the completed child survives a retention pass, and the recovery binds
     /// that child and releases the pin. A bound child is then pruned as usual.
     #[tokio::test(flavor = "multi_thread")]
@@ -755,23 +756,25 @@ mod tests {
             .expect("open the emit handler");
         let scoped_controller = handler.scoped();
 
-        let report = router
-            .emit(
+        // The bind's fault is its attempt's, so the emission never answers:
+        // the engine would run the attempt again. This attempt dies instead.
+        tokio::select! {
+            answered = router.emit(
                 button_occurrence(source_key, "button-pinned"),
                 &scoped_controller,
-            )
+            ) => panic!("an attempt whose bind is lost answers nothing: {answered:?}"),
+            () = failing.bind_failed() => {}
+        }
+        let occurrence_id = world
+            .store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
             .await
-            .expect("emit trigger");
-        assert!(
-            matches!(
-                report.deliveries[0].outcome,
-                TriggerDeliveryEmitOutcome::Failed { .. }
-            ),
-            "the lost bind fails the delivery: {report:?}"
-        );
+            .expect("list the occurrence")
+            .remove(0)
+            .occurrence_id;
         let reservation = world
             .store
-            .list_deliveries_by_occurrence_id(&report.occurrence_id)
+            .list_deliveries_by_occurrence_id(&occurrence_id)
             .await
             .expect("list the delivery")
             .remove(0);
@@ -789,7 +792,7 @@ mod tests {
             vec![crate::PinnedTriggerDelivery {
                 process_id: child.id.clone(),
                 pin: crate::TriggerDeliveryPin {
-                    occurrence_id: report.occurrence_id.clone(),
+                    occurrence_id: occurrence_id.clone(),
                     subscription_id: subscription.subscription_id.clone(),
                 },
             }],
@@ -827,7 +830,7 @@ mod tests {
 
         // Recovery binds the child the emit registered and releases the pin.
         let recovered =
-            Box::pin(router.recover_delivery(&report.occurrence_id, &subscription.subscription_id))
+            Box::pin(router.recover_delivery(&occurrence_id, &subscription.subscription_id))
                 .await
                 .expect("recover the delivery");
         assert_eq!(recovered, child.id);
@@ -847,8 +850,128 @@ mod tests {
             report_prune.pruned_processes, 1,
             "the bound child is pruned"
         );
+        // The attempt died at its bind, so its handler ended with it.
         drop(scoped_controller);
-        handler.close().await.expect("close the emit handler");
+        drop(handler);
+    }
+
+    /// A bind the store did not answer is its attempt's fault, never the
+    /// delivery's recorded failure (FIG-4513): the engine runs the attempt
+    /// again, which serves the ingest and the start from its journal, binds
+    /// the child the first attempt registered and reports it started.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_emit_whose_bind_meets_an_outage_binds_when_its_attempt_runs_again() {
+        let world = router_world().await;
+        let registry = Arc::clone(&world.registry);
+        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
+        let subscription = register(
+            world.store.as_ref(),
+            "bind-outage-register",
+            trigger_process_draft(&source_key, "bind-outage", world.env_ref.clone()),
+        )
+        .await;
+        let failing = Arc::new(BindFailsOnce::new(Arc::clone(&world.store)));
+        let router = Arc::new(
+            TriggerRouter::new(
+                Arc::clone(&failing) as Arc<dyn crate::TriggerStore>,
+                crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
+            )
+            .with_process_artifacts(
+                Arc::clone(&world.process_env_store),
+                crate::testing::process_engine_fixture(),
+            ),
+        );
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let reports: Arc<std::sync::Mutex<Vec<TriggerEmitReport>>> = Arc::default();
+        let attempt: lash_restate_test::HandlerAttempt = {
+            let router = Arc::clone(&router);
+            let attempts = Arc::clone(&attempts);
+            let reports = Arc::clone(&reports);
+            Arc::new(move |scoped| {
+                let router = Arc::clone(&router);
+                let attempts = Arc::clone(&attempts);
+                let reports = Arc::clone(&reports);
+                let source_key = source_key.clone();
+                Box::pin(async move {
+                    attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let report = router
+                        .emit(button_occurrence(source_key, "button-bind-outage"), &scoped)
+                        .await
+                        .expect("an attempt that answers emits");
+                    reports.lock().expect("reports lock").push(report);
+                })
+            })
+        };
+        double
+            .run_in_handler(
+                crate::AdmittedScope::runtime_operation("trigger-bind-outage"),
+                attempt,
+            )
+            .await
+            .expect("the emission completes once its bind is answered");
+
+        assert!(
+            attempts.load(std::sync::atomic::Ordering::SeqCst) >= 2,
+            "the engine ran the attempt again after the unanswered bind"
+        );
+        let reports = reports.lock().expect("reports lock").clone();
+        assert_eq!(
+            reports.len(),
+            1,
+            "only the attempt whose bind landed answered"
+        );
+        let report = &reports[0];
+        let reservation = world
+            .store
+            .list_deliveries_by_occurrence_id(&report.occurrence_id)
+            .await
+            .expect("list the delivery")
+            .remove(0);
+        let child = registry
+            .get_process_by_start_key(&trigger_delivery_start_key(&reservation))
+            .await
+            .expect("read the start key")
+            .expect("the first attempt registered the child");
+        assert_eq!(
+            (
+                report.deliveries[0].outcome.clone(),
+                report.deliveries[0].process_id.clone(),
+                report.deliveries[0].subscription_id.clone(),
+            ),
+            (
+                TriggerDeliveryEmitOutcome::Started,
+                Some(child.id.clone()),
+                subscription.subscription_id.clone(),
+            ),
+            "the delivery reports the child its first attempt registered"
+        );
+        assert_eq!(
+            reservation.process_id,
+            Some(child.id.clone()),
+            "the delivery is bound to that child"
+        );
+        assert_eq!(
+            registry
+                .list_trigger_delivery_pins()
+                .await
+                .expect("list pins"),
+            Vec::new(),
+            "the bind released the pin"
+        );
+        assert_eq!(
+            registry
+                .list_processes(&crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    ..crate::ProcessListFilter::default()
+                })
+                .await
+                .expect("list processes")
+                .len(),
+            1,
+            "no second child was registered"
+        );
     }
 
     /// A trigger store whose first delivery bind fails as a lost write would:
@@ -863,6 +986,13 @@ mod tests {
             Self {
                 inner,
                 failed: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        /// Resolves once the first bind has failed.
+        async fn bind_failed(&self) {
+            while !self.failed.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
         }
     }

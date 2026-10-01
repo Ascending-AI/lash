@@ -1743,6 +1743,12 @@ pub struct TriggerOccurrenceReclamationReport {
     /// them; a fresh pass must re-inspect the scope before reporting witnessed
     /// emptiness.
     pub reinspection_deferred_count: usize,
+    /// Tombstones of reclaimed occurrences this pass compacted: those written
+    /// before the cutoff (FIG-4513). An ingest that presents a compacted
+    /// identity records a new occurrence, so the cutoff is also the horizon
+    /// past which the host expects no redelivery.
+    #[serde(default)]
+    pub compacted_tombstone_count: usize,
 }
 
 impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
@@ -1756,7 +1762,7 @@ impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
             || self.reinspection_deferred_count > 0
         {
             crate::store::MaintenanceSweep::Incomplete
-        } else if self.reclaimed_occurrence_count > 0 {
+        } else if self.reclaimed_occurrence_count > 0 || self.compacted_tombstone_count > 0 {
             crate::store::MaintenanceSweep::Swept
         } else {
             crate::store::MaintenanceSweep::NothingToDo
@@ -1845,6 +1851,18 @@ pub trait TriggerStore: Send + Sync {
         session_id: &SessionId,
     ) -> Result<usize, PluginError>;
 
+    /// Record `request`'s occurrence and reserve its deliveries, or answer
+    /// the occurrence and reservations already held under its idempotency
+    /// key.
+    ///
+    /// An identity retention has reclaimed is never written back
+    /// (FIG-4513). Every delete of an occurrence leaves a tombstone under
+    /// its id in the same transaction, and an ingest that finds the
+    /// tombstone writes nothing and refuses with
+    /// [`trigger_occurrence_reclaimed`](crate::trigger_occurrence_reclaimed):
+    /// it is a redelivery of an emission that already ran, on a host with no
+    /// journal to answer it from. The tombstone lasts until
+    /// [`Self::reclaim_trigger_occurrences`] compacts it.
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
@@ -1930,6 +1948,11 @@ pub trait TriggerStore: Send + Sync {
     /// at ingest, while matched rows arm with their last delivery's deletion.
     /// The cutoff only defers eligibility. The complete scope is witnessed
     /// before deletion; later failure returns the partial report accumulated.
+    ///
+    /// The pass then compacts every reclaimed occurrence's tombstone written
+    /// before the cutoff, whichever delete wrote it. The cutoff is therefore
+    /// also the redelivery horizon: an ingest that presents an identity past
+    /// it records a new occurrence.
     async fn reclaim_trigger_occurrences(
         &self,
         cutoff_epoch_ms: u64,

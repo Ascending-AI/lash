@@ -721,7 +721,8 @@ pub use plugin::{
     SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginInit,
     SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
     SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
-    durable_identity_conflict, is_durable_identity_conflict,
+    durable_identity_conflict, is_durable_identity_conflict, is_trigger_occurrence_reclaimed,
+    trigger_occurrence_reclaimed,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use provider::{

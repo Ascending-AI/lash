@@ -636,6 +636,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // definitions are immutable and content-addressed, retained by their
 // referrers rather than by a catalog name. A catalog provisioned before the
 // change fails the open-time shape check and is recreated.
+//
+// Version 141 also carries `lash_trigger_occurrence_tombstones` (FIG-4513,
+// changed in place under the version freeze): every delete of a trigger
+// occurrence leaves its tombstone in the same statement, and an ingest that
+// finds one writes nothing back. A catalog provisioned before the change
+// fails the open-time shape check and is recreated.
 /// version_guard(
 ///     file(
 ///         path = "crates/lash-postgres-store/schema.sql",

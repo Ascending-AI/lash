@@ -516,6 +516,10 @@ table lash_trigger_mutation_receipts
   column request_fingerprint text not-null
   column result_json text not-null
   primary-key (operation_id)
+table lash_trigger_occurrence_tombstones
+  column occurrence_id text not-null
+  column reclaimed_at_ms bigint not-null
+  primary-key (occurrence_id)
 table lash_trigger_occurrences
   column idempotency_key text not-null
   column occurred_at_ms bigint not-null

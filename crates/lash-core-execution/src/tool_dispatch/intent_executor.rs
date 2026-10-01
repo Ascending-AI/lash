@@ -539,7 +539,9 @@ async fn execute_one(
             // merely because their callers reused a key. A redrive retains the
             // same replay key, so it ingests the same occurrence, or is served
             // its recorded ingest, and replays the same deterministic delivery
-            // starts.
+            // starts. A redrive with no journal, after retention reclaimed the
+            // occurrence, is refused by the store and writes nothing
+            // (FIG-4513).
             // `emit_recorded` settles the report those two dedupe points make
             // replay-varying, so the recorded `Executed` result is byte-stable.
             let router = context.trigger_router.as_ref().ok_or_else(|| {

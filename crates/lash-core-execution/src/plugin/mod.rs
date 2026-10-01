@@ -48,7 +48,10 @@ pub use config::{
     ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationFacts, OwnerChange, PluginConfig,
     UnknownPluginConfigOwner,
 };
-pub use error::{PluginError, durable_identity_conflict, is_durable_identity_conflict};
+pub use error::{
+    PluginError, durable_identity_conflict, is_durable_identity_conflict,
+    is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
+};
 pub use history::{
     CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,
     ContextPressureContext, ContextPressureDecision, ContextPressureHook, DecidedContextPressure,

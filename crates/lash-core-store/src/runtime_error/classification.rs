@@ -239,6 +239,8 @@ impl RuntimeErrorCode {
             Self::TriggerDeliveryBound => Terminal,
             // the delivery's row is gone, and only a new reservation starts.
             Self::TriggerDeliveryRetired => Terminal,
+            // the occurrence's tombstone outlives every redelivery it answers.
+            Self::TriggerOccurrenceReclaimed => Terminal,
             // the target was replaced by a retention tombstone.
             Self::ProcessNoLongerRetained => Terminal,
             // a newer incarnation durably superseded this one.

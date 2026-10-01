@@ -967,6 +967,7 @@ macro_rules! process_trigger_retention_tests {
             (trigger_delivery_pin, "trigger-delivery-pin"),
             (trigger_delivery_start_admission, "trigger-delivery-start-admission"),
             (trigger_delivery_refusal, "trigger-delivery-refusal"),
+            (trigger_occurrence_redelivery_after_reclaim, "trigger-occurrence-redelivery-after-reclaim"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
