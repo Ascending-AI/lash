@@ -1115,7 +1115,7 @@ where
             RestateEffectExecution::DirectProcess {
                 invocation,
                 command,
-            } => match execute_restate_process_command(
+            } => match Box::pin(execute_restate_process_command(
                 &self.context,
                 &self.namespace,
                 &self.authority_id,
@@ -1139,7 +1139,7 @@ where
                         }
                     });
                 },
-            )
+            ))
             .await
             {
                 Ok(result) => Ok(RuntimeEffectOutcome::Process { result }),
@@ -1159,7 +1159,7 @@ where
                     .record_eager_effect(
                         &envelope,
                         Box::pin(async move {
-                            execute_restate_process_command(
+                            Box::pin(execute_restate_process_command(
                                 &self.context,
                                 &self.namespace,
                                 &self.authority_id,
@@ -1170,7 +1170,7 @@ where
                                 local_executor,
                                 |_| {},
                                 |_, _| {},
-                            )
+                            ))
                             .await
                             .map(|result| RuntimeEffectOutcome::Process { result })
                         }),
