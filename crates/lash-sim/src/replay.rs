@@ -311,6 +311,19 @@ fn require_invariants_flag(
 
 fn normalize(kind: BoundaryKind, value: &Value) -> Value {
     let mut value = value.clone();
+    if kind == BoundaryKind::ProviderEvent
+        && let Some(blocked) =
+            value.pointer_mut("/scripted_transport_release/blocked_before_release")
+        && blocked.is_boolean()
+    {
+        // A release makes bytes available even before the provider polls its
+        // gate (c92413ede122). ADR 0044 leaves host task polling uncontrolled;
+        // FIG-1152 permits normalizing only such nondeterministic observations.
+        // Use the model's parked case for either valid boolean, keeping missing
+        // or malformed evidence distinct and every release identity/time intact.
+        // The trace retains the actual observation because this is a clone.
+        *blocked = Value::Bool(true);
+    }
     if kind == BoundaryKind::QueuedIngress
         && let Some(object) = value.as_object_mut()
         && object.get("input_id").and_then(Value::as_str).is_some()
@@ -361,6 +374,150 @@ mod tests {
     use super::*;
     use crate::generator::generate_workload;
     use crate::runner::run_generated_workload_for_fixture;
+
+    #[test]
+    fn provider_release_replay_preserves_the_boundary_across_host_poll_orders() {
+        use crate::scheduler::BoundaryEvent;
+        use crate::trace::{AbstractSessionView, AbstractWorldView, OracleVerdict};
+        use serde_json::json;
+
+        let event = BoundaryEvent::new(
+            "session-006:provider:014:provider-event:001:sse",
+            "session-006",
+            BoundaryKind::ProviderEvent,
+            902,
+            "provider.event.sse",
+            json!({
+                "turn_boundary_id": "session-006:provider:014",
+                "exchange_index": 13,
+                "event_index": 1,
+                "event_name": "sse",
+                "provider_kind": "openai",
+            }),
+        );
+        // The boundary from full run 36872412476, independent of ModelStore.
+        let observed = json!({
+            "session": "session-006",
+            "provider_event_release": true,
+            "turn_boundary_id": "session-006:provider:014",
+            "exchange_index": 13,
+            "event_index": 1,
+            "event_name": "sse",
+            "provider_kind": "openai",
+            "active_turn_pending_before_release": true,
+            "released_while_turn_pending": true,
+            "scripted_transport_release": {
+                "exchange_index": 13,
+                "event_index": 1,
+                "event_name": "sse",
+                "at": 902,
+                "blocked_before_release": false,
+            },
+        });
+        let delivered = BoundaryScheduler::with_events(1, [event.clone()])
+            .deliver_boundary(&event.boundary_id, observed)
+            .expect("scheduled release");
+        let summary = AbstractWorldView::with_digest(
+            1,
+            1,
+            vec![AbstractSessionView {
+                alias: "session-006".to_string(),
+                opened: false,
+                ingress_count: 0,
+                provider_turns: Vec::new(),
+                tool_outputs: Vec::new(),
+                exec_code_outputs: Vec::new(),
+                observer_turn_indices: Vec::new(),
+                observer_reconnects: 0,
+                queued_ingress_count: 0,
+                cancellation_count: 0,
+                trigger_count: 0,
+                backend_failure_count: 0,
+                provider_mutation_count: 0,
+                durable_effect_keys: Vec::new(),
+                checkpoint_commit_count: 0,
+                checkpoint_component_stored_count: 0,
+                checkpoint_component_ref_count: 0,
+                checkpoint_head_revision: 0,
+            }],
+            Vec::new(),
+        );
+        let mut trace = SimulationTrace::new(
+            1,
+            "provider-release-regression",
+            "provider-release-regression",
+            "1/1",
+            "provider-release",
+            "provider-release",
+            "provider-release",
+            Default::default(),
+            Default::default(),
+            vec![delivered],
+            Vec::new(),
+            OracleVerdict::passed("sim.oracle.replay-determinism.v1", "captured release"),
+            Vec::new(),
+            summary.clone(),
+        );
+        let path = Path::new("provider-release-regression.json");
+        for blocked in [false, true] {
+            trace.events[0].observed["scripted_transport_release"]["blocked_before_release"] =
+                json!(blocked);
+            let report = replay_trace(path, &trace).expect("host poll order must not diverge");
+            assert_eq!(report.final_summary, summary);
+            assert_eq!(
+                report.delivered_boundary_sequence,
+                vec![event.boundary_id.clone()]
+            );
+            assert_eq!(
+                trace.events[0].observed["scripted_transport_release"]["blocked_before_release"],
+                json!(blocked),
+                "the trace must retain its actual gate observation"
+            );
+        }
+
+        for (pointer, value) in [
+            ("/session", json!("another-session")),
+            ("/provider_event_release", json!(false)),
+            ("/turn_boundary_id", json!("another-turn")),
+            ("/exchange_index", json!(14)),
+            ("/event_index", json!(2)),
+            ("/event_name", json!("end")),
+            ("/provider_kind", json!("another-provider")),
+            ("/active_turn_pending_before_release", json!(false)),
+            ("/released_while_turn_pending", json!(false)),
+            ("/scripted_transport_release/exchange_index", json!(14)),
+            ("/scripted_transport_release/event_index", json!(2)),
+            ("/scripted_transport_release/event_name", json!("end")),
+            ("/scripted_transport_release/at", json!(903)),
+            (
+                "/scripted_transport_release/blocked_before_release",
+                json!("false"),
+            ),
+            (
+                "/scripted_transport_release/blocked_before_release",
+                Value::Null,
+            ),
+        ] {
+            let mut tampered = trace.clone();
+            *tampered.events[0]
+                .observed
+                .pointer_mut(pointer)
+                .expect("field") = value;
+            assert!(
+                matches!(replay_trace(path, &tampered), Err(ReplayError::Divergence(message)) if message.contains("observed payload changed")),
+                "changed release field {pointer} must diverge"
+            );
+        }
+        let mut missing = trace;
+        missing.events[0].observed["scripted_transport_release"]
+            .as_object_mut()
+            .expect("release object")
+            .remove("blocked_before_release");
+        assert!(matches!(
+            replay_trace(path, &missing),
+            Err(ReplayError::Divergence(message)) if message.contains("observed payload changed")
+        ));
+    }
 
     #[tokio::test]
     async fn replay_reproduces_boundary_sequence_and_summary() {
