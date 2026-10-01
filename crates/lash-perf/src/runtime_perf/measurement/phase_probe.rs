@@ -166,6 +166,71 @@ fn record_completed_phase(
     entry.allocations = sum_allocation_deltas([&entry.allocations, &metrics.allocations]);
     entry.rss_growth_kb = sum_optional_i64(entry.rss_growth_kb, metrics.rss_growth_kb);
 }
+async fn deep_turn_session(
+    runtime: &super::super::harness::BenchmarkRuntime,
+    turn_id: &TurnId,
+    source_id: String,
+    probe: Arc<RuntimePerfPhaseProbe>,
+) -> anyhow::Result<lash::LashSession> {
+    use lash_core::provider::Provider as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let scripted =
+        super::super::providers::benchmark_provider(RuntimePerfScenario::DeepTurnComposition);
+    let config = scripted.serialize_config();
+    let durable = runtime.session().durable();
+    let turn_id = turn_id.clone();
+    let first_call = Arc::new(AtomicBool::new(true));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind(scripted.kind())
+        .serialize_config(move || config.clone())
+        .requires_streaming(scripted.requires_streaming())
+        .options(scripted.options())
+        .complete(move |request| {
+            let mut scripted = scripted.clone();
+            let durable = durable.clone();
+            let turn_id = turn_id.clone();
+            let source_id = source_id.clone();
+            let first_call = Arc::clone(&first_call);
+            async move {
+                // A provider call follows durable admission. Enqueue before
+                // returning its response, so AfterWork still sees the marker.
+                if first_call.swap(false, Ordering::SeqCst) {
+                    let root = durable.unfinished_root().await.map_err(|error| {
+                        lash_core::llm::transport::LlmTransportError::new(error.to_string())
+                    })?;
+                    if !root.is_some_and(|root| root.root == turn_id) {
+                        return Err(lash_core::llm::transport::LlmTransportError::new(
+                            "deep composition ingress requires its durably running turn",
+                        ));
+                    }
+                    durable
+                        .send(TurnInput::text("deep composition ingress marker"))
+                        .id(source_id)
+                        .ingress(lash_core::TurnInputIngress::active_turn(
+                            &turn_id,
+                            lash_core::TurnInputCheckpointBoundary::AfterWork,
+                        ))
+                        .await
+                        .map_err(|error| {
+                            lash_core::llm::transport::LlmTransportError::new(error.to_string())
+                        })?;
+                }
+                scripted.complete(request).await
+            }
+        })
+        .build()
+        .into_handle();
+    let session = runtime
+        .core()
+        .session(runtime.session().session_id())
+        .provider(provider)
+        .open()
+        .await?;
+    session.set_turn_phase_probe(probe).await;
+    Ok(session)
+}
+
 pub(crate) async fn run_once(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
@@ -440,6 +505,7 @@ async fn run_once_inner(
     // Both the run and the await closures insert counters while their span
     // is open, so the map is shared through a Mutex rather than borrowed.
     let extra_counters = std::sync::Mutex::new(BTreeMap::new());
+    let mut deep_session: Option<lash::LashSession> = None;
     for turn_index in 0..chat_turns {
         let mut extra_phase_profile = BTreeMap::new();
         if matches!(scenario, RuntimePerfScenario::StoreReopen) && turn_index > 0 {
@@ -548,14 +614,20 @@ async fn run_once_inner(
                     lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
                 )
             });
+
         if let Some(turn_id) = deep_turn_id.as_deref() {
-            runtime
-                .enqueue_active_turn_input(
+            if let Some(session) = deep_session.take() {
+                session.close().await?;
+            }
+            deep_session = Some(
+                Box::pin(deep_turn_session(
+                    &runtime,
                     &TurnId::from(turn_id),
-                    TurnInput::text("deep composition ingress marker"),
-                    &format!("deep-composition-ingress-{}", turn_index + 1),
-                )
-                .await?;
+                    format!("deep-composition-ingress-{}", turn_index + 1),
+                    Arc::clone(&phase_probe),
+                ))
+                .await?,
+            );
         }
 
         let trigger_end_to_end = matches!(scenario, RuntimePerfScenario::RlmTriggerMailPipeline);
@@ -590,6 +662,7 @@ async fn run_once_inner(
         let counters_ref = &extra_counters;
         let observation_ref = &trigger_delivery_observation;
         let probe_ref = &phase_probe;
+        let deep_session_ref = &deep_session;
         run.turn_then(
             turn_index,
             async move {
@@ -664,13 +737,20 @@ async fn run_once_inner(
                         },
                     );
                     Ok(turn)
-                } else if let Some(turn_id) = deep_turn_id.as_deref() {
+                } else if let (Some(turn_id), Some(session)) =
+                    (deep_turn_id.as_deref(), deep_session_ref.as_ref())
+                {
                     runtime_perf_timed(
                         scenario,
                         turn_index,
                         "run_turn",
                         Some(cancel.clone()),
-                        runtime.run_turn_with_id(turn_input, &TurnId::from(turn_id), cancel),
+                        Box::pin(runtime.turn_entry().run(
+                            session,
+                            turn_input,
+                            Some(&TurnId::from(turn_id)),
+                            cancel,
+                        )),
                     )
                     .await
                 } else if trigger_end_to_end {
@@ -794,7 +874,11 @@ async fn run_once_inner(
 
     let (state, cumulative_usage) = run
         .export(async {
-            let state = runtime.export_state().await;
+            let state = if let Some(session) = &deep_session {
+                session.admin().state().export().await
+            } else {
+                runtime.export_state().await
+            };
             let cumulative_usage = runtime.settled_usage_report().await?;
             Ok((state, cumulative_usage))
         })
@@ -856,6 +940,9 @@ async fn run_once_inner(
             "durable_commit.checkpoint_components".to_string(),
             commit.checkpoint_components,
         );
+    }
+    if let Some(session) = deep_session {
+        session.close().await?;
     }
     runtime.close().await?;
     if let Some(root) = sqlite_root {

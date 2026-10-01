@@ -100,9 +100,25 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     let double = crate::tests::test_double_backend(0).await;
     let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
+    let provider_started = Arc::new(tokio::sync::Notify::new());
+    let release_provider = Arc::new(tokio::sync::Notify::new());
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
-        .complete_error("turn input route test should not call the provider")
+        .complete({
+            let started = Arc::clone(&provider_started);
+            let release = Arc::clone(&release_provider);
+            move |_| {
+                let started = Arc::clone(&started);
+                let release = Arc::clone(&release);
+                async move {
+                    started.notify_one();
+                    release.notified().await;
+                    Ok(text_response(
+                        r#"<typescript>finish("running turn released");</typescript>"#,
+                    ))
+                }
+            }
+        })
         .build()
         .into_handle();
     let model = lash::ModelSpec::builder("test-model")
@@ -151,10 +167,6 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect("create the workbench's current session");
     let session_id = state.current_session_id();
-    // The engine admits none of the inputs: the test asserts which of them
-    // the host's settle leaves pending.
-    let _hold = double.hold_session_drive(&session_id).await;
-
     let no_active = enqueue_turn_input(
         State(state.clone()),
         Query(SessionQuery::default()),
@@ -166,6 +178,33 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     .await
     .expect_err("active-turn ingress without a running turn must fail");
     assert_eq!(no_active.status, StatusCode::CONFLICT);
+
+    let session = crate::created_session(&state.core, session_id.clone())
+        .await
+        .open()
+        .await
+        .expect("open session for durable turn admission");
+    let turn_id = TurnId::from("running-turn");
+    let turn = session
+        .send(lash::TurnInput::text("restored active prompt"))
+        .id(turn_id.clone())
+        .await
+        .expect("send the real running turn");
+    tokio::time::timeout(Duration::from_secs(10), provider_started.notified())
+        .await
+        .expect("the admitted turn reaches its provider");
+    assert_eq!(
+        session
+            .durable()
+            .unfinished_root()
+            .await
+            .expect("read durable turn admission")
+            .expect("the turn is durably running")
+            .root,
+        turn_id
+    );
+    // Keep later inputs pending while the host settles the admitted turn.
+    let _hold = double.hold_session_drive(&session_id).await;
 
     state.track_turn_prompt(
         &session_id,
@@ -214,20 +253,19 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         lash::persistence::TurnInputState::DeferredNextTurn
     );
 
-    let session = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open session for pending input evidence");
     let pending = session
         .durable()
         .pending_turn_inputs()
         .await
         .expect("list pending inputs");
-    assert_eq!(pending.len(), 2);
-    assert_eq!(pending[0].input.input_id, injected.input_id);
-    assert_eq!(pending[1].input.input_id, queued.input_id);
-    session.close().await.expect("close session");
+    assert_eq!(pending.len(), 3);
+    assert_eq!(pending[0].input.input_id, turn.receipt().input_id);
+    assert!(matches!(
+        &pending[0].status,
+        lash::PendingTurnInputReadStatus::Admitted { root } if root == turn_id
+    ));
+    assert_eq!(pending[1].input.input_id, injected.input_id);
+    assert_eq!(pending[2].input.input_id, queued.input_id);
 
     let Json(snapshot) = Box::pin(app_state(
         State(state.clone()),
@@ -240,39 +278,40 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
             && message.role == "user"
             && message.text == "restored active prompt"
     }));
-    assert_eq!(snapshot.pending_turn_inputs.len(), 2);
+    assert_eq!(snapshot.pending_turn_inputs.len(), 3);
     assert_eq!(
         snapshot.pending_turn_inputs[0].input.input_id,
-        injected.input_id
+        turn.receipt().input_id
     );
     assert_eq!(
         snapshot.pending_turn_inputs[1].input.input_id,
+        injected.input_id
+    );
+    assert_eq!(
+        snapshot.pending_turn_inputs[2].input.input_id,
         queued.input_id
     );
 
     crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("running-turn"))
         .await
         .expect("settle running turn");
-    let session = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open session after turn settle");
     let after_settle = session
         .durable()
         .pending_turn_inputs()
         .await
         .expect("list pending inputs after turn settle");
-    assert_eq!(after_settle.len(), 1);
-    assert_eq!(after_settle[0].input.input_id, queued.input_id);
-    session.close().await.expect("close session after settle");
+    assert_eq!(after_settle.len(), 2);
+    assert_eq!(after_settle[0].input.input_id, turn.receipt().input_id);
+    assert_eq!(after_settle[1].input.input_id, queued.input_id);
 
-    state.track_turn(&session_id, &TurnId::from("settle-race-turn"));
+    // Host settlement removes tracking, while the parked durable root remains
+    // running. Restore its tracking to exercise the route-check/settle race.
+    state.track_turn(&session_id, &turn_id);
     let checked_ingress = lash::persistence::TurnInputIngress::active_turn(
-        "settle-race-turn",
+        &turn_id,
         lash::persistence::TurnInputCheckpointBoundary::AfterWork,
     );
-    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("settle-race-turn"))
+    crate::restate::settle_workbench_turn(&state, &session_id, &turn_id)
         .await
         .expect("settle turn between route check and enqueue");
     let raced = state
@@ -292,22 +331,25 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect_err("settled active-turn input must be rejected");
     assert_eq!(race_error.status, StatusCode::CONFLICT);
-    let session = crate::created_session(&state.core, session_id.clone())
-        .await
-        .open()
-        .await
-        .expect("open session after settle race");
     let after_race = session
         .durable()
         .pending_turn_inputs()
         .await
         .expect("list pending inputs after settle race");
-    assert_eq!(after_race.len(), 1);
-    assert_eq!(after_race[0].input.input_id, queued.input_id);
-    session
-        .close()
+    assert_eq!(after_race.len(), 2);
+    assert_eq!(after_race[0].input.input_id, turn.receipt().input_id);
+    assert_eq!(after_race[1].input.input_id, queued.input_id);
+    turn.cancel().await.expect("cancel the parked durable turn");
+    release_provider.notify_one();
+    let output = tokio::time::timeout(Duration::from_secs(10), turn.output())
         .await
-        .expect("close session after settle race");
+        .expect("the released turn settles")
+        .expect("the cancelled turn commits");
+    assert!(matches!(
+        output.result.outcome,
+        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
+    ));
+    session.close().await.expect("close the settled session");
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
