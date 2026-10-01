@@ -14,10 +14,18 @@ supervisor):
           tool=<argv[0]>  peak_bytes=<memory.peak>  cpu_usec=<cpu time>
           wall_ms=<wall time>  exit=<status>  requested_kb=<...>  requested_cpu=<...>
 
-Copy the logs off the workers and run:
+Copy the logs off the workers (`/workspace/kiln-executor/usage/actions.log*`)
+and refresh every size file with one command:
 
-    python3 tools/buck2/action_sizes_from_log.py usage-*.log \\
-      -o tools/buck2/action-sizes.json
+    python3 tools/buck2/action_sizes_from_log.py --refresh usage-*.log
+
+That rewrites `tools/buck2/action-sizes.json` and
+`tools/buck2/test-run-sizes.json` and runs `tools/buck2/sync.py`, which
+regenerates `tools/buck2/exec_sizes.bzl` (requests and pool budgets) from them.
+Compile rows read only the Buck2 action shape (`tool=python3`), so older logs
+from the Bazel era add nothing to them; `--since <unix seconds>` drops older
+records when a window is wanted. `--report` prints, from the same logs, what
+each Lash action category reserved against what it used.
 
 What counts as a sample:
 
@@ -41,16 +49,22 @@ generator's sizing key.
 
 The rule, per `<package>/<crate>`:
 
-* `cpu_count` = ceil(p95 cores - 0.2), at least 1, capped at 8, where cores is
-  cpu time / wall time. A p95 within 0.2 of a whole core rounds down because CPU
-  is compressible: an action that briefly wants 2.1 cores on 2 runs slightly
-  slower and does not fail. Samples taken under a 1-CPU request run
-  under a one-core quota and measure the cap, not the need, so they are left out
-  whenever the crate also has samples at a larger request.
-* `memory_kb` = the largest peak x 1.5, rounded up to 512 MiB, never below the
-  1.5 GiB default, and never below the crate's entry in `MINIMUM_MEMORY_KB`.
-  Memory is not compressible, so it follows the worst sample, not a
-  percentile.
+* `cpu_count` = 1 while the p95 of cores (cpu time / wall time) is at most 1.6,
+  otherwise ceil(p95 cores - 0.2), capped at 8. The executor's `cpu.max` for an
+  action is the larger of its request and the worker's slot share (advertised
+  CPUs / max_inflight: 1.67 cores on the bazelboxes, 2 on the devbox), so a
+  one-CPU request already runs unthrottled up to that share and asking for two
+  only reserves a core the action leaves idle. Above the share the quota is the
+  request itself; a p95 within 0.2 of a whole core rounds down because CPU is
+  compressible: an action that briefly wants 2.1 cores on 2 runs slightly
+  slower and does not fail.
+* `memory_kb` = the p99 need, never below the largest peak, rounded up to
+  256 MiB, never below the 1.5 GiB default, and never below the crate's entry
+  in `MINIMUM_MEMORY_KB`. A run's need is its peak x 1.25, or the request it
+  ran under when the peak stayed inside that request: a run that fit proves
+  its request enough, and `memory.peak` includes page cache, which fills
+  whatever limit it is given. Rustc's memory is heap and not compressible, so
+  no recorded compile peak may exceed the request.
 * At least 20 samples, or no row -- except for a crate in
   `MINIMUM_MEMORY_KB`, whose floor keeps its row even on too few or too
   small samples. Fewer samples are not enough for a p95.
@@ -76,13 +90,22 @@ the compile fields are empty for it. The rule, per label:
   `TEST_RUN_MINIMUM_MEMORY_KB`, whose floor keeps its row even on too few
   samples. An unmeasured test keeps the request the generator gives it
   without one.
-* `memory_kb` = the largest peak x 1.5, rounded up to 512 MiB, at least 1 GiB,
-  and never below the label's entry in `TEST_RUN_MINIMUM_MEMORY_KB`. A
-  `__fv_` feature-variant label inherits its base label's floor.
-* `cpu_count` = the compile rule above: ceil(p95 cores - 0.2), at least 1,
-  capped at 8, over the samples of at least one second (1-CPU samples left out
-  when larger ones exist). A test whose every run is shorter asks for one core:
-  it cannot show more, and it holds what it has for under a second.
+* A label with at least three Buck2 runs is measured from those alone. A
+  label Buck2 has run less often also counts its Bazel-era runs
+  (`tool=test-setup.sh`): the wrapper differed, the libtest binary and its
+  cgroup did not.
+* `memory_kb` = the p99 need as above, rounded up to 256 MiB, at least 1 GiB,
+  and never below the label's entry in `TEST_RUN_MINIMUM_MEMORY_KB`. The
+  largest peak is not a floor here: a test that writes files fills the page
+  cache to its cgroup limit (`tool_batch_parallelism__test` peaks at exactly
+  the devbox's 7.5 GiB slot share with a p99 of 0.8 GiB), so one such run
+  would price the label at the box it happened to land on. A `__fv_`
+  feature-variant label inherits its base label's floor.
+* `cpu_count` = ceil(p95 cores - 0.2), at least 1, capped at 8, over the
+  samples of at least one second. A run does not lean on the slot share as a
+  compile does: a throttled compile is slower, a throttled test can pass its
+  timeout. A test whose every run is shorter asks for one core: it cannot show
+  more, and it holds what it has for under a second.
 * Every sampled label gets a row, including one at the smallest request: the
   generator's fallback for an unmeasured run is larger than that.
 """
@@ -111,14 +134,25 @@ MIN_SAMPLES = 20
 CPU_PERCENTILE = 95
 # How far above a whole core the p95 may sit and still round down.
 CPU_TOLERANCE = 0.2
+# The p95 a one-CPU request covers. Every pool worker gives an action the
+# larger of its request and the slot share as `cpu.max`
+# (`/workspace/tools/kiln/executor/install.sh`: advertised cpu_count /
+# max_inflight, 1.67 cores at the least), so one CPU is the accurate request up
+# to just under that share.
+SHARE_CORES = 1.6
 # The pool caps a single action's request at 8 cores.
 MAX_CPU_COUNT = 8
 # Peak is what the action reached on one machine on one day; the margin keeps a
-# slightly larger input from being OOM-killed by the action cgroup.
-MEMORY_MARGIN = 1.5
+# slightly larger input from being OOM-killed by the action cgroup. It sits on
+# each run's peak (see `memory_need`); the request is the p99 of those needs.
+MEMORY_MARGIN = 1.25
+MEMORY_PERCENTILE = 99
 # A request is a scheduling reservation; a finer granularity only fragments the
 # pool's budget.
-MEMORY_GRANULARITY_KB = 512 * 1024
+MEMORY_GRANULARITY_KB = 256 * 1024
+# Bazel's wrappers: another build system's reservations, left out of the
+# waste report, and a test label's evidence only until Buck2 has its own.
+BAZEL_TEST_TOOLS = {"test-setup.sh", "generate-xml.sh"}
 
 # Explicit per-crate floors, in KiB. The table is regenerated from whatever the
 # pool last measured, and a formula row can vanish on too few samples or land
@@ -149,16 +183,22 @@ class Samples:
     def __init__(self) -> None:
         # (cores, peak_bytes, requested_cpu)
         self.records: list[tuple[float, int, int]] = []
+        self.needs: list[float] = []
 
-    def observe(self, cores: float, peak_bytes: int, requested_cpu: int) -> None:
+    def observe(
+        self, cores: float, peak_bytes: int, requested_cpu: int, requested_kb: int = 0
+    ) -> None:
         self.records.append((cores, peak_bytes, requested_cpu))
+        self.needs.append(memory_need(peak_bytes, requested_kb))
 
     def cpu_basis(self) -> list[float]:
-        unconstrained = [r[0] for r in self.records if r[2] > DEFAULT_CPU_COUNT]
-        return unconstrained or [r[0] for r in self.records]
+        return [r[0] for r in self.records]
+
+    def peaks(self) -> list[int]:
+        return [r[1] for r in self.records]
 
     def peak_bytes(self) -> int:
-        return max(r[1] for r in self.records)
+        return max(self.peaks())
 
 
 def percentile(values: list[float], pct: int) -> float:
@@ -167,13 +207,34 @@ def percentile(values: list[float], pct: int) -> float:
     return ordered[max(0, math.ceil(pct / 100 * len(ordered)) - 1)]
 
 
-def cpu_count_for(p95_cores: float) -> int:
+def cpu_count_for(p95_cores: float, within_share: bool = True) -> int:
+    """The compile request; a test run passes `within_share=False`."""
+    if within_share and p95_cores <= SHARE_CORES:
+        return DEFAULT_CPU_COUNT
     wanted = math.ceil(p95_cores - CPU_TOLERANCE)
     return min(MAX_CPU_COUNT, max(DEFAULT_CPU_COUNT, wanted))
 
 
-def memory_kb_for(peak_bytes: int, floor_kb: int = DEFAULT_MEMORY_KB) -> int:
-    requested = math.ceil(peak_bytes / 1024 * MEMORY_MARGIN / MEMORY_GRANULARITY_KB)
+def memory_need(peak_bytes: int, requested_kb: int) -> float:
+    """What one successful run shows it needs, in bytes: its peak with margin.
+
+    A run that stayed inside its own request proves that request enough, so
+    its need stops there. `memory.peak` counts the page cache the action
+    filled, which grows to whatever limit the cgroup has; without this bound a
+    run that sat at its limit asks for a quarter more at every refresh.
+    """
+    need = peak_bytes * MEMORY_MARGIN
+    if peak_bytes <= requested_kb * 1024:
+        need = min(need, requested_kb * 1024)
+    return need
+
+
+def memory_kb_for(
+    needs: list[float], floor_kb: int = DEFAULT_MEMORY_KB, floor_bytes: int = 0
+) -> int:
+    """The p99 need, never below `floor_bytes`, rounded up to the granularity."""
+    wanted_bytes = max(percentile(needs, MEMORY_PERCENTILE), floor_bytes)
+    requested = math.ceil(wanted_bytes / 1024 / MEMORY_GRANULARITY_KB)
     return max(requested * MEMORY_GRANULARITY_KB, floor_kb)
 
 
@@ -232,7 +293,10 @@ def collect(lines, crates: set[tuple[str, str]]) -> dict[str, Samples]:
             continue
         requested_cpu = as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT
         measured[f"{pair[0]}/{pair[1]}"].observe(
-            cpu_usec / 1000 / wall_ms, peak_bytes, requested_cpu
+            cpu_usec / 1000 / wall_ms,
+            peak_bytes,
+            requested_cpu,
+            as_int(record.get("requested_kb")) or 0,
         )
     return measured
 
@@ -287,20 +351,47 @@ class TestRuns:
     """
 
     def __init__(self) -> None:
-        self.count = 0
-        self.peak_bytes = 0
+        self.peaks: list[int] = []
+        self.needs: list[float] = []
         self.timed = Samples()
 
-    def observe(self, cpu_usec: int, wall_ms: int, peak_bytes: int, requested_cpu: int) -> None:
-        self.count += 1
-        self.peak_bytes = max(self.peak_bytes, peak_bytes)
+    @property
+    def count(self) -> int:
+        return len(self.peaks)
+
+    @property
+    def peak_bytes(self) -> int:
+        return max(self.peaks, default=0)
+
+    def absorb(self, other: "TestRuns") -> None:
+        self.peaks += other.peaks
+        self.needs += other.needs
+        self.timed.records += other.timed.records
+        self.timed.needs += other.timed.needs
+
+    def observe(
+        self,
+        cpu_usec: int,
+        wall_ms: int,
+        peak_bytes: int,
+        requested_cpu: int,
+        requested_kb: int = 0,
+    ) -> None:
+        self.peaks.append(peak_bytes)
+        self.needs.append(memory_need(peak_bytes, requested_kb))
         if wall_ms >= MIN_WALL_MS:
             self.timed.observe(cpu_usec / 1000 / wall_ms, peak_bytes, requested_cpu)
 
 
 def collect_test_runs(lines, labels: set[str]) -> dict[str, TestRuns]:
-    """Keeps the successful runs of this workspace's tests, keyed by label."""
+    """Keeps the successful runs of this workspace's tests, keyed by label.
+
+    A label with at least TEST_MIN_SAMPLES Buck2 runs is measured from those
+    alone; only a label Buck2 has not run that often yet falls back to its
+    Bazel-era runs as well.
+    """
     measured: dict[str, TestRuns] = collections.defaultdict(TestRuns)
+    legacy: dict[str, TestRuns] = collections.defaultdict(TestRuns)
     for line in lines:
         record = parse_record(line)
         if record is None or record.get("exit") != "0":
@@ -317,8 +408,14 @@ def collect_test_runs(lines, labels: set[str]) -> dict[str, TestRuns]:
         if wall_ms is None or cpu_usec is None or peak_bytes is None:
             continue
         requested_cpu = as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT
-        measured[label].observe(cpu_usec, wall_ms, peak_bytes, requested_cpu)
-    return measured
+        era = legacy if record.get("tool") in BAZEL_TEST_TOOLS else measured
+        era[label].observe(
+            cpu_usec, wall_ms, peak_bytes, requested_cpu, as_int(record.get("requested_kb")) or 0
+        )
+    for label, runs in legacy.items():
+        if measured[label].count < TEST_MIN_SAMPLES:
+            measured[label].absorb(runs)
+    return {label: runs for label, runs in measured.items() if runs.count}
 
 
 def test_run_table(measured: dict[str, TestRuns]) -> dict[str, dict[str, float | int]]:
@@ -336,12 +433,15 @@ def test_run_table(measured: dict[str, TestRuns]) -> dict[str, dict[str, float |
             else 0.0
         )
         sizes[label] = {
-            "cpu_count": cpu_count_for(p95),
+            "cpu_count": cpu_count_for(p95, within_share=False),
             "memory_kb": max(
-                memory_kb_for(runs.peak_bytes, floor_kb=TEST_MEMORY_FLOOR_KB),
+                memory_kb_for(runs.needs, floor_kb=TEST_MEMORY_FLOOR_KB)
+                if runs.peaks
+                else TEST_MEMORY_FLOOR_KB,
                 minimum or 0,
             ),
             "p95_cores": round(p95, 2),
+            "p99_peak_bytes": percentile(runs.peaks, MEMORY_PERCENTILE) if runs.peaks else 0,
             "peak_bytes": runs.peak_bytes,
             "samples": runs.count,
         }
@@ -358,7 +458,9 @@ def table(measured: dict[str, Samples]) -> dict[str, dict[str, float | int]]:
         p95 = percentile(samples.cpu_basis(), CPU_PERCENTILE) if samples.records else 0.0
         cpu_count = cpu_count_for(p95)
         memory_kb = max(
-            memory_kb_for(samples.peak_bytes()) if samples.records else 0,
+            memory_kb_for(samples.needs, floor_bytes=samples.peak_bytes())
+            if samples.records
+            else 0,
             minimum or 0,
         )
         if cpu_count <= DEFAULT_CPU_COUNT and memory_kb <= DEFAULT_MEMORY_KB:
@@ -367,6 +469,9 @@ def table(measured: dict[str, Samples]) -> dict[str, dict[str, float | int]]:
             "cpu_count": cpu_count,
             "memory_kb": memory_kb,
             "p95_cores": round(p95, 2),
+            "p99_peak_bytes": (
+                percentile(samples.peaks(), MEMORY_PERCENTILE) if samples.records else 0
+            ),
             "peak_bytes": samples.peak_bytes() if samples.records else 0,
             "samples": len(samples.records),
         }
@@ -392,6 +497,95 @@ def cargo_metadata() -> dict:
     )
 
 
+def category_of(record: dict[str, str], crates: set[tuple[str, str]], labels: set[str]) -> str | None:
+    """The Lash action category a record belongs to, or None for another repository's.
+
+    The supervisor sees argv[0], the Cargo identity and the test label, not
+    the Buck2 category, so these are the groups the log can tell apart. A
+    target's Rustc, metadata, Clippy and Rustdoc actions share its identity
+    and, by Buck2's one execution platform per target, its request.
+    """
+    tool = record.get("tool")
+    if tool in BAZEL_TEST_TOOLS or tool == "process_wrapper":
+        return None
+    role, _, rest = record.get("test", "-").partition(":")
+    if role == "run":
+        label = rest.partition(":")[2].removeprefix("root")
+        if label not in labels:
+            return None
+        return "test batch" if label.endswith(":test_batch") else "test run"
+    if tool not in COMPILE_TOOLS:
+        return None
+    pair = (record.get("pkg", "-"), record.get("crate", "-"))
+    if pair in crates:
+        return "rustc, first-party (rustc, metadata, clippy, rustdoc)"
+    if pair[1] == "build_script_build":
+        return "rustc, build script"
+    if "-" in pair:
+        return "helper (deps, http_archive, schema, failure_filter)"
+    return "rustc, third-party"
+
+
+def waste_report(lines, crates: set[tuple[str, str]], labels: set[str]) -> str:
+    """Per category: what it reserved against what it used.
+
+    `excess` is reserved minus used CPU-seconds, the weight count x duration x
+    excess; `memory x` is reserved over peak byte-seconds. Failed actions count
+    here (they held their reservation too) but never in a size table.
+    """
+    totals: dict[str, list[float]] = collections.defaultdict(lambda: [0.0] * 8)
+    for line in lines:
+        record = parse_record(line)
+        if record is None:
+            continue
+        category = category_of(record, crates, labels)
+        fields = [
+            as_int(record.get(name))
+            for name in ("wall_ms", "cpu_usec", "peak_bytes", "requested_cpu", "requested_kb")
+        ]
+        if category is None or None in fields:
+            continue
+        wall_ms, cpu_usec, peak_bytes, requested_cpu, requested_kb = fields
+        row = totals[category]
+        row[0] += 1
+        row[1] += wall_ms / 1000
+        row[2] += cpu_usec / 1e6
+        row[3] += requested_cpu * wall_ms / 1000
+        row[4] += requested_kb * 1024 * wall_ms
+        row[5] += peak_bytes * wall_ms
+        row[6] += peak_bytes > requested_kb * 1024
+        row[7] += record.get("exit") != "0"
+    out = [
+        "| category | actions | wall s | used CPU s | reserved CPU s | excess | CPU x | memory x | peak > request | failed |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    total = [0.0] * 8
+    for category, row in sorted(totals.items(), key=lambda item: item[1][2] - item[1][3]):
+        total = [a + b for a, b in zip(total, row)]
+        out.append(report_row(category, row))
+    out.append(report_row("all", total))
+    return "\n".join(out) + "\n"
+
+
+def report_row(name: str, row: list[float]) -> str:
+    return (
+        f"| {name} | {row[0]:.0f} | {row[1]:.0f} | {row[2]:.0f} | {row[3]:.0f} "
+        f"| {row[3] - row[2]:.0f} | {row[3] / row[2] if row[2] else 0:.2f} "
+        f"| {row[4] / row[5] if row[5] else 0:.2f} | {row[6]:.0f} | {row[7]:.0f} |"
+    )
+
+
+def read_lines(paths: list[pathlib.Path], since: int) -> list[str]:
+    lines = []
+    for path in paths:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            stamp = line.partition("\t")[0]
+            if since and (not stamp.isdigit() or int(stamp) < since):
+                continue
+            lines.append(line)
+    return lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -409,14 +603,44 @@ def main() -> int:
         action="store_true",
         help="size test runs per label (tools/buck2/test-run-sizes.json) instead of compiles",
     )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="rewrite both size files in place and regenerate exec_sizes.bzl",
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="print reserved against used per action category instead of a table",
+    )
+    parser.add_argument(
+        "--since",
+        type=int,
+        default=0,
+        metavar="UNIX_SECONDS",
+        help="ignore records older than this",
+    )
     args = parser.parse_args()
-    lines = []
-    for path in args.logs:
-        lines.extend(path.read_text(encoding="utf-8", errors="replace").splitlines())
-    if args.test_runs:
-        inventory = json.loads(
-            (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+    lines = read_lines(args.logs, args.since)
+    inventory = json.loads(
+        (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+    )
+    if args.refresh or args.report:
+        crates = first_party_crates(cargo_metadata())
+        if args.report:
+            sys.stdout.write(waste_report(lines, crates, test_labels(inventory)))
+            return 0
+        (ROOT / "tools/buck2/action-sizes.json").write_text(
+            render(table(collect(lines, crates))), encoding="utf-8"
         )
+        (ROOT / "tools/buck2/test-run-sizes.json").write_text(
+            render(test_run_table(collect_test_runs(lines, test_labels(inventory)))),
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [sys.executable, str(ROOT / "tools/buck2/sync.py")], cwd=ROOT
+        ).returncode
+    if args.test_runs:
         rendered = render(test_run_table(collect_test_runs(lines, test_labels(inventory))))
     else:
         rendered = render(table(collect(lines, first_party_crates(cargo_metadata()))))

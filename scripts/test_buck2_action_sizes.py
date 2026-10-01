@@ -25,6 +25,7 @@ def record(
     requested_cpu: str = "4",
     tool: str = "python3",
     exit_status: str = "0",
+    requested_kb: int = 4194304,
 ) -> str:
     cpu_usec = int(cores * wall_ms * 1000)
     return "\t".join(
@@ -38,7 +39,7 @@ def record(
             f"cpu_usec={cpu_usec}",
             f"wall_ms={wall_ms}",
             f"exit={exit_status}",
-            "requested_kb=4194304",
+            f"requested_kb={requested_kb}",
             f"requested_cpu={requested_cpu}",
         ]
     )
@@ -93,7 +94,8 @@ class TableTest(unittest.TestCase):
     def test_cpu_is_the_p95_rounded_up_past_the_tolerance(self) -> None:
         # p95 of 19 x 1.0 and 1 x 2.5 cores is 1.0 (nearest rank), so 1 CPU;
         # memory keeps the row.
-        lines = [record(cores=1.0, peak_bytes=2 * GIB)] * 19 + [record(cores=2.5)]
+        lines = [record(cores=1.0, peak_bytes=2 * GIB)] * 19
+        lines += [record(cores=2.5, peak_bytes=2 * GIB)]
         self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 1)
         # 2.15 cores at p95 is within the tolerance of 2.
         lines = [record(cores=2.15)] * 20
@@ -107,25 +109,43 @@ class TableTest(unittest.TestCase):
         self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 8)
         self.assertEqual(sizes.MAX_CPU_COUNT, 8)
 
-    def test_one_cpu_samples_are_left_out_when_larger_requests_exist(self) -> None:
-        # Under a 1-CPU quota an action cannot show that it wants more.
+    def test_a_p95_inside_the_slot_share_asks_for_one_cpu(self) -> None:
+        # The worker's cpu.max for a one-CPU request is its slot share (1.67
+        # cores at the least), so a p95 up to 1.6 runs unthrottled on one.
+        self.assertEqual(sizes.SHARE_CORES, 1.6)
+        lines = [record(cores=1.6, peak_bytes=2 * GIB)] * 20
+        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 1)
+        lines = [record(cores=1.7)] * 20
+        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 2)
+
+    def test_samples_at_every_request_are_cpu_evidence(self) -> None:
         lines = [record(cores=1.0, requested_cpu="1")] * 200
         lines += [record(cores=2.0, requested_cpu="4")] * 20
         entry = table(lines)["lash-internal-core/lash_core"]
         self.assertEqual(entry["cpu_count"], 2)
         self.assertEqual(entry["samples"], 220)
 
-    def test_one_cpu_samples_are_used_when_they_are_all_there_is(self) -> None:
-        lines = [record(cores=1.6, requested_cpu="1")] * 20
-        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 2)
-
-    def test_memory_follows_the_worst_peak_with_margin(self) -> None:
-        lines = [record(cores=2.0, peak_bytes=GIB)] * 19
-        lines += [record(cores=2.0, peak_bytes=3 * GIB)]
+    def test_memory_is_the_p99_peak_with_margin(self) -> None:
+        lines = [record(cores=2.0, peak_bytes=GIB, requested_kb=1048576)] * 19
+        lines += [record(cores=2.0, peak_bytes=3 * GIB, requested_kb=1048576)]
         entry = table(lines)["lash-internal-core/lash_core"]
         self.assertEqual(entry["peak_bytes"], 3 * GIB)
-        # 3 GiB x 1.5 = 4.5 GiB, already a multiple of 512 MiB.
-        self.assertEqual(entry["memory_kb"], 4718592)
+        self.assertEqual(entry["p99_peak_bytes"], 3 * GIB)
+        # 3 GiB x 1.25 = 3.75 GiB, already a multiple of 256 MiB.
+        self.assertEqual(entry["memory_kb"], 3932160)
+
+    def test_a_run_inside_its_request_needs_no_more_than_that_request(self) -> None:
+        # 3.9 GiB under a 4 GiB request: the request was enough, so the row
+        # does not climb a quarter at every refresh.
+        lines = [record(cores=2.0, peak_bytes=int(3.9 * GIB))] * 20
+        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["memory_kb"], 4194304)
+
+    def test_compile_memory_never_goes_below_the_largest_peak(self) -> None:
+        lines = [record(cores=2.0, peak_bytes=GIB, requested_kb=1048576)] * 199
+        lines += [record(cores=2.0, peak_bytes=3 * GIB, requested_kb=1048576)]
+        entry = table(lines)["lash-internal-core/lash_core"]
+        self.assertEqual(entry["p99_peak_bytes"], GIB)
+        self.assertEqual(entry["memory_kb"], 3145728)
 
     def test_memory_never_goes_below_the_default(self) -> None:
         lines = [record(cores=2.0, peak_bytes=GIB // 4)] * 20
@@ -169,7 +189,7 @@ class TableTest(unittest.TestCase):
             sizes.MINIMUM_MEMORY_KB["lash-internal-core/lash_core"] = 2 * 1024 * 1024
             lines = [record(cores=2.0, peak_bytes=3 * GIB)] * 20
             self.assertEqual(
-                table(lines)["lash-internal-core/lash_core"]["memory_kb"], 4718592
+                table(lines)["lash-internal-core/lash_core"]["memory_kb"], 3932160
             )
         finally:
             sizes.MINIMUM_MEMORY_KB.clear()
@@ -201,7 +221,14 @@ class TableTest(unittest.TestCase):
                 self.assertIn(key, crates, "a row that names no first-party crate is dead")
                 self.assertEqual(
                     sorted(entry),
-                    ["cpu_count", "memory_kb", "p95_cores", "peak_bytes", "samples"],
+                    [
+                        "cpu_count",
+                        "memory_kb",
+                        "p95_cores",
+                        "p99_peak_bytes",
+                        "peak_bytes",
+                        "samples",
+                    ],
                 )
                 self.assertTrue(
                     entry["memory_kb"] > sizes.DEFAULT_MEMORY_KB
@@ -209,12 +236,10 @@ class TableTest(unittest.TestCase):
                     "an entry that asks for no more than the defaults is noise",
                 )
                 self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"]))
-                self.assertEqual(
-                    entry["memory_kb"],
-                    max(
-                        sizes.memory_kb_for(entry["peak_bytes"]),
-                        sizes.MINIMUM_MEMORY_KB.get(key, 0),
-                    ),
+                self.assertEqual(entry["memory_kb"] % sizes.MEMORY_GRANULARITY_KB, 0)
+                self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["peak_bytes"])
+                self.assertGreaterEqual(
+                    entry["memory_kb"], sizes.MINIMUM_MEMORY_KB.get(key, 0)
                 )
                 self.assertTrue(
                     entry["samples"] >= sizes.MIN_SAMPLES
@@ -231,6 +256,7 @@ def run_record(
     wall_ms: int = 4_000,
     exit_status: str = "0",
     requested_cpu: str = "4",
+    requested_kb: int = 4194304,
 ) -> str:
     """A test action's usage record, as the supervisor writes it since kiln#28."""
     return "\t".join(
@@ -244,7 +270,7 @@ def run_record(
             f"cpu_usec={int(cores * wall_ms * 1000)}",
             f"wall_ms={wall_ms}",
             f"exit={exit_status}",
-            "requested_kb=4194304",
+            f"requested_kb={requested_kb}",
             f"requested_cpu={requested_cpu}",
             f"test={role}:-:{label}",
         ]
@@ -301,9 +327,19 @@ class TestRunTableTest(unittest.TestCase):
     def test_memory_is_the_peak_with_margin_and_a_one_gib_floor(self) -> None:
         entry = run_table([run_record(peak_bytes=100 * 1024 * 1024)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 1048576)
-        # 7.45 GiB x 1.5 = 11.2 GiB, rounded up to 11.5 GiB.
+        # 7.45 GiB x 1.25 = 9.31 GiB, rounded up to 9.5 GiB.
         entry = run_table([run_record(peak_bytes=7_999_586_304)] * 3)
-        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 12058624)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 9961472)
+        # Inside its own request the run needs no more than that request.
+        entry = run_table([run_record(peak_bytes=7_999_586_304, requested_kb=8388608)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 8388608)
+
+    def test_one_run_at_the_cgroup_limit_does_not_price_the_label(self) -> None:
+        # Page cache fills whatever limit the box gives; the p99 is the need.
+        lines = [run_record(peak_bytes=100 * 1024 * 1024)] * 199
+        lines += [run_record(peak_bytes=8 * GIB, requested_kb=1048576)]
+        entry = run_table(lines)["//crates/lash-core:runtime_turns__test"]
+        self.assertEqual((entry["memory_kb"], entry["peak_bytes"]), (1048576, 8 * GIB))
 
     def test_the_minimum_floor_keeps_and_roughly_sizes_a_row(self) -> None:
         saved = dict(sizes.TEST_RUN_MINIMUM_MEMORY_KB)
@@ -326,7 +362,7 @@ class TestRunTableTest(unittest.TestCase):
             entry = run_table([run_record(peak_bytes=5 * GIB)] * 3)[
                 "//crates/lash-core:runtime_turns__test"
             ]
-            self.assertEqual(entry["memory_kb"], 7864320)
+            self.assertEqual(entry["memory_kb"], 6553600)
             # A feature-variant label carries the floor of its base label.
             variant = "//crates/lash-core:runtime_turns__test__fv_0123abcd"
             lines = [run_record(label=variant, peak_bytes=100 * 1024 * 1024)] * 3
@@ -338,7 +374,12 @@ class TestRunTableTest(unittest.TestCase):
             sizes.TEST_RUN_MINIMUM_MEMORY_KB.clear()
             sizes.TEST_RUN_MINIMUM_MEMORY_KB.update(saved)
 
-    def test_cpu_is_the_compile_p95_rule(self) -> None:
+    def test_cpu_is_the_p95_past_the_tolerance_without_the_slot_share(self) -> None:
+        # A compile at 1.5 cores asks for one CPU; a test run does not.
+        entry = run_table([run_record(cores=1.5)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 2)
+        entry = run_table([run_record(cores=1.15)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 1)
         entry = run_table([run_record(cores=2.15)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 2)
         entry = run_table([run_record(cores=2.25)] * 3)
@@ -369,11 +410,19 @@ class TestRunTableTest(unittest.TestCase):
                 self.assertIn(label, labels)
                 self.assertEqual(
                     sorted(entry),
-                    ["cpu_count", "memory_kb", "p95_cores", "peak_bytes", "samples"],
+                    [
+                        "cpu_count",
+                        "memory_kb",
+                        "p95_cores",
+                        "p99_peak_bytes",
+                        "peak_bytes",
+                        "samples",
+                    ],
                 )
+                self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["p99_peak_bytes"])
                 self.assertTrue(
                     entry["samples"] >= sizes.TEST_MIN_SAMPLES
-                    or label in sizes.TEST_RUN_MINIMUM_MEMORY_KB,
+                    or label.split("__fv_", 1)[0] in sizes.TEST_RUN_MINIMUM_MEMORY_KB,
                     "an unmeasured row survives only on an explicit minimum",
                 )
                 self.assertGreaterEqual(

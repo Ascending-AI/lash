@@ -186,17 +186,30 @@ def check_sizing() -> None:
         assert actual["cpu_count"] >= measured["cpu_count"]
         assert actual["memory_kb"] >= measured["memory_kb"]
 
-    platform_text = (HERE / "platforms.bzl").read_text(encoding="utf-8")
-    budgets = {
-        (int(cpu), int(memory))
-        for cpu, memory in re.findall(r"^    \((\d+), (\d+)\),$", platform_text, re.M)
-    }
+    # Compile requests resolve through one registered platform each; a test
+    # run or batch states its request to the test executor directly.
+    budgets = [tuple(budget) for budget in bzl_value(text, "POOL_BUDGETS")]
+    assert len(budgets) == len(set(budgets))
     requested = {
-        (value["cpu_count"], value["memory_kb"])
-        for table in (compile_requests, test_requests, batches)
-        for value in table.values()
-    }
-    assert requested <= budgets, f"unregistered pool budgets: {sorted(requested - budgets)}"
+        (value["cpu_count"], value["memory_kb"]) for value in compile_requests.values()
+    } | {(1, 1572864), (2, 3145728)}
+    assert requested <= set(budgets), f"unregistered pool budgets: {sorted(requested - set(budgets))}"
+    # A target that names no budget takes the first platform: it must stay the
+    # smallest request, not whichever row sorts first.
+    assert budgets[0] == min(budgets) == (1, 1048576), budgets[0]
+    assert 'load(":exec_sizes.bzl", "POOL_BUDGETS")' in (HERE / "platforms.bzl").read_text(
+        encoding="utf-8"
+    )
+
+    # No recorded peak may exceed the request made for it: the action cgroup
+    # kills at the request once it is above the worker's slot share.
+    for key, measured in measured_compile.items():
+        assert measured["peak_bytes"] <= compile_requests[key]["memory_kb"] * 1024, key
+    # A test's largest peak can be page cache filled to the box's limit, so
+    # its row is held to the p99 peak the sizing rule prices.
+    for label, measured in measured_tests.items():
+        actual = test_requests.get(label, batches.get(label))
+        assert measured["p99_peak_bytes"] <= actual["memory_kb"] * 1024, label
 
     for path in sorted(ROOT.rglob("BUCK")):
         if ".buck2" in path.parts or "vendor" in path.parts:
@@ -207,6 +220,47 @@ def check_sizing() -> None:
         for block in text.split("\n\n"):
             if re.match(r"lash_rust_(library|binary|unit_test|integration_test|feature)", block):
                 assert "exec_properties = sized_exec_properties(" in block, path
+
+
+def check_action_categories() -> None:
+    """Every remote action category resolves to a deliberate request."""
+    sys.path.insert(0, str(HERE))
+    import generate_model as model
+
+    sized = model.ACTION_CATEGORY_SIZES
+    assert set(sized.values()) <= {"compile", "default", "probe", "unsized"}
+    assert model.UNSIZED_ACTION_BUDGET == (1, 1048576)
+    assert (model.DEFAULT_CPU_COUNT, model.DEFAULT_MEMORY_KB) in model.FIXED_POOL_BUDGETS
+
+    sources = sorted(HERE.glob("*.bzl")) + [HERE / "prelude_overlay.py"]
+    # The checkout's prelude, when bootstrap has installed it: the Rust rules
+    # and the helpers the graph reaches through them.
+    prelude = ROOT / ".buck2/prelude"
+    for directory in ("rust", "http_archive"):
+        sources += sorted((prelude / directory).rglob("*.bzl"))
+    declared = {}
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        for category in re.findall(r'category = "([a-z0-9_]+)"', text):
+            declared.setdefault(category, path)
+        # `"rustdoc_json" if json else "rustdoc"`
+        for category in re.findall(r'category = "[a-z0-9_]+" if \w+ else "([a-z0-9_]+)"', text):
+            declared.setdefault(category, path)
+    unsized = {category: str(path) for category, path in declared.items() if category not in sized}
+    assert not unsized, f"action categories without a deliberate size: {unsized}"
+
+    # A rule of ours that runs an action names its request to the supervisor
+    # and its platform to the scheduler; nothing falls through to the first
+    # platform by omission.
+    for name in ("schema_checks.bzl", "platforms.bzl"):
+        text = (HERE / name).read_text(encoding="utf-8")
+        assert "KILN_ACTION_CPU_COUNT" in text, name
+        assert "pool_constraint(" in text, name
+    third_party = (HERE / "third_party.bzl").read_text(encoding="utf-8")
+    assert '_DEFAULT_CONSTRAINT = "//tools/buck2:pool_1_1572864"' in third_party
+    rust = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
+    assert '"exec_compatible_with": [pool_constraint(cpu, memory)]' in rust
+    assert "exec_compatible_with = [pool_constraint(cpu, memory)]" in rust
 
 
 def check_ownership() -> None:
@@ -1360,6 +1414,7 @@ def main() -> int:
     checks = [
         check_inventory,
         check_sizing,
+        check_action_categories,
         check_ownership,
         check_action_bridge,
         check_transitive_source_inputs,

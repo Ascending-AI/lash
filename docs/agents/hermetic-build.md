@@ -243,6 +243,42 @@ request 1 CPU and 1.5 GiB. Unmeasured tests retain their existing policy request
 including large-suite and timing-sensitive floors. Batches reserve a measured
 row or the two largest member requests side by side and run at most two members.
 
+The pool books worker slots by these requests, so an oversized request is lost
+capacity and an undersized one is a throttled or killed action. The rule, in
+`tools/buck2/action_sizes_from_log.py`:
+
+- A compile asks for one CPU while its p95 is at most 1.6 cores, because every
+  worker runs a one-CPU request under its slot share (1.67 cores at the least),
+  not under a one-core quota. Above that, and for every test run, the request
+  is `ceil(p95 - 0.2)`, capped at 8: there the cgroup's `cpu.max` is the request.
+- Memory is the p99 peak x 1.25, rounded up to 256 MiB. A run that stayed
+  inside the request it ran under needs no more than that request. A compile
+  row never drops below its largest recorded peak or the 1.5 GiB default; a
+  test row never drops below 1 GiB.
+- Each remote action category takes its request from the target that runs it;
+  `ACTION_CATEGORY_SIZES` in `tools/buck2/generate_model.py` names the source
+  for every category. A target that names no budget resolves to the first
+  platform in `POOL_BUDGETS`, 1 CPU and 1 GiB.
+
+Refresh the sizes from the workers' usage logs
+(`/workspace/kiln-executor/usage/actions.log*` on each pool box) with one
+command, then commit the three files it rewrites:
+
+```sh
+python3 tools/buck2/action_sizes_from_log.py --refresh --since <unix seconds> usage-*.log
+python3 tools/buck2/action_sizes_from_log.py --report --since <unix seconds> usage-*.log
+```
+
+`--refresh` rewrites `action-sizes.json` and `test-run-sizes.json` and runs
+`sync.py`, which regenerates `exec_sizes.bzl`, including the execution
+platforms. `--report` prints reserved against used CPU and memory per action
+category. The usage log cannot tell a target's metadata, Clippy, codegen and
+link actions apart; `tools/buck2/action_categories_from_events.py` joins it
+with `buck2 log show` output to measure each. A changed request changes the
+action key, so the first build after a refresh recompiles the resized crates. The graph contracts fail when a
+category has no entry, when a compile row is below its recorded peak, and when
+a test row is below its p99 peak.
+
 These are scheduler reservations, not compiler-thread counts. The worker
 supervisor uses the requests to size cgroups within unchanged floors and
 ceilings. Stock Buck2 puts properties in REAPI `Command.platform`. The pool

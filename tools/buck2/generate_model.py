@@ -63,6 +63,55 @@ CONTENTION_FLOOR = PACKAGE_POLICY["test_runs"]["contention_floor"]
 # Requests pinned per Buck2 label: runs too few times sampled for a measured
 # row, and unmeasured batches the member sum would oversize.
 PINNED_TEST_RUNS = PACKAGE_POLICY["test_runs"].get("pinned", {})
+# The execution platforms every graph registers whatever the tables say, as
+# (cpu_count, memory_kb). The first is the platform Buck2 resolves for a
+# target that names no budget -- `http_archive`, `rustc_cfg` and the other
+# prelude helpers -- so it is the smallest request the pool prices. Then the
+# default compile request (third-party crates, build scripts, schema actions)
+# and `//tools/buck2:runtime_probe_large`. `exec_sizes.bzl` adds one platform
+# per distinct compile request; test runs and batches state their request to
+# the test executor directly and need no platform.
+UNSIZED_ACTION_BUDGET = (1, 1048576)
+FIXED_POOL_BUDGETS = [(DEFAULT_CPU_COUNT, DEFAULT_MEMORY_KB), (2, 3145728)]
+# Where every remote action category of the graph gets its request. Buck2
+# resolves one execution platform per target, so a category is sized through
+# the target that runs it:
+#
+#   compile   the owning Rust target's row in `action-sizes.json`, else the
+#             default request. Its helpers (`deps`, `failure_filter`, ...) run
+#             on that same platform for well under a second.
+#   default   the default request, stated by the rule that declares the action
+#             (`third_party.bzl`, `schema_checks.bzl`, the build-script macro).
+#   probe     the request `runtime_probe` is given.
+#   unsized   a prelude helper target that names no budget and resolves to
+#             `UNSIZED_ACTION_BUDGET`.
+#
+# A test run is not a category: its wrapper states the label's request from
+# `test-run-sizes.json` to the test executor. `test_sync.py` fails when a
+# category of Lash's rules or of the prelude's Rust rules is missing here.
+ACTION_CATEGORY_SIZES = {
+    "analyze_llvm_lines": "compile",
+    "buildscript": "default",
+    "clippy": "compile",
+    "clippy_toml_merge": "compile",
+    "deps": "compile",
+    "failure_filter": "compile",
+    "find_profdata": "compile",
+    "http_archive": "unsized",
+    "named_deps": "compile",
+    "process_exclusions": "compile",
+    "run_crox": "compile",
+    "runtime_probe": "probe",
+    "rust_shared_library_symlinks": "compile",
+    "rustc": "compile",
+    "rustc_cfg": "unsized",
+    "rustc_host_tuple": "unsized",
+    "rustdoc": "compile",
+    "rustdoc_coverage": "compile",
+    "rustdoc_json": "compile",
+    "schema_check": "default",
+    "schema_generate": "default",
+}
 # Members a `:test_batch` runs at once. An unmeasured batch reserves the sum
 # of its largest BATCH_JOBS members' requests and the runner reads the same
 # number from `LASH_BATCH_JOBS`, never from `nproc`.
@@ -231,6 +280,18 @@ def exec_sizes_bzl() -> str:
         field: BATCH_JOBS * UNMEASURED_TEST_RUN[field]
         for field in ("cpu_count", "memory_kb")
     }
+    pool_budgets = [UNSIZED_ACTION_BUDGET] + sorted(
+        (
+            set(FIXED_POOL_BUDGETS)
+            | {
+                (request["cpu_count"], request["memory_kb"])
+                for request in (
+                    compile_request(*key.rsplit("/", 1)) for key in ACTION_SIZES
+                )
+            }
+        )
+        - {UNSIZED_ACTION_BUDGET}
+    )
     lines = [
         GENERATED_HEADER,
         '"""\n',
@@ -256,6 +317,11 @@ def exec_sizes_bzl() -> str:
         f'    "cpu_count": {unmeasured_batch["cpu_count"]},\n',
         f'    "memory_kb": {unmeasured_batch["memory_kb"]},\n',
         "}\n\n",
+        "# One execution platform per compile request. The first is what a\n",
+        "# target that names no budget resolves to.\n",
+        "POOL_BUDGETS = [\n",
+        "".join(f"    ({cpu}, {memory_kb}),\n" for cpu, memory_kb in pool_budgets),
+        "]\n\n",
         "COMPILE_REQUESTS = {\n",
         "".join(
             f"    {quote(key)}: {{"

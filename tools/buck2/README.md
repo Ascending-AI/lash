@@ -84,7 +84,10 @@ Each action's canonical budget supplies the platform properties `cpu_count`,
 `memory_kb`, `cpu_arch`, `OSFamily` and `kiln_executor_runtime`, plus outer-command
 `KILN_ACTION_CPU_COUNT` and `KILN_ACTION_MEMORY_KB`. The latter reaches the
 existing worker supervisor before compiler wrappers run. Compile and test
-requests use their respective sizing tables. The checksum-pinned Starlark
+requests use their respective sizing tables, which
+`action_sizes_from_log.py --refresh` rebuilds from the workers' usage logs; see
+[execution and resource accounting](../../docs/agents/hermetic-build.md#execution-and-resource-accounting)
+for the rule and the refresh. The checksum-pinned Starlark
 prelude overlay attaches this environment through the documented action API;
 it does not modify or rebuild the Buck2 executable.
 
