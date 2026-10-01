@@ -531,7 +531,9 @@ pub mod persistence {
         SessionLineage, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
         SessionObserverIntent,
     };
-    pub use lash_core_store::session_state::{RuntimeSessionAuthority, SessionPluginStateSource};
+    pub use lash_core_store::session_state::{
+        InstalledRootView, RuntimeSessionAuthority, SessionPluginStateSource,
+    };
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
     pub use lash_core_store::store::{
         EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow, StoreRefusal,

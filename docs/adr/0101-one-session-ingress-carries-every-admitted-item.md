@@ -78,10 +78,12 @@ follow-on. A raised or exhausted answer also records the head the follow-on's
 turn runs on and its turn index, and the step retains that head as an
 admission retains its base. Replay drives the recorded answer on the recorded
 head and index, and cannot raise the count twice.
-The first frame switch of a logical run freezes the host's
-`max_follow_on_recoveries` (default 3) on the fact, and the chain carries it:
-every recovery decides on the frozen bound, never on the bound of the host
-driving it, and the recorded decision carries it. Exhaustion commits
+A root records the host's `max_follow_on_recoveries` (default 3) when it
+resolves, as `follow_on_recoveries` on its `ResolvedRun`. Every fact of the
+logical run carries that record, so the chain carries the bound: every
+recovery decides on the recorded bound, never on the bound of the host driving
+it or of the host that committed the switch, and the recorded decision carries
+it. Exhaustion commits
 `FollowOnRecoveryExhausted` as a failed follow-on with its task delivered and
 clears the fact. Chain depth also survives crashes. Cancellation answers the
 follow-on's own task, rather than deferring it as undelivered ingress.

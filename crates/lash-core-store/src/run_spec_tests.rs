@@ -106,11 +106,17 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
         serde_json::json!({})
     );
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
+        .resolve(
+            &snapshot(),
+            None,
+            TerminationPolicy::default(),
+            3,
+            &catalog(),
+        )
         .expect("resolve");
     assert_eq!(
         resolved,
-        ResolvedRun::snapshot(snapshot(), TerminationPolicy::default())
+        ResolvedRun::snapshot(snapshot(), TerminationPolicy::default(), 3)
     );
     assert_eq!(resolved.base.config_revision, 7);
 }
@@ -124,7 +130,7 @@ fn a_resolved_run_records_its_termination_policy() {
         treat_missing_done_as_failure: false,
     };
     let resolved = RunSpec::default()
-        .resolve(&snapshot(), None, finishes.clone(), &catalog())
+        .resolve(&snapshot(), None, finishes.clone(), 3, &catalog())
         .expect("resolve");
     assert_eq!(resolved.termination, finishes);
 
@@ -161,7 +167,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
             "preview": lash_render::RenderParams::preview(),
         }),
     };
-    let mut resolved = ResolvedRun::snapshot(snapshot(), TerminationPolicy::default());
+    let mut resolved = ResolvedRun::snapshot(snapshot(), TerminationPolicy::default(), 3);
     resolved.render = Some(record.clone());
     let encoded = serde_json::to_vec(&resolved).expect("encode run");
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
@@ -171,7 +177,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    crate::session_state::adopt_resolved_run(&mut state, &decoded);
+    state.install_root_view(&decoded);
     let env = state.process_execution_env_spec(&state.policy);
     assert_eq!(env.render, Some(record.clone()));
     let env_bytes = env.to_store_bytes().expect("encode env");
@@ -280,7 +286,13 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     );
     assert!(spec.hash().expect("hash").is_some());
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
+        .resolve(
+            &snapshot(),
+            None,
+            TerminationPolicy::default(),
+            3,
+            &catalog(),
+        )
         .expect("resolve");
     assert_eq!(resolved.capabilities, spec.capabilities);
     assert_eq!(
@@ -322,7 +334,7 @@ fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
     });
     let catalog = catalog();
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog)
+        .resolve(&snapshot(), None, TerminationPolicy::default(), 3, &catalog)
         .expect("resolve");
     assert_eq!(catalog.snapshots(), 1, "the key is minted exactly once");
     let model = resolved.config().model.clone().expect("model");
@@ -344,7 +356,7 @@ fn a_reasoning_only_override_keeps_the_snapshot_model_without_minting() {
     });
     let catalog = catalog();
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog)
+        .resolve(&snapshot(), None, TerminationPolicy::default(), 3, &catalog)
         .expect("resolve");
     assert_eq!(catalog.snapshots(), 0, "no key, no mint");
     let model = resolved.config().model.clone().expect("model");
@@ -361,7 +373,13 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
         model: Some(ModelKey::new("retired-model")),
         ..RunOverrides::default()
     });
-    match spec.resolve(&snapshot(), None, TerminationPolicy::default(), &catalog()) {
+    match spec.resolve(
+        &snapshot(),
+        None,
+        TerminationPolicy::default(),
+        3,
+        &catalog(),
+    ) {
         Err(RunResolveError::Model(unavailable)) => {
             assert_eq!(unavailable.key, ModelKey::new("retired-model"));
             assert_eq!(unavailable.reason, ModelUnavailableReason::UnknownKey);
@@ -381,7 +399,13 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         model: Some(ModelKey::new("plain-model")),
         ..RunOverrides::default()
     });
-    match onto_plain.resolve(&snapshot(), None, TerminationPolicy::default(), &catalog()) {
+    match onto_plain.resolve(
+        &snapshot(),
+        None,
+        TerminationPolicy::default(),
+        3,
+        &catalog(),
+    ) {
         Err(RunResolveError::Reasoning(refused)) => {
             assert_eq!(refused.key, ModelKey::new("plain-model"));
             assert_eq!(
@@ -396,7 +420,13 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         reasoning: Some(ReasoningSelection::Effort("extreme".to_string())),
         ..RunOverrides::default()
     });
-    match unadvertised.resolve(&snapshot(), None, TerminationPolicy::default(), &catalog()) {
+    match unadvertised.resolve(
+        &snapshot(),
+        None,
+        TerminationPolicy::default(),
+        3,
+        &catalog(),
+    ) {
         Err(RunResolveError::Reasoning(refused)) => {
             assert_eq!(refused.key, ModelKey::new("session-model"));
         }
@@ -410,7 +440,13 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         ..RunOverrides::default()
     });
     accepted
-        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
+        .resolve(
+            &snapshot(),
+            None,
+            TerminationPolicy::default(),
+            3,
+            &catalog(),
+        )
         .expect("the provider's default reasoning fits a model with no controls");
 }
 
@@ -423,7 +459,7 @@ fn a_reasoning_override_for_a_session_without_a_model_is_refused() {
     let bare =
         PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     assert!(matches!(
-        spec.resolve(&bare, None, TerminationPolicy::default(), &catalog()),
+        spec.resolve(&bare, None, TerminationPolicy::default(), 3, &catalog()),
         Err(RunResolveError::ReasoningWithoutModel)
     ));
 }
@@ -453,6 +489,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             &snapshot(),
             Some(definition),
             TerminationPolicy::default(),
+            3,
             &catalog(),
         )
         .expect("resolve");

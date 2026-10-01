@@ -595,10 +595,9 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             .clone()
             .expect("the initial frame is current"),
         task: "follow-on task".to_string(),
-        resolved_run: None,
+        resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,
-        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     };
     let mut base_commit = RuntimeCommit::persisted_state_for_test(&state);
     base_commit.pending_follow_on = Some(follow_on.clone());

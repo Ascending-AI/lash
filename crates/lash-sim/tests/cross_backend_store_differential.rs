@@ -1368,10 +1368,13 @@ impl BackendRunner {
                             .clone()
                             .expect("a pending follow-on owes the head's current frame"),
                         task: "fig-2841 follow-on task".to_string(),
-                        resolved_run: None,
+                        resolved_run: Box::new(lash_core::ResolvedRun::snapshot(
+                            commit.config.clone(),
+                            lash_core::runtime::TerminationPolicy::default(),
+                            lash_core::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
+                        )),
                         chain_depth: 1,
                         attempts: 0,
-                        max_recoveries: lash_core::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
                     });
                 self.commit_and_track(commit, CheckpointSpec::Empty).await
             }

@@ -24,6 +24,20 @@ pub(crate) fn recorded_model_key(model: &Option<crate::ModelConfig>) -> &str {
         .map_or("<no model>", |model| model.key().as_str())
 }
 
+/// The record of a default-spec root over a fresh session's config, under
+/// the default host policies: what a fixture's pending follow-on carries
+/// when the law does not turn on the shape.
+pub(crate) fn default_resolved_run() -> Box<crate::ResolvedRun> {
+    Box::new(crate::ResolvedRun::snapshot(
+        crate::PersistedSessionConfig::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
+        crate::TerminationPolicy::default(),
+        crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
+    ))
+}
+
 pub(crate) fn admit(scope: crate::ExecutionScope) -> crate::AdmittedScope {
     match &scope {
         crate::ExecutionScope::Process { process_id } => {

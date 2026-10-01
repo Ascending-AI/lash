@@ -359,13 +359,15 @@ impl RunSpec {
     /// Resolve this spec against `snapshot`, the root's config after the
     /// boundary's command drain. `definition` is what the spec's registered
     /// definition produced over its context (`None` without a definition).
-    /// `termination` is the host's policy the root records.
+    /// `termination` and `follow_on_recoveries` are the host's policy and
+    /// follow-on recovery bound the root records.
     /// `models` mints the binding of an override key.
     pub fn resolve(
         &self,
         snapshot: &PersistedSessionConfig,
         definition: Option<RunOverrides>,
         termination: TerminationPolicy,
+        follow_on_recoveries: u32,
         models: &dyn crate::provider::RuntimeModels,
     ) -> Result<ResolvedRun, RunResolveError> {
         let mut config = snapshot.clone();
@@ -380,6 +382,7 @@ impl RunSpec {
             base: snapshot.clone(),
             render: None,
             termination,
+            follow_on_recoveries,
         })
     }
 }
@@ -482,12 +485,22 @@ pub struct ResolvedRun {
     /// terminal is assembled when its stream ends without `Done`. Recorded so
     /// every execution of the root assembles the same terminal (FIG-4389).
     pub termination: TerminationPolicy,
+    /// The host's follow-on recovery bound when the root first resolved
+    /// (ADR 0101 §3): how many times a drive may recover a follow-on this
+    /// root's frame switches owe before it commits failed. A pending
+    /// follow-on carries this record, so every recovery of the logical run
+    /// decides on it, never on the bound of the host that drives it.
+    pub follow_on_recoveries: u32,
 }
 
 impl ResolvedRun {
     /// The default spec's resolution: the snapshot itself, under
-    /// `termination`.
-    pub fn snapshot(base: PersistedSessionConfig, termination: TerminationPolicy) -> Self {
+    /// `termination` and `follow_on_recoveries`.
+    pub fn snapshot(
+        base: PersistedSessionConfig,
+        termination: TerminationPolicy,
+        follow_on_recoveries: u32,
+    ) -> Self {
         Self {
             base,
             spec: None,
@@ -495,6 +508,7 @@ impl ResolvedRun {
             capabilities: std::collections::BTreeMap::new(),
             render: None,
             termination,
+            follow_on_recoveries,
         }
     }
 

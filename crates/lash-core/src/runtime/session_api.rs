@@ -99,12 +99,23 @@ impl LashRuntime {
     /// which can differ from the resident one (a replay after a config
     /// change, a recovered follow-on's inherited shape, a refresh the root
     /// re-installs its record over), so the install publishes it to the live
-    /// plugin session just as a whole-state swap does (FIG-4022). This and
-    /// [`Self::install_resident_state`] are the only writers of the resident
-    /// authority.
+    /// plugin session just as a whole-state swap does (FIG-4022). This,
+    /// [`Self::uninstall_root_view`] and [`Self::install_resident_state`]
+    /// are the only writers of the resident authority.
     pub(in crate::runtime) fn install_resolved_run(&mut self, resolved: &crate::ResolvedRun) {
-        crate::runtime::state::adopt_resolved_run(&mut self.state, resolved);
+        self.state.install_root_view(resolved);
         self.publish_resident_authority();
+    }
+
+    /// Uninstall the recorded view of the root this runtime ran last and
+    /// restore the sticky config under it, published to the live plugin
+    /// session as the install was. Whatever resolves or publishes config
+    /// over the resident state afterwards reads the session's, never a
+    /// root's overrides.
+    pub(in crate::runtime) fn uninstall_root_view(&mut self) {
+        if self.state.take_root_view().is_some() {
+            self.publish_resident_authority();
+        }
     }
 
     /// Test hook: applies `edit` to a copy of the resident state and installs

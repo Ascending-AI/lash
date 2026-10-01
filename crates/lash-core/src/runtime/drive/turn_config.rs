@@ -103,6 +103,12 @@ impl LashRuntime {
             spec,
             inherited,
             termination: self.host.core.control.termination.clone(),
+            follow_on_recoveries: self
+                .host
+                .core
+                .durability
+                .queued_work_batching
+                .max_follow_on_recoveries(),
             protocol_driver: self
                 .session
                 .as_ref()
@@ -188,6 +194,9 @@ struct ResolveTurnConfigRunner {
     /// This worker's host termination policy, which a root records on its
     /// first resolution (FIG-4389); a replay decodes the record instead.
     termination: crate::runtime::TerminationPolicy,
+    /// This worker's host follow-on recovery bound, recorded with the root
+    /// the same way (FIG-4646).
+    follow_on_recoveries: u32,
     protocol_driver: Option<std::sync::Arc<dyn crate::plugin::ProtocolDriverPlugin>>,
     /// The session's config owners, which judge every namespace a spec's
     /// overrides changed (FIG-4379).
@@ -205,13 +214,14 @@ struct RootSpec {
 }
 
 impl RootSpec {
-    /// Resolve this spec against `snapshot` under `termination`. A fault a
-    /// redeploy or a retry repairs is marked so it never becomes the step's
-    /// recorded outcome.
+    /// Resolve this spec against `snapshot` under `termination` and
+    /// `follow_on_recoveries`. A fault a redeploy or a retry repairs is
+    /// marked so it never becomes the step's recorded outcome.
     async fn resolve(
         self,
         snapshot: &PersistedSessionConfig,
         termination: crate::runtime::TerminationPolicy,
+        follow_on_recoveries: u32,
     ) -> Result<
         (crate::ResolvedRun, Option<crate::ProtocolTurnOptions>),
         RuntimeEffectControllerError,
@@ -268,9 +278,15 @@ impl RootSpec {
             .clone()
             .over(definition.clone().unwrap_or_default())
             .protocol_turn_options;
-        spec.resolve(snapshot, definition, termination, self.models.as_ref())
-            .map(|resolved| (resolved, run_options))
-            .map_err(|error| run_resolve_fault(&self.hash, error))
+        spec.resolve(
+            snapshot,
+            definition,
+            termination,
+            follow_on_recoveries,
+            self.models.as_ref(),
+        )
+        .map(|resolved| (resolved, run_options))
+        .map_err(|error| run_resolve_fault(&self.hash, error))
     }
 }
 
@@ -305,10 +321,17 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
             // resolved, verbatim: it does not re-resolve.
             (Some(inherited), _) => (inherited, None),
             (None, None) => (
-                crate::ResolvedRun::snapshot(self.snapshot, self.termination),
+                crate::ResolvedRun::snapshot(
+                    self.snapshot,
+                    self.termination,
+                    self.follow_on_recoveries,
+                ),
                 None,
             ),
-            (None, Some(spec)) => spec.resolve(&self.snapshot, self.termination).await?,
+            (None, Some(spec)) => {
+                spec.resolve(&self.snapshot, self.termination, self.follow_on_recoveries)
+                    .await?
+            }
         };
         // An override is judged by the owner of every namespace it changed,
         // as a config command's candidate is: an overlay cannot set what the
@@ -396,6 +419,7 @@ mod tests {
         runtime.apply_turn_config(&crate::ResolvedRun::snapshot(
             view,
             crate::runtime::TerminationPolicy::default(),
+            crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         ));
 
         let plugins = runtime.plugin_session().expect("live plugin session");

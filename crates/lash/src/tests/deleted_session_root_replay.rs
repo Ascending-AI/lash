@@ -896,7 +896,7 @@ async fn a_changed_host_bound_does_not_change_the_recovery_decision(
         panic!("the root recorded one recovery decision: {evidence}");
     };
     assert!(
-        decision.contains(&format!("\"max_recoveries\":{frozen}")),
+        decision.contains(&format!("\"follow_on_recoveries\":{frozen}")),
         "the recorded decision carries the bound the chain froze: {evidence}"
     );
     match change {

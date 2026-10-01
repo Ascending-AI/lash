@@ -378,10 +378,9 @@ pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimeSt
         follow_on_turn_id: crate::TurnId::from("oversized:agent-frame:1"),
         frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "oversized"),
         task: "q".repeat(BYTE_LIMIT * 2),
-        resolved_run: None,
+        resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,
-        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     });
 
     let error = store
@@ -508,10 +507,9 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
             .clone()
             .expect("the initial frame is current"),
         task: "follow-up".to_string(),
-        resolved_run: None,
+        resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,
-        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     });
 
     store

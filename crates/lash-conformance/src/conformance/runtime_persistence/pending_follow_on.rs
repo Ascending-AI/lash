@@ -54,10 +54,9 @@ fn follow_on(frame_id: crate::FrameNodeId) -> crate::store::PendingFollowOn {
         follow_on_turn_id: TurnId::from(FOLLOW_ON_TURN),
         frame_id,
         task: "run in the switched frame".to_string(),
-        resolved_run: None,
+        resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,
-        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     }
 }
 

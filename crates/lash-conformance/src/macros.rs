@@ -187,7 +187,6 @@ macro_rules! runtime_persistence_tests {
             (a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest, "turn-input-batch-retries"),
             (a_conflict_or_a_repeated_id_refuses_the_whole_turn_input_batch, "turn-input-batch-refusals"),
             (a_steering_spec_must_match_a_pending_follow_ons_shape, "run-spec-follow-on-steering"),
-            (a_steering_spec_must_match_a_legacy_follow_ons_parent_shape, "run-spec-follow-on-legacy"),
             (a_steering_spec_must_match_a_queued_headed_roots_default_shape, "run-spec-queued-steering"),
             (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
             (pending_turn_inputs_admit_settle_and_fence, "root"),

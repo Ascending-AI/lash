@@ -178,10 +178,9 @@ impl LashRuntime {
         let record = self.admit_config_transaction(id.into(), expected_revision, transaction)?;
         let previous = self.session_policy();
         let mut next = self.state.clone();
-        // A transaction changes the sticky config, never a root's recorded
-        // execution view.
-        next.authority.committed_config = None;
-        next.authority.root_snapshot = None;
+        // A transaction resolves over the sticky config and changes it,
+        // never the recorded view of the root this runtime ran last.
+        next.take_root_view();
         let base = crate::store::persisted_session_config_from_state(&next);
         let registry = self.config_registry()?;
         let resolution = registry.resolve(&base, &record, self.host.core.providers.models.as_ref());
@@ -240,6 +239,11 @@ impl LashRuntime {
         // whichever runtime committed it last.
         self.reload_invalidated_resident_session_state().await?;
         self.adopt_committed_head().await?;
+        // The head this runtime committed itself is not reloaded, so the
+        // recorded view of the root it ran last is still installed: the
+        // transaction resolves over the sticky config under it and
+        // publishes onto it, never the root's overrides.
+        self.uninstall_root_view();
         let host = Arc::clone(&self.host.core.control.effect_host);
         let controller = super::drive::step_controller(
             root_controller,
@@ -262,8 +266,6 @@ impl LashRuntime {
             return Ok(true);
         }
         let previous = self.session_policy();
-        self.state.authority.committed_config = None;
-        self.state.authority.root_snapshot = None;
         let outcome = publish_config_resolution(&resolution, &mut self.state);
         let applied = matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. });
         if applied {
@@ -307,12 +309,9 @@ impl LashRuntime {
             crate::RuntimeAttribution::for_session(session_id.clone()),
             format!("config-transaction:{}", transaction.id),
         );
-        let mut base_state = self.state.clone();
-        base_state.authority.committed_config = None;
-        base_state.authority.root_snapshot = None;
         let runner = ResolveConfigTransactionRunner {
             registry,
-            base: crate::store::persisted_session_config_from_state(&base_state),
+            base: crate::store::persisted_session_config_from_state(&self.state),
             transaction: transaction.clone(),
             mismatch: mismatch.clone(),
             models: Arc::clone(&self.host.core.providers.models),

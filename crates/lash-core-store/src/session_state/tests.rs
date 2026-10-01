@@ -711,6 +711,69 @@ fn config_revision_round_trips_through_the_persisted_head_config() {
     assert_eq!(restored.policy.model, config.model);
 }
 
+/// Install a root view that runs under `config`, resolved against the
+/// state's sticky config.
+fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessionConfig) {
+    let mut run = crate::run_spec::ResolvedRun::snapshot(
+        crate::store::persisted_session_config_from_state(state),
+        crate::run_spec::TerminationPolicy::default(),
+        crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
+    );
+    run.resolved = (*config != run.base).then(|| Box::new(config.clone()));
+    state.install_root_view(&run);
+}
+
+/// FIG-4646: uninstalling a root view restores the sticky config under it,
+/// every fact of it, so nothing read from the state afterwards is the
+/// root's. A second view installed over the first keeps the session's
+/// sticky config, not the first view's.
+#[test]
+fn taking_a_root_view_restores_the_sticky_config() {
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
+    state.session_id = SessionId::from("take-root-view-law");
+    state.policy.model = Some(recorded_model("sticky-route"));
+    state.config_revision = 3;
+    let sticky = crate::store::persisted_session_config_from_state(&state);
+    assert!(state.take_root_view().is_none(), "no view is installed");
+
+    let mut first = sticky.clone();
+    first.model = Some(recorded_model("first-root-route"));
+    first.generation.seed = Some(7);
+    first.tool_access = crate::SessionToolAccess::ambient()
+        .with_hidden_tools(["hidden-by-root-view"])
+        .expect("valid hidden tool");
+    install_view(&mut state, &first);
+    let mut second = sticky.clone();
+    second.model = Some(recorded_model("second-root-route"));
+    install_view(&mut state, &second);
+    assert_eq!(
+        crate::store::execution_session_config_from_state(&state),
+        second
+    );
+    assert_eq!(
+        state.authority.root_view().map(|view| &view.sticky),
+        Some(&sticky),
+        "a view installed over another keeps the session's sticky config"
+    );
+
+    let taken = state.take_root_view().expect("the installed view");
+    assert_eq!(taken.sticky, sticky);
+    assert_eq!(taken.run.config(), &second);
+    assert!(state.authority.root_view().is_none());
+    assert_eq!(
+        crate::store::execution_session_config_from_state(&state),
+        sticky,
+        "the resident config is the sticky one again"
+    );
+    assert_eq!(
+        crate::store::persisted_session_config_from_state(&state),
+        sticky
+    );
+}
+
 /// FIG-4529: an observer's view of a state under a recorded root view reads
 /// the sticky config, while the state's own policy stays the root's.
 #[test]
@@ -733,7 +796,7 @@ fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
     let mut root = crate::store::persisted_session_config_from_state(&state);
     root.model = Some(recorded_model("root-route"));
     root.generation.seed = Some(7);
-    adopt_root_execution_config(&mut state, &root);
+    install_view(&mut state, &root);
 
     assert_eq!(state.policy.model, root.model, "the root runs its own view");
     let recorded = crate::SessionReadView::recorded_from_runtime_state(&state);
@@ -758,7 +821,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
     root.model = Some(recorded_model("root-route"));
     root.autonomous = !sticky.autonomous;
 
-    adopt_root_execution_config(&mut state, &root);
+    install_view(&mut state, &root);
     assert_eq!(
         crate::store::execution_session_config_from_state(&state),
         root
@@ -799,7 +862,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         crate::store::persisted_session_config_from_state(&state),
         sticky
     );
-    adopt_root_execution_config(&mut state, &root);
+    install_view(&mut state, &root);
     assert_eq!(
         crate::store::persisted_session_config_from_state(&state),
         sticky
@@ -845,7 +908,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     };
 
     // The first execution: the root's recorded view is the head's config.
-    adopt_root_execution_config(&mut state, &first);
+    install_view(&mut state, &first);
     let original = commit_under(&state);
     assert_eq!(original.config, first);
     assert!(
@@ -858,9 +921,9 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     let mut changed = first.clone();
     changed.model = Some(recorded_model("second-route"));
     changed.config_revision += 1;
-    state.authority.committed_config = None;
+    state.take_root_view();
     adopt_session_config(&mut state, &changed);
-    adopt_root_execution_config(&mut state, &first);
+    install_view(&mut state, &first);
     let replayed = commit_under(&state);
     assert_eq!(
         replayed.config, changed,
@@ -875,7 +938,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     // A root that ran under another view is another operation.
     let mut other = first.clone();
     other.model = Some(recorded_model("other-route"));
-    adopt_root_execution_config(&mut state, &other);
+    install_view(&mut state, &other);
     assert_ne!(
         commit_under(&state)
             .turn_commit_hash()
@@ -1057,6 +1120,7 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
             &admitted,
             None,
             crate::run_spec::TerminationPolicy::default(),
+            crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             &crate::provider::EmptyModels,
         )
         .expect("resolve the root");
@@ -1072,7 +1136,7 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
         "outside a root the head's configuration is the installed one"
     );
 
-    adopt_resolved_run(&mut state, &resolved);
+    state.install_root_view(&resolved);
     let expected = crate::AdmittedPluginConfig::new(capped_plugin_config(12), 4);
     assert_eq!(state.admitted_plugin_config(), expected);
     assert_eq!(

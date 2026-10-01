@@ -960,10 +960,9 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
         follow_on_turn_id: crate::TurnId::from("atomic-append:agent-frame:1"),
         frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "atomic-frame"),
         task: "must roll back".to_string(),
-        resolved_run: None,
+        resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 1,
         attempts: 0,
-        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     });
     let _failing_lease =
         seal_drive_fence_for_test(&store, &SessionId::from("root"), "atomic-append-failing").await;

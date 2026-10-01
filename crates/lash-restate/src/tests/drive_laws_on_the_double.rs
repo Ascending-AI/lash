@@ -283,6 +283,25 @@ mod stale_fence_boundary {
     }
 }
 
+// FIG-4646's recorded-view and recorded-bound laws on the double's SQLite
+// file leg: a config command after a pinned root resolves over the sticky
+// config, and a redriven switch owes its follow-on under the bound its root
+// resolved. The plain SQLite memory leg runs with `turn_config_tests!` above;
+// the PostgreSQL leg runs with the PostgreSQL ingress laws.
+mod recorded_root_view_and_bound {
+    use super::recorded_termination::file_harness;
+
+    mod sqlite_file {
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(false).await
+        }; (a_config_command_after_a_pinned_root_resolves_over_the_sticky_config, "run-spec-sticky-command"));
+
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(false).await
+        }; (a_redriven_switch_owes_its_follow_on_under_the_bound_its_root_resolved, "run-spec-follow-on-bound"));
+    }
+}
+
 // L-S8: a fresh execution of a started root is SubstrateLost. Every run
 // of the probe runner is a fresh invocation, so its second run of the
 // same admission is the fresh execution.

@@ -33,7 +33,11 @@ impl LashRuntime {
     /// outcome identical either way; between roots the record is absent and
     /// nothing is restored.
     pub(in crate::runtime) async fn refresh_resident_head(&mut self) -> Result<(), RuntimeError> {
-        let resolved_run = self.state.authority.resolved_run.clone();
+        let resolved_run = self
+            .state
+            .authority
+            .root_view()
+            .map(|view| view.run.clone());
         self.reload_invalidated_resident_session().await?;
         self.refresh_session_graph_from_store()
             .await

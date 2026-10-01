@@ -8,10 +8,10 @@
 pub fn persisted_session_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
-    if let Some(config) = &state.authority.committed_config {
-        return (**config).clone();
+    match state.authority.root_view() {
+        Some(view) => view.sticky.clone(),
+        None => execution_session_config_from_state(state),
     }
-    execution_session_config_from_state(state)
 }
 
 /// The configuration the running root was admitted under: the snapshot its
@@ -20,8 +20,8 @@ pub fn persisted_session_config_from_state(
 pub fn root_snapshot_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
-    match &state.authority.root_snapshot {
-        Some(snapshot) => (**snapshot).clone(),
+    match state.authority.root_view() {
+        Some(view) => view.run.base.clone(),
         None => execution_session_config_from_state(state),
     }
 }
@@ -46,8 +46,8 @@ pub fn recorded_session_policy_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::SessionPolicy {
     let mut policy = state.policy.clone();
-    if let Some(config) = &state.authority.committed_config {
-        crate::session_state::apply_persisted_config_to_policy(&mut policy, config);
+    if let Some(view) = state.authority.root_view() {
+        crate::session_state::apply_persisted_config_to_policy(&mut policy, &view.sticky);
     }
     policy
 }

@@ -754,7 +754,7 @@ impl RuntimeCommit {
         let config = persisted_session_config_from_state(state);
         let execution_config = state
             .authority
-            .committed_config
+            .root_view()
             .is_some()
             .then(|| execution_session_config_from_state(state))
             .filter(|execution| *execution != config)

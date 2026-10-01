@@ -305,7 +305,7 @@ async fn commit_switch_owing(
     store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     switching_turn: &str,
-    resolved_run: Option<Box<crate::ResolvedRun>>,
+    resolved_run: crate::ResolvedRun,
 ) -> crate::store::PendingFollowOn {
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
@@ -325,10 +325,9 @@ async fn commit_switch_owing(
             .clone()
             .expect("the initial frame is current"),
         task: "run in the switched frame".to_string(),
-        resolved_run,
+        resolved_run: Box::new(resolved_run),
         chain_depth: 1,
         attempts: 0,
-        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     };
     store
         .commit_runtime_state(steering_commit(&state, switching_turn, Some(owed.clone())))
@@ -340,8 +339,7 @@ async fn commit_switch_owing(
 /// A follow-on the head owes is a running root under the shape its fact
 /// recorded at the switch (FIG-3877): an input steered into the follow-on
 /// turn must match that recorded spec, not the spec of the input that started
-/// the parent root. A fact written before shapes were recorded falls back to
-/// the parent's starting-input spec, and an omitted spec inherits either way.
+/// the parent root. An omitted spec inherits the recorded shape.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -378,14 +376,9 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dy
         capabilities: std::collections::BTreeMap::new(),
         render: None,
         termination: crate::TerminationPolicy::default(),
+        follow_on_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     };
-    let owed = commit_switch_owing(
-        &store,
-        &session_id,
-        "switching-turn",
-        Some(Box::new(recorded)),
-    )
-    .await;
+    let owed = commit_switch_owing(&store, &session_id, "switching-turn", recorded).await;
     let follow_on = owed.follow_on_turn_id.clone();
     let steer = |text: &str, spec: crate::RunSpec| {
         pending_active_turn_input_draft(
@@ -415,50 +408,6 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dy
         .enqueue_pending_turn_input(steer("inherit", crate::RunSpec::default()))
         .await
         .expect("an omitted spec inherits the recorded shape");
-}
-
-/// A pending follow-on whose fact was written before shapes were recorded
-/// carries no `resolved_run`: steering joins the shape of the input that
-/// started its parent root (FIG-3877).
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_steering_spec_must_match_a_legacy_follow_ons_parent_shape(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let session_id = SessionId::from("run-spec-follow-on-legacy");
-    let parent_shape = spec_with_shape("the parent input's shape");
-    store
-        .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&session_id, "start the parent")
-                .with_source_key("switching-turn")
-                .with_run_spec(parent_shape.clone()),
-        )
-        .await
-        .expect("admit the parent's starting input");
-    let legacy = commit_switch_owing(&store, &session_id, "switching-turn", None).await;
-    let follow_on = legacy.follow_on_turn_id.clone();
-    let steer = |spec: crate::RunSpec| {
-        pending_active_turn_input_draft(
-            &session_id,
-            &follow_on,
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "steer the legacy follow-on",
-        )
-        .with_run_spec(spec)
-    };
-    assert!(matches!(
-        store
-            .enqueue_pending_turn_input(steer(spec_with_shape("another shape")))
-            .await,
-        Err(StoreError::PendingTurnInputRunSpecMismatch { turn_id, .. })
-            if turn_id == follow_on
-    ));
-    store
-        .enqueue_pending_turn_input(steer(parent_shape))
-        .await
-        .expect("the parent input's spec matches a legacy fact");
 }
 
 /// A queued-headed root runs under the default spec (FIG-3877): its members

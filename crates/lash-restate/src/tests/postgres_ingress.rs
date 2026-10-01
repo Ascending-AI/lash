@@ -470,6 +470,19 @@ mod recorded_termination {
         ] {
             super::harness(false).await
         }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+
+        // FIG-4646's recorded-view and recorded-bound laws.
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(false).await
+        }; (a_config_command_after_a_pinned_root_resolves_over_the_sticky_config, "run-spec-sticky-command"));
+
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(false).await
+        }; (a_redriven_switch_owes_its_follow_on_under_the_bound_its_root_resolved, "run-spec-follow-on-bound"));
     }
 
     mod always_replay {

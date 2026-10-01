@@ -178,8 +178,8 @@ impl RuntimeTurnDriver<'_> {
             .turn_pipeline
             .state()
             .authority
-            .resolved_render
-            .as_ref();
+            .root_view()
+            .and_then(|view| view.run.render.as_ref());
         let mut context = crate::plugin::ProtocolSessionContext::new(
             &self.session_id,
             self.session.fleet_format(),

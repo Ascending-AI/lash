@@ -381,6 +381,108 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
     );
 }
 
+/// The budget the law's command sets.
+const COMMANDED_TURNS: usize = 7;
+
+/// A config command applied after a pinned root, by the runtime that ran
+/// the root, resolves over the sticky config (FIG-4646): the head keeps the
+/// session's model and generation, takes the command's budget alone, and the
+/// next default root runs on the session's model.
+///
+/// The runtime's head is its own after the root's commit, so nothing reloads
+/// it before the command applies: the root's recorded view is still resident
+/// then, and uninstalling it is what restores the sticky config.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_config_command_after_a_pinned_root_resolves_over_the_sticky_config(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts =
+        DriveParts::new(prefix, "run-spec-sticky-command", &effect_host, &stores, 8).await;
+    let models = record_models(&mut parts);
+    enqueue(&parts, "pinned", "sticky-pinned", pinned_spec()).await;
+    let pinned_request = parts.request("run-spec-sticky-command-pinned");
+    let command_request = parts.request("run-spec-sticky-command-apply");
+    let submitter = parts.clone();
+    let (pinned, applied): (DriveOutcome, DriveOutcome) =
+        on_tier(&runner, &parts, move |mut runtime, scope| {
+            let pinned_request = pinned_request.clone();
+            let command_request = command_request.clone();
+            let submitter = submitter.clone();
+            Box::pin(async move {
+                let pinned = lash_core::drive::drive_session(&mut runtime, &scope, &pinned_request)
+                    .await
+                    .expect("the pinned root's drive runs");
+                // Another runtime submits the command, so the driving
+                // runtime's resident state is never invalidated.
+                let mut other = submitter.runtime().await;
+                other
+                    .reload_invalidated_resident_session_state()
+                    .await
+                    .expect("the submitting runtime loads the head");
+                other.adopt_committed_head().await.expect("read the head");
+                let revision = other.config_revision();
+                other
+                    .submit_config_transaction(
+                        "run-spec-sticky-command",
+                        revision,
+                        &crate::ConfigTransaction::of(crate::plugin::config::core::SetTurnBudget {
+                            turn_budget: crate::TurnBudget::bounded(COMMANDED_TURNS),
+                        }),
+                    )
+                    .await
+                    .expect("the config command is accepted");
+                let applied =
+                    lash_core::drive::drive_session(&mut runtime, &scope, &command_request)
+                        .await
+                        .expect("the command's drive runs");
+                (pinned, applied)
+            })
+        })
+        .await;
+    assert_eq!(committed_roots(&pinned), vec!["sticky-pinned"]);
+    assert!(
+        matches!(applied.ran.as_slice(), [RootOutcome::Applied { .. }]),
+        "the command lane applies the command: {applied:?}"
+    );
+    let head = head_config(&parts).await;
+    assert_eq!(
+        (
+            crate::conformance::helpers::recorded_model_key(&head.model).to_string(),
+            head.generation.seed,
+            head.turn_budget,
+            head.config_revision,
+        ),
+        (
+            SESSION_MODEL.to_string(),
+            None,
+            crate::TurnBudget::bounded(COMMANDED_TURNS),
+            1,
+        ),
+        "the command published its budget over the sticky config, not the pinned root's view"
+    );
+
+    enqueue(
+        &parts,
+        "after the command",
+        "sticky-after",
+        crate::RunSpec::default(),
+    )
+    .await;
+    let after = drive(&runner, &parts, "run-spec-sticky-command-after").await;
+    assert_eq!(committed_roots(&after), vec!["sticky-after"]);
+    assert_eq!(
+        recorded(&models),
+        vec![PINNED_MODEL, SESSION_MODEL],
+        "the default root after the command runs on the session's model"
+    );
+}
+
 /// Crashes a root's execution after its shape is recorded and before its
 /// model call.
 struct CrashBeforeModelCall;
@@ -1075,6 +1177,161 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
     assert!(
         committed.pending_follow_on.is_none(),
         "the completed follow-on cleared its fact"
+    );
+}
+
+/// The follow-on recovery bound of the host that resolves the law's root.
+const RESOLVED_RECOVERIES: u32 = 1;
+/// The bound of the host that redrives the root's switching commit.
+const REDRIVING_RECOVERIES: u32 = 5;
+
+/// The follow-on a switch owes carries the recovery bound its root resolved
+/// under (FIG-4646): a root that resolved on a host with one bound, crashed
+/// before its switching commit and was redriven on a host with another
+/// writes the bound it recorded, never the redriving host's.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_redriven_switch_owes_its_follow_on_under_the_bound_its_root_resolved(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts =
+        DriveParts::new(prefix, "run-spec-follow-on-bound", &effect_host, &stores, 8).await;
+    // The first frame asks for the switch tool. The follow-on frame's call
+    // runs after the switching commit, so it reads the fact that commit
+    // wrote before it answers.
+    let owed_bounds = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let owed_bounds = Arc::clone(&owed_bounds);
+            let store = Arc::clone(&parts.store);
+            let session_id = parts.session_id.clone();
+            move |_request| {
+                let index = calls.fetch_add(1, Ordering::SeqCst);
+                let owed_bounds = Arc::clone(&owed_bounds);
+                let store = Arc::clone(&store);
+                let session_id = session_id.clone();
+                async move {
+                    let part = if index == 0 {
+                        crate::LlmOutputPart::ToolCall {
+                            call_id: "switch-call".into(),
+                            tool_name: SWITCH_TOOL.into(),
+                            input_json: "{}".into(),
+                            replay: None,
+                        }
+                    } else {
+                        let owed = store
+                            .load_session_head_meta(&session_id)
+                            .await
+                            .expect("read the head the switch committed")
+                            .and_then(|head| head.pending_follow_on)
+                            .map(|owed| owed.resolved_run.follow_on_recoveries);
+                        owed_bounds
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .push(owed);
+                        crate::LlmOutputPart::Text {
+                            text: "answered in the follow-on frame".into(),
+                            response_meta: None,
+                        }
+                    };
+                    Ok(crate::LlmResponse {
+                        parts: vec![part],
+                        ..crate::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build();
+    parts.host.providers.models = law_models(provider.into_handle());
+    let tool: Arc<dyn crate::plugin::PluginFactory> =
+        Arc::new(crate::plugin::StaticPluginFactory::new(
+            "conformance-run-spec-switch-probe",
+            crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool {
+                executed: Arc::new(AtomicUsize::new(0)),
+            })),
+        ));
+    enqueue(
+        &parts,
+        "switch frames, then answer",
+        "follow-on-bound-root",
+        crate::RunSpec::default(),
+    )
+    .await;
+    let bounded = |recoveries: u32| {
+        let mut parts = parts.clone();
+        parts.host.durability.queued_work_batching = parts
+            .host
+            .durability
+            .queued_work_batching
+            .clone()
+            .with_max_follow_on_recoveries(recoveries);
+        parts
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let attempt = |parts: DriveParts, crash: bool| -> crate::ConformanceTurnAttempt {
+        let tool = Arc::clone(&tool);
+        let tx = tx.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let tool = Arc::clone(&tool);
+            let tx = tx.clone();
+            Box::pin(async move {
+                let mut runtime = runtime_with_switch(&parts, tool).await;
+                if crash {
+                    runtime.set_turn_phase_probe(Arc::new(CrashBeforeModelCall));
+                }
+                let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+                    tokio_util::sync::CancellationToken::new(),
+                    scope,
+                )))
+                .await;
+                assert!(!crash, "the crash fires before the root's model call");
+                let end = crate::ConformanceTurnEnd::of(&drive);
+                let _ = tx.send(drive);
+                end
+            })
+        })
+    };
+    let scope = admit(crate::ExecutionScope::turn(
+        &parts.session_id,
+        format!("{prefix}-run-spec-follow-on-bound-drive"),
+    ));
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        runner.run_crashed_then_redriven_turn(
+            scope,
+            attempt(bounded(RESOLVED_RECOVERIES), true),
+            attempt(bounded(REDRIVING_RECOVERIES), false),
+        ),
+    )
+    .await
+    .expect("the redriven root ends");
+    let drive = rx
+        .recv()
+        .await
+        .expect("the tier's runner ran the redrive")
+        .unwrap_or_else(|error| panic!("the redriven root runs: {error:?}"));
+    let turn = drive.ran().expect("the redrive ran the root to its end");
+    assert!(
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "the root finishes in the follow-on frame: {:?}; errors: {:?}",
+        turn.outcome,
+        turn.errors
+    );
+    assert_eq!(
+        *owed_bounds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        vec![Some(RESOLVED_RECOVERIES)],
+        "the switch owed its follow-on under the bound the root resolved, not the redriving \
+         host's"
     );
 }
 

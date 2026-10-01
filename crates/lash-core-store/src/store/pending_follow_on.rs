@@ -39,40 +39,30 @@ pub struct PendingFollowOn {
     /// The shape the logical run's root resolved under, recorded at the
     /// switch so a recovered follow-on runs under it — its protocol turn
     /// options included — rather than resolving the session's current
-    /// defaults fresh (FIG-3877). `None` on facts
-    /// written before the field existed, or whose root resolved no record.
-    /// Not part of the fact's JSON schema: the column is self-describing and
-    /// a crash back to an older worker leaves the record ignorable.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(skip)]
-    pub resolved_run: Option<Box<crate::run_spec::ResolvedRun>>,
+    /// defaults fresh (FIG-3877). It also carries the logical run's
+    /// follow-on recovery bound, which every recovery decides on.
+    #[schemars(with = "serde_json::Value")]
+    pub resolved_run: Box<crate::run_spec::ResolvedRun>,
     /// Frame switches in this chain so far, carried across a crash so the
     /// chain bound does not restart at zero.
     pub chain_depth: u32,
     /// Recoveries so far. Raised once per recovering drive, never reset.
     pub attempts: u32,
-    /// The recovery bound of the logical run, frozen when its first frame
-    /// switch owed a follow-on (the host's
-    /// `QueuedWorkBatchingConfig::max_follow_on_recoveries` then) and carried
-    /// along the chain. Every recovery decides on it, never on the bound of
-    /// the host that happens to drive it.
-    pub max_recoveries: u32,
 }
 
 impl PendingFollowOn {
     /// The follow-on of physical turn `physical_ordinal` of `root` switching to
-    /// `frame_id` with `task`. `chain_depth` counts this switch;
-    /// `max_recoveries` is the logical run's frozen recovery bound; `resolved`
+    /// `frame_id` with `task`. `chain_depth` counts this switch; `resolved`
     /// is the shape the logical run's root resolved under, recorded so a
-    /// recovered follow-on inherits it (FIG-3877).
+    /// recovered follow-on inherits it (FIG-3877) and is recovered under
+    /// its bound.
     pub fn after_switch(
         root: &TurnId,
         physical_ordinal: u64,
         frame_id: FrameNodeId,
         task: impl Into<String>,
         chain_depth: u32,
-        max_recoveries: u32,
-        resolved: Option<crate::run_spec::ResolvedRun>,
+        resolved: crate::run_spec::ResolvedRun,
     ) -> Result<Self, StoreError> {
         let next =
             StoreError::checked_monotonic_increment("follow_on_physical_index", physical_ordinal)?;
@@ -80,10 +70,9 @@ impl PendingFollowOn {
             follow_on_turn_id: PhysicalTurn::derive_turn_id(root, next),
             frame_id,
             task: task.into(),
-            resolved_run: resolved.map(Box::new),
+            resolved_run: Box::new(resolved),
             chain_depth,
             attempts: 0,
-            max_recoveries,
         })
     }
 
@@ -133,15 +122,17 @@ impl PendingFollowOn {
     }
 
     /// What a drive that recovers this fact may do: raise `attempts` and run
-    /// the follow-on, or, once the raised count would pass the fact's frozen
-    /// `max_recoveries`, commit it failed with [`FollowOnRecovery::Exhausted`].
+    /// the follow-on, or, once the raised count would pass the bound its
+    /// root recorded, commit it failed with [`FollowOnRecovery::Exhausted`].
     pub fn recovery(&self) -> Result<FollowOnRecovery, StoreError> {
         let raised = self.raised()?;
-        Ok(if raised.attempts > self.max_recoveries {
-            FollowOnRecovery::Exhausted(self.clone())
-        } else {
-            FollowOnRecovery::Run(raised)
-        })
+        Ok(
+            if raised.attempts > self.resolved_run.follow_on_recoveries {
+                FollowOnRecovery::Exhausted(self.clone())
+            } else {
+                FollowOnRecovery::Run(raised)
+            },
+        )
     }
 
     /// This fact with `attempts` raised by one: what a recovering drive
@@ -344,15 +335,26 @@ pub fn decode_pending_follow_on(
 mod tests {
     use super::*;
 
+    /// A default-spec root's record under recovery bound `recoveries`.
+    fn resolved(recoveries: u32) -> crate::run_spec::ResolvedRun {
+        crate::run_spec::ResolvedRun::snapshot(
+            crate::PersistedSessionConfig::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
+            crate::run_spec::TerminationPolicy::default(),
+            recoveries,
+        )
+    }
+
     fn fact(turn: &str, frame: &str) -> PendingFollowOn {
         PendingFollowOn {
             follow_on_turn_id: TurnId::from(turn),
             frame_id: FrameNodeId::new(frame).expect("frame"),
             task: "task".into(),
-            resolved_run: None,
+            resolved_run: Box::new(resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES)),
             chain_depth: 1,
             attempts: 0,
-            max_recoveries: DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         }
     }
 
@@ -392,8 +394,7 @@ mod tests {
             FrameNodeId::new("f").expect("frame"),
             "t",
             1,
-            DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
-            None,
+            resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
         )
         .expect("first");
         assert_eq!(first.follow_on_turn_id, TurnId::from("root:agent-frame:1"));
@@ -403,8 +404,7 @@ mod tests {
             FrameNodeId::new("g").expect("frame"),
             "t",
             2,
-            DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
-            None,
+            resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
         )
         .expect("second");
         assert_eq!(second.follow_on_turn_id, TurnId::from("root:agent-frame:2"));
@@ -427,8 +427,7 @@ mod tests {
                 FrameNodeId::new("f").expect("frame"),
                 "t",
                 1,
-                DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
-                None,
+                resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
             )
             .expect("switch");
             assert_eq!(
@@ -555,19 +554,45 @@ mod tests {
         ));
     }
 
-    /// The bound a recovery decides on is the fact's, frozen when the chain
-    /// was owed, whatever bound the recovering host is configured with.
+    /// The bound a recovery decides on is the one the fact's root recorded,
+    /// whatever bound the recovering host is configured with.
     #[test]
-    fn recovery_decides_on_the_frozen_bound() {
+    fn recovery_decides_on_the_bound_its_root_recorded() {
         let mut pending = fact("root:agent-frame:1", "f");
-        pending.max_recoveries = 0;
+        *pending.resolved_run = resolved(0);
         assert!(matches!(
             pending.recovery(),
             Ok(FollowOnRecovery::Exhausted(_))
         ));
-        pending.max_recoveries = 1;
-        assert!(
-            matches!(pending.recovery(), Ok(FollowOnRecovery::Run(raised)) if raised.attempts == 1 && raised.max_recoveries == 1)
+        *pending.resolved_run = resolved(1);
+        assert!(matches!(
+            pending.recovery(),
+            Ok(FollowOnRecovery::Run(raised))
+                if raised.attempts == 1 && raised.resolved_run.follow_on_recoveries == 1
+        ));
+    }
+
+    /// The head column's fact always carries its root's record: a fact
+    /// without one is not the supported shape.
+    #[test]
+    fn a_fact_without_its_roots_record_does_not_decode() {
+        let session = crate::SessionId::from("s");
+        let pending = fact("root:agent-frame:1", "f");
+        let encoded = encode_pending_follow_on(Some(&pending))
+            .expect("encode")
+            .expect("a fact");
+        assert_eq!(
+            decode_pending_follow_on(&session, Some(&encoded)).expect("decode"),
+            Some(pending)
         );
+        let mut value: serde_json::Value = serde_json::from_str(&encoded).expect("json");
+        value
+            .as_object_mut()
+            .expect("an object")
+            .remove("resolved_run");
+        assert!(matches!(
+            decode_pending_follow_on(&session, Some(&value.to_string())),
+            Err(StoreError::StoredDataCorrupt { .. })
+        ));
     }
 }

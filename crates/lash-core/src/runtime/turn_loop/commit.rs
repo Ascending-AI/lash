@@ -273,7 +273,7 @@ impl LashRuntime {
         root: TurnId,
         opts: TurnOptions<'_>,
     ) -> Result<(), RuntimeError> {
-        self.state.authority.resolved_run = None;
+        self.uninstall_root_view();
         let controller = opts.scoped_effect_controller();
         let binding =
             turn_control_binding(self.host.core.control.effect_host.as_ref(), &controller).await?;
@@ -332,9 +332,8 @@ impl LashRuntime {
     fn recorded_termination(&self) -> Result<crate::runtime::TerminationPolicy, RuntimeError> {
         self.state
             .authority
-            .resolved_run
-            .as_deref()
-            .map(|run| run.termination.clone())
+            .root_view()
+            .map(|view| view.run.termination.clone())
             .ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::RecordedTerminationUnavailable,
@@ -525,11 +524,6 @@ impl LashRuntime {
                 self.drive_root
                     .as_ref()
                     .map_or(&trace_turn_id, |run| run.root()),
-                self.host
-                    .core
-                    .durability
-                    .queued_work_batching
-                    .max_follow_on_recoveries(),
             )?;
             self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
@@ -605,11 +599,6 @@ impl LashRuntime {
             self.drive_root
                 .as_ref()
                 .map_or(&trace_turn_id, |run| run.root()),
-            self.host
-                .core
-                .durability
-                .queued_work_batching
-                .max_follow_on_recoveries(),
         ) {
             Ok(pending_follow_on) => pending_follow_on,
             Err(err) => {

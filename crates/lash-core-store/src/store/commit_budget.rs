@@ -593,10 +593,13 @@ mod tests {
             follow_on_turn_id: crate::TurnId::from("budget:agent-frame:1"),
             frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
             task: "q".repeat(BYTE_LIMIT * 2),
-            resolved_run: None,
+            resolved_run: Box::new(crate::run_spec::ResolvedRun::snapshot(
+                crate::store::persisted_session_config_from_state(&state),
+                crate::run_spec::TerminationPolicy::default(),
+                crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
+            )),
             chain_depth: 1,
             attempts: 0,
-            max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         });
 
         assert!(matches!(
@@ -697,10 +700,13 @@ mod tests {
             follow_on_turn_id: crate::TurnId::from("budget:agent-frame:1"),
             frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
             task: "follow-up".to_string(),
-            resolved_run: None,
+            resolved_run: Box::new(crate::run_spec::ResolvedRun::snapshot(
+                crate::store::persisted_session_config_from_state(&state),
+                crate::run_spec::TerminationPolicy::default(),
+                crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
+            )),
             chain_depth: 1,
             attempts: 0,
-            max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
         });
 
         commit

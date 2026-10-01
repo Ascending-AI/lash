@@ -1196,9 +1196,7 @@ fn admit_run_spec_conn(
 /// starts (FIG-3877), read inside the admission transaction:
 ///
 /// * `turn_id` is the follow-on the head owes: it inherits the shape its
-///   fact recorded at the switch. A fact written before the field existed
-///   falls back to the spec of the input that started its parent root; a
-///   queued-headed parent leaves the unfinished root to decide.
+///   fact recorded at the switch.
 /// * `turn_id` is a physical turn of the unfinished queued-headed root: it
 ///   started from no input, so it runs the default spec.
 /// * Otherwise nothing running names `turn_id`: the steering input is a
@@ -1210,26 +1208,18 @@ fn check_unsourced_steering_run_spec_conn(
     spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
     use lash_core_execution::store_backend_support as support;
-    let sql = crate::turn_ingress::turn_ingress_sql();
     // `Some(hash)` is the shape the running root resolved under (`None` =
     // the default spec); `None` means the evidence did not decide.
     let mut running: Option<Option<String>> = None;
     if let Some(owed) =
         pending_follow_on_conn(tx, &draft.session_id)?.filter(|owed| owed.is_turn(turn_id))
     {
-        running = match &owed.resolved_run {
-            Some(resolved) => Some(resolved.spec.as_ref().map(|hash| hash.as_str().to_string())),
-            // A fact written before the shape was recorded: the parent
-            // root's own starting input names the shape instead.
-            None => tx
-                .query_row(
-                    sql.pending_inputs.select_run_spec_by_source_key.sql(),
-                    params![draft.session_id.as_str(), owed.root_turn_id().as_str()],
-                    |row| row.get::<_, Option<String>>(1),
-                )
-                .optional()
-                .map_err(sqlite_error)?,
-        };
+        running = Some(
+            owed.resolved_run
+                .spec
+                .as_ref()
+                .map(|hash| hash.as_str().to_string()),
+        );
     }
     if running.is_none()
         && let Some(unfinished) = crate::session_roots::unfinished_root_conn(tx, &draft.session_id)?

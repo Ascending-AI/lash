@@ -87,10 +87,9 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
             .clone()
             .expect("initialized frame"),
         task: "follow-on matrix task".to_string(),
-        resolved_run: None,
+        resolved_run: crate::conformance::helpers::default_resolved_run(),
         chain_depth: 3,
         attempts: 2,
-        max_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     };
     let mut switch = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,

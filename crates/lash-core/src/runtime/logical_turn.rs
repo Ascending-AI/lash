@@ -180,9 +180,10 @@ pub(super) struct LogicalTurnCommitEffects {
 ///
 /// A frame switch owes the switched frame one follow-on turn, the next
 /// physical turn of the same logical run; its chain depth counts this switch,
-/// continuing the depth the turn itself was owed with, and its recovery bound
-/// is the one the chain froze, or `max_recoveries`, the host's bound, when
-/// this switch starts the chain. Every other outcome
+/// continuing the depth the turn itself was owed with, and it carries the
+/// record the running root resolved, the logical run's recovery bound
+/// included: a follow-on re-records its parent's record verbatim, so the
+/// whole chain carries the one its root resolved. Every other outcome
 /// leaves nothing: a turn commits only while the head owes nothing or owes
 /// this very turn, and this commit is that follow-on's terminal record.
 pub(super) fn follow_on_after_turn(
@@ -190,7 +191,6 @@ pub(super) fn follow_on_after_turn(
     outcome: &TurnOutcome,
     turn_id: &TurnId,
     root: &TurnId,
-    max_recoveries: u32,
 ) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
     let TurnOutcome::AgentFrameSwitch {
         frame_key, task, ..
@@ -203,7 +203,12 @@ pub(super) fn follow_on_after_turn(
         .as_ref()
         .filter(|owed| owed.is_turn(turn_id));
     let chain_depth = owed.map_or(0, |owed| owed.chain_depth).saturating_add(1);
-    let max_recoveries = owed.map_or(max_recoveries, |owed| owed.max_recoveries);
+    let resolved = state.authority.root_view().ok_or_else(|| {
+        RuntimeError::new(
+            RuntimeErrorCode::RecordedTerminationUnavailable,
+            format!("the follow-on of `{turn_id}` requires its root's recorded run"),
+        )
+    })?;
     let physical_ordinal = crate::store::PhysicalTurn::physical_ordinal_of(root, turn_id)
         .ok_or_else(|| {
             RuntimeError::new(
@@ -217,8 +222,7 @@ pub(super) fn follow_on_after_turn(
         crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str()),
         task.clone(),
         chain_depth,
-        max_recoveries,
-        state.authority.resolved_run.as_deref().cloned(),
+        resolved.run.clone(),
     )
     .map(Some)
     .map_err(super::runtime_error_from_store_commit)
@@ -530,7 +534,7 @@ impl LashRuntime {
             .pending_follow_on
             .as_deref()
             .filter(|owed| owed.is_turn(&turn_trace_turn_id))
-            .and_then(|owed| owed.resolved_run.as_deref().cloned());
+            .map(|owed| (*owed.resolved_run).clone());
         self.resolve_turn_config(
             &scoped_effect_controller,
             &turn_trace_turn_id,
