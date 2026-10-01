@@ -146,14 +146,16 @@ impl LiveAttempt {
     }
 
     fn send(&mut self, frame: Bytes) -> bool {
-        let pushed = self
-            .input
+        // Fed before the frame is queued, never after: the send wakes the
+        // attempt, which can read the frame and block on its input again on
+        // another worker before this returns, and marking it fed then would
+        // overwrite that park for good. Every reader of the probe holds the
+        // server lock this runs under, so none sees the mark without the
+        // frame.
+        self.probe.fed();
+        self.input
             .as_ref()
-            .is_some_and(|input| input.send(frame).is_ok());
-        if pushed {
-            self.probe.fed();
-        }
-        pushed
+            .is_some_and(|input| input.send(frame).is_ok())
     }
 
     /// Close the input: the SDK suspends at its next unresolved await.
@@ -304,4 +306,65 @@ pub struct TimerView {
     pub invocation: String,
     pub target: String,
     pub kind: &'static str,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Wake, Waker};
+
+    use bytes::Bytes;
+    use http_body::Body;
+    use tokio::sync::mpsc;
+
+    use super::LiveAttempt;
+    use crate::server::body::{AttemptBody, InputProbe};
+
+    /// The attempt's side of the race: woken by the server's send, it reads
+    /// everything queued and blocks on its empty input again before the
+    /// server's push has returned, as a handler on another worker can.
+    struct DrainOnWake(Mutex<AttemptBody>);
+
+    impl DrainOnWake {
+        fn drain(&self, waker: &Waker) {
+            let mut body = self.0.lock().expect("the body's lock");
+            let mut cx = Context::from_waker(waker);
+            while Pin::new(&mut *body).poll_frame(&mut cx).is_ready() {}
+        }
+    }
+
+    impl Wake for DrainOnWake {
+        fn wake(self: Arc<Self>) {
+            self.drain(Waker::noop());
+        }
+    }
+
+    /// An attempt that read a pushed frame and blocked on its input again
+    /// reads starved once the push returns, however early it got there. A
+    /// push that marked the attempt fed after queuing the frame overwrote
+    /// that park: the attempt then read as busy for good, so no time advance
+    /// ever ran its inactivity timeout and a wait for it to park never ended
+    /// (FIG-4511).
+    #[tokio::test]
+    async fn an_attempt_that_parks_again_inside_a_push_reads_starved() {
+        let (input, receiver) = mpsc::unbounded_channel::<Bytes>();
+        let probe = Arc::new(InputProbe::default());
+        let attempt_side = Arc::new(DrainOnWake(Mutex::new(AttemptBody::new(
+            receiver,
+            Arc::clone(&probe),
+            Arc::new(|| {}),
+        ))));
+        attempt_side.drain(&Waker::from(Arc::clone(&attempt_side)));
+        assert!(probe.is_starved(), "blocked on its empty input");
+        let mut attempt =
+            LiveAttempt::new(1, Some(input), Arc::clone(&probe), tokio::spawn(async {}));
+
+        assert!(attempt.push(Bytes::from_static(b"frame")));
+
+        assert!(
+            probe.is_starved(),
+            "the attempt drained the frame and blocked on its input again"
+        );
+    }
 }

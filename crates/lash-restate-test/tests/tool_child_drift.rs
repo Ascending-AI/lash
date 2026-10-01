@@ -270,6 +270,9 @@ impl Turn {
         while self.world.probe_executions.load(Ordering::SeqCst) == 0 {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
+        // The advance counts against the turn's inactivity timeout only once
+        // the turn's task has parked on its input, so wait for that first.
+        self.turn_parked().await;
         self.backend.server().advance(Duration::from_secs(61));
         self.turn_suspended().await;
         self.redeploy(true).await;
@@ -334,6 +337,21 @@ impl Turn {
             if driving && view.status == "running" {
                 self.backend.server().crash(&view.id);
             }
+        }
+    }
+
+    /// Waits until the turn's root workflow is parked: not running, or its
+    /// live attempt blocked on the server. Only a time advance or outside
+    /// input can move it from there.
+    async fn turn_parked(&self) {
+        loop {
+            if self.backend.server().invocations().into_iter().any(|view| {
+                view.target.starts_with(TURN_DRIVER_SERVICE)
+                    && (view.status != "running" || view.blocked_on_server == Some(true))
+            }) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
 
