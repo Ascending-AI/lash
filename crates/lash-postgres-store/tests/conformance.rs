@@ -214,14 +214,43 @@ fn handler_attempt(
 /// [`RestateTestBackend::run_in_handler`]: lash_restate_test::RestateTestBackend::run_in_handler
 struct DoubleTurnRunner {
     backend: lash_restate_test::RestateTestBackend,
+    /// The invocations a crash left open, by the scope they run: the law's
+    /// next turn of that scope is the double's redelivery of the invocation.
+    open: std::sync::Mutex<std::collections::HashMap<String, OpenTurn>>,
+}
+
+/// An invocation whose execution a crash killed, left open for the double to
+/// redeliver.
+struct OpenTurn {
+    /// Hands the redelivered execution the law's next attempt of the scope.
+    next: tokio::sync::watch::Sender<Option<lash_conformance::ConformanceTurnAttempt>>,
+    /// How the redelivered execution's attempt ended.
+    ends: tokio::sync::mpsc::UnboundedReceiver<lash_conformance::ConformanceTurnEnd>,
+    /// The invocation's call: it returns once a redelivered execution
+    /// settled that attempt.
+    call: tokio::task::JoinHandle<Result<(), String>>,
 }
 
 impl DoubleTurnRunner {
     fn shared(
         backend: lash_restate_test::RestateTestBackend,
     ) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
-        Arc::new(Self { backend })
+        Arc::new(Self {
+            backend,
+            open: std::sync::Mutex::default(),
+        })
     }
+
+    fn open_turns(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, OpenTurn>> {
+        self.open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// The key an open invocation is held under: its admitted scope.
+fn open_turn_key(admitted: &lash_core::AdmittedScope) -> String {
+    format!("{:?}", admitted.scope())
 }
 
 #[async_trait::async_trait]
@@ -231,10 +260,38 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
         admitted: lash_core::AdmittedScope,
         attempt: lash_conformance::ConformanceTurnAttempt,
     ) {
-        self.backend
-            .run_in_handler(admitted, handler_attempt(attempt))
-            .await
-            .unwrap_or_else(|error| panic!("the law's turn did not run in its handler: {error}"));
+        let open = self.open_turns().remove(&open_turn_key(&admitted));
+        let Some(open) = open else {
+            self.backend
+                .run_in_handler(admitted, handler_attempt(attempt))
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("the law's turn did not run in its handler: {error}")
+                });
+            return;
+        };
+        let OpenTurn {
+            next,
+            mut ends,
+            mut call,
+        } = open;
+        next.send_replace(Some(attempt));
+        let settled = tokio::select! {
+            biased;
+            end = ends.recv() => end,
+            ran = &mut call => {
+                panic!("the crashed turn's invocation ended ({ran:?}) before its redelivered attempt did")
+            }
+        };
+        // An attempt that aborted leaves the invocation open, as an aborted
+        // turn's invocation stays open on Restate; a settled one completes it.
+        if settled == Some(lash_conformance::ConformanceTurnEnd::Settled) {
+            call.await
+                .expect("the open invocation's call task")
+                .unwrap_or_else(|error| {
+                    panic!("the law's crashed turn did not recover in its redelivery: {error}")
+                });
+        }
     }
 
     async fn run_crashed_then_redriven_turn(
@@ -261,38 +318,86 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
         attempt: lash_conformance::ConformanceTurnAttempt,
         crash: lash_conformance::ConformanceCrash,
     ) {
-        // Inside the handler the crash kills the attempt where it stands —
-        // the double's redelivery would re-run the crashed job, so a retried
-        // attempt parks forever instead: the law's next `run_turn` is the
-        // recovery the tier promises, not Restate's retry.
+        // Inside the handler the crash kills the attempt where it stands: its
+        // future is dropped mid-poll. The execution then fails retryably as
+        // Restate's invocation of a dead deployment does, once the law has
+        // queued its next attempt of this scope, and the double's retry
+        // replays the journal the killed attempt left into that attempt. A
+        // fresh invocation would start an empty journal instead, which the
+        // drive's seal answers as a lost substrate (ADR 0105 L-S8), not as
+        // the recovery of a crashed turn.
+        let key = open_turn_key(&admitted);
+        assert!(
+            !self.open_turns().contains_key(&key),
+            "a crash of `{key}` while an earlier crash of it is still open"
+        );
+        let (next, queued) =
+            tokio::sync::watch::channel::<Option<lash_conformance::ConformanceTurnAttempt>>(None);
         let crashing: lash_restate_test::HandlerAttempt = {
             let crash = crash.clone();
+            let queued = queued.clone();
             Arc::new(move |scoped| {
                 let attempt = Arc::clone(&attempt);
                 let crash = crash.clone();
+                let mut queued = queued.clone();
                 Box::pin(async move {
-                    if crash.has_fired() {
+                    // An execution that starts after the crash fired (the
+                    // killed one was suspended or closed) is dead as it
+                    // starts.
+                    if !crash.has_fired() {
+                        tokio::select! {
+                            biased;
+                            () = crash.fired() => {}
+                            end = attempt(scoped) => {
+                                panic!("the crashing attempt ended ({end:?}) before its crash fired")
+                            }
+                        }
+                    }
+                    if queued.wait_for(Option::is_some).await.is_err() {
+                        // The law never runs the scope again.
                         std::future::pending::<()>().await;
                     }
-                    tokio::select! {
-                        biased;
-                        () = crash.fired() => {
-                            panic!("the conformance crash killed the attempt")
-                        }
-                        end = attempt(scoped) => {
-                            panic!("the crashing attempt ended ({end:?}) before its crash fired")
-                        }
-                    }
+                    panic!("the conformance crash killed the attempt")
                 })
             })
         };
+        let (ended, ends) = tokio::sync::mpsc::unbounded_channel();
+        let aborted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let redelivered: lash_restate_test::HandlerAttempt = Arc::new(move |scoped| {
+            let attempt = queued.borrow().clone();
+            let ended = ended.clone();
+            let aborted = Arc::clone(&aborted);
+            Box::pin(async move {
+                let attempt = attempt.expect(
+                    "the double redelivers a crashed turn only once its next attempt is queued",
+                );
+                // The attempt aborted in an earlier execution: the invocation
+                // stays open with nothing left to run.
+                if !aborted.load(std::sync::atomic::Ordering::SeqCst) {
+                    let end = attempt(scoped).await;
+                    let _ = ended.send(end);
+                    if end == lash_conformance::ConformanceTurnEnd::Settled {
+                        return;
+                    }
+                    aborted.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                std::future::pending::<()>().await;
+            })
+        });
+        let backend = self.backend.clone();
+        let mut call = tokio::spawn(async move {
+            backend
+                .run_crashed_then_redriven(admitted, crashing, redelivered)
+                .await
+        });
         tokio::select! {
             biased;
             () = crash.fired() => {}
-            result = self.backend.run_in_handler(admitted, crashing) => {
+            result = &mut call => {
                 panic!("the crashing turn's handler ended ({result:?}) before its crash fired")
             }
         }
+        self.open_turns().insert(key, OpenTurn { next, ends, call });
     }
 
     /// Process segments run in the double's process workflow: the worker is
