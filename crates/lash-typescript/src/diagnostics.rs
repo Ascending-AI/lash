@@ -34,6 +34,7 @@ pub enum DiagnosticCode {
     ForOfUnsupported,
     AwaitUnsupported,
     AwaitRequired,
+    UnawaitedTool,
     YieldUnsupported,
     TaggedTemplateUnsupported,
     SuperUnsupported,
@@ -116,6 +117,7 @@ impl DiagnosticCode {
         Self::ForOfUnsupported,
         Self::AwaitUnsupported,
         Self::AwaitRequired,
+        Self::UnawaitedTool,
         Self::YieldUnsupported,
         Self::TaggedTemplateUnsupported,
         Self::SuperUnsupported,
@@ -234,6 +236,9 @@ impl DiagnosticCode {
                 "await tool calls, process handles, `sleep`, `waitSignal`, or `Promise.all`/`allSettled`/`race`/`any` — nothing else is awaitable"
             }
             Self::AwaitRequired => "add `await` — the call returns a promise",
+            Self::UnawaitedTool => {
+                "await the tool call, or collect its handle into `Promise.all` or `Promise.allSettled` and await the aggregate"
+            }
             Self::YieldUnsupported => "collect the values into an array and return it",
             Self::TaggedTemplateUnsupported => {
                 "call the function with an ordinary template literal argument"
@@ -349,6 +354,7 @@ impl DiagnosticCode {
             | Self::ForUnsupported
             | Self::ForOfUnsupported
             | Self::AwaitUnsupported
+            | Self::UnawaitedTool
             | Self::YieldUnsupported
             | Self::TaggedTemplateUnsupported
             | Self::SuperUnsupported
@@ -441,6 +447,7 @@ impl DiagnosticCode {
             Self::ForOfUnsupported => "TS_FOR_OF_UNSUPPORTED",
             Self::AwaitUnsupported => "TS_AWAIT_UNSUPPORTED",
             Self::AwaitRequired => "TS_AWAIT_REQUIRED",
+            Self::UnawaitedTool => "TS_UNAWAITED_TOOL",
             Self::YieldUnsupported => "TS_YIELD_UNSUPPORTED",
             Self::TaggedTemplateUnsupported => "TS_TAGGED_TEMPLATE_UNSUPPORTED",
             Self::SuperUnsupported => "TS_SUPER_UNSUPPORTED",

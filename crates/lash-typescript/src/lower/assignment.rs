@@ -143,6 +143,15 @@ impl Lowerer {
                     // copy and never a local of the same name.
                     self.refuse_global_this_in_process(field)?;
                     self.refuse_expired_global_read(field)?;
+                    if let Some(binding) = self
+                        .scopes
+                        .iter()
+                        .rev()
+                        .flat_map(|scope| scope.bindings.values())
+                        .find(|binding| self.is_session_slot(binding) && binding.internal == *field)
+                    {
+                        self.read_bindings.insert(binding.id);
+                    }
                     Ok(LashExpr::BuiltinCall {
                         name: "__typescript_global_get".into(),
                         args: vec![LashExpr::String(field.as_str().into())],

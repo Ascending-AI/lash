@@ -575,8 +575,8 @@ fn promise_aggregates_lower_to_runtime_arrays_and_tool_handles() {
     .expect("Promise.allSettled should lower");
     assert!(contains_aggregate_await(&settled.main, false));
 
-    let program = lash_typescript::parse("web.fetch({ url: 'a' });")
-        .expect("unawaited tool calls lower to pending handles; the VM enforces lifetime");
+    let program = lash_typescript::parse("const p = web.fetch({ url: 'a' }); await p;")
+        .expect("a bound tool call lowers to a handle consumed by its later await");
     assert!(find_receiver_call(&program.main).is_some());
 }
 
@@ -897,24 +897,15 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
         lash_typescript::DiagnosticCode::MethodUnsupported
     );
 
-    // Expression-position tool calls create pending handles; abandonment is
-    // diagnosed at runtime, including through reserved-word property paths.
+    // Discarded tool handles refuse before execution, including through
+    // reserved-word property paths.
     for source in [
         "web.search({ query: 'x' });",
         "tools.search({ query: 'x' });",
         "inbox.alpha.delete({ id: '1' });",
     ] {
-        let program = lash_typescript::testing::compile(source).expect("pending tool compiles");
-        let error = futures::executor::block_on(lashlang::execute(
-            &program,
-            &mut State::new(),
-            &AggregateHost,
-        ))
-        .expect_err("unawaited handle");
-        assert!(
-            matches!(error, lashlang::RuntimeError::PendingTool { .. }),
-            "{source}: {error}"
-        );
+        let error = lash_typescript::testing::compile(source).expect_err("unawaited handle");
+        assert_eq!(error.code.as_str(), "TS_UNAWAITED_TOOL", "{source}");
     }
 }
 
@@ -2509,7 +2500,7 @@ fn tool_handles_do_not_cross_cells() {
         stale.as_record().expect("globals record").clone(),
     ));
     let linked = lash_typescript::link(
-        "const q = web.fetch({ value: 2 }); finish(await p);",
+        "const q = web.fetch({ value: 2 }); q; finish(await p);",
         &environment.with_globals(["p"]),
     )
     .expect("second cell should link");
@@ -2519,7 +2510,7 @@ fn tool_handles_do_not_cross_cells() {
         &MixedAggregateHost,
     ))
     .expect_err("a stale handle must not alias the new request");
-    let lashlang::RuntimeError::PendingTool { problem } = &error else {
+    let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
         panic!("expected the typed pending-tool refusal: {error}");
     };
     assert!(

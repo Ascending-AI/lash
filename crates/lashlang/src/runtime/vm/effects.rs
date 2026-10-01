@@ -254,6 +254,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     AwaitedValue::Plain => {
                         return Err(RuntimeError::PendingTool {
                             problem: plain_value_awaited(&value),
+                            pending: Vec::new(),
                         });
                     }
                 }

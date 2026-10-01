@@ -78,6 +78,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         RuntimeError::PendingTool {
             problem: problem.into(),
+            pending: Vec::new(),
         }
     }
 
@@ -94,6 +95,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let request =
             u32::try_from(self.pending_tools.len()).map_err(|_| RuntimeError::PendingTool {
                 problem: "this cell launched more tool calls than one execution can hold".into(),
+                pending: Vec::new(),
             })?;
         let id = HandleId::tool(self.execution_nonce, request);
         self.pending_tools.insert(
@@ -117,16 +119,42 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn ensure_no_pending_tools(&self) -> Result<(), RuntimeError> {
-        let count = self
+        let pending = self
             .pending_tools
             .values()
-            .filter(|entry| entry.is_some())
-            .count();
-        if count == 0 {
+            .flatten()
+            .map(|entry| {
+                let Value::List(call) = entry else {
+                    unreachable!("pending entries are captured calls or timers")
+                };
+                let Value::Number(site) = call[1] else {
+                    unreachable!("pending entries record their instruction position")
+                };
+                let call_path = match &call[0] {
+                    Value::Number(operation) => {
+                        let operation = &self.chunk.names[*operation as usize].text;
+                        match &call[2] {
+                            Value::Resource(receiver) => format!("{}.{operation}", receiver.alias),
+                            _ => operation.to_string(),
+                        }
+                    }
+                    _ => "sleep".to_string(),
+                };
+                super::super::UnawaitedToolCall {
+                    call_path,
+                    span: self.chunk.spans.get(site as usize).copied().flatten(),
+                }
+            })
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
             Ok(())
         } else {
             Err(RuntimeError::PendingTool {
-                problem: format!("{count} tool handle(s) were never awaited before cell end"),
+                problem: format!(
+                    "{} tool handle(s) were never awaited before cell end",
+                    pending.len()
+                ),
+                pending,
             })
         }
     }
@@ -144,6 +172,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             u32::try_from(self.pending_tools.len()).map_err(|_| RuntimeError::PendingTool {
                 problem: "this cell launched more pending operations than one execution can hold"
                     .into(),
+                pending: Vec::new(),
             })?;
         let id = HandleId::tool(self.execution_nonce, request);
         self.pending_tools.insert(
@@ -194,6 +223,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let Value::List(items) = items else {
             return Err(RuntimeError::PendingTool {
                 problem: "Promise aggregate requires an array".into(),
+                pending: Vec::new(),
             });
         };
         let settle = consumer == AggregateConsumer::AllSettled;
@@ -214,6 +244,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     let Some(Some(Value::List(call))) = self.pending_tools.get_mut(&id) else {
                         return Err(RuntimeError::PendingTool {
                             problem: SETTLED_HANDLE.into(),
+                            pending: Vec::new(),
                         });
                     };
                     let Value::Number(site) = call[1] else {
@@ -293,6 +324,7 @@ pub(super) fn ensure_no_tool_handle_arguments(args: &[Value]) -> Result<(), Runt
     if args.iter().any(value_contains_tool_handle) {
         return Err(RuntimeError::PendingTool {
             problem: HANDLE_AS_ARGUMENT.into(),
+            pending: Vec::new(),
         });
     }
     Ok(())

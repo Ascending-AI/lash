@@ -249,6 +249,7 @@ impl super::Lowerer {
             return Err(self.unknown_binding(name, span));
         };
         let current_function = self.current_function();
+        self.read_bindings.insert(binding.id);
         if current_function == binding.owner_function && !binding.initialized {
             return Err(Diagnostic::new(
                 DiagnosticCode::TemporalDeadZone,
@@ -406,6 +407,38 @@ impl super::Lowerer {
             }
         }
     }
+}
+
+pub(super) fn is_pending_tool(expression: &lashlang::Expr) -> bool {
+    matches!(super::spans::unmarked(expression), lashlang::Expr::BuiltinCall { name, .. }
+        if name.as_str() == "__typescript_pending_tool")
+}
+
+pub(super) fn discarded_tool_span(
+    expression: &Expr,
+    lowered: &lashlang::Expr,
+) -> Option<crate::SourceSpan> {
+    if is_pending_tool(lowered) {
+        return super::spans::source_span(expression);
+    }
+    if let Expr::Unary {
+        op: super::UnaryOp::Void,
+        value,
+    } = expression
+        && let lashlang::Expr::Block(expressions) = super::spans::unmarked(lowered)
+        && let [inner, lashlang::Expr::Undefined] = expressions.as_slice()
+    {
+        return discarded_tool_span(value, inner);
+    }
+    None
+}
+
+pub(super) fn unawaited_tool_diagnostic(span: Option<crate::SourceSpan>) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::UnawaitedTool,
+        "a discarded or unread tool handle can never be awaited in this cell",
+        span,
+    )
 }
 
 /// The `var` names a function body (or the script) declares at any depth,

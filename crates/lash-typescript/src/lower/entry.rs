@@ -260,6 +260,11 @@ fn lower_pass(
         })
         .collect::<Vec<_>>();
     expressions.extend(lowerer.lower_statements(&program.statements, StatementScope::Root)?);
+    for (binding, span) in &lowerer.pending_tool_bindings {
+        if !lowerer.read_bindings.contains(binding) {
+            return Err(super::binding::unawaited_tool_diagnostic(*span));
+        }
+    }
     Ok((lowerer, LashExpr::Block(expressions)))
 }
 

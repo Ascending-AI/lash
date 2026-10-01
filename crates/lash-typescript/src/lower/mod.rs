@@ -174,6 +174,8 @@ struct Lowerer {
     /// Where each closure copies its captures and where each binding is
     /// assigned, judged once the program has lowered.
     capture_ledger: CaptureLedger,
+    read_bindings: BTreeSet<captures::BindingId>,
+    pending_tool_bindings: Vec<(captures::BindingId, Option<SourceSpan>)>,
     /// The slots that live in a binding cell (FIG-3707), as the first
     /// lowering pass's ledger judged them. Empty on that first pass.
     cells: BTreeSet<captures::SlotKey>,
@@ -353,7 +355,13 @@ impl Lowerer {
                 let lowered = self.lower_stmt(stmt)?;
                 self.apply_label(label, lowered)
             }
-            Stmt::Expr(expr) => vec![self.lower_expr(expr)?],
+            Stmt::Expr(expr) => {
+                let lowered = self.lower_expr(expr)?;
+                if let Some(span) = binding::discarded_tool_span(expr, &lowered) {
+                    return Err(binding::unawaited_tool_diagnostic(Some(span)));
+                }
+                vec![lowered]
+            }
             Stmt::Block(statements) => vec![LashExpr::Role {
                 role: StructuralRole::Scope,
                 expr: Box::new(LashExpr::Block(
@@ -433,6 +441,14 @@ impl Lowerer {
                             .transpose()?
                             .unwrap_or(LashExpr::Undefined)
                     };
+                    if matches!(kind, VarKind::Const | VarKind::Let)
+                        && binding::is_pending_tool(&value)
+                        && let Some(name) = process_name
+                    {
+                        let binding = self.binding(name)?;
+                        self.pending_tool_bindings
+                            .push((binding.id, declaration.init.as_ref().and_then(source_span)));
+                    }
                     let mode = if *kind == VarKind::Var {
                         PatternMode::InitializeVar
                     } else {

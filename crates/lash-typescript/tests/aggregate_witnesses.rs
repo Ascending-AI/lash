@@ -344,7 +344,7 @@ const WORKER: &str = r#"
 fn refusal(outcome: Result<ExecutionOutcome, lashlang::RuntimeError>, label: &str) -> String {
     match outcome {
         Ok(outcome) => panic!("{label}: expected a refusal, got {outcome:?}"),
-        Err(lashlang::RuntimeError::PendingTool { problem }) => problem,
+        Err(lashlang::RuntimeError::PendingTool { problem, .. }) => problem,
         Err(error) => panic!("{label}: expected the typed pending-tool refusal, got {error}"),
     }
 }

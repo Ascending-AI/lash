@@ -25,7 +25,7 @@ mod entry_points;
 mod executable_identity;
 pub use executable_identity::ExecutableIdentity;
 mod error;
-pub use error::{EcmaErrorClass, ErrorTaxonomy, FormatError, RuntimeError};
+pub use error::{EcmaErrorClass, ErrorTaxonomy, FormatError, RuntimeError, UnawaitedToolCall};
 mod format;
 mod fuel;
 mod heap;

@@ -106,13 +106,14 @@ pub use runtime::{
     ProjectedValue, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
     ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome,
     RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError, State,
-    StringValue, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation,
-    VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError,
-    VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation,
-    VmIteratorCursor, VmLoopPhase, VmParkReason, VmParked, VmPendingErrorOriginContinuation,
-    VmProfileContinuation, VmRequest, VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep,
-    VmStepError, VmSuspended, VmSuspendedOperation, cancel_checkpoint_reached, compile, execute,
-    from_json, is_javascript_builtin_global, is_process_handle, unwrap_type_value,
+    StringValue, UnawaitedToolCall, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete,
+    VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation,
+    VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt,
+    VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmParkReason, VmParked,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest, VmResume, VmResumePoint,
+    VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended, VmSuspendedOperation,
+    cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
+    is_process_handle, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -250,6 +251,21 @@ pub use runtime::{
 };
 
 pub fn format_runtime_diagnostic(source: &str, error: &RuntimeError, span: Option<Span>) -> String {
+    if let RuntimeError::PendingTool { problem, pending } = error
+        && !pending.is_empty()
+    {
+        let mut message = format!("TS_PENDING_TOOL: {problem}");
+        for call in pending {
+            message.push('\n');
+            message.push_str(&format_source_diagnostic(
+                source,
+                call.span,
+                &format!("unawaited tool call `{}`", call.call_path),
+                &[],
+            ));
+        }
+        return message;
+    }
     format_source_diagnostic(
         source,
         span,

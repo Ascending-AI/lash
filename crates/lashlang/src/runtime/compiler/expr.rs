@@ -97,6 +97,7 @@ impl Compiler {
                 unreachable!()
             };
             *instruction = Instruction::PendingTool { operation, argc };
+            self.mark_instruction_source_span(self.code.len() - 1, path);
             return;
         }
         if let ("__typescript_pending_timer", [duration]) = (name, args) {

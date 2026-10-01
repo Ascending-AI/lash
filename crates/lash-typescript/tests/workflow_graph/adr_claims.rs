@@ -10,8 +10,8 @@ fn editable_ir_fields_survive_every_lens_direction() {
             "binding",
         ),
         (
-            "const x = await tools.echo('a');",
-            "const x = tools.echo('a');",
+            "const x = await tools.echo('a'); x;",
+            "const x = tools.echo('a'); x;",
             0,
             "result_steps",
         ),

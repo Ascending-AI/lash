@@ -91,9 +91,14 @@ fn abandoned_and_settled_handles_are_loud_errors() {
     for source in [
         "web.fetch({id:1});",
         "const p = web.fetch({id:1}); finish(42);",
-        "await 42;",
         "await (async () => { web.fetch({id:1}); })();",
         "await Promise.all([1].map(async id => { web.fetch({id}); return id; }));",
+    ] {
+        let error = lash_typescript::testing::compile(source).expect_err(source);
+        assert_eq!(error.code.as_str(), "TS_UNAWAITED_TOOL", "{source}");
+    }
+    for source in [
+        "await 42;",
         "await Promise.all(42);",
         "const p = web.fetch({id:1}); await p; await p;",
     ] {
@@ -149,10 +154,10 @@ fn nested_aggregates_unwrap_their_leaves_and_propagate_rejections() {
 fn a_hand_written_handle_record_is_refused_and_steals_nothing() {
     const FORGED: &str = "{ __handle__: 'lash', id: 't.0000000000000000.0' }";
     let error = execute(&format!(
-        "const p = web.fetch({{id:1}}); const forged = {FORGED}; finish(await forged);"
+        "const p = web.fetch({{id:1}}); p; const forged = {FORGED}; finish(await forged);"
     ))
     .expect_err("a forged handle must not settle a live request");
-    let lashlang::RuntimeError::PendingTool { problem } = &error else {
+    let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
         panic!("expected the typed pending-tool refusal: {error}");
     };
     assert!(
@@ -173,10 +178,10 @@ fn a_hand_written_handle_record_is_refused_and_steals_nothing() {
 #[test]
 fn the_retired_tool_handle_spelling_is_not_a_handle() {
     let error = execute(
-        "const p = web.fetch({id:1}); finish(await { __handle__: 'tool', id: 0, execution: '0000000000000000' });",
+        "const p = web.fetch({id:1}); p; finish(await { __handle__: 'tool', id: 0, execution: '0000000000000000' });",
     )
     .expect_err("the retired spelling must not settle anything");
-    let lashlang::RuntimeError::PendingTool { problem } = &error else {
+    let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
         panic!("expected the typed pending-tool refusal: {error}");
     };
     assert!(problem.contains("plain"), "{problem}");
@@ -187,14 +192,14 @@ fn the_retired_tool_handle_spelling_is_not_a_handle() {
 #[test]
 fn await_refusals_name_what_was_awaited() {
     let plain = execute("await 42; finish(1);").expect_err("a number is not awaitable");
-    let lashlang::RuntimeError::PendingTool { problem } = &plain else {
+    let lashlang::RuntimeError::PendingTool { problem, .. } = &plain else {
         panic!("{plain}");
     };
     assert!(problem.contains("plain number value"), "{problem}");
     assert!(!problem.contains("already"), "{problem}");
     let twice = execute("const p = web.fetch({id:1}); await p; await p; finish(1);")
         .expect_err("a handle settles once");
-    let lashlang::RuntimeError::PendingTool { problem } = &twice else {
+    let lashlang::RuntimeError::PendingTool { problem, .. } = &twice else {
         panic!("{twice}");
     };
     assert!(problem.contains("already awaited"), "{problem}");
@@ -231,7 +236,7 @@ fn a_pending_handle_passed_as_a_tool_argument_is_refused_before_dispatch() {
         let error =
             futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &host))
                 .expect_err(source);
-        let lashlang::RuntimeError::PendingTool { problem } = &error else {
+        let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
             panic!("{source}: {error}");
         };
         assert!(
@@ -243,5 +248,110 @@ fn a_pending_handle_passed_as_a_tool_argument_is_refused_before_dispatch() {
             0,
             "{source}: nothing may reach the host"
         );
+    }
+}
+
+fn assert_unawaited_refusal(shape: &str) {
+    let source = format!("await web.fetch({{id:0}});\n{shape}\nfinish(42);");
+    let host = CountingHost::default();
+    let result = lash_typescript::testing::compile(&source);
+    if let Ok(compiled) = &result {
+        let _ = futures::executor::block_on(lashlang::execute(compiled, &mut State::new(), &host));
+    }
+    assert_eq!(host.dispatched.load(Ordering::SeqCst), 0, "{shape}");
+    let diagnostic = result.expect_err(shape);
+    assert_eq!(diagnostic.code.as_str(), "TS_UNAWAITED_TOOL");
+    assert!(diagnostic.is_dialect_refusal());
+    let span = diagnostic.span.expect("the refusal names the call site");
+    assert_eq!(&source[span.start..span.end], "web.fetch({id:1})");
+    let rendered = lash_typescript::format_diagnostic(&source, &diagnostic);
+    for repair in ["await", "Promise.all", "Promise.allSettled"] {
+        assert!(rendered.contains(repair), "{rendered}");
+    }
+}
+
+#[test]
+fn fig_4545_bare_tool_call_is_refused_before_effects() {
+    assert_unawaited_refusal("web.fetch({id:1});");
+}
+
+#[test]
+fn fig_4545_void_tool_call_is_refused_before_effects() {
+    assert_unawaited_refusal("void web.fetch({id:1});");
+}
+
+#[test]
+fn fig_4545_unread_const_handle_is_refused_before_effects() {
+    assert_unawaited_refusal("const ignored = web.fetch({id:1});");
+}
+
+#[test]
+fn fig_4545_unread_let_handle_is_refused_before_effects() {
+    assert_unawaited_refusal("let ignored = web.fetch({id:1}); ignored = 42;");
+}
+
+#[test]
+fn fig_4545_awaiting_shapes_remain_legal() {
+    for source in [
+        "const h = web.fetch({id:1}); const x = 2; finish(await h);",
+        "finish(await Promise.all([web.fetch({id:1}), web.fetch({id:2})]));",
+        "finish(await Promise.allSettled([web.fetch({id:1}), web.fetch({id:2})]));",
+        "const hs = []; hs.push(web.fetch({id:1})); finish(await Promise.all(hs));",
+        "async function f() { return await web.fetch({id:1}); } finish(await f());",
+        "const h = web.fetch({id:1}); function f() { return h; } finish(await f());",
+        "const h = web.fetch({id:1}); finish(await globalThis.h);",
+        "{ const h = web.fetch({id:1}); await h; } { const h = web.fetch({id:2}); await h; } finish(42);",
+    ] {
+        assert!(
+            matches!(execute(source), Ok(ExecutionOutcome::Finished(_))),
+            "{source}"
+        );
+    }
+    let globals = ["h".to_string()].into_iter().collect();
+    lash_typescript::parse_with_globals(
+        "const h = web.fetch({id:1}); finish(await globalThis.h);",
+        &globals,
+    )
+    .expect("globalThis reads the cell's handle when it shadows a prior session binding");
+}
+
+#[test]
+fn fig_4545_runtime_only_handles_name_each_call_and_line() {
+    let source = "const hs = [];\nif (true) hs.push(web.fetch({id:1}));\nif (true) hs.push(inbox.alpha.delete({id:2}));\nfinish(42);";
+    for source in [source, source.strip_suffix("finish(42);").unwrap()] {
+        let compiled =
+            lash_typescript::testing::compile(source).expect("uncertain consumers stay legal");
+        let host = CountingHost::default();
+        let error =
+            futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &host))
+                .expect_err("abandoned runtime handles");
+        assert_eq!(host.dispatched.load(Ordering::SeqCst), 0);
+        let lashlang::RuntimeError::PendingTool { pending, .. } = &error else {
+            panic!("{error}")
+        };
+        assert_eq!(pending.len(), 2);
+        for (call, expected) in pending
+            .iter()
+            .zip(["web.fetch({id:1})", "inbox.alpha.delete({id:2})"])
+        {
+            let span = call.span.expect("creation site span");
+            assert_eq!(&source[span.start..span.end], expected);
+        }
+        let restored: lashlang::RuntimeError =
+            serde_json::from_value(serde_json::to_value(&error).unwrap()).unwrap();
+        assert_eq!(
+            restored, error,
+            "typed call evidence survives the executor wire"
+        );
+        let rendered = lashlang::format_runtime_diagnostic(source, &error, None);
+        for detail in [
+            "2 tool handle(s)",
+            "web.fetch",
+            "line 2",
+            "inbox.alpha.delete",
+            "line 3",
+        ] {
+            assert!(rendered.contains(detail), "{rendered}");
+        }
     }
 }

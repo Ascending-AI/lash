@@ -38,8 +38,20 @@ naming `processes.await(handle)`. It does not create another settlement phase.
 A handle uses `{__handle__: "lash", id}`. The pending id includes the execution
 identity; only a live request in that execution can be settled. Unknown,
 expired, or consumed requests receive typed repairs. Pending handles in tool
-arguments are refused before dispatch. Abandoned pending tool calls produce a
-runtime error at execution completion.
+arguments are refused before dispatch. A tool call discarded as an expression
+statement, including `void tools.x(...)`, and a `const` or `let` tool handle
+whose binding is never read in the cell are refused at lowering with the
+spanned `TS_UNAWAITED_TOOL` diagnostic. Its repair names direct `await` and
+collection into an awaited `Promise.all` or `Promise.allSettled`. Reads resolve
+to binding identities, including captures and session-global property reads.
+Lowering remains conservative about possible consumers: later awaits, literal
+aggregate arrays and handles pushed into arrays remain legal.
+
+Abandoned handles that cannot be proven unused at lowering produce a typed
+`PendingTool` error at execution completion. Each pending entry retains its
+call path and source span from the recorded instruction position. Source-aware
+feedback renders each call's line as well as the count. This inspects only VM
+state and changes neither dispatch nor replay re-execution.
 
 Pending requests and their execution identity are continuation state. Suspension
 preserves them under the declared continuation and compiled-program contract.

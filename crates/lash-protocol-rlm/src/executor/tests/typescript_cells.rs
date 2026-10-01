@@ -657,6 +657,140 @@ fn echo_definition() -> lash_core::ToolDefinition {
 
 struct EchoToolProvider;
 
+struct CountingEchoToolProvider(Arc<std::sync::atomic::AtomicUsize>);
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for CountingEchoToolProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        EchoToolProvider.tool_manifests()
+    }
+
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        EchoToolProvider.resolve_manifest_by_id(id)
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        EchoToolProvider.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        EchoToolProvider.execute(call).await
+    }
+}
+
+async fn pending_handle_cell(code: &str) -> (lash_core::ExecResponse, usize) {
+    let double =
+        crate::testing::kernel_double(SEED + 4545, lash_restate_test::ServerConfig::default())
+            .await;
+    let handler = double
+        .open_handler(crate::testing::default_cell_scope())
+        .await
+        .expect("open handler");
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+        crate::testing::double_ports(&double, &handler),
+        Arc::new(CountingEchoToolProvider(Arc::clone(&calls))),
+        lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+    );
+    let response = execute_code_with_test_render(
+        &mut RlmExecutionState::for_engine("typescript"),
+        context,
+        ExecRequest { code: code.into() },
+        crate::testing::sqlite_memory_artifact_store().await,
+        LashlangSurface::default(),
+        None,
+        RlmProjectedBindings::default(),
+        RlmLashlangExecutionTraceConfig::default(),
+        lashlang::ExecutionBounds::unbounded(),
+        crate::plugin::RlmChannel::Cell,
+    )
+    .await;
+    handler.close().await.expect("close handler");
+    (response, calls.load(Ordering::SeqCst))
+}
+
+#[test]
+fn fig_4545_obvious_unawaited_shapes_issue_no_effects() {
+    block_on(async {
+        for shape in [
+            "echo.say({text:'ignored'});",
+            "void echo.say({text:'ignored'});",
+            "const ignored = echo.say({text:'ignored'});",
+            "let ignored = echo.say({text:'ignored'}); ignored = 42;",
+        ] {
+            let code = format!("await echo.say({{text:'committed'}});\n{shape}\nfinish(42);");
+            let (response, calls) = pending_handle_cell(&code).await;
+            assert_eq!(calls, 0, "{shape}: {response:?}");
+            let error = response.error.as_ref().expect("lowering refusal");
+            assert_eq!(error.kind, lash_core::CellFailureKind::Policy);
+            assert!(error.message.contains("TS_UNAWAITED_TOOL"), "{response:?}");
+            assert!(error.message.contains("line 2"), "{response:?}");
+            assert!(error.message.contains("Promise.allSettled"), "{response:?}");
+            assert_eq!(response.terminal_finish, None);
+        }
+    });
+}
+
+#[test]
+fn fig_4545_awaiting_shapes_execute_each_tool_once() {
+    block_on(async {
+        for (code, count) in [
+            (
+                "const h = echo.say({text:'a'}); const x = 2; finish(await h);",
+                1,
+            ),
+            (
+                "finish(await Promise.all([echo.say({text:'a'}), echo.say({text:'b'})]));",
+                2,
+            ),
+            (
+                "finish(await Promise.allSettled([echo.say({text:'a'}), echo.say({text:'b'})]));",
+                2,
+            ),
+            (
+                "const hs = []; hs.push(echo.say({text:'a'})); finish(await Promise.all(hs));",
+                1,
+            ),
+            (
+                "async function f() { return await echo.say({text:'a'}); } finish(await f());",
+                1,
+            ),
+        ] {
+            let (response, calls) = pending_handle_cell(code).await;
+            assert_eq!(response.error, None, "{code}: {response:?}");
+            assert!(response.terminal_finish.is_some(), "{response:?}");
+            assert_eq!(calls, count, "{code}");
+        }
+    });
+}
+
+#[test]
+fn fig_4545_runtime_only_handles_reach_feedback_with_paths_and_lines() {
+    block_on(async {
+        let code = "const hs = [];\nif (true) hs.push(echo.say({text:'a'}));\nif (true) hs.push(echo.say({text:'b'}));\nfinish(42);";
+        for code in [code, code.strip_suffix("finish(42);").unwrap()] {
+            let (response, calls) = pending_handle_cell(code).await;
+            assert_eq!(calls, 0);
+            let failure = response
+                .error
+                .as_ref()
+                .expect("runtime pending handle failure");
+            let feedback = crate::feedback::render(failure, "cell");
+            for detail in [
+                "TS_PENDING_TOOL",
+                "2 tool handle(s)",
+                "echo.say",
+                "line 2",
+                "line 3",
+            ] {
+                assert!(feedback.contains(detail), "{feedback}");
+            }
+            assert_eq!(response.terminal_finish, None);
+        }
+    });
+}
+
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for EchoToolProvider {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {

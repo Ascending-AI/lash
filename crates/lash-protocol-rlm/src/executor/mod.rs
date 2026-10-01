@@ -1134,10 +1134,7 @@ async fn execute_code_in_worker_scope(
             {
                 state.cancel_code_execution();
             }
-            let message = lash_lashlang_runtime::host_lifetime_failure_message(&failure.error)
-                .unwrap_or_else(|| {
-                    lashlang::format_runtime_diagnostic(code, &failure.error, failure.span)
-                });
+            let message = crate::feedback::render_runtime_failure(code, &failure);
             return exec_response_from(
                 host.into_collected(),
                 Some(lash_core::CellFailure::new(kind, message)),

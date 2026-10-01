@@ -43,6 +43,24 @@ pub enum FormatError {
     UnusedArgument { index: usize },
 }
 
+/// One live pending operation at cell completion, in deterministic handle order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnawaitedToolCall {
+    pub call_path: String,
+    pub span: Option<crate::Span>,
+}
+
+fn pending_tool_details(pending: &[UnawaitedToolCall]) -> String {
+    let mut details = String::new();
+    for call in pending {
+        details.push_str(&format!("\n- {}", call.call_path));
+        if let Some(span) = call.span {
+            details.push_str(&format!(" at bytes {}..{}", span.start, span.end));
+        }
+    }
+    details
+}
+
 /// A typed failure raised while executing compiled Lashlang code.
 #[non_exhaustive]
 #[derive(Clone, Debug, Error, PartialEq, Serialize, Deserialize)]
@@ -210,8 +228,11 @@ pub enum RuntimeError {
     )]
     TypeScriptArrayNonIndexPropertyUnsupported { key: String },
     /// A TypeScript pending tool promise violated its lifetime contract.
-    #[error("TS_PENDING_TOOL: {problem}")]
-    PendingTool { problem: String },
+    #[error("TS_PENDING_TOOL: {problem}{}", pending_tool_details(.pending))]
+    PendingTool {
+        problem: String,
+        pending: Vec<UnawaitedToolCall>,
+    },
     /// A builtin received the wrong number of arguments.
     #[error("`{name}` takes {expected} arg(s), got {actual}")]
     InvalidArgumentCount {
@@ -1069,6 +1090,7 @@ mod tests {
             RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key: "-1".into() },
             RuntimeError::PendingTool {
                 problem: "test".into(),
+                pending: Vec::new(),
             },
             RuntimeError::InvalidArgumentCount {
                 name: "call".into(),

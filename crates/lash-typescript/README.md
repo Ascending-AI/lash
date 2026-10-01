@@ -111,10 +111,16 @@ an object-valued `inputs` each reject by name with
 
 Every `Promise` aggregate evaluates any array-valued expression and aggregates
 its pending handles and already-settled values as one durable effect group.
-Unawaited tool calls create handles, and so does an unawaited `sleep(ms)` — a
-pending timer whose start point is the aggregate that admits it; abandoning
-either at cell end is a typed runtime error. Non-array values and awaiting a settled value also
-fail loudly. A mixed aggregate is **one** batch on **one** recorded settlement
+Unawaited tool calls create handles. A bare tool-call statement, including
+`void tools.x(...)`, and a `const` or `let` tool handle never read in the cell
+are refused at lowering with `TS_UNAWAITED_TOOL`, before any effects run.
+Await the call or collect its handle into `Promise.all` or `Promise.allSettled`
+and await the aggregate. Bound handles awaited later and handles collected
+into arrays remain legal. Runtime-only abandonment raises `TS_PENDING_TOOL`
+with the count, each call path and its source line. An unawaited `sleep(ms)`
+also creates a pending timer whose start point is the aggregate that admits it;
+abandoning it is a typed runtime error. Non-array values and awaiting a settled
+value also fail loudly. A mixed aggregate is **one** batch on **one** recorded settlement
 order: a `processes.await` leaf parks on a durable wait and takes its place in
 that order when its completion arrives, so a tool rejection has no precedence
 over a process rejection and there is no tool-then-process phase split. A raw
