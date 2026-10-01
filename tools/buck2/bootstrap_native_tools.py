@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 import urllib.request
 
+import bootstrap_store
+
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -124,19 +126,29 @@ native_tree(
 '''
 
 
+def build(name: str, tool: dict, destination: pathlib.Path) -> None:
+    destination.mkdir()
+    zstd = tool["url"].endswith(".tar.zst")
+    with tempfile.TemporaryDirectory(prefix="lash-native-archive-", dir=destination.parent) as raw:
+        archive = pathlib.Path(raw) / (name + (".tar.zst" if zstd else ".tar.xz"))
+        print(f"download {name} {tool['url']}")
+        download(tool, archive)
+        extract(tool, archive, destination, zstd)
+
+
 def install(output: pathlib.Path, lock: dict) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="lash-native-tools-", dir=output.parent) as raw:
         stage = pathlib.Path(raw) / "native"
         stage.mkdir()
         for name, tool in lock["tools"].items():
-            zstd = tool["url"].endswith(".tar.zst")
-            archive = pathlib.Path(raw) / (name + (".tar.zst" if zstd else ".tar.xz"))
-            print(f"download {name} {tool['url']}")
-            download(tool, archive)
+            # `required` only names paths to check; it does not change the tree.
+            archive = {key: value for key, value in tool.items() if key != "required"}
             destination = stage / name
-            destination.mkdir()
-            extract(tool, archive, destination, zstd)
+            if not bootstrap_store.materialize(
+                ROOT, "native-" + name, archive, lambda tree, name=name, tool=tool: build(name, tool, tree), destination
+            ):
+                build(name, tool, destination)
         (stage / "BUCK").write_text(buck_file(), encoding="utf-8")
         (stage / ".lash-native-tools.json").write_text(
             json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8"

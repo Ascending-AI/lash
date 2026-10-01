@@ -17,6 +17,8 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HERE = ROOT / "tools/buck2"
+# The receipts these checks write describe fixtures; never offer them to real checkouts.
+os.environ["LASH_BUCK2_STORE"] = "off"
 
 
 def load_json(name: str):

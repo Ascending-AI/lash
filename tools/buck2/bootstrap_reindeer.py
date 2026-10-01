@@ -12,7 +12,10 @@ import subprocess
 import tempfile
 import urllib.request
 
+import bootstrap_store
 
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 LOCK = pathlib.Path(__file__).with_name("reindeer-lock.json")
 DEFAULT_OUTPUT = pathlib.Path(__file__).with_name("bin") / "reindeer"
 
@@ -43,12 +46,10 @@ def current(output: pathlib.Path, lock: dict) -> bool:
     )
 
 
-def install(output: pathlib.Path, lock: dict) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    asset = lock["asset"]
+def build(stage: pathlib.Path, asset: dict) -> None:
+    stage.mkdir()
     with tempfile.TemporaryDirectory(prefix="lash-reindeer-") as raw:
-        temporary = pathlib.Path(raw)
-        archive = temporary / "reindeer.zst"
+        archive = pathlib.Path(raw) / "reindeer.zst"
         with urllib.request.urlopen(asset["url"]) as response, archive.open("wb") as out:
             shutil.copyfileobj(response, out)
         if archive.stat().st_size != asset["compressed_size"]:
@@ -58,11 +59,22 @@ def install(output: pathlib.Path, lock: dict) -> None:
             raise SystemExit(
                 f"Reindeer checksum mismatch: expected {asset['sha256']}, got {actual}"
             )
-        staged = temporary / "reindeer"
+        staged = stage / "reindeer"
         with staged.open("wb") as out:
             subprocess.run(["unzstd", "-c", archive], check=True, stdout=out)
+        if sha256(staged) != asset["executable_sha256"]:
+            raise SystemExit("Reindeer executable does not match the lock")
         staged.chmod(0o755)
-        staged.replace(output)
+
+
+def install(output: pathlib.Path, lock: dict) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    asset = lock["asset"]
+    with tempfile.TemporaryDirectory(prefix="lash-reindeer-", dir=output.parent) as raw:
+        stage = pathlib.Path(raw) / "reindeer"
+        if not bootstrap_store.materialize(ROOT, "reindeer", asset, lambda tree: build(tree, asset), stage):
+            build(stage, asset)
+        (stage / "reindeer").replace(output)
         output.with_suffix(".sha256").write_text(sha256(output) + "\n", encoding="ascii")
 
 

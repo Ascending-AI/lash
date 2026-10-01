@@ -10,6 +10,8 @@ import os
 import pathlib
 import subprocess
 
+import bootstrap_store
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HERE = ROOT / "tools/buck2"
@@ -52,7 +54,11 @@ def expected_directories() -> set[str]:
 
 
 def current(wanted: dict) -> bool:
-    if VENDOR.is_symlink() or not RECEIPT.is_file():
+    # Buck2 ignores `vendor`, so it may be a link to the shared store's tree
+    # for exactly these inputs, and to nothing else.
+    if VENDOR.is_symlink() and os.readlink(VENDOR) != str(bootstrap_store.tree("vendor", wanted)):
+        return False
+    if not RECEIPT.is_file():
         return False
     try:
         actual = json.loads(RECEIPT.read_text(encoding="utf-8"))
@@ -63,12 +69,12 @@ def current(wanted: dict) -> bool:
     }
 
 
-def install(wanted: dict) -> None:
+def vendor(destination: pathlib.Path, wanted: dict) -> None:
     cargo = os.environ.get("KILN_REAL_CARGO")
     if not cargo:
         raise SystemExit("source ./env.sh first (KILN_REAL_CARGO is unset)")
-    if VENDOR.is_symlink():
-        raise SystemExit(f"refusing symlinked vendor directory: {VENDOR}")
+    if destination.is_symlink():
+        raise SystemExit(f"refusing symlinked vendor directory: {destination}")
     # `cargo vendor` prints a possible source-replacement stanza to stdout; it
     # does not need or write repository Cargo configuration. Discard that
     # suggestion so vendoring cannot change a user's Cargo source policy.
@@ -80,14 +86,26 @@ def install(wanted: dict) -> None:
             "--versioned-dirs",
             "--manifest-path",
             str(ROOT / "third-party/Cargo.toml"),
-            str(VENDOR),
+            str(destination),
         ],
         cwd=ROOT,
         check=True,
         stdout=subprocess.DEVNULL,
     )
-    VENDOR.mkdir(exist_ok=True)
-    RECEIPT.write_text(json.dumps(wanted, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    destination.mkdir(exist_ok=True)
+    (destination / RECEIPT.name).write_text(
+        json.dumps(wanted, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def install(wanted: dict) -> None:
+    if bootstrap_store.materialize(
+        ROOT, "vendor", wanted, lambda tree: vendor(tree, wanted), VENDOR, symlink=True
+    ):
+        return
+    # Without a store, a link left by an earlier run must not receive Cargo's writes.
+    bootstrap_store.release(VENDOR)
+    vendor(VENDOR, wanted)
 
 
 def main() -> int:

@@ -6,7 +6,7 @@
 /.kiln/
 /tools/buck2/toolchains/rust-files/
 /tools/buck2/bin/
-/vendor/
+/vendor
 /.tgt/
 *.perf
 *.old

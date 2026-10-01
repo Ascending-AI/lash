@@ -17,12 +17,14 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import tomllib
 from collections import defaultdict
 
+import bootstrap_store
 import clippy_policy
 import generate_model
 
@@ -232,6 +234,65 @@ def write_receipt(outputs: dict[pathlib.Path, str]) -> None:
         encoding="utf-8",
     )
     temporary.replace(RECEIPT)
+    share_receipt()
+
+
+def shared_receipt(directory: pathlib.Path, inputs: dict) -> pathlib.Path:
+    return directory / (digest_bytes(json.dumps(inputs, sort_keys=True).encode()) + ".json")
+
+
+def share_receipt() -> None:
+    """Offer this receipt to other checkouts with the same inputs; never fail over it."""
+    directory = bootstrap_store.receipts()
+    if directory is None:
+        return
+    try:
+        shared = shared_receipt(directory, json.loads(RECEIPT.read_text(encoding="utf-8"))["inputs"])
+        temporary = shared.with_suffix(f".{os.getpid()}.tmp")
+        shutil.copyfile(RECEIPT, temporary)
+        temporary.replace(shared)
+    except (OSError, KeyError, json.JSONDecodeError):
+        pass
+
+
+def adopt_shared_receipt() -> bool:
+    """Reuse the receipt another checkout wrote for exactly these inputs.
+
+    A receipt is a claim this checkout re-verifies in full, so a wrong or
+    damaged one costs a regeneration and is never trusted. A receipt is filed
+    under its inputs, which depend on the generated path set it excludes;
+    recent receipts supply the path sets worth trying.
+    """
+    directory = bootstrap_store.receipts()
+    if directory is None:
+        return False
+    try:
+        recent = sorted(directory.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    except OSError:
+        return False
+    tried: set[frozenset[str]] = set()
+    for candidate in recent[:16]:
+        try:
+            generated = frozenset(json.loads(candidate.read_text(encoding="utf-8"))["outputs"])
+        except (OSError, KeyError, TypeError, json.JSONDecodeError):
+            continue
+        if not generated or generated in tried:
+            continue
+        if len(tried) == 3:
+            break
+        tried.add(generated)
+        shared = shared_receipt(directory, input_identity(set(generated)))
+        try:
+            RECEIPT.parent.mkdir(parents=True, exist_ok=True)
+            temporary = RECEIPT.with_suffix(".json.tmp")
+            shutil.copyfile(shared, temporary)
+            temporary.replace(RECEIPT)
+        except OSError:
+            continue
+        if receipt_is_current():
+            os.utime(shared)
+            return True
+    return False
 
 
 def metadata(manifest: pathlib.Path = ROOT / "Cargo.toml", *, locked: bool = True) -> dict:
@@ -1078,7 +1139,7 @@ def main() -> int:
         cwd=ROOT,
         check=True,
     )
-    if args.check and not args.verify_resolution and receipt_is_current():
+    if args.check and not args.verify_resolution and (receipt_is_current() or adopt_shared_receipt()):
         print("Buck2 graph receipt is current")
         return 0
 

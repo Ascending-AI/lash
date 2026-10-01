@@ -17,7 +17,10 @@ import sys
 import tempfile
 import urllib.request
 
+import bootstrap_store
 
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 LOCK = pathlib.Path(__file__).with_name("toolchain-lock.json")
 DEFAULT_OUTPUT = pathlib.Path(__file__).with_name("toolchains") / "rust-files"
 REQUIRED = (
@@ -107,23 +110,29 @@ def extract(component: dict, archive: pathlib.Path, destination: pathlib.Path) -
     )
 
 
-def install(output: pathlib.Path, lock: dict) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
+def build(stage: pathlib.Path, lock: dict) -> None:
+    stage.mkdir()
     with tempfile.TemporaryDirectory(prefix="lash-buck2-rust-") as raw:
         temporary = pathlib.Path(raw)
-        stage = temporary / "rust-files"
-        stage.mkdir()
         for component in lock["components"]:
             archive = temporary / f"{component['name']}.tar.zst"
             print(f"download {component['name']} {component['url']}", file=sys.stderr)
             download(component, archive)
             extract(component, archive, stage)
-        (stage / ".lash-toolchain.json").write_text(
-            json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        if not all((stage / path).exists() for path in REQUIRED):
-            missing = [path for path in REQUIRED if not (stage / path).exists()]
-            raise SystemExit("toolchain archives omitted required paths: " + ", ".join(missing))
+    (stage / ".lash-toolchain.json").write_text(
+        json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    if not all((stage / path).exists() for path in REQUIRED):
+        missing = [path for path in REQUIRED if not (stage / path).exists()]
+        raise SystemExit("toolchain archives omitted required paths: " + ", ".join(missing))
+
+
+def install(output: pathlib.Path, lock: dict) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".lash-buck2-rust-", dir=output.parent) as raw:
+        stage = pathlib.Path(raw) / "rust-files"
+        if not bootstrap_store.materialize(ROOT, "rust", lock, lambda tree: build(tree, lock), stage):
+            build(stage, lock)
         old = output.with_name(output.name + ".old")
         if old.exists():
             shutil.rmtree(old)

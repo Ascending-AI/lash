@@ -4,8 +4,8 @@ Use `kiln build`, `kiln check`, `kiln test`, `kiln clippy`, `kiln doc` and
 `kiln run` after creating your own Kiln fork and sourcing `./env.sh`.
 `scripts/hermetic-build.sh` is the repository entrypoint. The driver uses the
 official, unmodified Buck2 executable pinned in `pins.json`; bootstrap verifies
-both the archive and executable checksums and installs only checkout-private
-ignored files.
+both the archive and executable checksums and installs only ignored files, in
+the checkout and in the [shared bootstrap store](#shared-bootstrap-store).
 
 [Developer workflows](../../docs/agents/hermetic-build.md) describe target
 selection, feature lanes, profiles, service gates, generated files, materialized
@@ -27,6 +27,56 @@ The driver defaults to 16 remote actions, or 32 in CI. `--jobs N` selects remote
 concurrency; eight coordinator threads bound local scheduling. Compatibility
 and benchmark runs use controlled concurrency separately from these defaults.
 Each checkout has its own `kiln` isolation directory and daemon.
+
+## Shared bootstrap store
+
+A fresh checkout needs about 1.8 GiB of pinned inputs. `bootstrap_store.py`
+keeps one verified copy of each for every checkout of this user:
+
+| Entry | Named by | In the checkout |
+| --- | --- | --- |
+| `buck2` | archive and executable checksums in `pins.json` | `.buck2/bin/buck2`, cloned |
+| `prelude` | Buck2 executable checksum and `prelude_overlay.py` | `.buck2/prelude`, cloned; its receipt is written locally |
+| `rust` | `toolchain-lock.json` | `tools/buck2/toolchains/rust-files`, cloned |
+| `native-<tool>` | the tool's archive record in `native-tools-lock.json` | `.buck2/native/<tool>`, cloned; `BUCK` and the receipt are written locally |
+| `reindeer` | the asset in `reindeer-lock.json` | `tools/buck2/bin/reindeer`, cloned |
+| `vendor` | the checksums `bootstrap_vendor.py` already records | `vendor`, a symlink to the entry |
+
+The store is `$LASH_BUCK2_STORE`, else `$XDG_CACHE_HOME/lash-buck2`, else
+`~/.cache/lash-buck2`. `LASH_BUCK2_STORE=off` disables it, and CI leaves it off
+unless the variable names a directory. The store must be owned by the current
+user and writable by no one else. If it is not usable, each script installs
+into the checkout exactly as it did before the store existed.
+
+A clone is a reflink where the filesystem has them, otherwise a hardlink,
+otherwise a copy, so put the store on the checkouts' filesystem to share disk.
+Buck2 does not read source trees through a symlink that leaves the project, and
+would hash such a link as an absolute path, so every action input is cloned.
+`vendor` is not an input and `.buckconfig` ignores it, so the file watcher
+never follows that link. Each stored inode gains one hardlink per live
+checkout; past 1,000 links, or at the filesystem's limit, the file is copied
+instead. Stored and cloned files are read-only because a hardlink shares its
+bytes with every other checkout: write a new file and rename it over the old
+one, as `prelude_overlay.py` does.
+
+An entry is built in a private directory by the script that owns its pin,
+which verifies the pinned checksums, and is published by one rename under a
+per-entry lock. Concurrent checkouts wait and then clone the same entry. Every
+clone first compares the entry with its manifest (paths, sizes, modes,
+modification times and link targets); an entry that differs is rebuilt, never
+used. `python3 tools/buck2/bootstrap.py --verify-store` rehashes every file
+and deletes the entries that fail.
+
+Each checkout records the entries it uses. `python3 tools/buck2/bootstrap.py
+--prune-store` deletes the entries that no existing checkout references and
+that nothing used in the last day (`--unused-for SECONDS` changes the period),
+with stale staging directories and unused graph receipts. It skips an entry
+another process holds. A checkout whose `vendor` entry was deleted vendors
+again on its next command.
+
+`sync.py --check` also files its receipt in the store, keyed by the receipt's
+inputs. A checkout with no current receipt adopts one written for identical
+inputs and verifies it against its own files before trusting it.
 
 ## Action resources and results
 

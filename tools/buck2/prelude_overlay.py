@@ -17,6 +17,7 @@ import hashlib
 import json
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 
@@ -875,6 +876,16 @@ def expected_outputs(prelude: pathlib.Path) -> dict[str, bytes]:
     return outputs
 
 
+def replace(path: pathlib.Path, data: bytes) -> None:
+    """Write a new file over `path`; a prelude file may be a link shared with other checkouts."""
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_bytes(data)
+    if path.exists():
+        # Buck2 hashes the executable bit of a prelude tool with its bytes.
+        temporary.chmod(stat.S_IMODE(path.stat().st_mode) | 0o200)
+    temporary.replace(path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--buck2", type=pathlib.Path, required=True)
@@ -935,7 +946,7 @@ def main() -> int:
         stale.append(name)
         if not args.check:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
+            replace(path, data)
     if stale and args.check:
         print("prelude overlay is absent or stale: " + ", ".join(stale), file=sys.stderr)
         return 1
@@ -945,8 +956,8 @@ def main() -> int:
         if not receipt.is_file() or receipt.read_text() != payload:
             print("prelude overlay receipt is absent or stale", file=sys.stderr)
             return 1
-    else:
-        receipt.write_text(payload)
+    elif not receipt.is_file() or receipt.read_text() != payload:
+        replace(receipt, payload.encode())
     print("verified" if args.check else "applied", "Lash Rust action overlay")
     return 0
 

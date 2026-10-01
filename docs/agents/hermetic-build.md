@@ -93,6 +93,21 @@ the pins, bootstraps, rule overlay, Reindeer inputs and Python ABI. The trusted
 main warmer is the sole writer; credentials, daemons and build outputs are
 excluded from that tool cache.
 
+Outside CI, checkouts share these pinned inputs through one store, by default
+`$XDG_CACHE_HOME/lash-buck2` (`~/.cache/lash-buck2`); `LASH_BUCK2_STORE` names
+another directory, or `off`. Each entry is named by its pin, built once under a
+lock, sealed by a manifest and replaced if it no longer matches. A checkout
+gets the Buck2 executable, prelude, Rust toolchain, native tools and Reindeer
+as ordinary read-only files: reflinks or hardlinks when the store is on the
+checkout's filesystem, copies otherwise. Buck2 never reads an input through a
+link out of the project, so action digests equal those of a private install.
+Only `vendor`, which Buck2 ignores, is a symlink into the store. A generated
+graph receipt is shared the same way and re-verified by the checkout that
+adopts it. Replace a pinned file instead of editing it in place. With no usable
+store, bootstrap installs everything into the checkout as before. Bound the
+store with `python3 tools/buck2/bootstrap.py --prune-store`; see
+[the tooling notes](../../tools/buck2/README.md#shared-bootstrap-store).
+
 After changing dependencies, workspace membership or target policy:
 
 ```sh
