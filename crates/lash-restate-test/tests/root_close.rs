@@ -47,6 +47,14 @@ struct CloseGate {
     granted: Mutex<BTreeMap<ObligationId, usize>>,
     /// Whether the held claim is waiting at the gate now.
     waiting: AtomicUsize,
+    settlement: Mutex<Option<SettlementGate>>,
+}
+
+/// Hold the close after its durable settlement, before its run result can
+/// reach the server's crash rule.
+struct SettlementGate {
+    reached: tokio::sync::oneshot::Sender<()>,
+    release: tokio::sync::oneshot::Receiver<()>,
 }
 
 impl CloseGate {
@@ -90,6 +98,21 @@ impl CloseGate {
 
     fn granted(&self) -> BTreeMap<ObligationId, usize> {
         self.granted.lock().expect("granted claims").clone()
+    }
+
+    fn pause_after_settlement(
+        &self,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (reached, settled) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        *self.settlement.lock().expect("settlement gate") = Some(SettlementGate {
+            reached,
+            release: released,
+        });
+        (settled, release)
     }
 }
 
@@ -157,7 +180,20 @@ impl ObligationLedger for GatedScopeCloseLedger {
         settlement: ObligationSettlement,
         now_ms: u64,
     ) -> Result<SettleOutcome, StoreError> {
-        self.inner.settle(id, token, settlement, now_ms).await
+        let outcome = self.inner.settle(id, token, settlement, now_ms).await?;
+        let pause = {
+            let held = self.gate.held.lock().expect("held close");
+            if held.as_ref() == Some(id) {
+                self.gate.settlement.lock().expect("settlement gate").take()
+            } else {
+                None
+            }
+        };
+        if let Some(pause) = pause {
+            pause.reached.send(()).expect("observe the settled close");
+            pause.release.await.expect("release the settled close");
+        }
+        Ok(outcome)
     }
 
     async fn rearm(&self, id: &ObligationId, now_ms: u64) -> Result<bool, StoreError> {
@@ -410,13 +446,10 @@ async fn a_close_crashed_after_the_next_root_was_admitted_converges_once() {
         .open()
         .await
         .expect("open");
-    let crashes = Arc::new(AtomicUsize::new(0));
-    {
-        let crashes = Arc::clone(&crashes);
-        world.backend.server().on_crash(Arc::new(move |_: &str| {
-            crashes.fetch_add(1, Ordering::SeqCst);
-        }));
-    }
+    let (crashes, mut crash_count) = tokio::sync::watch::channel(0usize);
+    assert!(world.backend.server().on_crash(Arc::new(move |_: &str| {
+        crashes.send_modify(|count| *count += 1);
+    })));
 
     world.ask(&session, "first question").await;
     held(&world.gate).await;
@@ -431,41 +464,61 @@ async fn a_close_crashed_after_the_next_root_was_admitted_converges_once() {
         CrashRule::new(CrashPoint::BeforeRunResult { name: None })
             .service(TURN_DRIVER_SERVICE)
             .handler("close")
-            .key(key),
+            .key(key.clone()),
     );
+    let (settled, release_settlement) = world.gate.pause_after_settlement();
     world.gate.release();
 
-    let granted = world.closes_delivered(2).await;
+    // Force the ordering that load exposed: durable delivery is visible
+    // while the run result, and therefore the crash, is still held back.
+    tokio::time::timeout(Duration::from_secs(30), settled)
+        .await
+        .expect("the held close settles")
+        .expect("observe the held settlement");
+    assert_eq!(world.state(&first).await, Some(ObligationState::Delivered));
     assert_eq!(
-        crashes.load(Ordering::SeqCst),
-        1,
-        "the held close crashed once"
+        *crash_count.borrow(),
+        0,
+        "settlement does not prove the crash happened"
     );
+    release_settlement
+        .send(())
+        .expect("let the run result reach the crash rule");
+
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        crash_count.wait_for(|count| *count > 0),
+    )
+    .await
+    .expect("the held close reaches its crash rule")
+    .expect("observe the close crash");
+    tokio::time::timeout(Duration::from_secs(30), world.backend.server().settle())
+        .await
+        .expect("the close replay settles");
+    let replayed: Vec<_> = world
+        .backend
+        .server()
+        .invocations()
+        .into_iter()
+        .filter(|invocation| invocation.target.ends_with("/close"))
+        .collect();
+    assert_eq!(replayed.len(), 2, "both roots sent their close");
+    assert!(
+        replayed.iter().all(|close| close.status == "completed"),
+        "both close invocations complete: {replayed:?}"
+    );
+    assert_eq!(*crash_count.borrow(), 1, "the held close crashed once");
+    let granted = world.closes_delivered(2).await;
     assert!(granted.contains_key(&first));
     assert!(
         granted.values().all(|claims| *claims == 1),
         "each root's close was delivered by exactly one claim, the crashed one included: \
          {granted:?}"
     );
-    let replayed = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let closes: Vec<_> = world
-                .backend
-                .server()
-                .invocations()
-                .into_iter()
-                .filter(|invocation| invocation.target.ends_with("/close"))
-                .collect();
-            if closes.len() == 2 && closes.iter().all(|close| close.status == "completed") {
-                return closes;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("both close invocations complete");
     assert!(
-        replayed.iter().any(|close| close.attempts >= 2),
+        replayed.iter().any(|close| {
+            close.target == format!("{TURN_DRIVER_SERVICE}/{key}/close") && close.attempts == 2
+        }),
         "the crashed close ran again: {replayed:?}"
     );
     assert_eq!(world.state(&first).await, Some(ObligationState::Delivered));
