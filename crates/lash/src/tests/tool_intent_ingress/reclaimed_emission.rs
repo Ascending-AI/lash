@@ -214,11 +214,7 @@ async fn sqlite_file_backend() -> (tempfile::TempDir, lash_core::Backend) {
     (directory, lash_conformance::recording_backend_over(stores))
 }
 
-/// A PostgreSQL backend, when the service URL is set.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "the test host reads the optional PostgreSQL service URL"
-)]
+/// A PostgreSQL backend on the required service URL.
 async fn postgres_backend() -> Result<
     Option<(
         lash_postgres_store::testing::IsolatedDatabase,
@@ -226,14 +222,7 @@ async fn postgres_backend() -> Result<
         lash_core::Backend,
     )>,
 > {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        assert!(
-            std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-            "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        eprintln!("skipping PostgreSQL reclaimed-emission law: database URL is not set");
-        return Ok(None);
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
@@ -272,6 +261,7 @@ macro_rules! reclaimed_emission_laws {
         }
 
         #[tokio::test]
+        #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
         async fn $postgres() -> Result<()> {
             let Some((_database, _attachments, backend)) = postgres_backend().await? else {
                 return Ok(());

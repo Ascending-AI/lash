@@ -324,6 +324,7 @@ async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart_on_sq
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart_on_postgres()
 -> Result<()> {
     let Some((stores, _held)) = postgres_store_set().await else {

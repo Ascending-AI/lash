@@ -507,6 +507,7 @@ macro_rules! on_every_store {
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
         async fn $postgres() {
             let Some((double, _attachments)) = on_postgres(plain()).await else {
                 return;
@@ -515,6 +516,7 @@ macro_rules! on_every_store {
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
         async fn $postgres_replay() {
             let Some((double, _attachments)) = on_postgres(always_replay()).await else {
                 return;
