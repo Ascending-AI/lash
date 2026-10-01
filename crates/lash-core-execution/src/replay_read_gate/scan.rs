@@ -309,6 +309,11 @@ fn skip_raw(
 pub(super) struct Surface<'a> {
     /// Store read methods: a call to one is a fresh read of mutable state.
     pub(super) reads: &'a [&'a str],
+    /// Live host services, as `(trait, method)`: a call to one consults the
+    /// host's state today. It is matched as a method call on any receiver, or
+    /// as a path call the trait's own name qualifies, so an unrelated
+    /// associated function of the same name is no hit.
+    pub(super) services: &'a [(&'a str, &'a str)],
     /// Calls whose argument list is a recorded step's body.
     pub(super) steps: &'a [&'a str],
     /// A `fn` whose signature names one of these is on a replay path.
@@ -881,7 +886,16 @@ fn walk_body(tokens: &[Token], in_step: bool, surface: &Surface<'_>, def: &mut F
                         line: token.line,
                         recorded: in_step,
                     });
-                    if surface.reads.contains(&name) {
+                    let qualifier =
+                        if i > 2 && tokens[i - 1].is_punct(':') && tokens[i - 2].is_punct(':') {
+                            tokens[i - 3].ident()
+                        } else {
+                            None
+                        };
+                    let service = surface.services.iter().any(|(owner, service)| {
+                        *service == name && (method || qualifier == Some(*owner))
+                    });
+                    if service || surface.reads.contains(&name) {
                         def.reads.push(ReadSite {
                             method: name.to_string(),
                             line: token.line,

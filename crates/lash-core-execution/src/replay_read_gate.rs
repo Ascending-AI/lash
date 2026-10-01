@@ -14,9 +14,11 @@
 //! tree instead of trusting a tag:
 //!
 //! - **the API surface** is the read methods of the process-registry concern
-//!   traits and the trigger store. [`STORE_TRAITS`] is proven complete against
-//!   the trait declarations, so a new trait method must be classified as a
-//!   read or a write before this gate passes;
+//!   traits and the trigger store, and the live host services a durable path
+//!   consults ([`HOST_SERVICES`]). [`STORE_TRAITS`] and
+//!   [`HOST_SERVICE_TRAITS`] are proven complete against the trait
+//!   declarations, so a new trait method must be classified before this gate
+//!   passes;
 //! - **a replay path** is a `fn` whose signature names a controller or journal
 //!   context ([`REPLAY_SIGNATURE_TYPES`]), a method of a type that owns one
 //!   ([`REPLAY_IMPL_TYPES`]), or a uniquely named `fn` a replay path calls
@@ -97,6 +99,19 @@ const HOST_READS: &[&str] = &[
     "list_originated_by",
 ];
 
+/// Live host services, as `(trait, method)`: each answers from the host's
+/// wiring and policy today, not from the store. A replay path may consult
+/// one inside the recorded step whose outcome its answer becomes, or under a
+/// [`PinClass::LiveService`] pin that states why it stays live.
+const HOST_SERVICES: &[(&str, &str)] = &[
+    // Reinstalls a delivery's captured provider route, or refuses it.
+    ("TriggerRouteRestorer", "restore"),
+];
+
+/// The traits whose methods are the live host services, with the source that
+/// declares each.
+const HOST_SERVICE_TRAITS: &[(&str, &str)] = &[(TRIGGERS, "TriggerRouteRestorer")];
+
 /// The surface's other methods: writes, idempotent admissions (which return
 /// their retained record, the recorded admission a duplicate decides from)
 /// and configuration. Listed so the completeness check can tell a new read
@@ -176,8 +191,10 @@ const STORE_TRAITS: &[(&str, &str)] = &[
     (REGISTRY_CONCERNS, "ProcessRetention"),
     (REGISTRY_CONCERNS, "ProcessClockRebind"),
     (REGISTRY_CONCERNS, "ProcessRegistrationProbe"),
-    ("crates/lash-core-execution/src/triggers.rs", "TriggerStore"),
+    (TRIGGERS, "TriggerStore"),
 ];
+
+const TRIGGERS: &str = "crates/lash-core-execution/src/triggers.rs";
 
 const REGISTRY_CONCERNS: &str =
     "crates/lash-core-execution/src/runtime/process/registry_concerns.rs";
@@ -232,6 +249,10 @@ enum PinClass {
     /// A live revalidation that can only stop stale work before its next
     /// effect, never choose different work (ADR 0105 §1).
     StopOnly(&'static str),
+    /// A live host service that serves the identity the record names or
+    /// refuses it (ADR 0119): it stays live on a replay, where a refusal can
+    /// stop the work it gates and no answer can choose different work.
+    LiveService(&'static str),
     /// Outside the rule, for the stated reason.
     Exempt(&'static str),
     /// A known violation another ticket owns; its fix deletes the pin.
@@ -301,6 +322,19 @@ const PINS: &[Pin] = &[
         class: PinClass::Exempt(
             "the lineage of the live enclosing process: immutable, and the process \
              cannot be pruned while it runs",
+        ),
+    },
+    // `prepare_delivery_start` restores the route ahead of the delivery
+    // start's recorded step, on the first attempt and on every replay
+    // (FIG-4537).
+    Pin {
+        file: TRIGGER_ROUTER,
+        text: "restorer.restore(capture).await",
+        count: 1,
+        class: PinClass::LiveService(
+            "the host's route restorer is handed only the capture the reservation recorded \
+             and consults no catalog or live configuration; it answers restored, or refuses \
+             the delivery before its start's step, and can select no other route or target",
         ),
     },
     Pin {
@@ -387,6 +421,7 @@ const STEP_BODIES: &[StepBody] = &[
     },
 ];
 
+const TRIGGER_ROUTER: &str = "crates/lash-core-execution/src/triggers/router.rs";
 const LOAD_WORKER: &str = "runbooks/restate-postgres-workers/src/load/worker.rs";
 const LOAD_BEHAVIORS: &str = "runbooks/restate-postgres-workers/src/load/behaviors.rs";
 
@@ -495,6 +530,7 @@ fn check(hits: &[scan::Hit], pins: &[Pin]) -> Vec<String> {
     for pin in pins {
         if let PinClass::Observation(reason)
         | PinClass::StopOnly(reason)
+        | PinClass::LiveService(reason)
         | PinClass::Exempt(reason)
         | PinClass::Ticket(reason) = pin.class
             && reason.trim().is_empty()
@@ -510,9 +546,16 @@ fn check(hits: &[scan::Hit], pins: &[Pin]) -> Vec<String> {
         let allowed = pinned.get(key).copied().unwrap_or(0);
         if sites.len() > allowed {
             for hit in sites {
+                let reads = if STORE_READS.contains(&hit.method.as_str())
+                    || HOST_READS.contains(&hit.method.as_str())
+                {
+                    "reads mutable store state"
+                } else {
+                    "consults a live host service"
+                };
                 failures.push(format!(
-                    "{}:{}: `{}` reads mutable store state on a replay path outside every \
-                     recorded step (in `{}`, on a replay path because {}): {}",
+                    "{}:{}: `{}` {reads} on a replay path outside every recorded step (in \
+                     `{}`, on a replay path because {}): {}",
                     hit.file, hit.line, hit.method, hit.function, hit.path, hit.text
                 ));
             }
@@ -539,6 +582,7 @@ fn surface(wrappers: &[StepWrapper]) -> scan::Surface<'static> {
         .collect();
     scan::Surface {
         reads: READS.get_or_init(|| STORE_READS.iter().chain(HOST_READS).copied().collect()),
+        services: HOST_SERVICES,
         steps: Box::leak(steps.into_boxed_slice()),
         replay_signature_types: REPLAY_SIGNATURE_TYPES,
         replay_impl_types: REPLAY_IMPL_TYPES,
@@ -656,6 +700,31 @@ fn the_store_surface_classifies_every_trait_method() {
     }
 }
 
+#[test]
+fn the_host_services_classify_every_trait_method() {
+    let mut declared = Vec::new();
+    for (file, trait_name) in HOST_SERVICE_TRAITS {
+        let methods = scan::trait_methods(&read_workspace_file(file), trait_name)
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        assert!(!methods.is_empty(), "{trait_name} declares methods");
+        declared.extend(methods.into_iter().map(|method| (*trait_name, method)));
+    }
+    let listed: Vec<_> = HOST_SERVICES
+        .iter()
+        .map(|(trait_name, method)| (*trait_name, method.to_string()))
+        .collect();
+    assert_eq!(
+        declared, listed,
+        "HOST_SERVICES lists exactly the methods its traits declare"
+    );
+    for (_, service) in HOST_SERVICES {
+        assert!(
+            !STORE_READS.contains(service) && !STORE_WRITES.contains(service),
+            "`{service}` is classified twice"
+        );
+    }
+}
+
 /// The gate's own red side: planted fresh reads fail it, and the shapes the
 /// rule allows pass.
 mod self_test {
@@ -764,6 +833,47 @@ mod self_test {
             #[tokio::test]
             async fn law(scoped: ScopedEffectController<'_>) {
                 registry.get_process(&id).await;
+            }
+            "#,
+        );
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_host_service_call_outside_a_recorded_step_fails() {
+        let found = hits(
+            r#"
+            async fn prepare(&self, capture: &TriggerSourceCapture) -> Result<(), Refusal> {
+                self.route_restorer.restore(capture).await
+            }
+            async fn start(&self, scoped: &ScopedEffectController<'_>) {
+                self.prepare(&capture).await?;
+                TriggerRouteRestorer::restore(restorer.as_ref(), &capture).await?;
+                scoped.execute_effect(envelope, executor).await
+            }
+            "#,
+        );
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|hit| hit.method == "restore"));
+        assert_eq!(found[0].function, "prepare");
+        assert_eq!(found[0].path, "called from `start`");
+        assert!(
+            check(&found, &[])
+                .iter()
+                .all(|failure| failure.contains("consults a live host service")),
+            "an unpinned service call fails the gate"
+        );
+    }
+
+    #[test]
+    fn a_host_service_call_inside_a_step_or_of_another_type_passes() {
+        let found = hits(
+            r#"
+            async fn start(context: &impl RestateControllerContext<'_>) {
+                let ordinals = ReplayOrdinals::restore(state.as_ref());
+                context
+                    .run_json_or_retry_send(name, async move { restorer.restore(&capture).await })
+                    .await
             }
             "#,
         );
@@ -969,6 +1079,23 @@ mod self_test {
             failures
                 .iter()
                 .any(|failure| failure.contains("step body `owned` is called outside")),
+            "{failures:?}"
+        );
+    }
+
+    /// A route-restorer call planted in `prepare_delivery_start`, ahead of
+    /// the delivery start's recorded step, fails the gate (FIG-4537).
+    #[test]
+    fn the_real_tree_fails_with_an_unrecorded_route_restore_before_the_delivery_start() {
+        let failures = planted_tree(
+            TRIGGER_ROUTER,
+            "let args =",
+            "let _planted = restorer.restore(&subscription.source_capture).await;",
+        );
+        assert!(
+            failures.iter().any(|failure| failure.contains("_planted")
+                && failure.contains("`restore`")
+                && failure.contains("in `prepare_delivery_start`")),
             "{failures:?}"
         );
     }

@@ -575,10 +575,13 @@ impl From<TriggerRouteRefusal> for PluginError {
 
 /// Reinstalls a captured provider route before a delivery executes.
 ///
-/// This runs only for an unrecorded delivery attempt. It may not widen the
-/// grant, consult a catalog, or resolve a replacement definition: the capture
-/// is the whole authority, and the only answers are "restored", "not right
-/// now", and "refused".
+/// This runs for a delivery its emission's recorded receipt holds unbound,
+/// ahead of the start's recorded step: on the first attempt, on every replay
+/// of that emission, and on the relay's recovery. It is a live host service
+/// (FIG-4537), so a replay asks it again and a refusal there stops the
+/// replayed delivery. It may not widen the grant, consult a catalog, or
+/// resolve a replacement definition: the capture is the whole authority, and
+/// the only answers are "restored", "not right now", and "refused".
 #[async_trait::async_trait]
 pub trait TriggerRouteRestorer: Send + Sync {
     async fn restore(&self, capture: &TriggerSourceCapture) -> Result<(), TriggerRouteRefusal>;

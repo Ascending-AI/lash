@@ -1311,7 +1311,11 @@ impl TriggerDeliveryRecoveryError {
 }
 
 impl TriggerRouter {
-    /// Reinstalls the captured provider route for one unrecorded delivery.
+    /// Reinstalls the captured provider route for one unbound delivery.
+    ///
+    /// The restorer is a live host service handed only the recorded capture.
+    /// It runs ahead of the start's recorded step, so a replay consults it
+    /// again; the replay-read gate pins this call with that class (FIG-4537).
     ///
     /// A resident source needs nothing. A provider route with no restorer wired
     /// is left as captured: the host that never installed a restorer has no

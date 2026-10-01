@@ -409,11 +409,16 @@ one, and every helper those call outside a recorded step. It then fails on
 each read of the store's mutable surface (the process registry's query,
 observer, event-log and lifecycle reads, the trigger store's listings, and the
 facade's session and process lookups) that runs on a replay path outside
-every recorded step. It parses the store traits, so a new trait method must be
-classified as a read or as a write or admission before the gate passes. A read
-the rule allows outside a step (a non-durable observation, a stop-only
-revalidation, an exempt store-side fact) is pinned in the gate's table with
-its class and reason, and a violation owned by an open ticket is pinned with
+every recorded step. Its surface also holds the live host services a durable
+path consults (the trigger route restorer): a call to one outside every
+recorded step fails the same way. It parses the store and service traits, so a
+new trait method must be classified as a read, as a write or admission, or as
+a live service before the gate passes. A read the rule allows outside a step (a
+non-durable observation, a stop-only revalidation, an exempt store-side fact)
+and a live host service that serves only what the record names (the route
+restorer, which `prepare_delivery_start` hands the reservation's captured
+route ahead of the delivery start's step) are pinned in the gate's table with
+their class and reason, and a violation owned by an open ticket is pinned with
 that ticket; a pin that matches nothing fails as stale. The gate's
 self-tests plant a read ahead of a journaled command, including in the real
 facade, and require the gate to fail.
