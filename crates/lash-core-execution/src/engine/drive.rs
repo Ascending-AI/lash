@@ -249,7 +249,13 @@ pub enum DriveStop {
 ///   it would name that command under a new root and meet the same refusal
 ///   (FIG-4393). The refusal is the root's typed end; the session's next ask
 ///   to drive tries the command again.
-#[derive(Clone, Debug, Default)]
+///
+/// A drive an engine runs over several invocations keeps the rules across
+/// each handoff: the leg that hands off sends what it remembers of its own
+/// roots ([`handed_off`](Self::handed_off)), and the next leg starts from it.
+/// A root the next admission names again is then met by the same rule,
+/// whichever leg ran it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveLoop {
     ran: BTreeSet<TurnId>,
     released: BTreeSet<TurnId>,
@@ -261,6 +267,26 @@ impl DriveLoop {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// What the leg a drive hands off to starts from, after this leg ran
+    /// `leg`: the rules' memory of those roots alone, so what a drive carries
+    /// stays bounded by one leg however long its chain grows.
+    #[must_use]
+    pub fn handed_off(&self, leg: &[RootOutcome]) -> Self {
+        let leg: BTreeSet<&TurnId> = leg.iter().map(RootOutcome::root).collect();
+        let kept = |roots: &BTreeSet<TurnId>| {
+            roots
+                .iter()
+                .filter(|root| leg.contains(root))
+                .cloned()
+                .collect()
+        };
+        Self {
+            ran: kept(&self.ran),
+            released: kept(&self.released),
+            commands_head: self.commands_head,
+        }
     }
 
     /// Whether the drive runs `admitted`'s root: `Err(stop)` when it stops
@@ -416,6 +442,61 @@ mod tests {
                 },
             ),
             None,
+        );
+    }
+
+    fn admitted(root: &TurnId) -> Admitted {
+        admission_body::admitted(
+            SessionId::from("s"),
+            root.clone(),
+            DriveRequestId::new("r"),
+            super::super::admission::AdmissionId::new("r:0"),
+            0,
+            super::super::contracts::BuildGeneration::for_test("t0"),
+            AdmittedWork::Queued {
+                head: crate::BatchId::from("qwb:head"),
+            },
+        )
+    }
+
+    /// The rules outlive a handoff (FIG-4523): the leg a drive continues on
+    /// starts from what the leg before it remembers of its own roots, so a
+    /// released root admission names again stops the drive there, and a root
+    /// of an earlier leg is no longer carried.
+    #[test]
+    fn the_leg_a_drive_hands_off_to_keeps_the_rules_of_the_leg_before_it() {
+        let earlier = TurnId::from("earlier");
+        let released = TurnId::from("released");
+        let mut rules = DriveLoop::new();
+        rules.before(&admitted(&earlier)).expect("a new root runs");
+        let first = rules.handed_off(&[RootOutcome::Ceded {
+            root: earlier.clone(),
+        }]);
+
+        let mut rules = first;
+        assert_eq!(
+            rules.before(&admitted(&earlier)),
+            Err(DriveStop::Yielded {
+                root: earlier.clone()
+            }),
+            "the leg before ran it"
+        );
+        rules.before(&admitted(&released)).expect("a new root runs");
+        let outcome = RootOutcome::Released {
+            root: released.clone(),
+        };
+        assert_eq!(rules.after(admitted(&released).work(), &outcome), None);
+        let mut next = rules.handed_off(std::slice::from_ref(&outcome));
+        assert_eq!(
+            next.before(&admitted(&released)),
+            Err(DriveStop::RootAborted { root: released }),
+        );
+        next.before(&admitted(&earlier))
+            .expect("only the handing-off leg's roots are carried");
+        assert_eq!(
+            serde_json::from_value::<DriveLoop>(serde_json::to_value(&next).expect("encode"))
+                .expect("decode"),
+            next
         );
     }
 }

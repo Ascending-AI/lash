@@ -303,13 +303,28 @@ Restate counts a handler's failed attempts over the invocation's whole retry
 loop, which only a suspension or a new invocation restarts. A drive that
 awaits one root after another never suspends, so its eight-attempt budget
 would be spent on the sum of every root's failures. The drive therefore
-records a `lash.drive.boundary` step after each root it goes on from: whether
-the attempt that reached the boundary was served an earlier boundary from the
-journal, which makes it a retry or a resume. Such an attempt hands off there,
-before its root bound, and its stop is `DriveStop::HandedOff`. One retry loop
-then covers the roots up to the first boundary a replaying attempt reaches
-live, never the backlog. Under always-replay every attempt replays, and a
-drive runs in legs of two roots. Process execution uses bounded segments and durable handovers.
+records two kinds of step. Before it calls a leg's first root it records
+`lash.drive.leg`, whose body marks the attempt that runs it as the one that
+started the leg. The step follows admission 0, which stays the drive's first
+command and carries its generation (§12). After each root it goes on from, it
+records `lash.drive.boundary`: whether the attempt that reached the boundary
+was served the leg's start from the journal, which makes it a retry or a
+resume. Such an attempt hands off there, before its root bound, and its stop
+is `DriveStop::HandedOff`. One retry loop then covers the roots up to the
+first boundary a replaying attempt reaches live, the leg's first boundary
+included, never the backlog. Under always-replay every attempt past a leg's
+first await replays, and a drive runs in legs of one root. A failed attempt
+that ends before the leg's start is stored, inside admission 0, is not seen.
+
+The continuation's request carries what the kernel's stop rules (`DriveLoop`)
+remember of the roots the handing-off leg ran, and the next leg starts from
+it. A root that admission names again right after it ran therefore stops the
+drive in the leg that meets it, as it does inside one invocation, instead of
+being called again by a leg that forgot it. Only the handing-off leg's own
+roots travel, so the request stays bounded by one leg. A waiter's attach
+under the continuation's identity carries none; it joins the invocation the
+leg's journaled send started. Process execution uses bounded segments and
+durable handovers.
 
 `DriveRequest.build_generation` names the build generation. Recorded routes
 and generation sentinels bind journal replay under ADR 0106 §1. A process's
@@ -318,7 +333,7 @@ old segment's journal in place. Durable formats follow the current freeze
 and compatibility rules of ADR 0106.
 
 Evidence: `crates/lash-core-execution/src/engine/drive.rs:1`,
-`crates/lash-restate/src/session_driver.rs:1156`,
+`crates/lash-restate/src/session_driver.rs:1103`,
 `crates/lash-restate/src/process/workflow.rs:1`,
 `crates/lash-core-execution/src/engine/contracts.rs:37`.
 

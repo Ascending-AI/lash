@@ -229,6 +229,38 @@ impl SessionDriver for Driver {
         Ok(())
     }
 }
+/// How `request`'s drive of `session` ended, read through every invocation
+/// it handed off to: each leg's roots in order, and the last leg's stop. A
+/// drive whose attempt replayed hands off at its next root boundary
+/// (FIG-4506, FIG-4523), so one leg's answer is not the drive's.
+#[expect(
+    clippy::result_large_err,
+    reason = "matches the ingress client's error API"
+)]
+async fn attach_whole_drive(
+    work: &crate::RestateSessionWork,
+    session: &SessionId,
+    request: DriveRequestId,
+) -> Result<DriveOutcome, crate::RestateHttpError> {
+    let mut leg = DriveRequest {
+        session: session.clone(),
+        request,
+        // A continuation's request id names its session and request alone.
+        build_generation: lash_core::engine::BuildGeneration::for_test("unread"),
+    };
+    let mut ran = Vec::new();
+    loop {
+        let outcome = work.attach_drive(&leg.session, leg.request.clone()).await?;
+        ran.extend(outcome.ran);
+        if !matches!(outcome.stop, DriveStop::HandedOff { .. }) {
+            return Ok(DriveOutcome {
+                ran,
+                stop: outcome.stop,
+            });
+        }
+        leg.request = lash_core::engine::drive_continuation_request(&leg);
+    }
+}
 struct Fixture {
     harness: LiveConformanceHarness,
     driver: Arc<Driver>,
@@ -478,10 +510,21 @@ impl Fixture {
             .await
             .expect("park pass")
     }
+    /// [`attach_whole_drive`] on the fixture's session.
+    #[expect(
+        clippy::result_large_err,
+        reason = "matches the ingress client's error API"
+    )]
+    async fn attach_whole_drive(
+        &self,
+        request: DriveRequestId,
+    ) -> Result<DriveOutcome, crate::RestateHttpError> {
+        attach_whole_drive(&self.work, &self.driver.session, request).await
+    }
     /// Attach to `request`'s drive, firing the double's timers while it
     /// runs; `None` when it did not end within the bounded witness.
     async fn attach_within(&self, request: DriveRequestId) -> Option<DriveOutcome> {
-        let attach = self.work.attach_drive(&self.driver.session, request);
+        let attach = self.attach_whole_drive(request);
         tokio::pin!(attach);
         for _ in 0..1000 {
             if let Some(server) = self.harness.server_double() {
@@ -621,8 +664,7 @@ async fn pause_resume(server: HarnessServer) {
         .await
         .expect("apply");
     let outcome = f
-        .work
-        .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
+        .attach_whole_drive(DriveRequestId::new("initial"))
         .await
         .expect("resumed drive");
     assert_eq!(outcome.stop, DriveStop::Idle);
@@ -728,8 +770,7 @@ async fn a_paused_admission_is_parked_and_only_its_redrive_resumes_it() {
         .await
         .expect("apply");
     let outcome = f
-        .work
-        .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
+        .attach_whole_drive(DriveRequestId::new("initial"))
         .await
         .expect("the redrive resumed the drive");
     assert_eq!(outcome.stop, DriveStop::Idle);
@@ -1068,8 +1109,7 @@ async fn crash_gaps(server: HarnessServer) {
             ));
             assert!(scopes.calls.load(Ordering::SeqCst) > 0);
             let outcome = f
-                .work
-                .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
+                .attach_whole_drive(DriveRequestId::new("initial"))
                 .await
                 .expect("released drive");
             assert!(matches!(
@@ -1148,13 +1188,27 @@ async fn released_then_next(server: HarnessServer) {
         .deliver_intent(&intent)
         .await
         .expect("release");
+    // The drive that consumes the release resumed a suspended attempt, so it
+    // may hand off at the released root's boundary (FIG-4523). The release's own ask to drive
+    // queues behind this invocation, so after a handoff either drive admits
+    // the next root: this one's continuation, or that ask's drive ahead of
+    // it, which leaves the continuation nothing to admit.
     let outcome = f
-        .work
-        .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
+        .attach_whole_drive(DriveRequestId::new("initial"))
         .await
         .expect("drive");
     assert!(
-        matches!(outcome.ran.as_slice(), [RootOutcome::Released { root }, RootOutcome::Committed { root: committed, .. }] if *root == f.driver.root && *committed == next)
+        match outcome.ran.as_slice() {
+            [RootOutcome::Released { root }] => *root == f.driver.root,
+            [
+                RootOutcome::Released { root },
+                RootOutcome::Committed {
+                    root: committed, ..
+                },
+            ] => *root == f.driver.root && *committed == next,
+            _ => false,
+        },
+        "{outcome:?}"
     );
     assert_eq!(outcome.stop, DriveStop::Idle);
     assert_eq!(f.driver.commits.load(Ordering::SeqCst), 1);
@@ -1200,8 +1254,7 @@ async fn released_then_repeated(server: HarnessServer) {
         .await
         .expect("release");
     let outcome = f
-        .work
-        .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
+        .attach_whole_drive(DriveRequestId::new("initial"))
         .await
         .expect("drive");
     assert!(
@@ -1906,7 +1959,7 @@ async fn missing_started_root(server: HarnessServer, admin_outage: bool) {
         .into_owned();
     let key = crate::session_driver::turn_workflow_key(&session, &root);
     let killed = harness.harness_admin().kill_workflow_run(&turn, &key).await;
-    let attach = work.attach_drive(&session, DriveRequestId::new("initial"));
+    let attach = attach_whole_drive(&work, &session, DriveRequestId::new("initial"));
     tokio::pin!(attach);
     let mut outcome = None;
     for _ in 0..2000 {

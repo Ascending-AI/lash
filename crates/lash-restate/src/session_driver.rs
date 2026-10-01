@@ -90,7 +90,7 @@
 //! build's drain formats and hands it in through
 //! [`RestateConfig`](crate::RestateConfig) (FIG-3795 A).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use lash_core::engine::{
@@ -146,14 +146,22 @@ mod asks;
 /// journals a send to its key's `close` handler where it recorded the root's
 /// `CloseRootScope` step, and `close` records that step. And again for
 /// FIG-4506: `LashSession`'s `drive` records a `lash.drive.boundary` step
-/// after each root it goes on from, short of its root bound.
+/// after each root it goes on from, short of its root bound. And again for
+/// FIG-4523: `drive` records a `lash.drive.leg` step after admission 0, before
+/// it calls the leg's first root, and the continuation it sends carries the
+/// stop rules' memory of the leg.
 pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";
 
+/// The journal name of the step `drive` records before it calls a leg's first
+/// root. Its body marks the attempt that runs it fresh: an attempt served the
+/// step from the journal follows a failed attempt or a suspension.
+const LEG_START_STEP: &str = "lash.drive.leg";
+
 /// The journal name of the step `drive` records at a root boundary: whether
-/// the attempt that reached the boundary had replayed an earlier one, and so
+/// the attempt that reached the boundary was not the leg's fresh one, and so
 /// hands the rest of the drive to its continuation.
 const ROOT_BOUNDARY_STEP: &str = "lash.drive.boundary";
 
@@ -188,6 +196,12 @@ pub(crate) const TURN_OUTCOME_FORMATS: StoredValueFormats = StoredValueFormats {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestateSessionDriveRequest {
     pub request: DriveRequest,
+    /// What the leg that handed this drive off remembers of its own roots
+    /// ([`DriveLoop::handed_off`]): the stop rules this leg starts from, so a
+    /// root that leg ran is not run again here. Only a leg's own continuation
+    /// send carries it; a host's send and a waiter's attach never do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handed_off: Option<DriveLoop>,
 }
 
 /// The request `LashTurn/{session}:{root}/run` runs: one admitted root.
@@ -468,6 +482,7 @@ impl RestateSessionWork {
                 request: request.clone(),
                 build_generation: self.build_generation.clone(),
             },
+            handed_off: None,
         };
         self.ingress
             .send_object_json_idempotent_bounded(
@@ -501,6 +516,7 @@ impl RestateSessionWork {
                 request: request.clone(),
                 build_generation: generation.clone(),
             },
+            handed_off: None,
         };
         self.ingress
             .send_object_json_idempotent_bounded(
@@ -528,6 +544,7 @@ impl RestateSessionWork {
                 request: request.clone(),
                 build_generation: self.build_generation.clone(),
             },
+            handed_off: None,
         };
         self.ingress
             .call_object_json_idempotent::<_, Reply<DriveOutcome>>(
@@ -947,6 +964,7 @@ impl LashSession for LashSessionImpl {
             &self.route,
             ctx,
             input.request,
+            input.handed_off,
         )
         .await
         .map(|outcome| Reply::at(wire, outcome))
@@ -1015,9 +1033,11 @@ impl LashTurn for LashTurnImpl {
 }
 
 /// What `LashSession/{session}/drive` journals: admission `n` on the
-/// drive-admission scope, then, for an admitted root, the call to its
-/// `LashTurn`, the root boundary, then admission `n + 1`, until admission
-/// answers anything but an admitted root or a boundary hands the drive off.
+/// drive-admission scope, then, for an admitted root, the leg start ahead of
+/// the first one, the call to its `LashTurn`, the root boundary, then
+/// admission `n + 1`, until admission answers anything but an admitted root
+/// or a boundary hands the drive off. `handed_off` is what the leg before
+/// this one remembers, when this leg is a continuation.
 async fn drive_session_journal(
     slot: &RestateSessionDriverSlot,
     authority_id: &RestateAuthorityId,
@@ -1025,6 +1045,7 @@ async fn drive_session_journal(
     route: &crate::services::ServiceRoute,
     ctx: ObjectContext<'_>,
     request: DriveRequest,
+    handed_off: Option<DriveLoop>,
 ) -> Result<DriveOutcome, HandlerError> {
     if ctx.key() != request.session.as_str() {
         return Err(misaddressed(format!(
@@ -1070,30 +1091,32 @@ async fn drive_session_journal(
             generation,
             route,
             request,
+            handed_off.unwrap_or_default(),
         ))
         .await?
 }
 
 /// Admission `n`, then the admitted root's `LashTurn` and its boundary,
 /// until admission answers anything but an admitted root or a boundary hands
-/// the drive off.
+/// the drive off. `rules` are the kernel's stop rules as the leg before this
+/// one left them, new for a drive's first leg.
 async fn drive_admissions(
     driver: &dyn SessionDriver,
     controller: &RestateRuntimeEffectController<'_, ObjectContext<'_>>,
     generation: &BuildGeneration,
     route: &crate::services::ServiceRoute,
     request: DriveRequest,
+    mut rules: DriveLoop,
 ) -> Result<DriveOutcome, HandlerError> {
     let admission_scope = drive_admission_scope(&request.session, &request.request);
     let mut ran = Vec::new();
-    // The kernel's stop rules, the same ones the in-process drive keeps.
-    // Every outcome they read comes from a journaled call result, so a
-    // replay rebuilds the same state.
-    let mut rules = DriveLoop::new();
+    // `rules` are the kernel's stop rules, the same ones the in-process drive
+    // keeps. Every outcome they read comes from a journaled call result or
+    // from the request, so a replay rebuilds the same state.
     let mut ordinal = 0_u32;
-    // The root boundaries this attempt recorded itself. One it was served
-    // from the journal instead was recorded by an attempt before it.
-    let live_boundaries = Arc::new(AtomicUsize::new(0));
+    // Whether this attempt recorded the leg's start itself. An attempt served
+    // it from the journal follows a failed attempt or a suspension.
+    let fresh = Arc::new(AtomicBool::new(false));
     loop {
         let scoped = controller
             .scoped_effect_controller(admission_scope.clone())
@@ -1109,6 +1132,20 @@ async fn drive_admissions(
                 // key has run once.
                 if let Err(stop) = rules.before(&admitted) {
                     return Ok(DriveOutcome { ran, stop });
+                }
+                // The leg starts where its first root is about to be called,
+                // not ahead of admission 0: that admission is the drive's
+                // first command and carries its generation (FIG-3980).
+                if ordinal == 0 {
+                    let fresh = Arc::clone(&fresh);
+                    RunFuture::name(
+                        ContextSideEffects::run(controller.context(), move || async move {
+                            fresh.store(true, Ordering::SeqCst);
+                            Ok(())
+                        }),
+                        LEG_START_STEP,
+                    )
+                    .await?;
                 }
                 let root = admitted.root().clone();
                 let work = admitted.work().clone();
@@ -1174,16 +1211,16 @@ async fn drive_admissions(
                 // invocation restarts: a drive that kept going would add up
                 // the failed attempts of every root it runs, and pause on a
                 // budget meant for one root's work (FIG-4506). So an attempt
-                // that replayed a boundary, one that follows a failed attempt
-                // or a suspension, hands the rest of the drive to a fresh
-                // invocation at the first boundary it reaches live. What it
-                // decided is recorded, so its own replay decides the same.
+                // that did not start the leg itself, one that follows a failed
+                // attempt or a suspension, hands the rest of the drive to a
+                // new invocation at the first boundary it reaches live, the
+                // leg's first one included (FIG-4523). What it decided is
+                // recorded, so its own replay decides the same.
                 let handed_off = ran.len() == MAX_ROOTS_PER_DRIVE || {
-                    let boundary = ran.len() - 1;
-                    let live = Arc::clone(&live_boundaries);
+                    let fresh = Arc::clone(&fresh);
                     let Json(replayed) = RunFuture::name(
                         ContextSideEffects::run(controller.context(), move || async move {
-                            Ok(Json(live.fetch_add(1, Ordering::SeqCst) < boundary))
+                            Ok(Json(!fresh.load(Ordering::SeqCst)))
                         }),
                         ROOT_BOUNDARY_STEP,
                     )
@@ -1196,7 +1233,11 @@ async fn drive_admissions(
                     // object's exclusive handler before we return. The
                     // request id is the send's idempotency key, so a waiter
                     // that attaches under it joins this invocation rather
-                    // than starting a second one.
+                    // than starting a second one. It carries what the stop
+                    // rules remember of this leg's roots: a leg may be one
+                    // root long, and a root admission names again right after
+                    // it ran must stop the drive in the leg that meets it
+                    // rather than be run there again.
                     let continuation = DriveRequest {
                         session: request.session.clone(),
                         request: drive_continuation_request(&request),
@@ -1214,6 +1255,7 @@ async fn drive_admissions(
                         "drive",
                         RestateSessionDriveRequest {
                             request: continuation,
+                            handed_off: Some(rules.handed_off(&ran)),
                         },
                     )
                     .idempotency_key(continuation_id)
@@ -1509,6 +1551,7 @@ mod tests {
         };
         let mut encoded = serde_json::to_value(RestateSessionDriveRequest {
             request: request.clone(),
+            handed_off: None,
         })
         .expect("encode");
         assert_eq!(

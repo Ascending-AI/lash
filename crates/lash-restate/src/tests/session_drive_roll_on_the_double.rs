@@ -424,6 +424,7 @@ impl SessionRoll {
                 request: DriveRequestId::new(request),
                 build_generation: stamp.clone(),
             },
+            handed_off: None,
         }
     }
 

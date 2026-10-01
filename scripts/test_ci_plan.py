@@ -1242,6 +1242,34 @@ class RestateSuiteSelectionTests(unittest.TestCase):
                     self.assertTrue(any(command.search(recipes[recipe]) for recipe in selected),
                                     f"root-control {leg} has no CI-selected recipe")
 
+    def test_session_driver_runs_both_legs_in_a_ci_selected_recipe(self) -> None:
+        """The session drive's live continuation law runs where CI selects it.
+
+        The suite was registered and no recipe or workflow ran it (FIG-4523),
+        so its law went unexecuted through FIG-4506. The justfile and the
+        workflow are parsed; nothing shells out to `just`.
+        """
+
+        import tomllib
+
+        registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
+        self.assertIn("session-driver", registry)
+        recipes = ci_plan._justfile_recipes((ROOT / "justfile").read_text())
+        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["functional-e2e"]
+        selected = {row["recipe"] for row in job["strategy"]["matrix"]["include"]}
+        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run functional E2E")
+        self.assertIn("just ${{ matrix.recipe }}", run)
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("parse only")):
+            for leg in ("live", "replay"):
+                with self.subTest(leg=leg):
+                    command = re.compile(
+                        rf'^\s*python3\s+"\{{\{{repo\}}\}}/scripts/ci/restate_suite\.py"'
+                        rf'\s+suite\s+session-driver\s+--leg\s+{leg}\b',
+                        re.MULTILINE,
+                    )
+                    self.assertTrue(any(command.search(recipes[recipe]) for recipe in selected),
+                                    f"session-driver {leg} has no CI-selected recipe")
+
     def test_load_replay_suites_run_both_legs_in_a_ci_selected_recipe(self) -> None:
         import tomllib
 

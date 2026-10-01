@@ -226,6 +226,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                                     request: DriveRequestId::new("drain-drive"),
                                     build_generation: generation,
                                 },
+                                handed_off: None,
                             }),
                         )
                         .await

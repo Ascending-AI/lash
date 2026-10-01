@@ -144,21 +144,33 @@ impl SimEngine {
     /// process's driver has deposited its report. The handle read after it
     /// answers from that report at once, so a harness waiting on a turn
     /// makes no request of its own to the server while the turn runs, and
-    /// the server's grant order stays a function of the seed. A drive the
-    /// engine refused ends the wait too; the handle then reports why.
+    /// the server's grant order stays a function of the seed. A drive runs
+    /// over as many invocations as hand it off, and the root that took the
+    /// input may run in any of them, so the wait follows every leg that
+    /// stops [`HandedOff`](lash_core::engine::DriveStop::HandedOff) to the
+    /// one after it. A drive the engine refused ends the wait too; the
+    /// handle then reports why.
     async fn await_input_drive(&self, session: &lash::LashSession, input: &lash::InputId) {
-        let request = lash_core::drive::ingress_drive_request(
-            input.as_str(),
-            lash_core::drive::FIRST_INGRESS_ATTEMPT,
-        );
-        let session_id = session.session_id();
+        let mut leg = lash_core::engine::DriveRequest {
+            session: session.session_id(),
+            request: lash_core::drive::ingress_drive_request(
+                input.as_str(),
+                lash_core::drive::FIRST_INGRESS_ATTEMPT,
+            ),
+            build_generation: self.restate.lash_backend().build_generation().clone(),
+        };
         loop {
             match self
                 .restate
-                .attach_drive(&session_id, request.clone())
+                .attach_drive(&leg.session, leg.request.clone())
                 .await
             {
-                Err(error) if error.is_timeout() => continue,
+                Err(error) if error.is_timeout() => {}
+                Ok(outcome)
+                    if matches!(outcome.stop, lash_core::engine::DriveStop::HandedOff { .. }) =>
+                {
+                    leg.request = lash_core::engine::drive_continuation_request(&leg);
+                }
                 Ok(_) | Err(_) => return,
             }
         }

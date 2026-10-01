@@ -348,6 +348,7 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_first_ad
                     request: request.clone(),
                     build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),
                 },
+                handed_off: None,
             }),
             request.as_str(),
         )
@@ -370,6 +371,7 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_first_ad
                     request: request.clone(),
                     build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),
                 },
+                handed_off: None,
             }),
             request.as_str(),
         )
