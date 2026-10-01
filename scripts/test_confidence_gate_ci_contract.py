@@ -12,6 +12,7 @@ import runpy
 import subprocess
 import sys
 import tempfile
+import textwrap
 import tomllib
 import unittest
 from unittest import mock
@@ -59,6 +60,38 @@ FAST_SHARDS = [
     "sim-generated",
     "minimizer-fixtures",
 ]
+
+
+def render_just_recipe(name: str, *arguments: str) -> str:
+    """The shebang recipe `name` with `arguments` bound, as `just` would run it.
+
+    The repository-gates job has no `just`, so recipe behaviour is exercised
+    from the justfile itself: positional arguments, then the header's quoted
+    defaults, fill each `{{parameter}}`. Any other recipe shape fails the
+    render instead of running something `just` would not.
+    """
+    text = JUSTFILE.read_text(encoding="utf-8")
+    header = re.search(
+        rf"(?m)^{re.escape(name)}((?:[ \t]+\w+='[^']*')*)[ \t]*:[ \t]*\n", text
+    )
+    if header is None:
+        raise AssertionError(f"justfile has no recipe {name} with quoted defaults")
+    parameters = re.findall(r"(\w+)='([^']*)'", header[1])
+    if len(arguments) > len(parameters):
+        raise AssertionError(f"{name} takes at most {len(parameters)} arguments")
+    values = dict(parameters) | dict(zip((key for key, _ in parameters), arguments))
+    body = []
+    for line in text[header.end() :].splitlines():
+        if line and not line[0].isspace():
+            break
+        body.append(line)
+    script = textwrap.dedent("\n".join(body)).strip("\n") + "\n"
+    if not script.startswith("#!/usr/bin/env bash\n"):
+        raise AssertionError(f"{name} is not a bash shebang recipe")
+    rendered = re.sub(r"\{\{\s*(\w+)\s*\}\}", lambda match: values[match[1]], script)
+    if "{{" in rendered:
+        raise AssertionError(f"{name} uses an interpolation the render does not support")
+    return rendered
 
 
 @functools.lru_cache(maxsize=None)
@@ -1190,8 +1223,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 *arguments: str, **extra: str
             ) -> tuple[subprocess.CompletedProcess, list[list[str]]]:
                 calls.unlink(missing_ok=True)
+                recipe = temporary / "recipe"
+                recipe.write_text(render_just_recipe(*arguments), encoding="utf-8")
+                recipe.chmod(0o755)
                 result = subprocess.run(
-                    ["just", *arguments],
+                    [str(recipe), *arguments[1:]],
                     cwd=ROOT,
                     env=environment | extra,
                     capture_output=True,
