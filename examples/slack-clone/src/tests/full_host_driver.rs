@@ -9,6 +9,9 @@
 //! changes the bot or its backend.
 
 use std::collections::BTreeSet;
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::bot::runtime::{PRIOR_STORE_LAYOUT, SESSIONS_ROOT, open_stores};
 
@@ -46,6 +49,110 @@ fn driver_tables() -> BTreeSet<String> {
         .filter(|pair| pair[0] == "FROM" || pair[0] == "JOIN")
         .map(|pair| pair[1].to_string())
         .collect()
+}
+
+fn driver_snapshot(catalog: &Path) -> serde_json::Value {
+    // Compile the actual Journey class without its optional browser imports.
+    let script = r#"
+from __future__ import annotations
+import ast
+import json
+from pathlib import Path
+import sqlite3
+import sys
+
+module = ast.parse(sys.stdin.read())
+journey = next(node for node in module.body if isinstance(node, ast.ClassDef) and node.name == "Journey")
+module.body = [journey]
+exec(compile(module, "full-host-driver", "exec"))
+snapshot = Journey.__new__(Journey)
+snapshot.session_db = Path(sys.argv[1])
+print(json.dumps(snapshot.session_snapshot()))
+"#;
+    let mut child = Command::new("python3")
+        .args(["-c", script])
+        .arg(catalog)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the session snapshot driver");
+    child
+        .stdin
+        .take()
+        .expect("driver stdin")
+        .write_all(DRIVER.as_bytes())
+        .expect("send the checked-in driver");
+    let output = child.wait_with_output().expect("wait for snapshot");
+    assert!(
+        output.status.success(),
+        "the full-host session snapshot failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("session snapshot JSON")
+}
+
+#[test]
+fn the_driver_expects_the_mcp_names_published_by_the_bot_servers() {
+    for (server, tools) in [
+        (
+            "slack_clone",
+            &[
+                "sample_summary",
+                "elicit_confirmation",
+                "elicit_via_url",
+                "list_host_roots",
+            ][..],
+        ),
+        ("workspace_http", &["workspace_badge"][..]),
+    ] {
+        for name in lash_plugin_mcp::mcp_tool_names(server, tools).values() {
+            assert!(
+                DRIVER.contains(&format!("\"{name}\"")),
+                "the full-host driver does not expect the published MCP tool name `{name}`"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_driver_reads_usage_with_separate_model_identities_from_the_bot_store() {
+    let data_dir = tempfile::tempdir().expect("bot data dir");
+    let _stores = open_stores(data_dir.path())
+        .await
+        .expect("open the bot's store set");
+    let catalog = data_dir.path().join(SESSIONS_ROOT).join(SESSION_CATALOG);
+    assert_eq!(driver_snapshot(&catalog)["usage"], serde_json::json!([]));
+
+    let connection = rusqlite::Connection::open(&catalog).expect("open session catalog");
+    for (kind, key, served) in [
+        ("session", "key-a", Some("served-wire")),
+        ("session", "key-b", None),
+        ("process", "process-key", Some("process-wire")),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, \
+                 provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, \
+                 model_key, requested_model, served_model, input_tokens, output_tokens, \
+                 cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, \
+                 payload_hash, recorded_at_ms) VALUES (?1, 'owner', ?2, 0, 0, 'attempt', \
+                 'reported', 'run', 'call', 'turn', ?2, 'requested-wire', ?3, 7, 3, 0, 0, 0, \
+                 'payload', 1)",
+                rusqlite::params![kind, key, served],
+            )
+            .expect("record usage fixture");
+    }
+
+    assert_eq!(
+        driver_snapshot(&catalog)["usage"],
+        serde_json::json!([
+            {"owner_id": "owner", "model_key": "key-a", "requested_model": "requested-wire",
+             "served_model": "served-wire", "input_tokens": 7, "output_tokens": 3},
+            {"owner_id": "owner", "model_key": "key-b", "requested_model": "requested-wire",
+             "served_model": null, "input_tokens": 7, "output_tokens": 3},
+        ])
+    );
 }
 
 #[test]
