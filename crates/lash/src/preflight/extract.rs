@@ -14,6 +14,7 @@
 //! data it may not be able to read.
 
 use lash_core::{DurableItem, DurablePayload, DurableSurface};
+#[cfg(feature = "rlm")]
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
 use super::msgpack;
