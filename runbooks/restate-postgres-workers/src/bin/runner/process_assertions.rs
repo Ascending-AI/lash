@@ -378,17 +378,9 @@ pub(super) async fn assert_processes_terminal(pool: &sqlx::PgPool) -> Result<()>
     Ok(())
 }
 
-pub(super) async fn assert_no_duplicate_runtime_rows(pool: &sqlx::PgPool) -> Result<()> {
-    let queued_work_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM lash_queued_work_batches WHERE session_id = $1")
-            .bind(DEFAULT_SESSION_ID)
-            .fetch_one(pool)
-            .await
-            .context("count queued work rows")?;
-    anyhow::ensure!(
-        queued_work_count == 0,
-        "expected no leftover queued work rows after wake consumption, got {queued_work_count}"
-    );
+pub(super) async fn assert_no_duplicate_runtime_rows(storage: &PostgresStorage) -> Result<()> {
+    assert_no_live_queued_work(storage).await?;
+    let pool = storage.pool();
     let duplicate_turn_commits: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM (
             SELECT session_id, turn_id
