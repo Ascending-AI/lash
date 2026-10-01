@@ -36,6 +36,7 @@ impl SessionDriver for HeldDriver {
         _controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
+        _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         if matches!(self.kind, JournalKind::AwaitedRoot) {
             return Ok(if ordinal == 0 {

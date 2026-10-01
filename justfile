@@ -246,6 +246,14 @@ effect-group-conformance-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg replay \
     --artifacts "$artifacts"
 
+  # The drain hand-over's PostgreSQL legs (FIG-4639): this recipe has the
+  # database its SQLite legs, in `server-double-e2e`, do not need.
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over-postgres --leg live \
+    --artifacts "$artifacts"
+
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over-postgres --leg replay \
+    --artifacts "$artifacts"
+
 # The server double's deployment laws against a live restate-server (FIG-3795
 # part B): newest-deployment routing and invocation pinning, so the double
 # cannot drift; and the deployment-namespace laws (FIG-3898): namespaced cores
@@ -283,6 +291,8 @@ server-double-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-driver --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-roots --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-roots --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg replay
 
 # The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
 # (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its

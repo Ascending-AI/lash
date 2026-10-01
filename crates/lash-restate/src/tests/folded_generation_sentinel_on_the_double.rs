@@ -105,6 +105,7 @@ impl SessionDriver for HeldDriver {
         controller: ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
+        _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         self.recorded_step(
             &controller,

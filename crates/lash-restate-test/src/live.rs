@@ -390,6 +390,37 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
         .await
     }
 
+    /// Another build of this deployment, as a rolling deploy brings one up
+    /// beside it (FIG-4639): a second engine and endpoint of drain generation
+    /// `build_generation` over this backend's stores and clock, served on
+    /// `endpoint_bind` and registered at `endpoint_url`, a URI of its own
+    /// (ADR 0115 §3.5). This backend keeps serving what the server pinned to
+    /// it, and a new invocation of a stable name routes to the newest
+    /// registration. The caller installs the new build's process worker and
+    /// session driver.
+    pub async fn add_build(
+        &self,
+        endpoint_bind: std::net::SocketAddr,
+        endpoint_url: String,
+        build_generation: lash_core::engine::BuildGeneration,
+    ) -> Result<Self, LiveError> {
+        Self::start_over(
+            LiveConfig {
+                endpoint_bind,
+                endpoint_url,
+                ..self.inner.config.clone()
+            },
+            self.inner.segment_effect_budget,
+            Arc::clone(&self.inner.engine_stores),
+            Arc::clone(&self.inner.stores),
+            Arc::clone(&self.inner.clock),
+            build_generation,
+            true,
+            Box::new(|builder| builder),
+        )
+        .await
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "deployment needs typed stores, erased engine stores and host service bindings"

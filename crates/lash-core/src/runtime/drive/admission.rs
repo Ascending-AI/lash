@@ -66,6 +66,31 @@ pub(in crate::runtime) struct AdmitDriveRunner {
     pub(in crate::runtime) stores: Arc<dyn crate::DeploymentStore>,
     pub(in crate::runtime) request: AdmitRequest,
     pub(in crate::runtime) ordinal: u32,
+    /// The drain this admission hands over for, when its drive named one
+    /// (FIG-4639).
+    pub(in crate::runtime) drain: Option<DrainRead>,
+}
+
+/// The drain mark an admission reads before it admits (ADR 0106 §1): the
+/// store's marks, and the build generation its drive's invocation is pinned
+/// to.
+pub(in crate::runtime) struct DrainRead {
+    pub(in crate::runtime) marks: Arc<dyn crate::store::generation_drain::GenerationDrainStore>,
+    pub(in crate::runtime) generation: crate::engine::BuildGeneration,
+}
+
+impl DrainRead {
+    /// Whether an operator marked the generation draining: the same mark the
+    /// recovery leader's hand-over duty and the drain status read.
+    async fn marked(&self) -> Result<bool, RuntimeEffectControllerError> {
+        Ok(self
+            .marks
+            .draining_generations()
+            .await
+            .map_err(|error| store_fault("generation drain mark read", error))?
+            .iter()
+            .any(|marked| marked.generation == self.generation))
+    }
 }
 
 #[async_trait::async_trait]
@@ -165,6 +190,17 @@ impl AdmitDriveRunner {
         let Some((root, work)) = self.next_root(&store).await? else {
             return Ok(AdmitVerdict::Idle);
         };
+        // A drive whose build is draining admits no further root (FIG-4639):
+        // the work found here is the newest build's. The mark is read only
+        // once there is work to hand over, and the verdict records it, so a
+        // replay hands over where this execution did.
+        if let Some(drain) = &self.drain
+            && drain.marked().await?
+        {
+            return Ok(AdmitVerdict::Draining {
+                generation: drain.generation.clone(),
+            });
+        }
         // The parked root is bound to the session and owns its head
         // (FIG-4202): while its redrive is unsettled, nothing is admitted
         // ahead of it, session commands included, and a turn input waits for

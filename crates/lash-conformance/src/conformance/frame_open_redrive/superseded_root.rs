@@ -108,7 +108,7 @@ async fn engine_root(
         request: lash_core::engine::DriveRequestId::new(scope.scope_id()),
         build_generation,
     };
-    let admitted = match lash_core::drive::admit_drive(runtime, scope, &request, 0)
+    let admitted = match lash_core::drive::admit_drive(runtime, scope, &request, 0, None)
         .await
         .map_err(lash_core::engine::DriveAbort::into_error)?
     {

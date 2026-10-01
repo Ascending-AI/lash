@@ -319,6 +319,13 @@ fails before the leg's start is stored journals nothing and is not seen: a
 deployment that refuses the invocation, or a request the handler cannot
 open.
 
+A drive whose build is draining hands off sooner, before its next root
+([ADR 0106 §1](0106-durable-formats-upgrade-by-migration-or-drain.md)): the
+recorded admission answers `AdmitVerdict::Draining` and the drive sends its
+continuation under the stable name, to the newest build, with the stop
+`DriveStop::Draining`. The decision is the journaled admission's, so a replay
+makes it again.
+
 The continuation's request carries what the kernel's stop rules (`DriveLoop`)
 remember of the roots the handing-off leg ran, and the next leg starts from
 it. A root that admission names again right after it ran therefore stops the

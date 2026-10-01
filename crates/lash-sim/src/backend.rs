@@ -147,8 +147,9 @@ impl SimEngine {
     /// the server's grant order stays a function of the seed. A drive runs
     /// over as many invocations as hand it off, and the root that took the
     /// input may run in any of them, so the wait follows every leg that
-    /// stops [`HandedOff`](lash_core::engine::DriveStop::HandedOff) to the
-    /// one after it. A drive the engine refused ends the wait too; the
+    /// stops [`HandedOff`](lash_core::engine::DriveStop::HandedOff), or
+    /// [`Draining`](lash_core::engine::DriveStop::Draining), to the one
+    /// after it. A drive the engine refused ends the wait too; the
     /// handle then reports why.
     async fn await_input_drive(&self, session: &lash::LashSession, input: &lash::InputId) {
         let mut leg = lash_core::engine::DriveRequest {
@@ -167,7 +168,11 @@ impl SimEngine {
             {
                 Err(error) if error.is_timeout() => {}
                 Ok(outcome)
-                    if matches!(outcome.stop, lash_core::engine::DriveStop::HandedOff { .. }) =>
+                    if matches!(
+                        outcome.stop,
+                        lash_core::engine::DriveStop::HandedOff { .. }
+                            | lash_core::engine::DriveStop::Draining { .. }
+                    ) =>
                 {
                     leg.request = lash_core::engine::drive_continuation_request(&leg);
                 }

@@ -28,10 +28,12 @@ pub(crate) async fn admit_drive_observed(
     controller: &ScopedEffectController<'_>,
     request: &lash_core::engine::DriveRequest,
     ordinal: u32,
+    draining: Option<&lash_core::engine::BuildGeneration>,
 ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
-    let verdict = lash_core::drive::admit_drive(&mut writer, controller, request, ordinal).await;
+    let verdict =
+        lash_core::drive::admit_drive(&mut writer, controller, request, ordinal, draining).await;
     runtime.publish_from(&writer);
     verdict
 }

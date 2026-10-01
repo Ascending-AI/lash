@@ -160,6 +160,7 @@ impl SessionDriver for Driver {
         controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
+        _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         recorded_admission(&controller, request, ordinal, || {
             self.decide_admission(request, ordinal)
@@ -252,7 +253,10 @@ async fn attach_whole_drive(
     loop {
         let outcome = work.attach_drive(&leg.session, leg.request.clone()).await?;
         ran.extend(outcome.ran);
-        if !matches!(outcome.stop, DriveStop::HandedOff { .. }) {
+        if !matches!(
+            outcome.stop,
+            DriveStop::HandedOff { .. } | DriveStop::Draining { .. }
+        ) {
             return Ok(DriveOutcome {
                 ran,
                 stop: outcome.stop,
@@ -1366,6 +1370,7 @@ impl SessionDriver for TickingDriver {
         _: lash_core::ScopedEffectController<'_>,
         _: &DriveRequest,
         _: u32,
+        _: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         panic!("the recovery interval never admits")
     }
@@ -1562,6 +1567,7 @@ impl SessionDriver for CadenceDriver {
         _: lash_core::ScopedEffectController<'_>,
         _: &DriveRequest,
         _: u32,
+        _: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         panic!("the recovery interval never admits")
     }
@@ -1817,6 +1823,7 @@ impl SessionDriver for StartedRootDriver {
         controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
+        _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         recorded_admission(&controller, request, ordinal, || {
             self.decide_admission(request, ordinal)

@@ -171,6 +171,7 @@ impl lash_core::SessionDriver for RecoveryDriver {
         _: ScopedEffectController<'_>,
         _: &lash_core::engine::DriveRequest,
         _: u32,
+        _: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
         panic!("the recovery schedule admits no drives")
     }

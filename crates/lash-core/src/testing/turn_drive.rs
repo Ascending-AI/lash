@@ -97,7 +97,7 @@ impl TestTurnDrive for LashRuntime {
         let mut rules = DriveLoop::new();
         loop {
             let AdmitVerdict::Admit(admitted) =
-                crate::drive::admit_drive(self, &controller, &request, ordinal)
+                crate::drive::admit_drive(self, &controller, &request, ordinal, None)
                     .await
                     .map_err(crate::engine::DriveAbort::into_error)?
             else {
@@ -172,7 +172,7 @@ impl TestTurnDrive for LashRuntime {
         let mut rules = DriveLoop::new();
         let mut ordinal = 0_u32;
         loop {
-            let verdict = crate::drive::admit_drive(self, &controller, &request, ordinal)
+            let verdict = crate::drive::admit_drive(self, &controller, &request, ordinal, None)
                 .await
                 .map_err(|abort| aborted(abort.into_error()))?;
             let admitted = match verdict {
@@ -270,7 +270,7 @@ impl TestTurnDrive for LashRuntime {
             build_generation: self.host.core.backend().build_generation().clone(),
         };
         let AdmitVerdict::Admit(admitted) =
-            crate::drive::admit_drive(self, &controller, &request, 0)
+            crate::drive::admit_drive(self, &controller, &request, 0, None)
                 .await
                 .map_err(crate::engine::DriveAbort::into_error)?
         else {

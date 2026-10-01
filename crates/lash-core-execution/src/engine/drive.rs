@@ -24,7 +24,9 @@ use crate::{AdmittedScope, RuntimeError, SessionId, TurnId, TurnOutcome};
 const DRIVE_ADMISSION_SCOPE_PREFIX: &str = "drive:";
 
 /// Maximum roots admitted by one engine drive invocation before it hands
-/// remaining work to a new request.
+/// remaining work to a new request. An invocation whose build is draining
+/// hands over sooner, after the root it is running
+/// ([`DriveStop::Draining`]).
 pub const MAX_ROOTS_PER_DRIVE: usize = 64;
 
 /// What a driver keeps open for one attempt of one drive invocation
@@ -226,6 +228,17 @@ pub enum DriveStop {
     /// waiter follows the continuation; this is one leg's stop, never a
     /// whole drive's.
     HandedOff { root: TurnId },
+    /// The engine's drive invocation ended before its next root because
+    /// `generation`, the build it is pinned to, is draining (ADR 0106 §1):
+    /// admission recorded the drain mark and admitted nothing
+    /// ([`AdmitVerdict::Draining`](super::admission::AdmitVerdict::Draining)),
+    /// and the invocation sent the rest of the drive to its continuation
+    /// request ([`drive_continuation_request`]) under the stable name, which
+    /// the newest build serves. One leg's stop, as
+    /// [`HandedOff`](Self::HandedOff) is: a waiter follows the continuation.
+    Draining {
+        generation: super::contracts::BuildGeneration,
+    },
 }
 
 /// The stop rules every drive loop keeps, in process or split across an

@@ -703,10 +703,10 @@ pub async fn one_authorized_drive_per_session(
         let first = first.clone();
         let second = second.clone();
         Box::pin(async move {
-            let a = lash_core::drive::admit_drive(&mut runtime, &scope, &first, 0)
+            let a = lash_core::drive::admit_drive(&mut runtime, &scope, &first, 0, None)
                 .await
                 .expect("admit the first drive");
-            let b = lash_core::drive::admit_drive(&mut runtime, &scope, &second, 0)
+            let b = lash_core::drive::admit_drive(&mut runtime, &scope, &second, 0, None)
                 .await
                 .expect("admit the second drive");
             let a = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted(a))
@@ -979,7 +979,7 @@ pub async fn reset_before_admission_admits_fresh(
         let fresh = fresh.clone();
         Box::pin(async move {
             let stale = admitted(
-                lash_core::drive::admit_drive(&mut runtime, &scope, &stale, 0)
+                lash_core::drive::admit_drive(&mut runtime, &scope, &stale, 0, None)
                     .await
                     .expect("admit the stale drive"),
             );
@@ -1117,7 +1117,7 @@ pub async fn fence_is_not_in_the_envelope_hash(
         let request = admit_request.clone();
         Box::pin(async move {
             admitted(
-                lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
                     .await
                     .expect("admit the root"),
             )
@@ -1268,7 +1268,7 @@ pub async fn a_root_admission_survives_a_worker_crash_without_widening(
             Box::pin(async move {
                 let mut runtime = parts.runtime().await;
                 let admitted = admitted(
-                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
                         .await
                         .expect("admit the root"),
                 );
@@ -1286,7 +1286,7 @@ pub async fn a_root_admission_survives_a_worker_crash_without_widening(
                 let _late = parts.enqueue("late", None).await;
                 let mut runtime = parts.runtime().await;
                 let admitted = admitted(
-                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
                         .await
                         .expect("readmit the root"),
                 );
@@ -1410,7 +1410,7 @@ pub async fn a_committed_root_replays_its_recorded_repair(
             Box::pin(async move {
                 let mut runtime = parts.runtime().await;
                 let admitted = admitted(
-                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
                         .await
                         .expect("admit the root"),
                 );
@@ -1430,7 +1430,7 @@ pub async fn a_committed_root_replays_its_recorded_repair(
             Box::pin(async move {
                 let mut runtime = parts.runtime().await;
                 let admitted = admitted(
-                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
                         .await
                         .expect("replay admission"),
                 );
@@ -1530,9 +1530,10 @@ pub async fn a_store_fault_at_the_root_admission_is_retried_not_recorded(
                 let tx = tx.clone();
                 Box::pin(async move {
                     let mut runtime = parts.runtime().await;
-                    let verdict = lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
-                        .await
-                        .expect("admit the root");
+                    let verdict =
+                        lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
+                            .await
+                            .expect("admit the root");
                     let lash_core::engine::AdmitVerdict::Admit(admitted) = verdict else {
                         // The engine already retried the faulted execution to
                         // its commit: this run finds nothing to admit.
@@ -1626,9 +1627,10 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
             let tx = tx.clone();
             Box::pin(async move {
                 let mut runtime = parts.runtime().await;
-                let verdict = lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
-                    .await
-                    .expect("admit the input root");
+                let verdict =
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
+                        .await
+                        .expect("admit the input root");
                 let admitted = admitted(verdict);
                 // The command and a later input arrive between the root's
                 // drive admission and its own. Both are keyed, so a tier that
@@ -1747,7 +1749,7 @@ async fn idle_admission(
     on_tier(runner, parts, move |mut runtime, scope| {
         let request = request.clone();
         Box::pin(async move {
-            match lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0).await {
+            match lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None).await {
                 Ok(AdmitVerdict::Admit(admitted)) => match admitted.work() {
                     lash_core::engine::AdmittedWork::Queued { .. } => "queued".to_owned(),
                     lash_core::engine::AdmittedWork::Commands { .. } => "commands".to_owned(),

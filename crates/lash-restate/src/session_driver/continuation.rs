@@ -32,6 +32,25 @@ pub(super) fn continuation_generation(request: &DriveRequestId) -> Option<BuildG
     .flatten()
 }
 
+/// Whether admission `ordinal` of `request`, on `route`, answers to its
+/// build's drain (FIG-4639): every admission after the root the drive started
+/// on does, so a drive whose build is draining admits no further root. The
+/// drive's first admission answers to none, so the root it took always runs.
+/// A continuation's first admission is the drive's next root: on a
+/// generation lane it answers to the drain too, or a drive resumed there
+/// would run its whole backlog in one-root legs on the draining build. Under
+/// the stable name a new invocation is the newest build's, so its first root
+/// runs.
+pub(super) fn drain_answered(
+    route: &crate::services::ServiceRoute,
+    request: &DriveRequestId,
+    ordinal: u32,
+) -> bool {
+    ordinal > 0
+        || matches!(route.lane(), crate::services::Lane::Generation(_))
+            && continuation_generation(request).is_some()
+}
+
 #[expect(
     clippy::result_large_err,
     reason = "the ingress client returns RestateHttpError unboxed across its public API"
@@ -74,28 +93,31 @@ impl RestateSessionWork {
             .map(Reply::into_body)
     }
     /// The leg a drive continues on after `leg` ended with `outcome`, when
-    /// `leg` handed off at a root boundary.
+    /// `leg` handed the drive on: at a root boundary, to its own lane, or
+    /// because its build is draining, to the stable name.
     pub(super) fn continuation(
         &self,
         session: &SessionId,
         leg: &DriveRequestId,
         outcome: &DriveOutcome,
     ) -> Option<DriveRequestId> {
-        matches!(outcome.stop, DriveStop::HandedOff { .. }).then(|| {
-            let route = match continuation_generation(leg) {
-                Some(generation) => self
-                    .namespace
-                    .generation(LashService::SessionDriver, generation),
-                None => self.namespace.stable(LashService::SessionDriver),
-            };
-            session_drive_continuation(
-                &DriveRequest {
-                    session: session.clone(),
-                    request: leg.clone(),
-                    build_generation: self.build_generation.clone(),
-                },
-                &route,
-            )
-        })
+        let leg = DriveRequest {
+            session: session.clone(),
+            request: leg.clone(),
+            build_generation: self.build_generation.clone(),
+        };
+        match outcome.stop {
+            DriveStop::HandedOff { .. } => {
+                let route = match continuation_generation(&leg.request) {
+                    Some(generation) => self
+                        .namespace
+                        .generation(LashService::SessionDriver, generation),
+                    None => self.namespace.stable(LashService::SessionDriver),
+                };
+                Some(session_drive_continuation(&leg, &route))
+            }
+            DriveStop::Draining { .. } => Some(drive_continuation_request(&leg)),
+            _ => None,
+        }
     }
 }

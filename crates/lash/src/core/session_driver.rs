@@ -404,6 +404,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         controller: lash_core::ScopedEffectController<'_>,
         request: &lash_core::engine::DriveRequest,
         ordinal: u32,
+        draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
         let runtime = match self.drive_runtime(&request.session).await {
             Ok(runtime) => runtime,
@@ -424,7 +425,8 @@ impl lash_core::SessionDriver for CoreSessionDriver {
             }
             Err(failure) => return Err(failure.into_abort()),
         };
-        crate::turn::admit_drive_observed(runtime.handle(), &controller, request, ordinal).await
+        crate::turn::admit_drive_observed(runtime.handle(), &controller, request, ordinal, draining)
+            .await
     }
 
     async fn run_root(

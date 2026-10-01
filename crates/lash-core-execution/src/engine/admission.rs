@@ -44,6 +44,14 @@ pub enum AdmitVerdict {
     },
     /// No work is pending.
     Idle,
+    /// Work is pending and nothing is admitted: `generation`, the build the
+    /// drive's invocation is pinned to, is marked draining (ADR 0106 §1), so
+    /// the drive hands the rest to the newest build. The mark is read inside
+    /// the recorded step and recorded with this answer, so a replay hands
+    /// over where the first execution did, whatever the mark says by then.
+    Draining {
+        generation: super::contracts::BuildGeneration,
+    },
 }
 
 /// The seal's decision.

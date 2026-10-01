@@ -159,11 +159,22 @@ pub trait SessionDriver: Send + Sync {
     /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step
     /// through `controller`, which serves
     /// [`drive_admission_scope`](crate::engine::drive_admission_scope).
+    ///
+    /// `draining` is the build generation whose drain this admission hands
+    /// over for (FIG-4639, ADR 0106 §1): the generation of the build the
+    /// engine's drive invocation is pinned to, named for every admission
+    /// after the root the invocation's drive started on. When that
+    /// generation is marked draining and work is pending, the step admits
+    /// nothing and records
+    /// [`AdmitVerdict::Draining`](crate::engine::AdmitVerdict::Draining).
+    /// `None` admits whatever drains: the drive's first admission, whose
+    /// root always runs on the build that took it.
     async fn admit(
         &self,
         controller: crate::ScopedEffectController<'_>,
         request: &crate::engine::DriveRequest,
         ordinal: u32,
+        draining: Option<&crate::engine::BuildGeneration>,
     ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort>;
 
     /// Run `admitted`'s root to its terminal through `controller`, which
@@ -492,6 +503,7 @@ mod tests {
             _controller: crate::ScopedEffectController<'_>,
             _request: &crate::engine::DriveRequest,
             _ordinal: u32,
+            _draining: Option<&crate::engine::BuildGeneration>,
         ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort> {
             unreachable!("the probe never admits")
         }

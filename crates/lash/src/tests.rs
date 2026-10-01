@@ -1194,6 +1194,7 @@ mod crashed_create_drain;
 mod deleted_session_root_replay;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
+mod drain_hand_over;
 mod failure_settlement;
 mod finalize_fault;
 mod obligation_relays;

@@ -19,7 +19,11 @@
 //!   continuation at a root boundary: at its root bound, and at the first
 //!   boundary an attempt that replayed reaches, so the retry budget Restate
 //!   counts per invocation covers one stretch of roots and never the whole
-//!   backlog (FIG-4506). The object's key serializes the
+//!   backlog (FIG-4506). A drive whose build is draining hands over
+//!   sooner: every admission after the root it started on reads its build's
+//!   drain mark, and a marked build admits no further root and sends the
+//!   rest to the stable name, the newest build's (FIG-4639, ADR 0106 §1).
+//!   The object's key serializes the
 //!   engine's drives of the session (O1); an in-process driver beside it is
 //!   serialized by the SQL session execution lease until S8.
 //! - **`LashTurn/{session}:{root}`** is a workflow, one per logical root. Its
@@ -119,7 +123,7 @@ use crate::{
 mod asks;
 mod continuation;
 
-use continuation::{continuation_generation, session_drive_continuation};
+use continuation::{continuation_generation, drain_answered, session_drive_continuation};
 
 /// The generation of the session driver's journaled command prefix
 /// (ADR 0105 §12): a drain surface, and so an input to the build's drain
@@ -155,6 +159,8 @@ use continuation::{continuation_generation, session_drive_continuation};
 /// it calls the leg's first root, and the continuation it sends carries the
 /// stop rules' memory of the leg. And again for FIG-4556: `lash.drive.leg` is
 /// `drive`'s first command, ahead of admission 0, and carries its generation.
+/// And again for FIG-4639: on a recorded `AdmitVerdict::Draining`, `drive`
+/// sends its continuation under the stable name and stops `Draining`.
 ///
 /// version_guard(
 ///     shapes(cover(RestateSessionDriveRequest, RestateTurnDriveRequest)),
@@ -375,8 +381,11 @@ impl SessionDriver for InstalledSessionDriver {
         controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
+        draining: Option<&BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
-        self.driver.admit(controller, request, ordinal).await
+        self.driver
+            .admit(controller, request, ordinal, draining)
+            .await
     }
 
     async fn run_root(
@@ -1157,11 +1166,15 @@ async fn drive_admissions(
         let scoped = controller
             .scoped_effect_controller(admission_scope.clone())
             .map_err(refused_scope)?;
+        let draining = drain_answered(route, &request.request, ordinal).then_some(generation);
         let verdict = driver
-            .admit(scoped, &request, ordinal)
+            .admit(scoped, &request, ordinal, draining)
             .await
             .map_err(abort_failure)?;
-        let stop = match verdict {
+        // The leg's stop, and what it hands the rest of the drive to when it
+        // ends at a boundary: the route its continuation is sent under and
+        // the continuation's request id.
+        let (next, stop) = match verdict {
             AdmitVerdict::Admit(admitted) => {
                 // A root this drive already ran, or whose execution it saw
                 // released, is never called a second time: its `LashTurn`
@@ -1249,61 +1262,77 @@ async fn drive_admissions(
                     .await?;
                     replayed
                 };
-                if handed_off {
-                    // The send is a journaled Restate command. Its request is
-                    // distinct from this invocation and queues behind this
-                    // object's exclusive handler before we return. The
-                    // request id is the send's idempotency key, so a waiter
-                    // that attaches under it joins this invocation rather
-                    // than starting a second one. It carries what the stop
-                    // rules remember of this leg's roots: a leg may be one
-                    // root long, and a root admission names again right after
-                    // it ran must stop the drive in the leg that meets it
-                    // rather than be run there again.
-                    let continuation = DriveRequest {
-                        session: request.session.clone(),
-                        request: session_drive_continuation(&request, route),
-                        build_generation: request.build_generation.clone(),
-                    };
-                    let continuation_id = continuation.request.as_str().to_owned();
-                    // The continuation is this same drive yielding: it goes
-                    // to this invocation's lane, so a drive resumed on
-                    // `_g<G>` stays under the generation its journal family
-                    // belongs to. On the stable lane this is the stable name.
-                    crate::services::routed_object::<_, _, ()>(
-                        controller.context(),
-                        route,
-                        request.session.as_str().to_owned(),
-                        "drive",
-                        RestateSessionDriveRequest {
-                            request: continuation,
-                            handed_off: Some(rules.handed_off(&ran)),
-                        },
-                    )
-                    .idempotency_key(continuation_id)
-                    .send()
-                    .await?;
-                    return Ok(DriveOutcome {
-                        ran,
-                        stop: DriveStop::HandedOff { root: yielded_root },
-                    });
+                if !handed_off {
+                    ordinal = ordinal.checked_add(1).ok_or_else(|| {
+                        misaddressed(format!(
+                            "session `{}` drive `{}` exhausted its admission ordinals",
+                            request.session,
+                            request.request.as_str()
+                        ))
+                    })?;
+                    continue;
                 }
-                ordinal = ordinal.checked_add(1).ok_or_else(|| {
-                    misaddressed(format!(
-                        "session `{}` drive `{}` exhausted its admission ordinals",
-                        request.session,
-                        request.request.as_str()
-                    ))
-                })?;
-                continue;
+                // The continuation is this same drive yielding: it goes to
+                // this invocation's lane, so a drive resumed on `_g<G>` stays
+                // under the generation its journal family belongs to. On the
+                // stable lane this is the stable name.
+                (
+                    Some((route.clone(), session_drive_continuation(&request, route))),
+                    DriveStop::HandedOff { root: yielded_root },
+                )
             }
-            AdmitVerdict::Idle => DriveStop::Idle,
-            AdmitVerdict::Parked(park) => DriveStop::Parked(park),
-            AdmitVerdict::SubstrateLost { root } => DriveStop::SubstrateLost { root },
+            // This build is draining (FIG-4639): the rest goes to the stable
+            // name, the newest build's. A replay decodes the same verdict.
+            AdmitVerdict::Draining { generation } => (
+                Some((
+                    route.namespace().stable(LashService::SessionDriver),
+                    lash_core::engine::drive_continuation_request(&request),
+                )),
+                DriveStop::Draining { generation },
+            ),
+            AdmitVerdict::Idle => (None, DriveStop::Idle),
+            AdmitVerdict::Parked(park) => (None, DriveStop::Parked(park)),
+            AdmitVerdict::SubstrateLost { root } => (None, DriveStop::SubstrateLost { root }),
             AdmitVerdict::RootTerminal { root, kind, commit } => {
-                DriveStop::RootTerminal { root, kind, commit }
+                (None, DriveStop::RootTerminal { root, kind, commit })
             }
         };
+        let Some((next_route, next_request)) = next else {
+            return Ok(DriveOutcome { ran, stop });
+        };
+        // The send is a journaled Restate command. Its request is distinct
+        // from this invocation and queues behind this object's exclusive
+        // handler before we return. The request id is the send's idempotency
+        // key, so a waiter that attaches under it joins this invocation
+        // rather than starting a second one. It carries what the stop rules
+        // remember of this leg's roots: a leg may be one root long, and a
+        // root admission names again right after it ran must stop the drive
+        // in the leg that meets it rather than be run there again. A leg
+        // that ran no root passes on what it was handed.
+        let continuation = DriveRequest {
+            session: request.session.clone(),
+            request: next_request,
+            build_generation: request.build_generation.clone(),
+        };
+        let continuation_id = continuation.request.as_str().to_owned();
+        let remembered = if ran.is_empty() {
+            rules
+        } else {
+            rules.handed_off(&ran)
+        };
+        crate::services::routed_object::<_, _, ()>(
+            controller.context(),
+            &next_route,
+            request.session.as_str().to_owned(),
+            "drive",
+            RestateSessionDriveRequest {
+                request: continuation,
+                handed_off: Some(remembered),
+            },
+        )
+        .idempotency_key(continuation_id)
+        .send()
+        .await?;
         return Ok(DriveOutcome { ran, stop });
     }
 }
@@ -1466,6 +1495,7 @@ mod tests {
             _controller: lash_core::ScopedEffectController<'_>,
             _request: &DriveRequest,
             _ordinal: u32,
+            _draining: Option<&lash_core::engine::BuildGeneration>,
         ) -> Result<AdmitVerdict, DriveAbort> {
             unreachable!("the slot law runs no drive")
         }

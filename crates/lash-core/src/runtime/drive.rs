@@ -335,14 +335,17 @@ pub async fn drive_session_with(
 /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step through
 /// `controller`, which must serve
 /// [`drive_admission_scope`](crate::engine::drive_admission_scope) for the
-/// request.
+/// request. `draining` is the build generation whose drain the admission
+/// hands over for
+/// ([`SessionDriver::admit`](crate::runtime::work::SessionDriver::admit)).
 pub async fn admit_drive(
     runtime: &mut LashRuntime,
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
     ordinal: u32,
+    draining: Option<&crate::engine::BuildGeneration>,
 ) -> Result<AdmitVerdict, DriveAbort> {
-    Box::pin(runtime.admit_drive_step(controller, request, ordinal)).await
+    Box::pin(runtime.admit_drive_step(controller, request, ordinal, draining)).await
 }
 
 /// Emit admission `ordinal`'s journaled `AdmitDrive` step through
@@ -357,6 +360,7 @@ async fn emit_admission_step(
     ordinal: u32,
     store: Option<crate::store::SessionStore>,
     stores: Arc<dyn crate::DeploymentStore>,
+    drain: Option<admission::DrainRead>,
 ) -> Result<AdmitVerdict, DriveAbort> {
     let scope = drive_admission_scope(&request.session, &request.request);
     let invocation = RuntimeEffectInvocation::new(
@@ -387,6 +391,7 @@ async fn emit_admission_step(
                     stores,
                     request: admit_request,
                     ordinal,
+                    drain,
                 }),
                 None,
             ),
@@ -411,7 +416,7 @@ pub async fn admit_drive_retired(
     ordinal: u32,
     stores: Arc<dyn crate::DeploymentStore>,
 ) -> Result<AdmitVerdict, DriveAbort> {
-    emit_admission_step(controller, request, ordinal, None, stores).await
+    emit_admission_step(controller, request, ordinal, None, stores, None).await
 }
 
 /// Run `admitted`'s root for a session whose store could not be opened: its
@@ -731,10 +736,21 @@ impl LashRuntime {
         let mut declined_follow_on = false;
         let mut budget_exhausted = false;
         let stop = loop {
-            let admitted = match Box::pin(self.admit_drive_step(controller, request, ordinal))
+            // This loop's drive is pinned to no build an engine drains: its
+            // admissions name no drain, and none answers `Draining`.
+            let admitted = match Box::pin(self.admit_drive_step(controller, request, ordinal, None))
                 .await?
             {
                 AdmitVerdict::Admit(admitted) => admitted,
+                AdmitVerdict::Draining { generation } => {
+                    return Err(DriveAbort::Refused(RuntimeError::new(
+                        RuntimeErrorCode::QueuedWork,
+                        format!(
+                            "admission answered the drain of generation `{generation}` to a \
+                             drive that named none"
+                        ),
+                    )));
+                }
                 AdmitVerdict::Idle => break DriveStop::Idle,
                 AdmitVerdict::Parked(park) => break DriveStop::Parked(park),
                 AdmitVerdict::SubstrateLost { root } => break DriveStop::SubstrateLost { root },
@@ -807,6 +823,7 @@ impl LashRuntime {
         controller: &ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
+        draining: Option<&crate::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         if request.session != self.state.session_id {
             return Err(DriveAbort::Refused(RuntimeError::new(
@@ -839,6 +856,10 @@ impl LashRuntime {
             ordinal,
             Some(store),
             self.host.core.session_store_factory(),
+            draining.map(|generation| admission::DrainRead {
+                marks: self.host.core.backend().generation_drain(),
+                generation: generation.clone(),
+            }),
         )
         .await
     }

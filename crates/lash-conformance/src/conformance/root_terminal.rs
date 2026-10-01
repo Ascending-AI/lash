@@ -304,7 +304,7 @@ pub async fn a_root_whose_admission_a_successor_sealed_commits_nothing(
         let request = request.clone();
         Box::pin(async move {
             let admitted = admitted(
-                lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0, None)
                     .await
                     .expect("admit the root"),
             );

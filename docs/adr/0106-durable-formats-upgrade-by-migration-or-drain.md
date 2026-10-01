@@ -76,7 +76,28 @@ snapshot or an enumeration of every engine invocation. Finalize additionally
 checks retained deployments in §2. Parked work requires compatible replay or
 an operator control decision.
 
+A session drive's drain is bounded by one root per drive. Restate pins a
+`LashSession` drive invocation to the build that started it, and a drive
+admits one root after another, so a busy session would hold its pinned build
+for a whole backlog. Every admission after the root a drive started on
+therefore reads the drain mark of the build its invocation is pinned to,
+inside the recorded `AdmitDrive` step. Marked, with work pending, the step
+admits nothing and records `AdmitVerdict::Draining` with that generation. The
+drive then sends the rest to its continuation request under the stable name,
+which the newest build serves, and stops `DriveStop::Draining`; a waiter
+follows the continuation. The root in flight always runs to its terminal
+commit on its build. A replay decodes the recorded verdict and hands over
+where the first execution did, whatever the mark says by then. A drive
+resumed on a generation's lane runs the root it was resumed for and hands
+over the same way, its lane continuations included. A drive's first admission
+reads no mark: under the stable name a new invocation is already the newest
+build's, so a drain never passes work back and forth. The in-process drive
+loop is pinned to no build and reads none.
+
 Evidence: `crates/lash/src/formats.rs:594`,
+`crates/lash-core/src/runtime/drive/admission.rs:193`,
+`crates/lash-restate/src/session_driver.rs:1169`,
+`crates/lash/src/tests/drain_hand_over.rs:1`,
 `crates/lash-core-store/src/store/state_version.rs:51`,
 `crates/lash-restate/src/services.rs:35`,
 `crates/lash-restate/src/deployment_registry.rs:66`,

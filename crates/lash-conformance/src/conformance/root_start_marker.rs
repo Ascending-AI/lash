@@ -178,7 +178,7 @@ pub async fn fresh_execution_of_started_root_is_substrate_lost(
         move |mut runtime, scoped| {
             let request = request.clone();
             Box::pin(async move {
-                lash_core::drive::admit_drive(&mut runtime, &scoped, &request, 0)
+                lash_core::drive::admit_drive(&mut runtime, &scoped, &request, 0, None)
                     .await
                     .expect("admission runs")
             })

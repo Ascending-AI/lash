@@ -205,6 +205,26 @@ endpoints = ["RR"]
 shards = 1
 timeout_seconds = 240
 
+# A session drive on a draining build hands over to the newest build after
+# its current root (FIG-4639): build N and build N+1 are two deployments over
+# one store set, so two endpoint binds per shard. The PostgreSQL legs run
+# where the recipe provides a database.
+[suites.drain-hand-over]
+label = "//crates/lash:lash__unit_test"
+cwd = "crates/lash"
+filters = ["tests::drain_hand_over::live_restate_"]
+endpoints = ["DH_A", "DH_B"]
+shards = 1
+timeout_seconds = 240
+
+[suites.drain-hand-over-postgres]
+label = "//crates/lash:lash__unit_test"
+cwd = "crates/lash"
+filters = ["tests::drain_hand_over::postgres_live_restate_"]
+endpoints = ["DH_A", "DH_B"]
+shards = 1
+timeout_seconds = 240
+
 [suites.remote-cancellation]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"
