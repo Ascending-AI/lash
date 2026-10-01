@@ -436,7 +436,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     /// Feed a response to a previously emitted effect.
-    pub fn handle_response(&mut self, response: Response) {
+    pub fn handle_response(&mut self, response: Response<M::IntentOutcome>) {
         if let Err(overflow) = self.try_handle_response(response) {
             self.fail_turn(make_error_event(
                 crate::session_model::TurnFailureKind::TokenUsageAccounting,
@@ -452,7 +452,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Fallible host seam for delivering a response whose usage must remain
     /// suitable for durable accumulation.
-    pub fn try_handle_response(&mut self, response: Response) -> Result<(), TokenUsageOverflow> {
+    pub fn try_handle_response(
+        &mut self,
+        response: Response<M::IntentOutcome>,
+    ) -> Result<(), TokenUsageOverflow> {
         let Some(work) = self.state.take_waiting(&response) else {
             return Ok(());
         };
@@ -858,7 +861,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn handle_tool_results(
         &mut self,
         expansion: &ToolExpansionPlan,
-        completed: Vec<CompletedToolCall>,
+        completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     ) {
         let completed = if expansion.is_empty() {
             completed

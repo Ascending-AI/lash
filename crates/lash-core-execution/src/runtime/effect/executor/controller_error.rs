@@ -41,11 +41,21 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ProcessAlreadyTerminal { .. } => {
                 Self::new(RuntimeErrorCode::ProcessAlreadyTerminal, err.to_string())
             }
-            err @ PluginError::ParentEnded { .. } => {
-                Self::new(RuntimeErrorCode::ProcessParentEnded, err.to_string())
-            }
-            err @ PluginError::StartKeyConflict { .. } => {
-                Self::new(RuntimeErrorCode::ProcessStartKeyConflict, err.to_string())
+            ref err @ PluginError::ParentEnded {
+                ref start_key,
+                ref parent,
+            } => RuntimeError::new(RuntimeErrorCode::ProcessParentEnded, err.to_string())
+                .with_cause(crate::RuntimeErrorCause::ProcessParentEnded {
+                    start_key: start_key.clone(),
+                    parent: Box::new(parent.clone()),
+                })
+                .into(),
+            ref err @ PluginError::StartKeyConflict { ref start_key } => {
+                RuntimeError::new(RuntimeErrorCode::ProcessStartKeyConflict, err.to_string())
+                    .with_cause(crate::RuntimeErrorCause::ProcessStartKeyConflict {
+                        start_key: start_key.clone(),
+                    })
+                    .into()
             }
             err @ PluginError::TriggerDeliveryBound { .. } => {
                 Self::new(RuntimeErrorCode::TriggerDeliveryBound, err.to_string())

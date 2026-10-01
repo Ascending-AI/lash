@@ -71,7 +71,7 @@ impl DecodeLimits {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CodecRefusal {
     #[error("frame is truncated: {needed} bytes needed, {available} available")]

@@ -64,7 +64,15 @@ impl AttachmentSourcePolicy for OpenAttachmentSourcePolicy {
 /// The retry and operator verdicts are derived from the class, never stored
 /// separately, so a class and its verdicts cannot contradict each other.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

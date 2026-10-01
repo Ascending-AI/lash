@@ -21,7 +21,7 @@ use crate::version::ProtocolVersionRefusal;
 
 /// What the supervisor observed of a worker's end. Evidence, never testimony:
 /// a worker cannot claim how it ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SupervisorEvidence {
     /// The pipe closed with no exit status observed yet.
@@ -39,7 +39,7 @@ pub use lash_sansio::worker_limit::{WorkerFrameKind, WorkerLimit};
 /// A diagnostic beside a typed cause, cut to [`Self::MAX_BYTES`]. The variant
 /// that carries it decides the class; the bound keeps a refusal within any
 /// frame whatever its text.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(from = "String", into = "String")]
 pub struct Detail(String);
 
@@ -81,7 +81,7 @@ impl std::fmt::Display for Detail {
 }
 
 /// The exchange a worker answered with a message it does not admit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Exchange {
     /// The first message of a checkout, which is the handshake.
@@ -113,7 +113,9 @@ impl std::fmt::Display for Exchange {
 
 /// A message that arrived out of order, or an exchange whose accounting does
 /// not add up.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SequenceFault {
     #[error("an idle worker expects Start or lifecycle control")]
@@ -167,7 +169,7 @@ pub enum SequenceFault {
 }
 
 /// A typed payload inside a frame that did not encode or decode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PayloadKind {
     Bootstrap,
@@ -189,7 +191,9 @@ pub enum PayloadKind {
 }
 
 /// Why a freshly exec'd worker could not take its place on the pipe.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum BootstrapFault {
     #[error("the worker environment is not empty")]
@@ -207,7 +211,7 @@ pub enum BootstrapFault {
 }
 
 /// A failure of the supervising pool itself, met while it drove a worker.
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PoolFault {
     #[error("the worker recovery store failed")]
@@ -228,7 +232,7 @@ pub enum PoolFault {
 
 /// A parent, its worker or the pool between them broke the protocol. A fresh
 /// worker may keep it, so the owning invocation is re-driven.
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolBreach {
     #[error("{refusal}")]
@@ -264,7 +268,7 @@ pub enum ProtocolBreach {
 }
 
 /// An input of the run that the worker reads when it starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunInput {
     Context,
@@ -289,7 +293,7 @@ impl std::fmt::Display for RunInput {
 
 /// The run's own inputs are refused. They are the same on every attempt, so
 /// re-driving the invocation refuses them again: the refusal is terminal.
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunRefusal {
     #[error("{refusal}")]
@@ -350,7 +354,7 @@ pub enum WorkerDeploymentFault {
     NotExecutable,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InfrastructureOutcome {
     #[error("the worker executable {executable:?} is unavailable: {fault}")]

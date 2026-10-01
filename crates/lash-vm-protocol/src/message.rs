@@ -19,25 +19,73 @@ use crate::state::{OpaqueVmState, VmOwner};
 /// The lease one checkout of a worker runs under. The parent mints it and
 /// fences it when the worker is lost, so a late message under an old lease is
 /// refused rather than applied.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct ExecutionLease(pub u64);
 
 /// The owner's epoch: advances when ownership of the session or durable
 /// process moves, so a message from a superseded owner is refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct OwnerEpoch(pub u64);
 
 /// The context frame's epoch: advances when a frame opens (F5), which fences
 /// every response from the frame before it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct FrameEpoch(pub u64);
 
 /// The transport sequence: each direction numbers its messages from zero,
 /// one apart, so a dropped, duplicated or reordered message is refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct TransportSequence(pub u64);
 
@@ -51,7 +99,9 @@ pub struct MessageHeader {
 }
 
 /// Why a receiver refused a header.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HeaderRefusal {
     #[error("message runs under lease {found:?}, expected {expected:?}")]

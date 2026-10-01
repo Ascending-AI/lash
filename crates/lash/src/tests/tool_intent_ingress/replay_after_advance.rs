@@ -214,8 +214,7 @@ async fn trigger_redelivery_after_delivery_prune_answers_the_recorded_outcome() 
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             recorded @ lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::EmitTrigger,
-                result,
+                realized: lash_core::ToolIntentRealized::EmitTrigger(result),
                 ..
             },
         replayed: false,
@@ -223,9 +222,10 @@ async fn trigger_redelivery_after_delivery_prune_answers_the_recorded_outcome() 
     else {
         panic!("the first delivery emits fresh, got {first:?}");
     };
-    let delivered: ProcessId =
-        serde_json::from_value(result["deliveries"][0]["outcome"]["started"]["process_id"].clone())
-            .expect("the emit started one delivery");
+    let delivered = result.deliveries[0]
+        .process_id()
+        .cloned()
+        .expect("the emit started one delivery");
     end_prune_and_compact(&registry, &delivered).await;
     let processes_before = registered_process_count(&registry).await?;
 

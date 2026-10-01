@@ -225,12 +225,16 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
                 Self::OwnerMismatch { expected, recorded }
             }
             Core::ForeignTriggerOwnerScope { expected, recorded } => {
-                Self::ForeignTriggerOwnerScope { expected, recorded }
+                Self::ForeignTriggerOwnerScope {
+                    expected: expected.into(),
+                    recorded: recorded.into(),
+                }
             }
-            Core::ForeignTriggerActor { expected, recorded } => {
-                Self::ForeignTriggerActor { expected, recorded }
-            }
-            Core::CommandFailed { code, message } => Self::CommandFailed { code, message },
+            Core::ForeignTriggerActor { expected, recorded } => Self::ForeignTriggerActor {
+                expected: expected.into(),
+                recorded: recorded.into(),
+            },
+            Core::CommandFailed { cause } => Self::CommandFailed { cause },
             Core::MintingGroupChildCancelled => Self::MintingGroupChildCancelled,
             Core::DeclaredStartIdentityMismatch { expected, recorded } => {
                 Self::DeclaredStartIdentityMismatch {
@@ -242,18 +246,16 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
     }
 }
 
-impl From<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOutcome {
-    fn from(value: lash_core::ToolIntentExecutionOutcome) -> Self {
-        match value {
-            lash_core::ToolIntentExecutionOutcome::Executed {
-                identity,
-                kind,
-                result,
-            } => Self::Executed {
-                identity: identity.into(),
-                kind: kind.into(),
-                result,
-            },
+impl TryFrom<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOutcome {
+    type Error = crate::RemoteProtocolError;
+    fn try_from(value: lash_core::ToolIntentExecutionOutcome) -> Result<Self, Self::Error> {
+        Ok(match value {
+            lash_core::ToolIntentExecutionOutcome::Executed { identity, realized } => {
+                Self::Executed {
+                    identity: identity.into(),
+                    realized: realized.try_into()?,
+                }
+            }
             lash_core::ToolIntentExecutionOutcome::Refused {
                 identity,
                 intent_index,
@@ -270,7 +272,7 @@ impl From<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOu
                     refusal: refusal.into(),
                 }
             }
-        }
+        })
     }
 }
 
@@ -423,5 +425,70 @@ impl From<&lash_core::store::ParkReason> for RemoteTurnParkReason {
             message: value.message().to_string(),
             model_key: value.model_key().map(|key| key.as_str().to_string()),
         }
+    }
+}
+
+macro_rules! convert_realized_payload {
+    (CancelProcess, $result:expr) => {
+        Box::new($result.into())
+    };
+    (GetDefinition, $result:expr) => {
+        (*$result).into()
+    };
+    (PublishDefinition, $result:expr) => {
+        (*$result).into()
+    };
+    (SignalProcess, $result:expr) => {
+        Box::new((*$result).try_into()?)
+    };
+    (EmitProcessEvent, $result:expr) => {
+        Box::new((*$result).try_into()?)
+    };
+    (RegisterTrigger, $result:expr) => {
+        Box::new((*$result).try_into()?)
+    };
+    ($variant:ident, $result:expr) => {
+        $result.into()
+    };
+}
+macro_rules! define_realized_conversion {
+    ($($variant:ident $wire:literal,)*) => {
+        impl TryFrom<lash_core::ToolIntentRealized> for RemoteToolIntentRealized {
+            type Error = crate::RemoteProtocolError;
+            fn try_from(value: lash_core::ToolIntentRealized) -> Result<Self, Self::Error> {
+                Ok(match value {
+                    $(lash_core::ToolIntentRealized::$variant(result) => Self::$variant(convert_realized_payload!($variant, result)),)*
+                })
+            }
+        }
+    };
+}
+lash_sansio::tool_intent_variants!(define_realized_conversion);
+
+impl TryFrom<lash_core::TriggerMutationReceipt> for crate::RemoteTriggerMutationReceipt {
+    type Error = crate::RemoteProtocolError;
+    fn try_from(value: lash_core::TriggerMutationReceipt) -> Result<Self, Self::Error> {
+        let lash_core::TriggerMutationReceipt {
+            owner_scope,
+            subscription_key,
+            subscription_id,
+            incarnation,
+            revision,
+            definition_fingerprint,
+            enabled,
+            disposition,
+            record_snapshot,
+        } = value;
+        Ok(Self {
+            owner_scope: owner_scope.into(),
+            subscription_key,
+            subscription_id,
+            incarnation,
+            revision,
+            definition_fingerprint,
+            enabled,
+            disposition,
+            record_snapshot: record_snapshot.try_into()?,
+        })
     }
 }

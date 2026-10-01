@@ -67,16 +67,116 @@ pub fn is_trigger_occurrence_reclaimed(error: &PluginError) -> bool {
         _ => false,
     }
 }
-#[derive(Debug, thiserror::Error, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", content = "message", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum PluginError {
-    /// A process cannot run without the behaviour its creation recorded.
+// The plugin vocabulary owns both its live error and its durable intent cause.
+// Adding a variant requires its code, failure class and lossless conversion here.
+macro_rules! define_plugin_errors {
+    ($live_derive:meta; $recorded_derive:meta; $( $(#[$($attr:tt)*])* $variant:ident $payload:tt
+        => $from:pat => $recorded:tt => $convert:expr
+        => $projection:pat => $code:expr => $class:expr; )*) => {
+        #[ $live_derive ]
+        #[serde(tag = "type", content = "message", rename_all = "snake_case")]
+        #[non_exhaustive]
+        pub enum PluginError {
+            $( $(#[$($attr)*])* $variant $payload, )*
+        }
+
+        /// The typed command cause retained by a tool intent and carried to the host.
+        #[ $recorded_derive ]
+        #[serde(tag = "type", content = "message", rename_all = "snake_case", deny_unknown_fields)]
+        pub enum ToolIntentCommandFailure {
+            $( $(#[$($attr)*])* $variant $recorded, )*
+        }
+
+        impl From<&PluginError> for ToolIntentCommandFailure {
+            fn from(error: &PluginError) -> Self {
+                match error {
+                    $( $from => $convert, )*
+                }
+            }
+        }
+
+        impl ToolIntentCommandFailure {
+            pub fn code(&self) -> std::borrow::Cow<'_, str> { self.classification().0 }
+            pub fn failure_class(&self) -> crate::ToolFailureClass { self.classification().1 }
+            fn classification(&self) -> (std::borrow::Cow<'_, str>, crate::ToolFailureClass) {
+                match self {
+                    $( $projection => (($code).into(), $class), )*
+                }
+            }
+        }
+    };
+}
+
+/// The durable fields of a runtime command failure. Invocation-local retry
+/// markers are not recorded command facts.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    thiserror::Error,
+)]
+#[error("{code}: {message}")]
+#[serde(deny_unknown_fields)]
+pub struct ToolIntentRuntimeFailure {
+    #[schemars(with = "String")]
+    pub code: crate::RuntimeErrorCode,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<crate::RuntimeErrorCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<Box<crate::RuntimeEffectReplayMismatchReport>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_input_acceptance:
+        Option<Box<lash_core_store::turn_input_vocabulary::TurnInputAcceptanceReceipt>>,
+}
+
+impl ToolIntentRuntimeFailure {
+    fn failure_class(&self) -> crate::ToolFailureClass {
+        if self.code.is_terminal()
+            || self
+                .cause
+                .as_ref()
+                .is_some_and(crate::RuntimeErrorCause::is_terminal)
+        {
+            crate::ToolFailureClass::InvalidRequest
+        } else {
+            crate::ToolFailureClass::Unavailable
+        }
+    }
+}
+
+define_plugin_errors! {
+    derive(Debug, thiserror::Error, Clone, serde::Serialize, serde::Deserialize);
+    derive(Debug, thiserror::Error, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema);
+    #[error(transparent)]
+    TriggerOperation(Box<crate::TriggerOperationError>)
+        => PluginError::TriggerOperation(source)
+        => (Box<crate::TriggerOperationError>)
+        => Self::TriggerOperation(source.clone())
+        => Self::TriggerOperation(source)
+        => source.code()
+        => if source.is_terminal() { crate::ToolFailureClass::InvalidRequest } else { crate::ToolFailureClass::Unavailable };
+/// A process cannot run without the behaviour its creation recorded.
     #[error("process engine `{engine_kind}` has no recorded configuration")]
-    MissingRecordedProcessConfig { engine_kind: String },
-    #[error("trigger registration requires an Engine target, received `{kind}`")]
-    InvalidTriggerTarget { kind: String },
-    /// The process already accepted a different cancellation request.
+    MissingRecordedProcessConfig { engine_kind: String }
+        => PluginError::MissingRecordedProcessConfig { engine_kind }
+        => { engine_kind: String }
+        => Self::MissingRecordedProcessConfig { engine_kind: engine_kind.clone() }
+        => Self::MissingRecordedProcessConfig { .. }
+        => "missing_recorded_process_config"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error("trigger registration requires an Engine target, received `{kind}`")]
+    InvalidTriggerTarget { kind: String }
+        => PluginError::InvalidTriggerTarget { kind }
+        => { kind: String }
+        => Self::InvalidTriggerTarget { kind: kind.clone() }
+        => Self::InvalidTriggerTarget { .. }
+        => "invalid_trigger_target"
+        => crate::ToolFailureClass::InvalidRequest;
+/// The process already accepted a different cancellation request.
     #[error(
         "process `{process_id}` already accepted cancellation {existing:?}; refused {requested:?}"
     )]
@@ -84,22 +184,47 @@ pub enum PluginError {
         process_id: ProcessId,
         existing: Box<crate::CancelRequest>,
         requested: Box<crate::CancelRequest>,
-    },
-    /// A new start named a closed scope: its starter has ended, or the scope
+    }
+        => PluginError::ProcessCancelConflict { process_id, existing, requested }
+        => {
+        process_id: ProcessId,
+        existing: Box<crate::CancelRequest>,
+        requested: Box<crate::CancelRequest>,
+    }
+        => Self::ProcessCancelConflict { process_id: process_id.clone(), existing: existing.clone(), requested: requested.clone() }
+        => Self::ProcessCancelConflict { .. }
+        => "process_cancel_conflict"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A new start named a closed scope: its starter has ended, or the scope
     /// its lifetime names has closed (FIG-3607 R11). The start is refused
     /// before an id is minted, so the refusal names the start by its key.
     #[error("cannot register process start {start_key:?}: scope `{parent}` has closed")]
     ParentEnded {
         start_key: Option<crate::StartKey>,
         parent: crate::ScopeId,
-    },
-    /// A host start key is bound to a retained process another start made
+    }
+        => PluginError::ParentEnded { start_key, parent }
+        => {
+        start_key: Option<crate::StartKey>,
+        parent: crate::ScopeId,
+    }
+        => Self::ParentEnded { start_key: start_key.clone(), parent: parent.clone() }
+        => Self::ParentEnded { .. }
+        => "process_parent_ended"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A host start key is bound to a retained process another start made
     /// (ADR 0107): the retry presented a different start. A host key is
     /// global, so the retained process may be another originator's; the
     /// refusal names the key and nothing of the process it is bound to.
     #[error("process start key `{start_key}` is bound to another start")]
-    StartKeyConflict { start_key: crate::StartKey },
-    /// A trigger delivery's start found no retained process under its key,
+    StartKeyConflict { start_key: crate::StartKey }
+        => PluginError::StartKeyConflict { start_key }
+        => { start_key: crate::StartKey }
+        => Self::StartKeyConflict { start_key: start_key.clone() }
+        => Self::StartKeyConflict { .. }
+        => "process_start_key_conflict"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A trigger delivery's start found no retained process under its key,
     /// and the delivery already bound to `process_id` (ADR 0107 §5,
     /// FIG-4369). The bound process was pruned, so its key finds nothing; the
     /// registrar read the binding in the transaction that checked the key and
@@ -111,8 +236,18 @@ pub enum PluginError {
         occurrence_id: String,
         subscription_id: String,
         process_id: ProcessId,
-    },
-    /// A trigger delivery's start found no retained process under its key,
+    }
+        => PluginError::TriggerDeliveryBound { occurrence_id, subscription_id, process_id }
+        => {
+        occurrence_id: String,
+        subscription_id: String,
+        process_id: ProcessId,
+    }
+        => Self::TriggerDeliveryBound { occurrence_id: occurrence_id.clone(), subscription_id: subscription_id.clone(), process_id: process_id.clone() }
+        => Self::TriggerDeliveryBound { .. }
+        => "trigger_delivery_bound"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A trigger delivery's start found no retained process under its key,
     /// and no delivery row: retention removed the delivery once its bound
     /// process was pruned (FIG-4369). The registrar registered nothing.
     #[error(
@@ -121,37 +256,95 @@ pub enum PluginError {
     TriggerDeliveryRetired {
         occurrence_id: String,
         subscription_id: String,
-    },
-    /// Discovery must itself be an inline member of the tool catalogue.
+    }
+        => PluginError::TriggerDeliveryRetired { occurrence_id, subscription_id }
+        => {
+        occurrence_id: String,
+        subscription_id: String,
+    }
+        => Self::TriggerDeliveryRetired { occurrence_id: occurrence_id.clone(), subscription_id: subscription_id.clone() }
+        => Self::TriggerDeliveryRetired { .. }
+        => "trigger_delivery_retired"
+        => crate::ToolFailureClass::InvalidRequest;
+/// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
-    InvalidToolDiscovery { operation: String },
-    /// A protocol's per-call batch maximum exceeds its hard ceiling.
+    InvalidToolDiscovery { operation: String }
+        => PluginError::InvalidToolDiscovery { operation }
+        => { operation: String }
+        => Self::InvalidToolDiscovery { operation: operation.clone() }
+        => Self::InvalidToolDiscovery { .. }
+        => "invalid_tool_discovery"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A protocol's per-call batch maximum exceeds its hard ceiling.
     #[error("batch maximum {requested} exceeds the ceiling of {ceiling} members")]
-    InvalidBatchMaximum { requested: usize, ceiling: usize },
-    /// An effective resident catalog member could not supply its immutable definition.
+    InvalidBatchMaximum { requested: usize, ceiling: usize }
+        => PluginError::InvalidBatchMaximum { requested, ceiling }
+        => { requested: usize, ceiling: usize }
+        => Self::InvalidBatchMaximum { requested: *requested, ceiling: *ceiling }
+        => Self::InvalidBatchMaximum { .. }
+        => "invalid_batch_maximum"
+        => crate::ToolFailureClass::InvalidRequest;
+/// An effective resident catalog member could not supply its immutable definition.
     #[error("resident tool `{name}` ({tool_id}) has no contract")]
     ResidentToolContractUnavailable {
         tool_id: crate::ToolId,
         name: String,
-    },
-    #[error("resident catalog repeats tool id `{tool_id}`")]
-    ResidentToolDuplicateId { tool_id: crate::ToolId },
-    #[error("resident catalog repeats tool name `{name}`")]
-    ResidentToolDuplicateName { name: String },
-    /// An effective resident catalog member has no executable route in the pinned registry.
+    }
+        => PluginError::ResidentToolContractUnavailable { tool_id, name }
+        => {
+        tool_id: crate::ToolId,
+        name: String,
+    }
+        => Self::ResidentToolContractUnavailable { tool_id: tool_id.clone(), name: name.clone() }
+        => Self::ResidentToolContractUnavailable { .. }
+        => "resident_tool_contract_unavailable"
+        => crate::ToolFailureClass::Internal;
+#[error("resident catalog repeats tool id `{tool_id}`")]
+    ResidentToolDuplicateId { tool_id: crate::ToolId }
+        => PluginError::ResidentToolDuplicateId { tool_id }
+        => { tool_id: crate::ToolId }
+        => Self::ResidentToolDuplicateId { tool_id: tool_id.clone() }
+        => Self::ResidentToolDuplicateId { .. }
+        => "resident_tool_duplicate_id"
+        => crate::ToolFailureClass::Internal;
+#[error("resident catalog repeats tool name `{name}`")]
+    ResidentToolDuplicateName { name: String }
+        => PluginError::ResidentToolDuplicateName { name }
+        => { name: String }
+        => Self::ResidentToolDuplicateName { name: name.clone() }
+        => Self::ResidentToolDuplicateName { .. }
+        => "resident_tool_duplicate_name"
+        => crate::ToolFailureClass::Internal;
+/// An effective resident catalog member has no executable route in the pinned registry.
     #[error("resident tool `{name}` ({tool_id}) has no pinned execution route: {reason}")]
     ResidentToolRouteUnavailable {
         tool_id: crate::ToolId,
         name: String,
         reason: String,
-    },
-    /// A fresh session create named an id the catalog already holds. A
+    }
+        => PluginError::ResidentToolRouteUnavailable { tool_id, name, reason }
+        => {
+        tool_id: crate::ToolId,
+        name: String,
+        reason: String,
+    }
+        => Self::ResidentToolRouteUnavailable { tool_id: tool_id.clone(), name: name.clone(), reason: reason.clone() }
+        => Self::ResidentToolRouteUnavailable { .. }
+        => "resident_tool_route_unavailable"
+        => crate::ToolFailureClass::Internal;
+/// A fresh session create named an id the catalog already holds. A
     /// create never adopts an existing session (FIG-4112); replaying a
     /// recorded identity is a process run's `SessionTurn` initialisation,
     /// not a create.
     #[error("session `{session_id}` already exists")]
-    SessionAlreadyExists { session_id: crate::SessionId },
-    /// A lane-less head write found an owner in the store transaction.
+    SessionAlreadyExists { session_id: crate::SessionId }
+        => PluginError::SessionAlreadyExists { session_id }
+        => { session_id: crate::SessionId }
+        => Self::SessionAlreadyExists { session_id: session_id.clone() }
+        => Self::SessionAlreadyExists { .. }
+        => "session_already_exists"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A lane-less head write found an owner in the store transaction.
     /// Submit host head writes as boundary session commands, or retry once
     /// the owner releases the head. The refused write changes nothing.
     #[error(
@@ -160,16 +353,42 @@ pub enum PluginError {
     SessionHeadOwned {
         session_id: SessionId,
         owner: crate::store::SessionHeadOwner,
-    },
-    #[error("plugin registration error: {0}")]
-    Registration(String),
-    /// A plugin's config registration cannot stand, so no session can be
-    /// created or changed on this deployment's plugin set.
-    #[error("config registration is invalid: {0}")]
-    ConfigRegistration(super::ConfigRegistrationError),
-    #[error("plugin invoke error: {0}")]
-    Invoke(String),
-    /// A bounded before-tool-call reinspection attempted to replace arguments again.
+    }
+        => PluginError::SessionHeadOwned { session_id, owner }
+        => {
+        session_id: SessionId,
+        owner: crate::store::SessionHeadOwner,
+    }
+        => Self::SessionHeadOwned { session_id: session_id.clone(), owner: owner.clone() }
+        => Self::SessionHeadOwned { .. }
+        => "session_head_owned"
+        => crate::ToolFailureClass::Unavailable;
+#[error("plugin registration error: {0}")]
+    Registration (String)
+        => PluginError::Registration(source)
+        => (String)
+        => Self::Registration(source.clone())
+        => Self::Registration(_)
+        => "registration"
+        => crate::ToolFailureClass::Internal;
+/// A plugin's config registration cannot stand on the deployment's plugin set.
+#[error("config registration is invalid: {0}")]
+    ConfigRegistration (super::ConfigRegistrationError)
+        => PluginError::ConfigRegistration(source)
+        => (super::ConfigRegistrationError)
+        => Self::ConfigRegistration(source.clone())
+        => Self::ConfigRegistration(_)
+        => "config_registration"
+        => crate::ToolFailureClass::Internal;
+#[error("plugin invoke error: {0}")]
+    Invoke (String)
+        => PluginError::Invoke(source)
+        => (String)
+        => Self::Invoke(source.clone())
+        => Self::Invoke(_)
+        => "invoke"
+        => crate::ToolFailureClass::Execution;
+/// A bounded before-tool-call reinspection attempted to replace arguments again.
     #[error(
         "before_tool_call replacement from `{replacing_plugin_id}` was replaced again by `{repeated_plugin_id}` during bounded reinspection"
     )]
@@ -178,8 +397,19 @@ pub enum PluginError {
         replacing_plugin_id: String,
         /// Earlier plugin that attempted another replacement during reinspection.
         repeated_plugin_id: String,
-    },
-    /// A bounded after-tool-call reinspection attempted to replace the result again.
+    }
+        => PluginError::BeforeToolCallReplacementConflict { replacing_plugin_id, repeated_plugin_id }
+        => {
+        /// Plugin whose replacement caused earlier hooks to be reinspected.
+        replacing_plugin_id: String,
+        /// Earlier plugin that attempted another replacement during reinspection.
+        repeated_plugin_id: String,
+    }
+        => Self::BeforeToolCallReplacementConflict { replacing_plugin_id: replacing_plugin_id.clone(), repeated_plugin_id: repeated_plugin_id.clone() }
+        => Self::BeforeToolCallReplacementConflict { .. }
+        => "before_tool_call_replacement_conflict"
+        => crate::ToolFailureClass::Internal;
+/// A bounded after-tool-call reinspection attempted to replace the result again.
     #[error(
         "after_tool_call replacement from `{replacing_plugin_id}` was replaced again by `{repeated_plugin_id}` during bounded reinspection"
     )]
@@ -188,25 +418,76 @@ pub enum PluginError {
         replacing_plugin_id: String,
         /// Earlier plugin that attempted another replacement during reinspection.
         repeated_plugin_id: String,
-    },
-    #[error("plugin session error: {0}")]
-    Session(String),
-    /// An atomic plugin-state refusal, retained across journal transport.
+    }
+        => PluginError::AfterToolCallReplacementConflict { replacing_plugin_id, repeated_plugin_id }
+        => {
+        /// Plugin whose replacement caused earlier hooks to be reinspected.
+        replacing_plugin_id: String,
+        /// Earlier plugin that attempted another replacement during reinspection.
+        repeated_plugin_id: String,
+    }
+        => Self::AfterToolCallReplacementConflict { replacing_plugin_id: replacing_plugin_id.clone(), repeated_plugin_id: repeated_plugin_id.clone() }
+        => Self::AfterToolCallReplacementConflict { .. }
+        => "after_tool_call_replacement_conflict"
+        => crate::ToolFailureClass::Internal;
+#[error("plugin session error: {0}")]
+    Session (String)
+        => PluginError::Session(source)
+        => (String)
+        => Self::Session(source.clone())
+        => Self::Session(_)
+        => "session"
+        => crate::ToolFailureClass::Unavailable;
+/// An atomic plugin-state refusal, retained across journal transport.
     #[error("plugin state: {0}")]
-    State(#[source] super::PluginStateError),
+    State (#[source] super::PluginStateError)
+        => PluginError::State(source)
+        => (#[source] super::PluginStateError)
+        => Self::State(source.clone())
+        => Self::State(source)
+        => "state"
+        => match source {
+            super::PluginStateError::InvalidKey { .. } | super::PluginStateError::ValueTooLarge { .. } | super::PluginStateError::StoreTooLarge { .. } => crate::ToolFailureClass::InvalidRequest,
+            super::PluginStateError::Encode { .. } | super::PluginStateError::Decode { .. } => crate::ToolFailureClass::Internal,
+            super::PluginStateError::GenerationConflict { .. } => crate::ToolFailureClass::Unavailable,
+        };
     #[error(transparent)]
-    Format(#[from] super::FormatRefusal),
-    /// A store compatibility refusal, preserved through plugin-facing ports.
+    Format (#[from] super::FormatRefusal)
+        => PluginError::Format(source)
+        => (#[from] super::FormatRefusal)
+        => Self::Format(source.clone())
+        => Self::Format(_)
+        => crate::RuntimeErrorCode::Plugin.as_str()
+        => crate::ToolFailureClass::InvalidRequest;
+/// A store compatibility refusal, preserved through plugin-facing ports.
     #[error(transparent)]
-    StoreRefusal(#[from] crate::store::StoreRefusal),
-    /// A captured plugin init payload exceeded the durable-request bound.
+    StoreRefusal (#[from] crate::store::StoreRefusal)
+        => PluginError::StoreRefusal(source)
+        => (#[from] crate::store::StoreRefusal)
+        => Self::StoreRefusal(source.clone())
+        => Self::StoreRefusal(source)
+        => source.code().as_str().to_string()
+        => crate::ToolFailureClass::Internal;
+/// A captured plugin init payload exceeded the durable-request bound.
     #[error("captured session init payload is {bytes} bytes, exceeding the {limit}-byte bound")]
-    SessionInitTooLarge { bytes: usize, limit: usize },
-    /// An existing plugin session cannot be reconstructed because a required
+    SessionInitTooLarge { bytes: usize, limit: usize }
+        => PluginError::SessionInitTooLarge { bytes, limit }
+        => { bytes: usize, limit: usize }
+        => Self::SessionInitTooLarge { bytes: *bytes, limit: *limit }
+        => Self::SessionInitTooLarge { .. }
+        => "session_init_too_large"
+        => crate::ToolFailureClass::InvalidRequest;
+/// An existing plugin session cannot be reconstructed because a required
     /// protocol-owned field is absent from its durable record.
     #[error("recorded session config for plugin `{plugin_id}` is missing required field `{field}`")]
-    MissingRecordedSessionConfig { plugin_id: String, field: String },
-    /// A host attempted to substitute a durably pinned protocol selection.
+    MissingRecordedSessionConfig { plugin_id: String, field: String }
+        => PluginError::MissingRecordedSessionConfig { plugin_id, field }
+        => { plugin_id: String, field: String }
+        => Self::MissingRecordedSessionConfig { plugin_id: plugin_id.clone(), field: field.clone() }
+        => Self::MissingRecordedSessionConfig { .. }
+        => "missing_recorded_session_config"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A host attempted to substitute a durably pinned protocol selection.
     #[error(
         "recorded session config for plugin `{plugin_id}` pins `{field}` to {recorded}, refusing {requested}"
     )]
@@ -215,14 +496,37 @@ pub enum PluginError {
         field: String,
         recorded: String,
         requested: String,
-    },
-    #[error(transparent)]
-    Runtime(crate::RuntimeError),
-    /// A turn-scoped plugin write presented a lapsed or superseded borrowed
+    }
+        => PluginError::RecordedSessionConfigConflict { plugin_id, field, recorded, requested }
+        => {
+        plugin_id: String,
+        field: String,
+        recorded: String,
+        requested: String,
+    }
+        => Self::RecordedSessionConfigConflict { plugin_id: plugin_id.clone(), field: field.clone(), recorded: recorded.clone(), requested: requested.clone() }
+        => Self::RecordedSessionConfigConflict { .. }
+        => "recorded_session_config_conflict"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error(transparent)]
+    Runtime (crate::RuntimeError)
+        => PluginError::Runtime(source)
+        => (ToolIntentRuntimeFailure)
+        => Self::Runtime(ToolIntentRuntimeFailure { code: source.code.clone(), message: source.message.clone(), cause: source.cause.clone(), summary: source.summary.clone(), turn_input_acceptance: source.turn_input_acceptance.clone() })
+        => Self::Runtime(source)
+        => source.code.as_str()
+        => source.failure_class();
+/// A turn-scoped plugin write presented a lapsed or superseded borrowed
     /// session-execution guard.
     #[error("session execution lease for `{session_id}` was lost before plugin commit")]
-    SessionExecutionLeaseLost { session_id: SessionId },
-    /// A session append operation id was reused for different semantic request content.
+    SessionExecutionLeaseLost { session_id: SessionId }
+        => PluginError::SessionExecutionLeaseLost { session_id }
+        => { session_id: SessionId }
+        => Self::SessionExecutionLeaseLost { session_id: session_id.clone() }
+        => Self::SessionExecutionLeaseLost { .. }
+        => "session_execution_lease_lost"
+        => crate::ToolFailureClass::Unavailable;
+/// A session append operation id was reused for different semantic request content.
     #[error(
         "append operation `{operation_key}` for session `{session_id}` was reused with different request content"
     )]
@@ -231,8 +535,19 @@ pub enum PluginError {
         session_id: SessionId,
         /// Canonical durable operation key that was reused incorrectly.
         operation_key: String,
-    },
-    /// Durable append receipt metadata contradicts the retry's requested-node
+    }
+        => PluginError::AppendOperationIdentityConflict { session_id, operation_key }
+        => {
+        /// Session whose append operation identity conflicted.
+        session_id: SessionId,
+        /// Canonical durable operation key that was reused incorrectly.
+        operation_key: String,
+    }
+        => Self::AppendOperationIdentityConflict { session_id: session_id.clone(), operation_key: operation_key.clone() }
+        => Self::AppendOperationIdentityConflict { .. }
+        => "append_operation_identity_conflict"
+        => crate::ToolFailureClass::InvalidRequest;
+/// Durable append receipt metadata contradicts the retry's requested-node
     /// count. This is store corruption, not a caller-recoverable conflict.
     #[error(
         "append receipt `{operation_key}` for session `{session_id}` has contradictory requested-node counts (stored {stored}, attempted {attempted})"
@@ -245,8 +560,22 @@ pub enum PluginError {
         stored: u64,
         /// Count carried by the retry.
         attempted: u64,
-    },
-    /// A durable plugin-owned record contained a value outside its declared
+    }
+        => PluginError::AppendReceiptRequestedNodeCountCorrupt { session_id, operation_key, stored, attempted }
+        => {
+        /// Session whose append receipt is corrupt.
+        session_id: SessionId,
+        /// Canonical durable operation key of the corrupt receipt.
+        operation_key: String,
+        stored: u64,
+        /// Count carried by the retry.
+        attempted: u64,
+    }
+        => Self::AppendReceiptRequestedNodeCountCorrupt { session_id: session_id.clone(), operation_key: operation_key.clone(), stored: *stored, attempted: *attempted }
+        => Self::AppendReceiptRequestedNodeCountCorrupt { .. }
+        => "append_receipt_requested_node_count_corrupt"
+        => crate::ToolFailureClass::Internal;
+/// A durable plugin-owned record contained a value outside its declared
     /// representation. Retrying cannot repair the stored bytes.
     #[error("stored {record_kind} data is corrupt: {message}")]
     StoredDataCorrupt {
@@ -254,30 +583,74 @@ pub enum PluginError {
         record_kind: String,
         /// Backend diagnostic describing the malformed field or payload.
         message: String,
-    },
-    /// A backend-owned authoritative clock produced a value before the Unix
+    }
+        => PluginError::StoredDataCorrupt { record_kind, message }
+        => {
+        /// Stable name of the durable record whose payload was unreadable.
+        record_kind: String,
+        /// Backend diagnostic describing the malformed field or payload.
+        message: String,
+    }
+        => Self::StoredDataCorrupt { record_kind: record_kind.clone(), message: message.clone() }
+        => Self::StoredDataCorrupt { .. }
+        => "stored_data_corrupt"
+        => crate::ToolFailureClass::Internal;
+/// A backend-owned authoritative clock produced a value before the Unix
     /// epoch, outside the runtime clock contract.
     #[error("{clock} returned a pre-Unix-epoch millisecond value: {epoch_ms}")]
-    ClockBeforeUnixEpoch { clock: String, epoch_ms: i64 },
-    #[error("process handle `{process_id}` is not live or visible in this session")]
-    ProcessNotVisible { process_id: ProcessId },
-    /// A session-only operation ran under a process runtime. A process has
+    ClockBeforeUnixEpoch { clock: String, epoch_ms: i64 }
+        => PluginError::ClockBeforeUnixEpoch { clock, epoch_ms }
+        => { clock: String, epoch_ms: i64 }
+        => Self::ClockBeforeUnixEpoch { clock: clock.clone(), epoch_ms: *epoch_ms }
+        => Self::ClockBeforeUnixEpoch { .. }
+        => "clock_before_unix_epoch"
+        => crate::ToolFailureClass::Internal;
+#[error("process handle `{process_id}` is not live or visible in this session")]
+    ProcessNotVisible { process_id: ProcessId }
+        => PluginError::ProcessNotVisible { process_id }
+        => { process_id: ProcessId }
+        => Self::ProcessNotVisible { process_id: process_id.clone() }
+        => Self::ProcessNotVisible { .. }
+        => "process_not_visible"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A session-only operation ran under a process runtime. A process has
     /// no session and no agent frame of its own, and is never handed its
     /// originator's session as a stand-in.
     #[error("`{operation}` needs a session runtime, but process `{process_id}` owns this one")]
     NotASessionRuntime {
         operation: String,
         process_id: ProcessId,
-    },
-    /// An external or host completion named a stored attachment that has no
+    }
+        => PluginError::NotASessionRuntime { operation, process_id }
+        => {
+        operation: String,
+        process_id: ProcessId,
+    }
+        => Self::NotASessionRuntime { operation: operation.clone(), process_id: process_id.clone() }
+        => Self::NotASessionRuntime { .. }
+        => "not_a_session_runtime"
+        => crate::ToolFailureClass::InvalidRequest;
+/// An external or host completion named a stored attachment that has no
     /// upload evidence: its source was ended and swept, so the output would
     /// reference bytes nothing can read. Nothing is recorded.
     #[error("process output attachment `{digest}` is no longer available")]
-    ProcessOutputAttachmentUnavailable { digest: crate::AttachmentId },
-    /// An operation referenced a process id that the registry never knew.
+    ProcessOutputAttachmentUnavailable { digest: crate::AttachmentId }
+        => PluginError::ProcessOutputAttachmentUnavailable { digest }
+        => { digest: crate::AttachmentId }
+        => Self::ProcessOutputAttachmentUnavailable { digest: digest.clone() }
+        => Self::ProcessOutputAttachmentUnavailable { .. }
+        => "process_output_attachment_unavailable"
+        => crate::ToolFailureClass::InvalidRequest;
+/// An operation referenced a process id that the registry never knew.
     #[error("unknown process `{process_id}`")]
-    ProcessUnknown { process_id: ProcessId },
-    /// A Process Change Feed cursor predates deletion history removed by
+    ProcessUnknown { process_id: ProcessId }
+        => PluginError::ProcessUnknown { process_id }
+        => { process_id: ProcessId }
+        => Self::ProcessUnknown { process_id: process_id.clone() }
+        => Self::ProcessUnknown { .. }
+        => "process_unknown"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A Process Change Feed cursor predates deletion history removed by
     /// Tombstone Compaction. The consumer must perform a full relist before
     /// resuming from the reported horizon.
     #[error(
@@ -286,8 +659,17 @@ pub enum PluginError {
     ProcessChangeCursorPruned {
         requested_cursor: crate::ProcessChangeCursor,
         tombstone_compaction_horizon: crate::ProcessChangeCursor,
-    },
-    /// A process park feed cursor predates history
+    }
+        => PluginError::ProcessChangeCursorPruned { requested_cursor, tombstone_compaction_horizon }
+        => {
+        requested_cursor: crate::ProcessChangeCursor,
+        tombstone_compaction_horizon: crate::ProcessChangeCursor,
+    }
+        => Self::ProcessChangeCursorPruned { requested_cursor: *requested_cursor, tombstone_compaction_horizon: *tombstone_compaction_horizon }
+        => Self::ProcessChangeCursorPruned { .. }
+        => "process_change_cursor_pruned"
+        => crate::ToolFailureClass::Internal;
+/// A process park feed cursor predates history
     /// `compact_process_park_feed` removed. The consumer must relist parked
     /// processes before resuming from the reported horizon.
     #[error(
@@ -296,21 +678,57 @@ pub enum PluginError {
     ProcessParkFeedCursorCompacted {
         /// The lowest feed position the store still serves.
         horizon: crate::store::ParkFeedCursor,
-    },
-    #[error(transparent)]
-    RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
-    #[error("process execution authority for `{process_id}` is missing or superseded")]
-    ProcessExecutionSuperseded { process_id: ProcessId },
-    #[error("monotonic counter `{counter}` cannot advance past {current}")]
-    MonotonicCounterOverflow { counter: String, current: u64 },
-    #[error(
+    }
+        => PluginError::ProcessParkFeedCursorCompacted { horizon }
+        => {
+        /// The lowest feed position the store still serves.
+        horizon: crate::store::ParkFeedCursor,
+    }
+        => Self::ProcessParkFeedCursorCompacted { horizon: *horizon }
+        => Self::ProcessParkFeedCursorCompacted { .. }
+        => "process_park_feed_cursor_compacted"
+        => crate::ToolFailureClass::Internal;
+#[error(transparent)]
+    RuntimeEffectController (#[from] crate::RuntimeEffectControllerError)
+        => PluginError::RuntimeEffectController(source)
+        => (ToolIntentRuntimeFailure)
+        => Self::RuntimeEffectController(ToolIntentRuntimeFailure { code: source.code.clone(), message: source.message.clone(), cause: source.cause.clone(), summary: source.summary.clone(), turn_input_acceptance: None })
+        => Self::RuntimeEffectController(source)
+        => source.code.as_str()
+        => source.failure_class();
+#[error("process execution authority for `{process_id}` is missing or superseded")]
+    ProcessExecutionSuperseded { process_id: ProcessId }
+        => PluginError::ProcessExecutionSuperseded { process_id }
+        => { process_id: ProcessId }
+        => Self::ProcessExecutionSuperseded { process_id: process_id.clone() }
+        => Self::ProcessExecutionSuperseded { .. }
+        => "process_execution_superseded"
+        => crate::ToolFailureClass::Unavailable;
+#[error("monotonic counter `{counter}` cannot advance past {current}")]
+    MonotonicCounterOverflow { counter: String, current: u64 }
+        => PluginError::MonotonicCounterOverflow { counter, current }
+        => { counter: String, current: u64 }
+        => Self::MonotonicCounterOverflow { counter: counter.clone(), current: *current }
+        => Self::MonotonicCounterOverflow { .. }
+        => "monotonic_counter_overflow"
+        => crate::ToolFailureClass::Internal;
+#[error(
         "process outcome is no longer retained (terminal state `{terminal_label}`, pruned at {pruned_at_ms}ms)"
     )]
     ProcessNoLongerRetained {
         terminal_label: crate::RetiredProcessStatus,
         pruned_at_ms: u64,
-    },
-    /// A wait was requested on a row whose registering caller departed before
+    }
+        => PluginError::ProcessNoLongerRetained { terminal_label, pruned_at_ms }
+        => {
+        terminal_label: crate::RetiredProcessStatus,
+        pruned_at_ms: u64,
+    }
+        => Self::ProcessNoLongerRetained { terminal_label: *terminal_label, pruned_at_ms: *pruned_at_ms }
+        => Self::ProcessNoLongerRetained { .. }
+        => "process_no_longer_retained"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A wait was requested on a row whose registering caller departed before
     /// any outcome could be recorded (FIG-1383).
     ///
     /// The wait is refused rather than parked: the row is non-terminal, no
@@ -320,38 +738,95 @@ pub enum PluginError {
     #[error(
         "process `{process_id}` recorded a caller departure before any outcome; awaiting it would never resolve"
     )]
-    ProcessCallerDeparted { process_id: ProcessId },
-    /// A recovery would end a process that a later segment already carries
+    ProcessCallerDeparted { process_id: ProcessId }
+        => PluginError::ProcessCallerDeparted { process_id }
+        => { process_id: ProcessId }
+        => Self::ProcessCallerDeparted { process_id: process_id.clone() }
+        => Self::ProcessCallerDeparted { .. }
+        => "process_caller_departed"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A recovery would end a process that a later segment already carries
     /// (FIG-3820).
     #[error("process `{process_id}` is carried by its segment {segment_ordinal}")]
     ProcessHandedOver {
         process_id: ProcessId,
         segment_ordinal: u64,
-    },
-    #[error("process `{process_id}` is already terminal in state `{status:?}`")]
+    }
+        => PluginError::ProcessHandedOver { process_id, segment_ordinal }
+        => {
+        process_id: ProcessId,
+        segment_ordinal: u64,
+    }
+        => Self::ProcessHandedOver { process_id: process_id.clone(), segment_ordinal: *segment_ordinal }
+        => Self::ProcessHandedOver { .. }
+        => "process_handed_over"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error("process `{process_id}` is already terminal in state `{status:?}`")]
     ProcessAlreadyTerminal {
         process_id: ProcessId,
         status: crate::ProcessStatus,
-    },
-    #[error(
+    }
+        => PluginError::ProcessAlreadyTerminal { process_id, status }
+        => {
+        process_id: ProcessId,
+        status: crate::ProcessStatus,
+    }
+        => Self::ProcessAlreadyTerminal { process_id: process_id.clone(), status: *status }
+        => Self::ProcessAlreadyTerminal { .. }
+        => "process_already_terminal"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error(
         "terminal process status `{declared_status:?}` contradicts outcome status `{outcome_status:?}`"
     )]
     ProcessTerminalOutcomeMismatch {
         declared_status: crate::ProcessStatus,
         outcome_status: Option<crate::ProcessStatus>,
-    },
-    #[error("process event type `{event_type}` is reserved for its dedicated registry mutation")]
-    ReservedProcessEvent { event_type: String },
-    #[error("process wake delivery carries an invalid wake identity `{wake_id}`")]
-    InvalidProcessWakeIdentity { wake_id: String },
-    #[error(
+    }
+        => PluginError::ProcessTerminalOutcomeMismatch { declared_status, outcome_status }
+        => {
+        declared_status: crate::ProcessStatus,
+        outcome_status: Option<crate::ProcessStatus>,
+    }
+        => Self::ProcessTerminalOutcomeMismatch { declared_status: *declared_status, outcome_status: *outcome_status }
+        => Self::ProcessTerminalOutcomeMismatch { .. }
+        => "process_terminal_outcome_mismatch"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error("process event type `{event_type}` is reserved for its dedicated registry mutation")]
+    ReservedProcessEvent { event_type: String }
+        => PluginError::ReservedProcessEvent { event_type }
+        => { event_type: String }
+        => Self::ReservedProcessEvent { event_type: event_type.clone() }
+        => Self::ReservedProcessEvent { .. }
+        => "reserved_process_event"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error("process wake delivery carries an invalid wake identity `{wake_id}`")]
+    InvalidProcessWakeIdentity { wake_id: String }
+        => PluginError::InvalidProcessWakeIdentity { wake_id }
+        => { wake_id: String }
+        => Self::InvalidProcessWakeIdentity { wake_id: wake_id.clone() }
+        => Self::InvalidProcessWakeIdentity { .. }
+        => "invalid_process_wake_identity"
+        => crate::ToolFailureClass::InvalidRequest;
+#[error(
         "process wake delivery format version {found} is incompatible with version {expected}; drain in-flight sessions on the old build before deploying this build, or recreate development/test stores"
     )]
-    ProcessWakeDeliveryFormatVersionMismatch { expected: u32, found: u32 },
-    /// A process-registry continuation was passed to a backend other than the
+    ProcessWakeDeliveryFormatVersionMismatch { expected: u32, found: u32 }
+        => PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
+        => { expected: u32, found: u32 }
+        => Self::ProcessWakeDeliveryFormatVersionMismatch { expected: *expected, found: *found }
+        => Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
+        => "process_wake_delivery_format_version_mismatch"
+        => crate::ToolFailureClass::InvalidRequest;
+/// A process-registry continuation was passed to a backend other than the
     /// backend that issued it.
     #[error("process registry cursor belongs to backend `{actual}`, not `{expected}`")]
-    ProcessRegistryCursorBackendMismatch { expected: String, actual: String },
+    ProcessRegistryCursorBackendMismatch { expected: String, actual: String }
+        => PluginError::ProcessRegistryCursorBackendMismatch { expected, actual }
+        => { expected: String, actual: String }
+        => Self::ProcessRegistryCursorBackendMismatch { expected: expected.clone(), actual: actual.clone() }
+        => Self::ProcessRegistryCursorBackendMismatch { .. }
+        => "process_registry_cursor_backend_mismatch"
+        => crate::ToolFailureClass::InvalidRequest;
 }
 
 impl<R> From<crate::MaintenanceFailure<R>> for PluginError {
@@ -490,7 +965,8 @@ impl PluginError {
                 crate::RuntimeErrorCode::PluginSessionManager,
                 error.to_string(),
             ),
-            refused @ (Self::Runtime(_)
+            refused @ (Self::TriggerOperation(_)
+            | Self::Runtime(_)
             | Self::RuntimeEffectController(_)
             | Self::ProcessCancelConflict { .. }
             | Self::InvalidTriggerTarget { .. }
@@ -583,6 +1059,7 @@ impl PluginError {
     /// changing durable state, configuration, or wiring.
     pub fn is_terminal(&self) -> bool {
         match self {
+            Self::TriggerOperation(error) => error.is_terminal(),
             Self::StoreRefusal(_) => true,
             Self::Format(_) => true,
             Self::State(error) => error.is_terminal(),
@@ -625,6 +1102,43 @@ impl PluginError {
 
 #[cfg(test)]
 mod classification_tests {
+    #[test]
+    fn format_refusal_retains_fields_through_intent_and_runtime_boundaries() {
+        let refusal = super::super::FormatRefusal {
+            plugin: "unreadable-plugin".into(),
+            namespace: super::super::FormatNamespace::Config,
+            stored: crate::FormatVersion::new(7).expect("nonzero format"),
+            readable: crate::FormatVersion::ONE,
+        };
+        let expected = serde_json::json!({
+            "plugin": "unreadable-plugin", "namespace": "config", "stored": 7, "readable": 1,
+        });
+        let plugin = super::PluginError::from(refusal);
+        let controller = crate::RuntimeEffectControllerError::from(plugin.clone());
+        for error in [
+            plugin,
+            super::PluginError::RuntimeEffectController(controller.clone()),
+            super::PluginError::Runtime(controller.into_runtime_error()),
+        ] {
+            let cause = super::ToolIntentCommandFailure::from(&error);
+            assert_eq!(
+                cause.failure_class(),
+                crate::ToolFailureClass::InvalidRequest
+            );
+            assert_eq!(cause.code(), crate::RuntimeErrorCode::Plugin.as_str());
+            let encoded = serde_json::to_value(&cause).expect("record command cause");
+            let fields = if encoded["type"] == "format" {
+                &encoded["message"]
+            } else {
+                &encoded["message"]["cause"]["refusal"]
+            };
+            assert_eq!(fields, &expected);
+            let replayed: super::ToolIntentCommandFailure =
+                serde_json::from_value(encoded).expect("replay command cause");
+            assert_eq!(replayed, cause);
+        }
+    }
+
     use super::*;
 
     #[test]

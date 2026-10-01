@@ -36,7 +36,16 @@ pub const RUN_SPEC_FAMILY_VERSION: u8 = 1;
 /// Resolution looks up the exact revision; a worker that does not serve it
 /// retries and parks, and never falls back to another revision.
 #[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub struct DefinitionRef {
     pub name: String,
@@ -303,7 +312,15 @@ where
 /// Why a registered definition refused to shape a root: deterministic, so it
 /// is recorded as the root's failure. `refusal` is the definition's own
 /// refusal type, serialized, and `message` its display text.
-#[derive(Clone, Debug, PartialEq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[error("run definition `{definition}` refused its context: {message}")]
 #[serde(deny_unknown_fields)]
 pub struct RunDefinitionRefusal {
@@ -332,7 +349,15 @@ impl Eq for RunDefinitionRefusal {}
 /// Why a protocol refused to resolve the render a root's results present
 /// with. `refusal` is the protocol's own refusal type, serialized, and
 /// `message` its display text.
-#[derive(Clone, Debug, PartialEq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[error("{message}")]
 #[serde(deny_unknown_fields)]
 pub struct RenderRefusal {
@@ -366,7 +391,16 @@ pub enum RenderFault {
 /// Why a root's shape was refused: deterministic, so it is the root's
 /// recorded failure, carried typed as
 /// [`RuntimeErrorCause::RunShapeRefused`](crate::RuntimeErrorCause::RunShapeRefused).
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RunShapeRefusal {

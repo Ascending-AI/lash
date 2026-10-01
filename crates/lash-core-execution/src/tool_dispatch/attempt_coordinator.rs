@@ -835,17 +835,17 @@ fn declares_at(
     intent_index: u32,
 ) -> bool {
     let (outcome_kind, index) = match outcome {
-        crate::ToolIntentExecutionOutcome::Executed { identity, kind, .. } => {
-            (kind, identity.intent_index)
-        }
+        crate::ToolIntentExecutionOutcome::Executed {
+            identity, realized, ..
+        } => (realized.kind(), identity.intent_index),
         crate::ToolIntentExecutionOutcome::Refused {
             intent_index: refused,
             kind,
             ..
-        } => (kind, *refused),
+        } => (*kind, *refused),
         _ => return false,
     };
-    *outcome_kind == kind && index == intent_index
+    outcome_kind == kind && index == intent_index
 }
 
 fn project_recorded_intent_outcomes(
@@ -856,7 +856,7 @@ fn project_recorded_intent_outcomes(
     // the provider's optimistic output. Batch-admission refusals describe the
     // intent protocol itself and stay in the typed intent-outcome stream.
     if let Some(crate::ToolIntentExecutionOutcome::Refused {
-        refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
+        refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
         ..
     }) = outcomes.iter().find(|outcome| {
         matches!(
@@ -874,9 +874,9 @@ fn project_recorded_intent_outcomes(
         // Rewriting the completed parent row here would break journal-first
         // settlement and append-only replay.
         *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-            crate::ToolFailureClass::Unavailable,
-            code.clone(),
-            message.clone(),
+            cause.failure_class(),
+            cause.code().to_string(),
+            cause.to_string(),
         ));
         return;
     }
@@ -890,8 +890,8 @@ fn project_recorded_intent_outcomes(
                 || declares_at(outcome, crate::ToolIntentKind::GetDefinition, index)
         });
         match outcome {
-            Some(crate::ToolIntentExecutionOutcome::Executed { result, .. }) => {
-                match serde_json::from_value(result.clone()) {
+            Some(crate::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
+                match realized.model_value().and_then(serde_json::from_value) {
                     Ok(decoded) => *value = decoded,
                     Err(error) => {
                         *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
@@ -925,14 +925,14 @@ fn project_recorded_intent_outcomes(
             .find(|outcome| declares_start_at(outcome, intent_index))
     {
         let handle = match start {
-            crate::ToolIntentExecutionOutcome::Executed { result, .. } => {
-                realized_start_handle(result).ok_or_else(|| {
-                    format!(
-                        "the declared process start did not register a process: its realized \
-                         result names no process handle: {result}"
-                    )
-                })
-            }
+            crate::ToolIntentExecutionOutcome::Executed {
+                realized: crate::ToolIntentRealized::StartProcess(handle),
+                ..
+            } => Ok(realized_start_handle(handle)),
+            crate::ToolIntentExecutionOutcome::Executed { realized, .. } => Err(format!(
+                "start slot names realized {}",
+                realized.kind().as_str()
+            )),
             crate::ToolIntentExecutionOutcome::Refused { refusal, .. }
             | crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => Err(format!(
                 "the declared process start did not register a process: it was refused with {}",
@@ -975,7 +975,19 @@ fn project_recorded_intent_outcomes(
         })
     {
         let handle = match registration {
-            crate::ToolIntentExecutionOutcome::Executed { result, .. } => result,
+            crate::ToolIntentExecutionOutcome::Executed { realized, .. } => {
+                match realized.model_value() {
+                    Ok(value) => value,
+                    Err(error) => {
+                        *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::Internal,
+                            "tool_intent_presentation_failed",
+                            error.to_string(),
+                        ));
+                        return;
+                    }
+                }
+            }
             crate::ToolIntentExecutionOutcome::Refused { refusal, .. }
             | crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => {
                 *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
@@ -1058,12 +1070,12 @@ fn project_recorded_intent_outcomes(
 /// The handle record a realized start answers: the one handle kind, its id,
 /// and the process id beside it. Nothing else of the realized view is copied —
 /// `status` and the rest are facts a holder reads through the process tools.
-fn realized_start_handle(result: &serde_json::Value) -> Option<serde_json::Value> {
-    let mut handle = serde_json::Map::new();
-    for name in [lash_sansio::handle::HANDLE_FIELD, "id", "process_id"] {
-        handle.insert(name.to_string(), result.get(name)?.clone());
-    }
-    Some(serde_json::Value::Object(handle))
+fn realized_start_handle(handle: &crate::ProcessHandleView) -> serde_json::Value {
+    serde_json::json!({
+        lash_sansio::handle::HANDLE_FIELD: lash_sansio::handle::HANDLE_KIND,
+        "id": handle.id,
+        "process_id": handle.process_id,
+    })
 }
 
 /// The realized answer a signal contributes back to its declaring attempt's
@@ -1093,28 +1105,19 @@ fn matching_answer<'a>(
 fn projected_intent_answers(
     outcomes: &[crate::ToolIntentExecutionOutcome],
 ) -> Vec<ProjectedIntentAnswer> {
-    let mut answers = Vec::new();
-    for outcome in outcomes {
-        let crate::ToolIntentExecutionOutcome::Executed { kind, result, .. } = outcome else {
-            continue;
-        };
-        let Some(process_id) = result
-            .get("process_id")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-        else {
-            continue;
-        };
-        if *kind == crate::ToolIntentKind::SignalProcess
-            && let Some(sequence) = result.get("sequence").and_then(serde_json::Value::as_u64)
-        {
-            answers.push(ProjectedIntentAnswer {
-                process_id,
-                fields: vec![("sequence".to_string(), serde_json::json!(sequence))],
-            });
-        }
-    }
-    answers
+    outcomes
+        .iter()
+        .filter_map(|outcome| match outcome {
+            crate::ToolIntentExecutionOutcome::Executed {
+                realized: crate::ToolIntentRealized::SignalProcess(event),
+                ..
+            } => Some(ProjectedIntentAnswer {
+                process_id: event.process_id.to_string(),
+                fields: vec![("sequence".to_string(), serde_json::json!(event.sequence))],
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 #[allow(
@@ -1195,16 +1198,8 @@ mod projection_tests {
         }
     }
 
-    fn executed(
-        kind: crate::ToolIntentKind,
-        result: serde_json::Value,
-    ) -> crate::ToolIntentExecutionOutcome {
-        executed_at(kind, result, 0)
-    }
-
     fn executed_at(
-        kind: crate::ToolIntentKind,
-        result: serde_json::Value,
+        realized: crate::ToolIntentRealized,
         intent_index: u32,
     ) -> crate::ToolIntentExecutionOutcome {
         crate::ToolIntentExecutionOutcome::Executed {
@@ -1216,15 +1211,25 @@ mod projection_tests {
                 replay_key: "replay".to_string(),
                 minting_emission_replay_key: None,
             },
-            kind,
-            result,
+            realized,
         }
     }
 
-    fn signal_outcome(process_id: &str, sequence: u64) -> crate::ToolIntentExecutionOutcome {
-        executed(
-            crate::ToolIntentKind::SignalProcess,
-            serde_json::json!({ "process_id": process_id, "sequence": sequence }),
+    fn signal_outcome(label: &str, sequence: u64) -> crate::ToolIntentExecutionOutcome {
+        let process_id = crate::process_id_for_test(label);
+        let invocation =
+            crate::runtime::causal::process_event_invocation(&process_id, sequence, "signal", None);
+        executed_at(
+            crate::ToolIntentRealized::SignalProcess(Box::new(crate::ProcessEvent {
+                process_id,
+                sequence,
+                event_type: "signal".to_string(),
+                payload: serde_json::Value::Null,
+                invocation,
+                semantics: Default::default(),
+                occurred_at: 0,
+            })),
+            0,
         )
     }
 
@@ -1244,10 +1249,14 @@ mod projection_tests {
     }
 
     fn start_outcome(label: &str, intent_index: u32) -> crate::ToolIntentExecutionOutcome {
-        let mut result = realized_handle(label);
-        result["kind"] = serde_json::json!("external");
-        result["status"] = serde_json::json!("running");
-        executed_at(crate::ToolIntentKind::StartProcess, result, intent_index)
+        executed_at(
+            crate::ToolIntentRealized::StartProcess(crate::ProcessHandleView::new(
+                crate::process_id_for_test(label),
+                crate::ProcessIdentity::new("external"),
+                crate::ProcessStatus::Running,
+            )),
+            intent_index,
+        )
     }
 
     #[test]
@@ -1256,8 +1265,9 @@ mod projection_tests {
         project_recorded_intent_outcomes(
             &mut output,
             &[refusal(crate::ToolIntentRefusalReason::CommandFailed {
-                code: "process_not_visible".to_string(),
-                message: "process is outside the invoking session".to_string(),
+                cause: crate::ToolIntentCommandFailure::ProcessNotVisible {
+                    process_id: crate::process_id_for_test("p-invisible"),
+                },
             })],
         );
 
@@ -1265,7 +1275,7 @@ mod projection_tests {
             panic!("intent command refusal must supersede optimistic success")
         };
         assert_eq!(failure.code, "process_not_visible");
-        assert_eq!(failure.message, "process is outside the invoking session");
+        assert!(failure.message.contains("not live or visible"));
     }
 
     #[test]
@@ -1297,7 +1307,7 @@ mod projection_tests {
                 ),
                 (
                     "process_id".to_string(),
-                    crate::ToolValue::String("p-signalled".to_string()),
+                    crate::ToolValue::String(crate::process_id_for_test("p-signalled").to_string()),
                 ),
             ]),
         ));
@@ -1385,30 +1395,6 @@ mod projection_tests {
         );
     }
 
-    #[test]
-    fn a_start_realized_without_a_handle_says_so() {
-        let mut output = crate::ToolCallOutput::success(start_slot(0));
-
-        project_recorded_intent_outcomes(
-            &mut output,
-            &[executed_at(
-                crate::ToolIntentKind::StartProcess,
-                serde_json::json!({ "status": "running" }),
-                0,
-            )],
-        );
-
-        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
-            panic!("a handle-less realization must not survive projection");
-        };
-        assert_eq!(failure.code, "process_start_unrealized");
-        assert_eq!(
-            failure.message,
-            "the declared process start did not register a process: its realized result \
-             names no process handle: {\"status\":\"running\"}"
-        );
-    }
-
     /// The slot spelling is only a slot where the attempt declared a start at
     /// that index. The same bytes in any other tool's output are the tool's
     /// own data, and no projection rewrites them.
@@ -1445,14 +1431,14 @@ mod projection_tests {
         // Same id, but no handle to replace: a start's answer is a handle, so
         // an output that is not one is not the optimistic form of it.
         let mut output = crate::ToolCallOutput::success(
-            serde_json::json!({ "process_id": "p-child", "ok": true }),
+            serde_json::json!({ "process_id": crate::process_id_for_test("p-child"), "ok": true }),
         );
 
         project_recorded_intent_outcomes(&mut output, &[start_outcome("p-child", 0)]);
 
         assert_eq!(
             output.value_for_projection(),
-            serde_json::json!({ "process_id": "p-child", "ok": true })
+            serde_json::json!({ "process_id": crate::process_id_for_test("p-child"), "ok": true })
         );
     }
 
@@ -1473,7 +1459,7 @@ mod projection_tests {
     #[test]
     fn a_realized_signal_projects_its_sequence_onto_the_process_it_signalled() {
         let mut output = crate::ToolCallOutput::success(
-            serde_json::json!({ "process_id": "p-target", "signal": "resume" }),
+            serde_json::json!({ "process_id": crate::process_id_for_test("p-target"), "signal": "resume" }),
         );
 
         project_recorded_intent_outcomes(
@@ -1484,7 +1470,7 @@ mod projection_tests {
         assert_eq!(
             output.value_for_projection(),
             serde_json::json!({
-                "process_id": "p-target",
+                "process_id": crate::process_id_for_test("p-target"),
                 "signal": "resume",
                 "sequence": 11,
             })

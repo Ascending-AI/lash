@@ -70,7 +70,9 @@ pub fn derive_pending_turn_input_id(
         )
     )
 }
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "scope", rename_all = "snake_case")]
 pub enum TurnInputIngress {
     ActiveTurn {
@@ -116,7 +118,16 @@ impl TurnInputIngress {
     }
 }
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TurnInputCheckpointBoundary {
@@ -708,7 +719,9 @@ pub enum PendingTurnInputReadStatus {
 /// The receipt deliberately carries only stable routing and idempotency
 /// identity. Queue dispatch and the pending row's mutable lifecycle state are
 /// observed separately through the pending-input reconciliation surface.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TurnInputAcceptanceReceipt {
     pub input_id: crate::InputId,
     pub session_id: SessionId,

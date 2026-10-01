@@ -20,6 +20,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-core-execution = { workspace = true }
 lash-sansio = { workspace = true }
 base64 = { workspace = true }
 lash-core = { workspace = true, optional = true }

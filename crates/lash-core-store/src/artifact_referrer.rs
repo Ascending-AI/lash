@@ -60,7 +60,9 @@ pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 2;
 pub const SYNTHETIC_NEXT_REFERRER_KIND: &str = "synthetic_next";
 
 /// The byte family a referrer claims.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferrerStore {
     Artifact,
@@ -83,7 +85,17 @@ impl fmt::Display for ReferrerStore {
 
 /// The referrer kinds, as the `referrer_kind` column stores them.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactReferrerKind {
@@ -363,8 +375,9 @@ impl fmt::Display for ArtifactReferrer {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
 struct StoredReferrer<'a> {
+    #[schemars(with = "ArtifactReferrerKind")]
     kind: std::borrow::Cow<'a, str>,
     id: std::borrow::Cow<'a, str>,
 }
@@ -1119,6 +1132,15 @@ fn reject_nul(kind: ArtifactReferrerKind, text: &str) -> Result<(), ArtifactRefe
         return Err(malformed(kind, "the id contains NUL"));
     }
     Ok(())
+}
+
+impl schemars::JsonSchema for ArtifactReferrer {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ArtifactReferrer".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        StoredReferrer::json_schema(generator)
+    }
 }
 
 #[cfg(test)]

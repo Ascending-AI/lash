@@ -264,18 +264,10 @@ fn recorded_start_intents() -> crate::ToolIntents {
 fn started_process_id(outcome: &crate::ToolIntentExecutionOutcome) -> (ProcessId, crate::StartKey) {
     match outcome {
         crate::ToolIntentExecutionOutcome::Executed {
-            identity, result, ..
+            identity,
+            realized: crate::ToolIntentRealized::StartProcess(handle),
         } => (
-            // The outcome carries the handle and the parts it names. The
-            // process id is `process_id`; `id` is the opaque handle (ADR 0095)
-            // and reading it here is what the one handle kind stops.
-            ProcessId::parse(
-                result
-                    .get("process_id")
-                    .and_then(serde_json::Value::as_str)
-                    .expect("a start outcome names its process id"),
-            )
-            .expect("a minted process id"),
+            handle.process_id.clone(),
             crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(identity),
         ),
         other => panic!("expected an executed start intent, got {other:?}"),
@@ -461,7 +453,7 @@ async fn tool_intent_outcome_replay_is_scoped_to_its_minting_emission() {
         matches!(
             recovered.intent_outcomes.as_slice(),
             [crate::ToolIntentExecutionOutcome::Executed {
-                kind: crate::ToolIntentKind::EmitProcessEvent,
+                realized: crate::ToolIntentRealized::EmitProcessEvent(_),
                 ..
             }]
         ),
@@ -528,7 +520,7 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
         first.intent_outcomes.as_slice(),
         [
             crate::ToolIntentExecutionOutcome::Executed {
-                kind: crate::ToolIntentKind::EmitProcessEvent,
+                realized: crate::ToolIntentRealized::EmitProcessEvent(_),
                 ..
             },
             crate::ToolIntentExecutionOutcome::Refused {
@@ -639,14 +631,18 @@ async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
 
     let outcome = run_fixed_intent_attempt(&context).await;
     let crate::ToolIntentExecutionOutcome::Refused {
-        refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
+        refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
         ..
     } = &outcome.intent_outcomes[0]
     else {
         panic!("ordinary controller-wrapped failures must remain per-intent refusals")
     };
-    assert_eq!(code, "runtime_effect_wrong_outcome");
-    assert_eq!(message, "process command returned the wrong outcome kind");
+    assert_eq!(cause.code(), "runtime_effect_wrong_outcome");
+    assert!(
+        cause
+            .to_string()
+            .contains("process command returned the wrong outcome kind")
+    );
 }
 
 #[tokio::test]
@@ -1007,11 +1003,10 @@ async fn crashed_trigger_intent_redrive(
 
 fn executed_trigger_outcome(
     outcome: &crate::tool_dispatch::ToolDispatchOutcome,
-) -> (&serde_json::Value, String) {
+) -> (&crate::facade_support::TriggerEmitReport, String) {
     let [
         crate::ToolIntentExecutionOutcome::Executed {
-            kind: crate::ToolIntentKind::EmitTrigger,
-            result,
+            realized: crate::ToolIntentRealized::EmitTrigger(result),
             ..
         },
     ] = outcome.intent_outcomes.as_slice()
@@ -1021,10 +1016,7 @@ fn executed_trigger_outcome(
             outcome.intent_outcomes
         )
     };
-    let occurrence_id = result["occurrence_id"]
-        .as_str()
-        .expect("the executed outcome reports its occurrence")
-        .to_string();
+    let occurrence_id = result.occurrence_id.clone();
     (result, occurrence_id)
 }
 
@@ -1075,7 +1067,7 @@ async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
 /// A delivery that never started is the declaration's own refusal, not a
 /// failure buried inside a successful outcome. Its reason is a live error
 /// string the next drive need not reproduce, so letting it reach
-/// `Executed { result }` would both call a start that did not happen a success
+/// `Executed { realized }` would both call a start that did not happen a success
 /// and put replay-varying bytes on the durable wire.
 #[tokio::test]
 async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
@@ -1094,7 +1086,7 @@ async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
     let [
         crate::ToolIntentExecutionOutcome::Refused {
             kind: crate::ToolIntentKind::EmitTrigger,
-            refusal: crate::ToolIntentRefusalReason::CommandFailed { message, .. },
+            refusal: crate::ToolIntentRefusalReason::CommandFailed { cause, .. },
             ..
         },
     ] = outcome.intent_outcomes.as_slice()
@@ -1105,8 +1097,9 @@ async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
         )
     };
     assert!(
-        message.contains("did not start") && message.contains("invalid payload for trigger"),
-        "the refusal must name the unstarted delivery and why: {message}"
+        cause.to_string().contains("did not start")
+            && cause.to_string().contains("invalid payload for trigger"),
+        "the refusal must name the unstarted delivery and why: {cause}"
     );
 }
 
@@ -1403,12 +1396,17 @@ async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_ou
         subscription.subscription_id
     );
     assert_eq!(
-        result["deliveries"],
-        json!([{
-            "occurrence_id": occurrence_id,
-            "subscription_id": subscription.subscription_id,
-            "outcome": {"started": {"process_id": deliveries[0].process_id}},
-        }]),
+        result.deliveries,
+        vec![crate::facade_support::TriggerDeliveryEmitReceipt {
+            occurrence_id,
+            subscription_id: subscription.subscription_id,
+            outcome: crate::facade_support::TriggerDeliveryEmitOutcome::Started {
+                process_id: deliveries[0]
+                    .process_id
+                    .clone()
+                    .expect("the delivery was started"),
+            },
+        }],
         "the recorded outcome states what every drive did, not which drive reserved first"
     );
 }
@@ -1461,7 +1459,7 @@ async fn an_attempt_holds_its_large_captured_environment_before_realizing_a_star
         matches!(
             outcome.intent_outcomes.as_slice(),
             [crate::ToolIntentExecutionOutcome::Executed {
-                kind: crate::ToolIntentKind::StartProcess,
+                realized: crate::ToolIntentRealized::StartProcess(_),
                 ..
             }]
         ),

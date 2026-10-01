@@ -437,13 +437,14 @@ pub mod tools {
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContract,
         ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolExecutionGrant, ToolFailure,
-        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentExecutionOutcome,
-        ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolIntents, ToolManifest,
-        ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall,
-        ToolPrepareContext, ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionModel,
-        ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
-        facade_support::ReconfigureError, facade_support::ToolSourceHandle,
-        facade_support::ToolStateFacadeOps, turn_outcome_from_tool_control,
+        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentCommandFailure,
+        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRealized,
+        ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents, ToolManifest, ToolModule,
+        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
+        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionModel, ToolValue, ToolView,
+        ToolViewBlock, ToolViewMeta, derive_tool_intent_identity, facade_support::ReconfigureError,
+        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
+        turn_outcome_from_tool_control,
     };
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
     /// Tool-execution request batches, replies, and child-process observation hooks.
@@ -757,12 +758,11 @@ pub mod plugins {
     pub use lash_core_worker::execution::runtime::ProcessExecutionEnvLoadError;
     pub use lash_protocol_standard::BatchSugar;
     pub use lash_sansio::{
-        AttachmentMaterializationNotice, CheckpointResumeAction, CompletedToolCall,
-        DegradedBinding, DriverAction, DriverContextView, EffectId, ExpandedRow, ExpandedWrapper,
-        ModelToolCalls, ModelToolReturn, Observation, PendingWork, ProjectorContext,
-        ResponseToolCalls, SessionStreamEvent, StreamMessageKind, ToolCatalogBuildError,
-        ToolContractResolver, ToolExpansionPlan, TurnMachineConfig, TurnProtocol, UnitTurnProtocol,
-        WriterFormats,
+        AttachmentMaterializationNotice, CheckpointResumeAction, DegradedBinding, DriverAction,
+        DriverContextView, EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn,
+        Observation, PendingWork, ProjectorContext, ResponseToolCalls, SessionStreamEvent,
+        StreamMessageKind, ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan,
+        TurnMachineConfig, TurnProtocol, UnitTurnProtocol, WriterFormats,
     };
     /// The protocol-generic forms [`TurnDriverConfig`] and
     /// [`TurnDriverPreamble`] specialize to the host's turn protocol.
@@ -771,7 +771,6 @@ pub mod plugins {
         TurnDriverPreamble as GenericTurnDriverPreamble,
     };
 
-    pub use lash_core::PluginOptions;
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
     /// The schema crate config wire types derive with, so an owner's
@@ -894,6 +893,7 @@ pub mod plugins {
     pub use lash_core::{
         CellFailure, CellFailureKind, ExecRequest, ExecResponse, RuntimeExecutionContext,
     };
+    pub use lash_core::{CompletedToolCall, PluginOptions};
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
     pub use lash_core::{
@@ -923,6 +923,7 @@ pub mod plugins {
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
     /// Default chat projector installed by [`TurnDriverConfig::chat`].
     pub use lash_sansio::ChatContextProjector;
+    pub use lash_sansio::CompletedToolCall as GenericCompletedToolCall;
     /// Projection contract stored by [`TurnDriverConfig`] when a protocol supplies a custom
     /// context projector.
     pub use lash_sansio::ContextProjector;
@@ -1152,7 +1153,8 @@ pub mod remote {
     pub mod usage {
         // The vocabulary this module's signatures name (the facade-completeness rule).
         pub use lash_remote_protocol::{
-            RemoteToolIntentExecutionOutcome, RemoteToolIntentKind, RemoteToolIntentRefusalReason,
+            RemoteToolIntentExecutionOutcome, RemoteToolIntentKind, RemoteToolIntentRealized,
+            RemoteToolIntentRefusalReason, RemoteTriggerMutationReceipt,
         };
 
         pub use lash_remote_protocol::queued_events::{

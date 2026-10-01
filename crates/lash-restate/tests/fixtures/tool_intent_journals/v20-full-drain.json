@@ -6424,36 +6424,38 @@
         "replay_key": "tool-intent:v2:blake3:b3558abfab97d8c9257e79cb098006c0a0fc288ae34d885c30ed6b8273956d58",
         "tool_call_id": "tc_231aa623ecbbba5bcf9480885c5a20afaabb7b6049b302ed3fba0423867177dc"
       },
-      "kind": "signal_process",
-      "result": {
-        "event_type": "signal.resume",
-        "invocation": {
-          "attribution": {},
-          "caused_by": {
-            "process_id": "p_00000000000070008000000000000001",
-            "type": "process"
+      "realized": {
+        "kind": "signal_process",
+        "result": {
+          "event_type": "signal.resume",
+          "invocation": {
+            "attribution": {},
+            "caused_by": {
+              "process_id": "p_00000000000070008000000000000001",
+              "type": "process"
+            },
+            "replay": {
+              "key": "process:p_00000000000070008000000000000001:signal.resume:tool-intent:v2:blake3:b3558abfab97d8c9257e79cb098006c0a0fc288ae34d885c30ed6b8273956d58"
+            },
+            "subject": {
+              "event_type": "signal.resume",
+              "process_id": "p_00000000000070008000000000000001",
+              "sequence": 1,
+              "type": "process_event"
+            }
           },
-          "replay": {
-            "key": "process:p_00000000000070008000000000000001:signal.resume:tool-intent:v2:blake3:b3558abfab97d8c9257e79cb098006c0a0fc288ae34d885c30ed6b8273956d58"
+          "occurred_at": 1700000000123,
+          "payload": {
+            "source": "checked-in-endpoint-corpus"
           },
-          "subject": {
-            "event_type": "signal.resume",
-            "process_id": "p_00000000000070008000000000000001",
-            "sequence": 1,
-            "type": "process_event"
-          }
-        },
-        "occurred_at": 1700000000123,
-        "payload": {
-          "source": "checked-in-endpoint-corpus"
-        },
-        "process_id": "p_00000000000070008000000000000001",
-        "semantics": {
-          "signal_wait": {
-            "ordinal": 1
-          }
-        },
-        "sequence": 1
+          "process_id": "p_00000000000070008000000000000001",
+          "semantics": {
+            "signal_wait": {
+              "ordinal": 1
+            }
+          },
+          "sequence": 1
+        }
       },
       "status": "executed"
     }

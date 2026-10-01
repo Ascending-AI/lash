@@ -675,6 +675,7 @@ PACKAGE_DEPS = {
         "normal": {
             "base64": "//third-party/rust:p0023",
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "schemars": "//third-party/rust:p0322",

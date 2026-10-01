@@ -155,7 +155,16 @@ type RecordedOf<C> = <<C as ConfigCommand>::Owner as ConfigOwner>::Recorded;
 type RefusalOf<C> = <<C as ConfigCommand>::Owner as ConfigOwner>::Refusal;
 
 /// A config registration that cannot stand.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConfigRegistrationError {
     #[error("plugin `{plugin_id}` registered a second config owner")]

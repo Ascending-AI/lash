@@ -535,6 +535,17 @@ mod recorded_child_facts {
         };
         fixture
     }; declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults);
+    lash_conformance::declared_start_tests!(@law [
+        #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+    ] {
+        let Some(fixture) =
+            super::super::recorded_child_facts_store_axis::postgres_tier().await
+        else {
+            eprintln!("skipping the PostgreSQL declared-start law: database is not configured");
+            return;
+        };
+        fixture
+    }; declared_start_refusal_settles_the_call);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

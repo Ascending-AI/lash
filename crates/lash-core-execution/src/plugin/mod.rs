@@ -48,8 +48,8 @@ pub use config::{
     NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use error::{
-    PluginError, durable_identity_conflict, is_durable_identity_conflict,
-    is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
+    PluginError, ToolIntentCommandFailure, ToolIntentRuntimeFailure, durable_identity_conflict,
+    is_durable_identity_conflict, is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
 };
 pub use history::{
     CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,

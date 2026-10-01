@@ -1255,6 +1255,7 @@ mod projected_seed_tests {
 pub struct RlmTurnProtocol;
 
 impl TurnProtocol for RlmTurnProtocol {
+    type IntentOutcome = ();
     type Event = RlmProtocolEvent;
     type Termination = RlmTermination;
     type DriverState = serde_json::Value;

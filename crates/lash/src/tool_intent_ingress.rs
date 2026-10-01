@@ -180,15 +180,14 @@ pub enum ToolIntentIngressOutcome {
 
 /// One realized host submission, before it is projected to a typed outcome.
 ///
-/// Four of the five intent kinds are process commands; the fifth is a trigger
-/// emission owned by the trigger router, which has no `ProcessEffectOutcome`.
+/// Process commands, trigger emissions and trigger registrations are owned by the trigger router, which has no `ProcessEffectOutcome`.
 enum RealizedIntent {
     Process(lash_core::ProcessEffectOutcome),
     Trigger(lash_core::facade_support::TriggerEmitReport),
     // Boxed: a registration handle carries the whole admitted subscription
     // record, including its captured source contract and route, and is an
     // order of magnitude larger than the other two variants.
-    TriggerRegistration(Box<serde_json::Value>),
+    TriggerRegistration(Box<lash_core::TriggerMutationReceipt>),
 }
 
 /// Session-and-scope-bound host front door for durable intent realization.
@@ -203,26 +202,9 @@ pub struct ToolIntentIngress {
     scope: lash_core::ExecutionScope,
 }
 
-fn ingress_runtime_error(error: crate::EmbedError) -> lash_core::RuntimeError {
-    match error {
-        crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => error,
-        crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error)) => {
-            let mut runtime = lash_core::RuntimeError::new(error.code, error.message);
-            runtime.summary = error.summary;
-            match error.cause {
-                Some(cause) => runtime.with_cause(cause),
-                None => runtime,
-            }
-        }
-        error => {
-            lash_core::RuntimeError::new(lash_core::RuntimeErrorCode::Plugin, error.to_string())
-        }
-    }
-}
-
 enum RealizationFailure {
     Refused(ToolIntentIngressRefusal),
-    Command(lash_core::ToolIntentKind, crate::EmbedError),
+    Command(lash_core::ToolIntentKind, lash_core::PluginError),
 }
 
 impl crate::LashCore {
@@ -361,8 +343,7 @@ impl ToolIntentIngress {
             Ok((result, replayed)) => (
                 lash_core::ToolIntentExecutionOutcome::Executed {
                     identity: identity.clone(),
-                    kind: result.0,
-                    result: result.1,
+                    realized: result,
                 },
                 replayed,
             ),
@@ -375,8 +356,7 @@ impl ToolIntentIngress {
                     intent_index: identity.intent_index,
                     kind,
                     refusal: lash_core::ToolIntentRefusalReason::CommandFailed {
-                        code: "tool_intent_ingress_realization_failed".to_string(),
-                        message: error.to_string(),
+                        cause: lash_core::ToolIntentCommandFailure::from(&error),
                     },
                 };
                 if let Err(store_error) = self
@@ -388,8 +368,7 @@ impl ToolIntentIngress {
                         intent_index: identity.intent_index,
                         kind,
                         refusal: lash_core::ToolIntentRefusalReason::CommandFailed {
-                            code: "tool_intent_ingress_outcome_persist_failed".to_string(),
-                            message: store_error.to_string(),
+                            cause: lash_core::ToolIntentCommandFailure::from(&store_error),
                         },
                     };
                 }
@@ -540,10 +519,7 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
-    ) -> std::result::Result<
-        ((lash_core::ToolIntentKind, serde_json::Value), bool),
-        RealizationFailure,
-    > {
+    ) -> std::result::Result<(lash_core::ToolIntentRealized, bool), RealizationFailure> {
         let kind = intent.kind();
         let submitted_intent = intent.clone();
         if let Some(recorded) = self.admit_submission(identity, &intent).await? {
@@ -553,154 +529,84 @@ impl ToolIntentIngress {
             .realize_inner(identity, intent)
             .await
             .map_err(|error| Self::realization_failure(kind, error))?;
-        let trigger_result = match &result {
-            RealizedIntent::Trigger(report) => Some((
-                lash_core::ToolIntentKind::EmitTrigger,
-                serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
-            )),
-            RealizedIntent::TriggerRegistration(handle) => {
-                Some((lash_core::ToolIntentKind::RegisterTrigger, *handle.clone()))
+        let realized = match result {
+            RealizedIntent::Trigger(report) => lash_core::ToolIntentRealized::EmitTrigger(report),
+            RealizedIntent::TriggerRegistration(receipt) => {
+                lash_core::ToolIntentRealized::RegisterTrigger(receipt)
             }
-            RealizedIntent::Process(_) => None,
-        };
-        let result = match trigger_result {
-            Some((trigger_kind, value)) => {
-                // `realize_inner` dispatches on the submitted intent, so this
-                // pairing only breaks if an admitted submission row carries a
-                // kind its own payload contradicts. The trigger routes have no
-                // journal replay to cross-check, so the row is the only place
-                // that corruption can come from; refuse rather than report a
-                // trigger outcome under another kind.
-                if kind != trigger_kind {
-                    return Err(RealizationFailure::Refused(
-                        ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                            recorded_kind: trigger_kind,
-                            submitted_kind: kind,
-                        },
-                    ));
+            RealizedIntent::Process(result) => match result {
+                lash_core::ProcessEffectOutcome::Start { record, .. } => {
+                    lash_core::ToolIntentRealized::StartProcess(
+                        lash_core::ProcessHandleView::from_record(*record),
+                    )
                 }
-                let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
-                    identity: identity.clone(),
-                    kind,
-                    result: value.clone(),
-                };
-                self.retain_outcome(identity, submitted_intent.clone(), outcome)
-                    .await
-                    .map_err(|error| {
-                        RealizationFailure::Command(
-                            kind,
-                            crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
-                        )
-                    })?;
-                return Ok(((kind, value), replayed));
-            }
-            None => match result {
-                RealizedIntent::Process(result) => result,
-                RealizedIntent::Trigger(_) | RealizedIntent::TriggerRegistration(_) => {
-                    unreachable!("trigger outcomes are settled above")
+                lash_core::ProcessEffectOutcome::Signal { event } => {
+                    lash_core::ToolIntentRealized::SignalProcess(event)
+                }
+                lash_core::ProcessEffectOutcome::Cancel { record } => {
+                    lash_core::ToolIntentRealized::CancelProcess(
+                        lash_core::ProcessCancelReceipt::from_record(*record)
+                            .map_err(|error| RealizationFailure::Command(kind, error))?,
+                    )
+                }
+                lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => {
+                    lash_core::ToolIntentRealized::EmitProcessEvent(event)
+                }
+                lash_core::ProcessEffectOutcome::Definition { definition } => match kind {
+                    lash_core::ToolIntentKind::PublishDefinition => {
+                        lash_core::ToolIntentRealized::PublishDefinition(definition)
+                    }
+                    lash_core::ToolIntentKind::GetDefinition => {
+                        lash_core::ToolIntentRealized::GetDefinition(definition)
+                    }
+                    lash_core::ToolIntentKind::StartProcess
+                    | lash_core::ToolIntentKind::SignalProcess
+                    | lash_core::ToolIntentKind::CancelProcess
+                    | lash_core::ToolIntentKind::EmitProcessEvent
+                    | lash_core::ToolIntentKind::EmitTrigger
+                    | lash_core::ToolIntentKind::RegisterTrigger => {
+                        return Err(Self::outside_protocol_outcome("definition"));
+                    }
+                },
+                lash_core::ProcessEffectOutcome::CompleteExternal { .. } => {
+                    return Err(Self::outside_protocol_outcome("complete_external"));
+                }
+                lash_core::ProcessEffectOutcome::ValidateVisible { .. } => {
+                    return Err(Self::outside_protocol_outcome("validate_visible"));
+                }
+                lash_core::ProcessEffectOutcome::List { .. } => {
+                    return Err(Self::outside_protocol_outcome("list"));
+                }
+                lash_core::ProcessEffectOutcome::Transfer => {
+                    return Err(Self::outside_protocol_outcome("transfer"));
+                }
+                lash_core::ProcessEffectOutcome::DeleteSession { .. } => {
+                    return Err(Self::outside_protocol_outcome("delete_session"));
+                }
+                lash_core::ProcessEffectOutcome::Await { .. } => {
+                    return Err(Self::outside_protocol_outcome("await"));
+                }
+                lash_core::ProcessEffectOutcome::AttachTerminal => {
+                    return Err(Self::outside_protocol_outcome("attach_terminal"));
                 }
             },
         };
-        let recorded_kind = match &result {
-            lash_core::ProcessEffectOutcome::Start { .. } => {
-                lash_core::ToolIntentKind::StartProcess
-            }
-            lash_core::ProcessEffectOutcome::Signal { .. } => {
-                lash_core::ToolIntentKind::SignalProcess
-            }
-            lash_core::ProcessEffectOutcome::Cancel { .. } => {
-                lash_core::ToolIntentKind::CancelProcess
-            }
-            lash_core::ProcessEffectOutcome::EmitEvent { .. } => {
-                lash_core::ToolIntentKind::EmitProcessEvent
-            }
-            lash_core::ProcessEffectOutcome::CompleteExternal { .. } => {
-                return Err(Self::outside_protocol_outcome("complete_external"));
-            }
-            lash_core::ProcessEffectOutcome::ValidateVisible { .. } => {
-                return Err(Self::outside_protocol_outcome("validate_visible"));
-            }
-            lash_core::ProcessEffectOutcome::List { .. } => {
-                return Err(Self::outside_protocol_outcome("list"));
-            }
-            lash_core::ProcessEffectOutcome::Transfer => {
-                return Err(Self::outside_protocol_outcome("transfer"));
-            }
-            lash_core::ProcessEffectOutcome::DeleteSession { .. } => {
-                return Err(Self::outside_protocol_outcome("delete_session"));
-            }
-            lash_core::ProcessEffectOutcome::Await { .. } => {
-                return Err(Self::outside_protocol_outcome("await"));
-            }
-            lash_core::ProcessEffectOutcome::AttachTerminal => {
-                return Err(Self::outside_protocol_outcome("attach_terminal"));
-            }
-            lash_core::ProcessEffectOutcome::Definition { .. } => kind,
-        };
-        if recorded_kind != kind {
+        if realized.kind() != kind {
             return Err(RealizationFailure::Refused(
                 ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                    recorded_kind,
+                    recorded_kind: realized.kind(),
                     submitted_kind: kind,
                 },
             ));
         }
-        let value = match result {
-            lash_core::ProcessEffectOutcome::Definition { definition } => {
-                serde_json::to_value(definition).unwrap_or(serde_json::Value::Null)
-            }
-            lash_core::ProcessEffectOutcome::Start { record, .. } => {
-                let summary = lash_core::ProcessHandleView::from_record(*record);
-                serde_json::to_value(summary).unwrap_or(serde_json::Value::Null)
-            }
-            lash_core::ProcessEffectOutcome::Signal { event } => {
-                serde_json::to_value(*event).unwrap_or(serde_json::Value::Null)
-            }
-            lash_core::ProcessEffectOutcome::Cancel { record } => serde_json::to_value(
-                lash_core::ProcessCancelReceipt::from_record(*record).map_err(|error| {
-                    RealizationFailure::Command(kind, crate::EmbedError::Plugin(error))
-                })?,
-            )
-            .unwrap_or(serde_json::Value::Null),
-            lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => {
-                serde_json::to_value(*event).unwrap_or(serde_json::Value::Null)
-            }
-            lash_core::ProcessEffectOutcome::CompleteExternal { .. } => {
-                return Err(Self::outside_protocol_outcome("complete_external"));
-            }
-            lash_core::ProcessEffectOutcome::ValidateVisible { .. } => {
-                return Err(Self::outside_protocol_outcome("validate_visible"));
-            }
-            lash_core::ProcessEffectOutcome::List { .. } => {
-                return Err(Self::outside_protocol_outcome("list"));
-            }
-            lash_core::ProcessEffectOutcome::Transfer => {
-                return Err(Self::outside_protocol_outcome("transfer"));
-            }
-            lash_core::ProcessEffectOutcome::DeleteSession { .. } => {
-                return Err(Self::outside_protocol_outcome("delete_session"));
-            }
-            lash_core::ProcessEffectOutcome::Await { .. } => {
-                return Err(Self::outside_protocol_outcome("await"));
-            }
-            lash_core::ProcessEffectOutcome::AttachTerminal => {
-                return Err(Self::outside_protocol_outcome("attach_terminal"));
-            }
-        };
         let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
             identity: identity.clone(),
-            kind,
-            result: value.clone(),
+            realized: realized.clone(),
         };
         self.retain_outcome(identity, submitted_intent, outcome)
             .await
-            .map_err(|error| {
-                RealizationFailure::Command(
-                    kind,
-                    crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
-                )
-            })?;
-        Ok(((kind, value), replayed))
+            .map_err(|error| RealizationFailure::Command(kind, error))?;
+        Ok((realized, replayed))
     }
 
     /// Claim `identity`'s row in the durable tool-intent submission ledger
@@ -731,19 +637,16 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: &lash_core::ToolIntent,
-    ) -> std::result::Result<
-        Option<(lash_core::ToolIntentKind, serde_json::Value)>,
-        RealizationFailure,
-    > {
+    ) -> std::result::Result<Option<lash_core::ToolIntentRealized>, RealizationFailure> {
         let kind = intent.kind();
         let submitted =
             lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone()).map_err(
                 |error| {
                     RealizationFailure::Command(
                         kind,
-                        crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
+                        lash_core::PluginError::Session(format!(
                             "failed to hash tool-intent submission: {error}"
-                        ))),
+                        )),
                     )
                 },
             )?;
@@ -752,7 +655,7 @@ impl ToolIntentIngress {
             .map_err(|error| RealizationFailure::Command(kind, error))?
             .admit_tool_intent_submission(submitted.clone())
             .await
-            .map_err(|error| RealizationFailure::Command(kind, crate::EmbedError::Plugin(error)))?;
+            .map_err(|error| RealizationFailure::Command(kind, error))?;
         let lash_core::ToolIntentSubmissionAdmission::Existing(existing) = admission else {
             return Ok(None);
         };
@@ -782,8 +685,8 @@ impl ToolIntentIngress {
             ));
         }
         Ok(match existing.outcome {
-            Some(lash_core::ToolIntentExecutionOutcome::Executed { kind, result, .. }) => {
-                Some((kind, result))
+            Some(lash_core::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
+                Some(realized)
             }
             _ => None,
         })
@@ -798,20 +701,16 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         submitted: lash_core::ToolIntent,
         outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<(), lash_core::RuntimeError> {
-        let registry = self.process_registry().map_err(ingress_runtime_error)?;
+    ) -> Result<(), lash_core::PluginError> {
+        let registry = self.process_registry()?;
         let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), submitted)
             .map_err(|error| {
-                lash_core::RuntimeError::new(
+                lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::RecordEncodingFailed,
                     format!("failed to hash admitted tool-intent submission: {error}"),
-                )
+                ))
             })?;
-        let recorded = match registry
-            .admit_tool_intent_submission(submission)
-            .await
-            .map_err(|error| ingress_runtime_error(error.into()))?
-        {
+        let recorded = match registry.admit_tool_intent_submission(submission).await? {
             lash_core::ToolIntentSubmissionAdmission::Admitted => false,
             lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
                 existing.outcome.is_some()
@@ -820,8 +719,7 @@ impl ToolIntentIngress {
         if !recorded {
             registry
                 .complete_tool_intent_submission(&identity.replay_key, outcome)
-                .await
-                .map_err(|error| ingress_runtime_error(error.into()))?;
+                .await?;
         }
         Ok(())
     }
@@ -843,18 +741,14 @@ impl ToolIntentIngress {
     /// [`ToolIntentIngressRefusal::TriggerOccurrenceReclaimed`] (FIG-4513).
     fn realization_failure(
         kind: lash_core::ToolIntentKind,
-        error: crate::EmbedError,
+        error: lash_core::PluginError,
     ) -> RealizationFailure {
-        if let crate::EmbedError::Plugin(plugin) = &error
-            && lash_core::is_durable_identity_conflict(plugin)
-        {
+        if lash_core::is_durable_identity_conflict(&error) {
             return RealizationFailure::Refused(ToolIntentIngressRefusal::DuplicateIdentity {
                 kind,
             });
         }
-        if let crate::EmbedError::Plugin(plugin) = &error
-            && lash_core::is_trigger_occurrence_reclaimed(plugin)
-        {
+        if lash_core::is_trigger_occurrence_reclaimed(&error) {
             return RealizationFailure::Refused(
                 ToolIntentIngressRefusal::TriggerOccurrenceReclaimed,
             );
@@ -874,7 +768,7 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
-    ) -> crate::Result<(RealizedIntent, bool)> {
+    ) -> Result<(RealizedIntent, bool), lash_core::PluginError> {
         if let Some(env_ref) = intent.execution_env_ref() {
             let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
                 self.scope
@@ -995,7 +889,7 @@ impl ToolIntentIngress {
             }
             lash_core::ToolIntent::RegisterTrigger(intent) => {
                 let handle = self.register_recorded_trigger(identity, *intent).await?;
-                return Ok((RealizedIntent::TriggerRegistration(Box::new(handle)), false));
+                return Ok((RealizedIntent::TriggerRegistration(handle), false));
             }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
@@ -1008,7 +902,7 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::RegisterTriggerIntent,
-    ) -> crate::Result<serde_json::Value> {
+    ) -> Result<Box<lash_core::TriggerMutationReceipt>, lash_core::PluginError> {
         // `validate` already pinned `owner_scope` and `actor` to this
         // ingress's own session authority (FIG-3116).
         let store = self.core.env.core.trigger_store();
@@ -1018,16 +912,15 @@ impl ToolIntentIngress {
             .core
             .control
             .effect_host
-            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
+            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))
+            .map_err(lash_core::PluginError::Runtime)?;
         // The realizing execution's journal holds what it publishes, and the
         // command's effect holds the revision it commits before it commits
         // (ADR 0113 §3.4, §3.7).
         let creator = scoped
             .execution_scope()
             .journal_identity()
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-            })?;
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
         let store: std::sync::Arc<dyn lash_core::TriggerStore> =
             std::sync::Arc::new(lash_core::triggers::RevisionReferrerTriggerStore::new(
                 store,
@@ -1040,9 +933,7 @@ impl ToolIntentIngress {
                 scoped.execution_scope().clone(),
                 identity.replay_key.clone(),
             )
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-            })?,
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
             lash_core::RuntimeAttribution::for_session(self.session_id.clone()),
             identity.replay_key.clone(),
         )
@@ -1064,22 +955,14 @@ impl ToolIntentIngress {
                 lash_core::RuntimeEffectLocalExecutor::triggers(store),
             )
             .await
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error))
-            })?
+            .map_err(lash_core::PluginError::RuntimeEffectController)?
             .into_trigger()
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error))
-            })?
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
-            })?;
+            .map_err(lash_core::PluginError::RuntimeEffectController)?
+            .map_err(|error| lash_core::PluginError::TriggerOperation(Box::new(error)))?;
         match outcome {
-            lash_core::TriggerCommandOutcome::Mutation { receipt } => {
-                lash_core::trigger_handle_outcome_value(&receipt).map_err(crate::EmbedError::Plugin)
-            }
-            other => Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                format!("trigger registration returned a non-mutation outcome: {other:?}"),
+            lash_core::TriggerCommandOutcome::Mutation { receipt } => Ok(receipt),
+            other => Err(lash_core::PluginError::Session(format!(
+                "trigger registration returned a non-mutation outcome: {other:?}"
             ))),
         }
     }
@@ -1087,10 +970,13 @@ impl ToolIntentIngress {
     async fn emit_recorded_trigger(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
-    ) -> crate::Result<(
-        lash_core::facade_support::TriggerEmitReport,
-        lash_core::StoreRealization,
-    )> {
+    ) -> Result<
+        (
+            lash_core::facade_support::TriggerEmitReport,
+            lash_core::StoreRealization,
+        ),
+        lash_core::PluginError,
+    > {
         let store = self.core.env.core.trigger_store();
         let ports = self.core.substrate_slot.ports().await;
         let process_work = ports.process;
@@ -1108,11 +994,11 @@ impl ToolIntentIngress {
             .core
             .control
             .effect_host
-            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
+            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))
+            .map_err(lash_core::PluginError::Runtime)?;
         router
             .emit_recorded_reporting_realization(request, &scoped)
             .await
-            .map_err(Into::into)
     }
 
     /// The gate may use that immutable environment to derive identity, but cannot inspect a
@@ -1121,7 +1007,7 @@ impl ToolIntentIngress {
         &self,
         registration: lash_core::ProcessStartRegistration,
         env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
-    ) -> crate::Result<lash_core::ProcessStartRegistration> {
+    ) -> Result<lash_core::ProcessStartRegistration, lash_core::PluginError> {
         let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine { kind, payload }) =
             registration.input.as_ref()
         else {
@@ -1141,15 +1027,17 @@ impl ToolIntentIngress {
     /// directly-wired engines plus the plugin-contributed ones.
     fn resolved_process_engines(
         &self,
-    ) -> crate::Result<lash_core::facade_support::ProcessEngineRegistry> {
+    ) -> Result<lash_core::facade_support::ProcessEngineRegistry, lash_core::PluginError> {
         Ok(self.core.host_process_engines.clone())
     }
 
-    fn process_registry(&self) -> crate::Result<std::sync::Arc<dyn lash_core::ProcessRegistry>> {
+    fn process_registry(
+        &self,
+    ) -> Result<std::sync::Arc<dyn lash_core::ProcessRegistry>, lash_core::PluginError> {
         self.core.env.process_registry().cloned().ok_or_else(|| {
-            crate::EmbedError::Plugin(lash_core::PluginError::Session(
+            lash_core::PluginError::Session(
                 "process registry is unavailable in this runtime".to_string(),
-            ))
+            )
         })
     }
 
@@ -1157,7 +1045,7 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         command: lash_core::ProcessCommand,
-    ) -> crate::Result<(lash_core::ProcessEffectOutcome, bool)> {
+    ) -> Result<(lash_core::ProcessEffectOutcome, bool), lash_core::PluginError> {
         self.run_command_with_replay_key(identity, identity.replay_key.clone(), command)
             .await
     }
@@ -1167,7 +1055,7 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         replay_key: String,
         command: lash_core::ProcessCommand,
-    ) -> crate::Result<(lash_core::ProcessEffectOutcome, bool)> {
+    ) -> Result<(lash_core::ProcessEffectOutcome, bool), lash_core::PluginError> {
         let registry = self.process_registry()?;
         let scoped = self
             .core
@@ -1175,7 +1063,8 @@ impl ToolIntentIngress {
             .core
             .control
             .effect_host
-            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
+            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))
+            .map_err(lash_core::PluginError::Runtime)?;
         #[expect(
             clippy::expect_used,
             reason = "the scope comes from the effect host's own `scoped` handle, which \
@@ -1252,13 +1141,11 @@ impl ToolIntentIngress {
             // refusal travels as a `RuntimeErrorCode`, and `realization_failure`
             // reads that code to produce the shared `DuplicateIdentity`
             // vocabulary.
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error))
-            })?;
+            .map_err(lash_core::PluginError::RuntimeEffectController)?;
         let lash_core::RuntimeEffectOutcome::Process { result } = outcome else {
-            return Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
+            return Err(lash_core::PluginError::Session(
                 "tool-intent ingress effect returned a non-process outcome".to_string(),
-            )));
+            ));
         };
         let replayed = match *store_realization.lock_recover() {
             // Local execution never ran: the journal replayed this effect.

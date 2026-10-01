@@ -363,6 +363,7 @@ pub mod facade_support {
     pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
         crate::operational_metrics::record_postgres_pool_acquire_wait(wait, outcome);
     }
+    pub use crate::Response;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
@@ -440,7 +441,6 @@ pub mod facade_support {
     pub use lash_sansio::ModelToolReturnPart;
     pub use lash_sansio::ProviderSchemaCapabilities;
     pub use lash_sansio::ResolvedSchema;
-    pub use lash_sansio::Response;
     pub use lash_sansio::SchemaPurpose;
     pub use lash_sansio::SchemaResolutionError;
     pub use lash_sansio::SchemaResolutionRequest;
@@ -490,12 +490,13 @@ pub(crate) use crate::runtime::UnavailableProcessService;
 pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
 
 pub mod sansio {
+    pub use crate::{CompletedToolCall, Response};
     pub use lash_sansio::sansio::{
-        ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
-        ContextProjector, EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
+        ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, ContextProjector,
+        EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
         ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
         ModelToolCalls, PendingToolCall, PendingWork, ProjectorTurnInputs, ProtocolDriverHandle,
-        Response, ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine,
+        ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine,
         render_turn_causes_prompt,
     };
 }
@@ -526,10 +527,9 @@ pub use lash_sansio::{
     TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput,
     ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
     ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass,
-    ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    ToolIntentRefusalReason, ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy,
-    ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
-    TurnOutputSource,
+    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
+    ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock,
+    ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};
 /// Project a successful tool control into its terminal turn outcome.
@@ -629,6 +629,7 @@ impl ProtocolDriverState {
 pub struct HostTurnProtocol;
 
 impl lash_sansio::TurnProtocol for HostTurnProtocol {
+    type IntentOutcome = ToolIntentExecutionOutcome;
     type Event = crate::session_model::ProtocolEvent;
     type Termination = ProtocolTurnOptions;
     type DriverState = ProtocolDriverState;
@@ -969,3 +970,13 @@ pub mod core_internal {
 // module (ADR 0125).
 pub use lash_core_store::UsageAccountingStore;
 pub use lash_core_store::usage_accounting::*;
+
+mod tool_intent_outcome;
+pub use plugin::{ToolIntentCommandFailure, ToolIntentRuntimeFailure};
+pub use tool_intent_outcome::{
+    ToolIntentExecutionOutcome, ToolIntentRealized, ToolIntentRefusalReason,
+};
+/// The host protocol's completion, including its typed durable intent outcomes.
+pub type CompletedToolCall = lash_sansio::CompletedToolCall<ToolIntentExecutionOutcome>;
+/// The host protocol's response to an execution effect.
+pub type Response = lash_sansio::Response<ToolIntentExecutionOutcome>;

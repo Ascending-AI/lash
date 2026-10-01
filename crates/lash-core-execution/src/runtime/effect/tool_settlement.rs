@@ -376,11 +376,10 @@ pub(crate) fn settlement_possession(
     intent_outcomes
         .iter()
         .filter_map(|intent| match intent {
-            crate::ToolIntentExecutionOutcome::Executed { kind, result, .. }
-                if *kind == crate::ToolIntentKind::StartProcess =>
-            {
-                crate::process_id_from_handle_json(result).ok()
-            }
+            crate::ToolIntentExecutionOutcome::Executed {
+                realized: crate::ToolIntentRealized::StartProcess(handle),
+                ..
+            } => Some(handle.process_id.clone()),
             _ => None,
         })
         .collect()

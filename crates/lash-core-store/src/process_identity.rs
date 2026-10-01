@@ -483,7 +483,19 @@ impl ProcessExecutionEnvSpec {
 /// Operationally: upgrade readers before any writer can emit a new status.
 /// A mixed-version fleet sharing one registry must roll all binaries forward
 /// first; rolling a writer out ahead of its readers stalls their feeds.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessStatus {
     #[default]

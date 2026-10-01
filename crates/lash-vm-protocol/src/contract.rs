@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::OpaqueStateRefusal;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VmContractComponent {
     Bytecode,

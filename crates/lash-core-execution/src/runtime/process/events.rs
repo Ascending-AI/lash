@@ -865,7 +865,7 @@ pub fn validate_process_signal_name(signal_name: &str) -> Result<(), crate::Plug
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEvent {
     pub process_id: ProcessId,
     pub sequence: u64,

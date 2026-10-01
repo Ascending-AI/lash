@@ -8,7 +8,9 @@ use crate::SessionId;
 ///
 /// Attachment retention and worker causes keep their source's retry class.
 /// Other causes are terminal except for an unavailable recorded model.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
@@ -18,6 +20,15 @@ pub enum RuntimeErrorCause {
     },
     PluginFormat {
         refusal: Box<crate::plugin_state::FormatRefusal>,
+    },
+    /// A process start names a scope whose lifetime has closed.
+    ProcessParentEnded {
+        start_key: Option<crate::process_identity::StartKey>,
+        parent: Box<crate::scope_identity::ScopeId>,
+    },
+    /// A host start key already names a different start.
+    ProcessStartKeyConflict {
+        start_key: crate::process_identity::StartKey,
     },
     /// The attachment-store family and structured source of a required retention failure.
     AttachmentRetention {
@@ -80,7 +91,9 @@ pub enum RuntimeErrorCause {
 }
 
 /// The record kind and diagnostic retained when durable data cannot be decoded.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct StoredDataCorruption {
     pub record_kind: String,
     pub message: String,
@@ -102,7 +115,9 @@ impl RuntimeErrorCause {
 /// A capability a deployment needs to execute an effect-group child, and
 /// whose absence is a fact of the deployment's wiring rather than of one
 /// attempt (FIG-4550).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum GroupChildCapability {

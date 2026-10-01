@@ -1193,8 +1193,15 @@ fn remote_turn_result_maps_core_semantics() {
             replay_key: "intent-replay-key".to_string(),
             minting_emission_replay_key: None,
         },
-        kind: RemoteToolIntentKind::EmitProcessEvent,
-        result: serde_json::json!({"sequence": 3}),
+        realized: RemoteToolIntentRealized::EmitProcessEvent(Box::new(RemoteProcessEvent {
+            process_id: lash_core::ProcessIdMint::sequential_id_for_testing(1),
+            sequence: 3,
+            event_type: "result".to_string(),
+            payload: serde_json::json!({"answer": 42}),
+            invocation: None,
+            semantics: RemoteProcessEventSemantics::default(),
+            occurred_at_ms: 5,
+        })),
     };
     let remote = RemoteTurnReport::from_core(
         "session",

@@ -203,7 +203,10 @@ impl<M: TurnProtocol> MachineState<M> {
     /// until the response's handler moves it on. A response whose id or kind
     /// does not match the outstanding effect is stale: the machine keeps
     /// waiting, its delivery bookkeeping untouched.
-    pub(super) fn take_waiting(&mut self, response: &Response) -> Option<PendingWork<M>> {
+    pub(super) fn take_waiting(
+        &mut self,
+        response: &Response<M::IntentOutcome>,
+    ) -> Option<PendingWork<M>> {
         let Self::Waiting {
             effect_id, work, ..
         } = self

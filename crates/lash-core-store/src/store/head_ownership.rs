@@ -27,7 +27,9 @@ use crate::{SessionId, TurnId};
 use super::StoreError;
 
 /// What owns a session's head, refusing a head write outside the drive.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "owner", rename_all = "snake_case")]
 pub enum SessionHeadOwner {
     /// An admitted root without terminal evidence.

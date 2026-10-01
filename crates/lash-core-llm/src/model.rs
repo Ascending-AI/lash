@@ -341,7 +341,16 @@ impl ModelConfig {
 
 /// A reasoning selection the recorded capability of the model under `key`
 /// refuses.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[error("reasoning selection refused for model key `{key}`: {message}")]
 pub struct ReasoningRefused {
     pub key: ModelKey,

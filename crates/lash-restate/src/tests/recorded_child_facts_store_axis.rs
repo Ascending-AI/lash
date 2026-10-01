@@ -203,4 +203,7 @@ mod sqlite_file {
     lash_conformance::declared_start_tests!(@law [] {
         super::sqlite_file_tier().await
     }; declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults);
+    lash_conformance::declared_start_tests!(@law [] {
+        super::sqlite_file_tier().await
+    }; declared_start_refusal_settles_the_call);
 }

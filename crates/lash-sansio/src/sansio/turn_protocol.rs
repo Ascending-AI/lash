@@ -3,6 +3,7 @@ use crate::SessionId;
 use crate::TurnId;
 
 impl TurnProtocol for UnitTurnProtocol {
+    type IntentOutcome = ();
     type Event = ();
     type Termination = ();
     type DriverState = serde_json::Value;
@@ -30,7 +31,8 @@ pub struct PendingToolCall {
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct CompletedToolCall {
+#[serde(bound(serialize = "I: Serialize", deserialize = "I: serde::Deserialize<'de>"))]
+pub struct CompletedToolCall<I = ()> {
     pub call_id: crate::ToolCallId,
     /// See [`PendingToolCall::provider_call_id`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,7 +42,7 @@ pub struct CompletedToolCall {
     pub output: ToolCallOutput,
     pub model_return: ModelToolReturn,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    pub intent_outcomes: Vec<I>,
     /// See [`PendingToolCall::replay`].
     pub replay: Option<ProviderReplayMeta>,
 }
@@ -289,7 +291,7 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     /// accounting is emitted separately by the machine immediately after this
     /// effect, preserving `Started` before the accounting completion record.
     ReportToolCalls {
-        completed: Vec<CompletedToolCall>,
+        completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     },
 }
 
@@ -380,7 +382,7 @@ where
 }
 
 /// A response to a previously emitted effect.
-pub enum Response {
+pub enum Response<I = ()> {
     /// Live execution environment sync completed.
     ExecutionEnvironmentSynced {
         id: EffectId,
@@ -397,7 +399,7 @@ pub enum Response {
     /// Native tool results.
     ToolResults {
         id: EffectId,
-        results: Vec<CompletedToolCall>,
+        results: Vec<CompletedToolCall<I>>,
     },
     /// Mode code execution result.
     ExecResult {
@@ -478,7 +480,7 @@ pub struct ExecutionEnvironmentSyncFailure {
     pub message: String,
 }
 
-impl Response {
+impl<I> Response<I> {
     /// The id of the effect this response answers.
     pub(super) fn effect_id(&self) -> EffectId {
         match self {
@@ -600,7 +602,7 @@ impl<M: TurnProtocol> PendingWork<M> {
     }
 
     /// Whether `response` is the kind of answer this work waits for.
-    pub(super) fn answered_by(&self, response: &Response) -> bool {
+    pub(super) fn answered_by(&self, response: &Response<M::IntentOutcome>) -> bool {
         match self {
             Self::SyncExecutionEnvironment => {
                 matches!(response, Response::ExecutionEnvironmentSynced { .. })
@@ -628,7 +630,7 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     Finish(TurnOutcome),
     /// Report completed tool calls that were refused before host dispatch.
     ReportToolCalls {
-        completed: Vec<CompletedToolCall>,
+        completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     },
 }
 
@@ -857,8 +859,8 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     fn fold_tool_results(
         &self,
         plan: &ToolExpansionPlan,
-        completed: Vec<CompletedToolCall>,
-    ) -> Vec<CompletedToolCall> {
+        completed: Vec<CompletedToolCall<M::IntentOutcome>>,
+    ) -> Vec<CompletedToolCall<M::IntentOutcome>> {
         debug_assert!(
             plan.is_empty(),
             "a driver that expands tool calls must fold them"
@@ -868,7 +870,7 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     fn handle_tool_results(
         &self,
         ctx: DriverContextView<'_, M>,
-        completed: Vec<CompletedToolCall>,
+        completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     ) -> Vec<DriverAction<M>>;
     /// Answer the [`PendingWork::Exec`] the driver started, handing back its
     /// `driver_state`.

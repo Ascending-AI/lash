@@ -28,7 +28,9 @@ impl RuntimeErrorCause {
             | Self::RunShapeRefused { .. }
             | Self::ConfigRefused { .. }
             | Self::MaxToolCallsExceeded { .. }
-            | Self::PluginFormat { .. } => true,
+            | Self::PluginFormat { .. }
+            | Self::ProcessParentEnded { .. }
+            | Self::ProcessStartKeyConflict { .. } => true,
         }
     }
 

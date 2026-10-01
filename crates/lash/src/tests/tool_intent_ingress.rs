@@ -88,13 +88,17 @@ async fn ingress_core_over(
 /// executed outcome answers.
 fn started_process_id(outcome: &crate::tools::ToolIntentIngressOutcome) -> ProcessId {
     let crate::tools::ToolIntentIngressOutcome::Admitted {
-        outcome: lash_core::ToolIntentExecutionOutcome::Executed { result, .. },
+        outcome:
+            lash_core::ToolIntentExecutionOutcome::Executed {
+                realized: lash_core::ToolIntentRealized::StartProcess(result),
+                ..
+            },
         ..
     } = outcome
     else {
         panic!("the start executed: {outcome:?}");
     };
-    lash_core::process_id_from_handle_json(result).expect("a start answers its process handle")
+    result.process_id.clone()
 }
 
 /// Every process the registry holds.
@@ -309,7 +313,7 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
             &outcome,
             crate::tools::ToolIntentIngressOutcome::Admitted {
                 outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::RegisterTrigger,
+                    realized: lash_core::ToolIntentRealized::RegisterTrigger(_),
                     ..
                 },
                 replayed: false,
@@ -333,8 +337,7 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::EmitTrigger,
-                result,
+                realized: lash_core::ToolIntentRealized::EmitTrigger(result),
                 ..
             },
         ..
@@ -342,8 +345,7 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
     else {
         panic!("registered trigger must fire: {emitted:?}");
     };
-    let report: lash_core::facade_support::TriggerEmitReport =
-        serde_json::from_value(result).expect("trigger report decodes");
+    let report = result;
     assert_eq!(report.started_process_ids().len(), 1);
     let occurrences = store
         .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
@@ -423,8 +425,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::EmitTrigger,
-                result,
+                realized: lash_core::ToolIntentRealized::EmitTrigger(result),
                 ..
             },
         replayed: false,
@@ -438,7 +439,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     assert_eq!(occurrences.len(), 1);
     assert_eq!(occurrences[0].idempotency_key, key.identity().replay_key);
     assert_eq!(
-        result["occurrence_id"].as_str(),
+        Some(result.occurrence_id.as_str()),
         Some(occurrences[0].occurrence_id.as_str())
     );
     let deliveries = store
@@ -465,8 +466,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::EmitTrigger,
-                result: duplicate_result,
+                realized: lash_core::ToolIntentRealized::EmitTrigger(duplicate_result),
                 ..
             },
         ..
@@ -1305,7 +1305,7 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
         first,
         crate::tools::ToolIntentIngressOutcome::Admitted {
             outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::StartProcess,
+                realized: lash_core::ToolIntentRealized::StartProcess(_),
                 ..
             },
             replayed: false,
@@ -1355,7 +1355,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
         first,
         crate::tools::ToolIntentIngressOutcome::Admitted {
             outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::EmitProcessEvent,
+                realized: lash_core::ToolIntentRealized::EmitProcessEvent(_),
                 ..
             },
             replayed: false,
@@ -1822,7 +1822,7 @@ async fn a_digest_only_start_redrives_without_republishing_its_environment() -> 
             &redriven,
             crate::tools::ToolIntentIngressOutcome::Admitted {
                 outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::StartProcess,
+                    realized: lash_core::ToolIntentRealized::StartProcess(_),
                     ..
                 },
                 replayed: false,
@@ -2151,13 +2151,15 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
             outcome:
                 lash_core::ToolIntentExecutionOutcome::Refused {
                     kind: lash_core::ToolIntentKind::StartProcess,
-                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed { message, .. },
+                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed { cause, .. },
                     ..
                 },
             replayed: false,
         } => assert!(
-            message.contains("process engine `ingress-engine-never-registered` is not configured"),
-            "the refusal must carry the engine registry's own typed miss: {message}"
+            cause
+                .to_string()
+                .contains("process engine `ingress-engine-never-registered` is not configured"),
+            "the refusal must carry the engine registry's own typed miss: {cause}"
         ),
         other => panic!("unregistered engine kind must be refused, got {other:?}"),
     }
@@ -2182,7 +2184,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
             &admitted,
             crate::tools::ToolIntentIngressOutcome::Admitted {
                 outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::StartProcess,
+                    realized: lash_core::ToolIntentRealized::StartProcess(_),
                     ..
                 },
                 ..
@@ -2267,15 +2269,17 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
     )
     .await
     .map_err(lash_core::PluginError::from)?;
-    let [lash_core::ToolIntentExecutionOutcome::Executed { result, .. }] = outcomes.as_slice()
+    let [
+        lash_core::ToolIntentExecutionOutcome::Executed {
+            realized: lash_core::ToolIntentRealized::StartProcess(result),
+            ..
+        },
+    ] = outcomes.as_slice()
     else {
         panic!("session recorded-intent route must execute: {outcomes:?}")
     };
     let session_identity = registry
-        .get_process(
-            &lash_core::process_id_from_handle_json(result)
-                .expect("a start answers its process handle"),
-        )
+        .get_process(&result.process_id)
         .await?
         .expect("session route registers a process")
         .identity;

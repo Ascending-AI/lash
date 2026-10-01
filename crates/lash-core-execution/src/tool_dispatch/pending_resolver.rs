@@ -244,9 +244,10 @@ async fn launch_declared_start(
     )
     .await?;
     let process_id = match &outcome {
-        crate::ToolIntentExecutionOutcome::Executed { result, .. } => {
-            crate::process_id_from_handle_json(result).ok()
-        }
+        crate::ToolIntentExecutionOutcome::Executed {
+            realized: crate::ToolIntentRealized::StartProcess(handle),
+            ..
+        } => Some(handle.process_id.clone()),
         _ => None,
     };
     Ok(LaunchReceipt {
@@ -265,7 +266,7 @@ fn unbound_declaration(
     tracing::warn!(
         target: "lash::tool_intent",
         tool_call_id = %declaring.tool_call_id,
-        refusal_reason = refusal.code(),
+        refusal_reason = %refusal.code(),
         "a declared start that does not belong to its call was refused before launch"
     );
     LaunchReceipt {
@@ -323,12 +324,12 @@ fn launch_parent(
 fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> crate::ToolFailure {
     let (class, code, message) = match outcome {
         crate::ToolIntentExecutionOutcome::Refused {
-            refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
+            refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
             ..
         } => (
-            crate::ToolFailureClass::Unavailable,
-            code.clone(),
-            message.clone(),
+            cause.failure_class(),
+            cause.code().to_string(),
+            cause.to_string(),
         ),
         crate::ToolIntentExecutionOutcome::Refused { refusal, .. } => (
             crate::ToolFailureClass::Internal,
@@ -565,7 +566,7 @@ pub fn model_visible_intent_outcomes(
         && matches!(
             outcome.intent_outcomes.as_slice(),
             [crate::ToolIntentExecutionOutcome::Executed {
-                kind: crate::ToolIntentKind::StartProcess,
+                realized: crate::ToolIntentRealized::StartProcess(_),
                 ..
             } | crate::ToolIntentExecutionOutcome::Refused {
                 kind: crate::ToolIntentKind::StartProcess,
@@ -576,5 +577,73 @@ pub fn model_visible_intent_outcomes(
         &[]
     } else {
         &outcome.intent_outcomes
+    }
+}
+
+#[cfg(test)]
+mod intent_shape_laws {
+    use super::*;
+
+    #[test]
+    fn terminal_start_conflict_keeps_its_failure_class_and_typed_key() {
+        let key = crate::StartKey::for_host("conflicting-start");
+        let error = crate::PluginError::StartKeyConflict {
+            start_key: key.clone(),
+        };
+        let outcome = crate::ToolIntentExecutionOutcome::Refused {
+            identity: None,
+            intent_index: 0,
+            kind: crate::ToolIntentKind::StartProcess,
+            refusal: crate::ToolIntentRefusalReason::CommandFailed {
+                cause: crate::ToolIntentCommandFailure::from(&error),
+            },
+        };
+        let failure = launch_refusal(&outcome);
+        assert_eq!(failure.class, crate::ToolFailureClass::InvalidRequest);
+        let bytes = serde_json::to_value(&outcome).expect("record refusal");
+        assert_eq!(
+            bytes["refusal"]["cause"]["message"]["start_key"],
+            serde_json::to_value(&key).expect("key")
+        );
+        let widened = crate::PluginError::RuntimeEffectController(error.into());
+        let cause = crate::ToolIntentCommandFailure::from(&widened);
+        assert_eq!(
+            cause.failure_class(),
+            crate::ToolFailureClass::InvalidRequest
+        );
+        assert_eq!(cause.code(), "process_start_key_conflict");
+        let bytes = serde_json::to_value(cause).expect("record widened cause");
+        assert_eq!(
+            bytes["message"]["cause"]["start_key"],
+            serde_json::to_value(key).expect("key")
+        );
+    }
+
+    #[test]
+    fn realized_start_cannot_decode_without_its_handle() {
+        let identity = crate::derive_tool_intent_identity(
+            &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
+            "turn",
+            &crate::ToolCallId::fixture("call"),
+            0,
+        );
+        for result in [serde_json::Value::Null, serde_json::json!({})] {
+            let mut bytes = serde_json::json!({
+                "status": "executed", "identity": identity,
+                "kind": "start_process", "result": result,
+                "realized": {"kind": "start_process", "result": result},
+            });
+            assert!(
+                serde_json::from_value::<crate::ToolIntentExecutionOutcome>(bytes.clone()).is_err(),
+                "a durable start must carry a complete handle"
+            );
+            let object = bytes.as_object_mut().expect("receipt object");
+            object.remove("kind");
+            object.remove("result");
+            assert!(
+                serde_json::from_value::<crate::ToolIntentExecutionOutcome>(bytes).is_err(),
+                "the realized payload must carry the complete handle"
+            );
+        }
     }
 }

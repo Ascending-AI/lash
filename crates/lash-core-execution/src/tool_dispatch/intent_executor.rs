@@ -77,8 +77,7 @@ pub async fn execute_final_tool_intents(
                 record_executed_metric(intent.kind());
                 crate::ToolIntentExecutionOutcome::Executed {
                     identity,
-                    kind: intent.kind(),
-                    result,
+                    realized: result,
                 }
             }
             Err(crate::PluginError::RuntimeEffectController(error))
@@ -102,8 +101,7 @@ pub async fn execute_final_tool_intents(
                 intent.kind(),
                 Some(identity),
                 crate::ToolIntentRefusalReason::CommandFailed {
-                    code: error_code(&error),
-                    message: error_message(&error),
+                    cause: crate::ToolIntentCommandFailure::from(&error),
                 },
             ),
         };
@@ -165,8 +163,7 @@ pub(crate) async fn realize_declared_start(
             record_executed_metric(kind);
             Ok(crate::ToolIntentExecutionOutcome::Executed {
                 identity,
-                kind,
-                result: serde_json::to_value(handle).unwrap_or(serde_json::Value::Null),
+                realized: crate::ToolIntentRealized::StartProcess(handle),
             })
         }
         Err(error) => match declared_start_fault(&error) {
@@ -176,8 +173,7 @@ pub(crate) async fn realize_declared_start(
                 kind,
                 Some(identity),
                 crate::ToolIntentRefusalReason::CommandFailed {
-                    code: error_code(&error),
-                    message: error_message(&error),
+                    cause: crate::ToolIntentCommandFailure::from(&error),
                 },
             )),
         },
@@ -257,8 +253,8 @@ pub(super) fn admit_batch(
         }
         if intent.owner() != owner {
             return Some(crate::ToolIntentRefusalReason::OwnerMismatch {
-                expected: owner.to_string(),
-                recorded: intent.owner().to_string(),
+                expected: owner.clone(),
+                recorded: intent.owner().clone(),
             });
         }
         if let crate::ToolIntent::StartProcess(start) = intent
@@ -291,7 +287,7 @@ fn refuse_all(
         let _entered = span.enter();
         tracing::warn!(
             target: "lash::tool_intent",
-            refusal_reason = refusal.code(),
+            refusal_reason = %refusal.code(),
             "empty tool intent batch refused"
         );
         return vec![crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal }];
@@ -363,7 +359,7 @@ fn refused(
     tracing::warn!(
         target: "lash::tool_intent",
         intent_kind = kind.as_str(),
-        refusal_reason = refusal.code(),
+        refusal_reason = %refusal.code(),
         intent_index = index,
         "tool intent refused"
     );
@@ -386,15 +382,14 @@ pub(super) fn validate_trigger_registration_authority(
         Ok(owner) => owner,
         Err(error) => {
             return Some(crate::ToolIntentRefusalReason::CommandFailed {
-                code: "trigger_owner_scope_unavailable".to_string(),
-                message: error.to_string(),
+                cause: crate::ToolIntentCommandFailure::from(&error),
             });
         }
     };
     if intent.owner_scope != expected_owner {
         return Some(crate::ToolIntentRefusalReason::ForeignTriggerOwnerScope {
-            expected: format!("{expected_owner:?}"),
-            recorded: format!("{:?}", intent.owner_scope),
+            expected: expected_owner,
+            recorded: intent.owner_scope.clone(),
         });
     }
     let expected_actor = match (&context.process_originator, &context.owner) {
@@ -412,14 +407,13 @@ pub(super) fn validate_trigger_registration_authority(
         (None, crate::ExecutionOwner::Process { process_id }) => {
             let error = crate::runtime::not_a_session_runtime("trigger_actor", process_id);
             return Some(crate::ToolIntentRefusalReason::CommandFailed {
-                code: error_code(&error),
-                message: error_message(&error),
+                cause: crate::ToolIntentCommandFailure::from(&error),
             });
         }
     };
     (intent.actor != expected_actor).then(|| crate::ToolIntentRefusalReason::ForeignTriggerActor {
-        expected: format!("{expected_actor:?}"),
-        recorded: format!("{:?}", intent.actor),
+        expected: expected_actor,
+        recorded: intent.actor.clone(),
     })
 }
 
@@ -440,7 +434,7 @@ fn record_executed_metric(_kind: crate::ToolIntentKind) {}
 
 #[cfg(feature = "otel-trace")]
 fn record_refused_metric(kind: crate::ToolIntentKind, refusal: &crate::ToolIntentRefusalReason) {
-    tool_intent_metrics().record_refused(kind.as_str(), refusal.code());
+    tool_intent_metrics().record_refused(kind.as_str(), refusal.code().as_ref());
 }
 
 #[cfg(not(feature = "otel-trace"))]
@@ -455,7 +449,7 @@ async fn execute_one(
     intent: &crate::ToolIntent,
     identity: &crate::ToolIntentIdentity,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<serde_json::Value, crate::PluginError> {
+) -> Result<crate::ToolIntentRealized, crate::PluginError> {
     let parent = context.parent_invocation.clone().unwrap_or_else(|| {
         crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
@@ -492,7 +486,7 @@ async fn execute_one(
                     child_entry_name: None,
                 });
             }
-            Ok(serde_json::to_value(summary).unwrap_or(serde_json::Value::Null))
+            Ok(crate::ToolIntentRealized::StartProcess(summary))
         }
         crate::ToolIntent::SignalProcess(intent) => {
             let event = context
@@ -506,17 +500,16 @@ async fn execute_one(
                     scope,
                 )
                 .await?;
-            Ok(serde_json::to_value(event).unwrap_or(serde_json::Value::Null))
+            Ok(crate::ToolIntentRealized::SignalProcess(Box::new(event)))
         }
         crate::ToolIntent::CancelProcess(intent) => {
             let record = context
                 .processes
                 .cancel_recorded_intent(&intent.owner, &intent.process_id, identity.clone(), scope)
                 .await?;
-            Ok(
-                serde_json::to_value(crate::ProcessCancelReceipt::from_record(record)?)
-                    .unwrap_or(serde_json::Value::Null),
-            )
+            Ok(crate::ToolIntentRealized::CancelProcess(
+                crate::ProcessCancelReceipt::from_record(record)?,
+            ))
         }
         crate::ToolIntent::EmitProcessEvent(intent) => {
             let event = context
@@ -530,7 +523,7 @@ async fn execute_one(
                     scope,
                 )
                 .await?;
-            Ok(serde_json::to_value(event).unwrap_or(serde_json::Value::Null))
+            Ok(crate::ToolIntentRealized::EmitProcessEvent(Box::new(event)))
         }
         crate::ToolIntent::EmitTrigger(intent) => {
             // The router owns the whole emission, but the durable declaration
@@ -555,36 +548,36 @@ async fn execute_one(
             request.idempotency_key = identity.replay_key.clone();
             let report =
                 Box::pin(router.emit_recorded(request, &context.effect_controller)).await?;
-            Ok(serde_json::to_value(report).unwrap_or(serde_json::Value::Null))
+            Ok(crate::ToolIntentRealized::EmitTrigger(report))
         }
-        crate::ToolIntent::PublishDefinition(intent) => {
-            realize_definition(
-                context,
-                identity,
-                crate::ProcessCommand::PublishDefinition {
-                    draft: intent.draft.clone(),
-                    module: intent.module.clone(),
-                },
-            )
-            .await
-        }
-        crate::ToolIntent::GetDefinition(intent) => {
-            realize_definition(
-                context,
-                identity,
-                crate::ProcessCommand::GetDefinition {
-                    definition_id: intent.definition_id.clone(),
-                },
-            )
-            .await
-        }
+        crate::ToolIntent::PublishDefinition(intent) => realize_definition(
+            context,
+            identity,
+            crate::ProcessCommand::PublishDefinition {
+                draft: intent.draft.clone(),
+                module: intent.module.clone(),
+            },
+        )
+        .await
+        .map(|definition| crate::ToolIntentRealized::PublishDefinition(Box::new(definition))),
+        crate::ToolIntent::GetDefinition(intent) => realize_definition(
+            context,
+            identity,
+            crate::ProcessCommand::GetDefinition {
+                definition_id: intent.definition_id.clone(),
+            },
+        )
+        .await
+        .map(|definition| crate::ToolIntentRealized::GetDefinition(Box::new(definition))),
         crate::ToolIntent::RegisterTrigger(intent) => {
             let router = context.trigger_router.as_ref().ok_or_else(|| {
                 crate::PluginError::Session(
                     "trigger store is unavailable in this runtime".to_string(),
                 )
             })?;
-            Ok(register_recorded_trigger(context, router, identity, intent).await?)
+            Ok(crate::ToolIntentRealized::RegisterTrigger(
+                register_recorded_trigger(context, router, identity, intent).await?,
+            ))
         }
     }
 }
@@ -597,7 +590,7 @@ async fn realize_definition(
     context: &ToolDispatchContext<'_>,
     identity: &crate::ToolIntentIdentity,
     command: crate::ProcessCommand,
-) -> Result<serde_json::Value, crate::PluginError> {
+) -> Result<crate::ProcessDefinition, crate::PluginError> {
     let scoped = context.effect_controller.clone();
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
@@ -626,8 +619,7 @@ async fn realize_definition(
         .await?
         .into_process()?;
     match result {
-        crate::ProcessEffectOutcome::Definition { definition } => serde_json::to_value(definition)
-            .map_err(|error| crate::PluginError::Session(error.to_string())),
+        crate::ProcessEffectOutcome::Definition { definition } => Ok(*definition),
         _ => Err(crate::PluginError::Session(
             "definition effect returned a different outcome".into(),
         )),
@@ -646,7 +638,7 @@ async fn register_recorded_trigger(
     router: &crate::TriggerRouter,
     identity: &crate::ToolIntentIdentity,
     intent: &crate::RegisterTriggerIntent,
-) -> Result<serde_json::Value, crate::PluginError> {
+) -> Result<Box<crate::TriggerMutationReceipt>, crate::PluginError> {
     let scoped = context.effect_controller.clone();
     let draft = intent.draft.clone();
     let invocation = crate::RuntimeEffectInvocation::new(
@@ -691,40 +683,12 @@ async fn register_recorded_trigger(
         .map_err(crate::PluginError::RuntimeEffectController)?
         .into_trigger()
         .map_err(crate::PluginError::RuntimeEffectController)?
-        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        .map_err(|error| crate::PluginError::TriggerOperation(Box::new(error)))?;
     match outcome {
-        crate::TriggerCommandOutcome::Mutation { receipt } => {
-            crate::trigger_handle_outcome_value(&receipt)
-        }
+        crate::TriggerCommandOutcome::Mutation { receipt } => Ok(receipt),
         other => Err(crate::PluginError::Session(format!(
             "trigger registration returned a non-mutation outcome: {other:?}"
         ))),
-    }
-}
-
-fn error_code(error: &crate::PluginError) -> String {
-    match error {
-        crate::PluginError::StoreRefusal(error) => error.code().as_str().to_string(),
-        crate::PluginError::RuntimeEffectController(error) => error.code.as_str().to_string(),
-        crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
-        crate::PluginError::NotASessionRuntime { .. } => "not_a_session_runtime".to_string(),
-        crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
-        crate::PluginError::ParentEnded { .. } => "process_parent_ended".to_string(),
-        crate::PluginError::StartKeyConflict { .. } => "process_start_key_conflict".to_string(),
-        crate::PluginError::TriggerDeliveryBound { .. } => "trigger_delivery_bound".to_string(),
-        crate::PluginError::TriggerDeliveryRetired { .. } => "trigger_delivery_retired".to_string(),
-        crate::PluginError::ProcessCancelConflict { .. } => "process_cancel_conflict".to_string(),
-        crate::PluginError::ProcessNoLongerRetained { .. } => {
-            "process_no_longer_retained".to_string()
-        }
-        _ => "plugin".to_string(),
-    }
-}
-
-fn error_message(error: &crate::PluginError) -> String {
-    match error {
-        crate::PluginError::RuntimeEffectController(error) => error.message.clone(),
-        _ => error.to_string(),
     }
 }
 
@@ -750,7 +714,10 @@ mod tests {
                 "store_incompatible",
             ),
         ] {
-            assert_eq!(super::error_code(&error.into()), expected);
+            assert_eq!(
+                crate::ToolIntentCommandFailure::from(&crate::PluginError::from(error)).code(),
+                expected
+            );
         }
     }
 
@@ -965,8 +932,8 @@ mod tests {
         assert_eq!(
             admit_batch(&session("session"), &intents),
             Some(crate::ToolIntentRefusalReason::OwnerMismatch {
-                expected: "session:session".to_string(),
-                recorded: "session:other-session".to_string(),
+                expected: session("session"),
+                recorded: session("other-session"),
             })
         );
     }
@@ -982,12 +949,18 @@ mod tests {
                 replay_key: "tool-intent-v1-literal".to_string(),
                 minting_emission_replay_key: None,
             },
-            kind: crate::ToolIntentKind::CancelProcess,
-            result: serde_json::json!({"cancelled": true}),
+            realized: crate::ToolIntentRealized::CancelProcess(crate::ProcessCancelReceipt {
+                process_id: crate::ProcessId::fixture("cancelled"),
+                status: crate::ProcessStatus::Cancelled,
+                origin: crate::CancelOrigin::ModelRequested,
+            }),
         };
         assert_eq!(
             executed.model_addendum(),
-            "[tool intent cancel_process #4 executed: {\"cancelled\":true}]"
+            format!(
+                "[tool intent cancel_process #4 executed: {{\"origin\":\"model_requested\",\"process_id\":\"{}\",\"status\":\"cancelled\"}}]",
+                crate::ProcessId::fixture("cancelled")
+            )
         );
 
         let refused = crate::ToolIntentExecutionOutcome::Refused {

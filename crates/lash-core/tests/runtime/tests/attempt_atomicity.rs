@@ -1193,7 +1193,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
             matches!(
                 first.as_slice(),
                 [lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::SignalProcess,
+                    realized: lash_core::ToolIntentRealized::SignalProcess(_),
                     ..
                 }]
             ),

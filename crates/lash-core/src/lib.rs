@@ -423,6 +423,7 @@ pub mod facade_support {
     pub use crate::triggers::trigger_occurrence_request_matches_record;
     pub use crate::triggers::trigger_operation_receipt_id;
     pub use crate::triggers::validate_trigger_occurrence_request;
+    pub use lash_core_execution::Response;
     pub use lash_core_store::session_graph::facade_ops::{
         SessionGraphFacadeOps, SessionNodeProjection,
     };
@@ -440,7 +441,6 @@ pub mod facade_support {
     pub use lash_sansio::ModelToolReturnPart;
     pub use lash_sansio::ProviderSchemaCapabilities;
     pub use lash_sansio::ResolvedSchema;
-    pub use lash_sansio::Response;
     pub use lash_sansio::SchemaPurpose;
     pub use lash_sansio::SchemaResolutionError;
     pub use lash_sansio::SchemaResolutionRequest;
@@ -506,13 +506,14 @@ pub(crate) use crate::attachments::{AttachmentProducer, AttachmentSourcePolicy};
 pub(crate) use crate::plugin::RuntimeServices;
 
 pub mod sansio {
+    pub use crate::{CompletedToolCall, Response};
     pub(crate) use lash_sansio::sansio::LogEvent;
     pub use lash_sansio::sansio::{
-        ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
-        ContextProjector, EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
+        ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, ContextProjector,
+        EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
         ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
         ModelToolCalls, PendingToolCall, PendingWork, ProjectorTurnInputs, ProtocolDriverHandle,
-        Response, ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine,
+        ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine,
         render_turn_causes_prompt,
     };
 }
@@ -546,10 +547,9 @@ pub use lash_sansio::{
     ToolBinding, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
     ToolCatalogBuildError, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
     ToolDefinitionBindingExt, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
-    ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    ToolIntentRefusalReason, ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy,
-    ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
-    TurnOutputSource,
+    ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract,
+    ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause,
+    TurnId, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,
@@ -899,4 +899,8 @@ pub mod usage_accounting {
 pub use lash_core_execution::UsageAccountingStore;
 pub use usage_accounting::*;
 
-pub use lash_core_execution::{AttachmentRetentionFailure, AttachmentRetentionStoreFailure};
+pub use lash_core_execution::{
+    AttachmentRetentionFailure, AttachmentRetentionStoreFailure, CompletedToolCall, Response,
+    ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentRealized,
+    ToolIntentRefusalReason, ToolIntentRuntimeFailure,
+};

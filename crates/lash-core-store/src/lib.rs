@@ -40,6 +40,7 @@ pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
 pub mod run_spec;
 pub mod runtime_owner;
+pub mod scope_identity;
 pub use runtime_owner::RuntimeOwner;
 pub mod runtime_error;
 #[cfg(test)]

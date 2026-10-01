@@ -774,7 +774,7 @@ pub fn descriptor(component: ComponentId) -> Option<&'static CompatDescriptor> {
 }
 
 /// A durable stamp.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CompatStamp {
     pub version: u32,
     pub min_reader: u32,
@@ -810,7 +810,9 @@ pub enum CompatAdmission {
 /// Each message names its remedy with a `lashctl` command. The JSON shape is
 /// what `lashctl --json` reports and what a newer build reads from an older
 /// one, so a variant's fields change only in place under the version freeze.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "refusal", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum CompatRefusal {

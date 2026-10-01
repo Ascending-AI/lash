@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 /// Which VM state the bytes are.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VmStateKind {
     /// A suspended execution: a parked process segment or a suspended run.
@@ -19,7 +19,7 @@ pub enum VmStateKind {
 
 /// Whose state it is: the session, or the durable process, the bytes belong
 /// to. A worker is handed state only for the owner its lease runs under.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct VmOwner(String);
 
@@ -123,7 +123,7 @@ pub struct StateExpectation<'a> {
 }
 
 /// Why opaque state failed a structural check.
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OpaqueStateRefusal {
     #[error("opaque VM state is {found:?}, expected {expected:?}")]

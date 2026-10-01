@@ -325,7 +325,7 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
             lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
                 Ok(Self::ToolIntentOutcome {
                     call_id,
-                    outcome: outcome.into(),
+                    outcome: outcome.try_into()?,
                 })
             }
             lash_core::TurnEvent::FinalValue { value } => Ok(Self::FinalValue { value }),

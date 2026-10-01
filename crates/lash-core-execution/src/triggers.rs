@@ -1065,7 +1065,7 @@ impl TriggerSubscriptionFilter {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerMutationOutcome {
     Created,
@@ -1338,7 +1338,9 @@ pub enum TriggerCommandOutcome {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TriggerOperationError {
@@ -1366,17 +1368,28 @@ pub enum TriggerOperationError {
 }
 
 impl TriggerOperationError {
+    /// Whether the same operation is refused until its input or configuration changes.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Conflict { .. } | Self::Invalid { .. } | Self::RevisionOverflow { .. } => true,
+            Self::Store { .. } => false,
+        }
+    }
+
     /// The Lash-vocabulary code a recorded trigger failure carries in the
     /// durable effect summary. Guarded by `PROCESS_EVENT_VOCABULARY_VERSION`:
     /// a spelling change rewrites what a redrive re-derives.
     pub fn failure_code(&self) -> lash_sansio::FailureCode {
-        let spelling = match self {
+        lash_sansio::FailureCode::lash(lash_sansio::TurnFailureCode::from_wire(self.code()))
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
             Self::Conflict { .. } => "trigger_conflict",
             Self::Invalid { .. } => "trigger_invalid",
             Self::RevisionOverflow { .. } => "trigger_revision_overflow",
             Self::Store { .. } => "trigger_store",
-        };
-        lash_sansio::FailureCode::lash(lash_sansio::TurnFailureCode::from_wire(spelling))
+        }
     }
 }
 

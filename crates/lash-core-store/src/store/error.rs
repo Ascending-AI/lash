@@ -32,7 +32,9 @@ pub enum AnchorUnavailable {
 /// authority refusal. Plugin errors are cloned and journaled, so
 /// this representation carries only the terminal refusals rather than backend
 /// failures and sources.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum StoreRefusal {

@@ -20,8 +20,8 @@ use lash_core::runtime::AdmissionBoundary;
 use lash_core::{
     AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
     MessageRole, PluginMessage, PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput,
-    ToolFailure, ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    TurnActivity, TurnActivityId, TurnCause, TurnEvent, TurnInputApplication,
+    ToolFailure, ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity, TurnActivity,
+    TurnActivityId, TurnCause, TurnEvent, TurnInputApplication,
 };
 use serde_json::json;
 
@@ -431,8 +431,13 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                         replay_key: "tool-intent:v1:blake3:literal".to_string(),
                         minting_emission_replay_key: None,
                     },
-                    kind: ToolIntentKind::StartProcess,
-                    result: json!({"process_id": "p-1"}),
+                    realized: lash_core::ToolIntentRealized::StartProcess(
+                        lash_core::ProcessHandleView::new(
+                            lash_core::ProcessIdMint::sequential_id_for_testing(1),
+                            lash_core::ProcessIdentity::new("external"),
+                            lash_core::ProcessStatus::Running,
+                        ),
+                    ),
                 },
             },
             json!({
@@ -447,8 +452,16 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                         "intent_index": 0,
                         "replay_key": "tool-intent:v1:blake3:literal",
                     },
-                    "kind": "start_process",
-                    "result": {"process_id": "p-1"},
+                    "realized": {
+                        "kind": "start_process",
+                        "result": {
+                            "__handle__": "lash",
+                            "id": lash_core::HandleId::process(&lash_core::ProcessIdMint::sequential_id_for_testing(1)),
+                            "process_id": lash_core::ProcessIdMint::sequential_id_for_testing(1),
+                            "kind": "external",
+                            "status": "running",
+                        },
+                    },
                 },
             }),
         ),

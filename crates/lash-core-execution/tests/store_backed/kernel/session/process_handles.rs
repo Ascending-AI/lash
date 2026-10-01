@@ -1115,8 +1115,13 @@ mod tests {
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: vec![crate::ToolIntentExecutionOutcome::Executed {
                         identity,
-                        kind: crate::ToolIntentKind::StartProcess,
-                        result: realized_handle.clone(),
+                        realized: crate::ToolIntentRealized::StartProcess(
+                            crate::ProcessHandleView::new(
+                                child.clone(),
+                                crate::ProcessIdentity::new("external"),
+                                crate::ProcessStatus::Running,
+                            ),
+                        ),
                     }],
                     captures: Vec::new(),
                     triggers: Vec::new(),

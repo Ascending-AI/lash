@@ -396,15 +396,19 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
         assert_eq!(failure.code, "pending_tool_resolver_unarmed");
     }
     assert!(outcomes[6].1.intent_outcomes.is_empty());
-    let [crate::ToolIntentExecutionOutcome::Executed { identity, kind, .. }] =
-        outcomes[7].1.intent_outcomes.as_slice()
+    let [
+        crate::ToolIntentExecutionOutcome::Executed {
+            identity,
+            realized: crate::ToolIntentRealized::StartProcess(_),
+            ..
+        },
+    ] = outcomes[7].1.intent_outcomes.as_slice()
     else {
         panic!(
             "the declared pending call retains one launch receipt: {:?}",
             outcomes[7].1.intent_outcomes
         );
     };
-    assert_eq!(*kind, crate::ToolIntentKind::StartProcess);
     assert_eq!(
         identity.owner,
         crate::RuntimeOwner::Session(session_id.clone())

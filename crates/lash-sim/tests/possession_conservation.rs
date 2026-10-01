@@ -233,15 +233,15 @@ impl PossessionWorld {
             .register_process(self.realized_registration(opener_name))
             .await
             .unwrap_or_else(|err| panic!("register realized child {child}: {err}"));
-        let child_id = record.id;
+        let child_id = record.id.clone();
+        let typed_handle = lash_core::ProcessHandleView::from_record(record);
         let handle = RuntimeExecutionContext::process_handle_json(&child_id);
         let outcome = settled_outcome(
             &call_id,
             handle.clone(),
             vec![ToolIntentExecutionOutcome::Executed {
                 identity,
-                kind: ToolIntentKind::StartProcess,
-                result: handle,
+                realized: lash_core::ToolIntentRealized::StartProcess(typed_handle),
             }],
         );
         let (session, possessed) = {
@@ -391,8 +391,19 @@ impl PossessionWorld {
             serde_json::json!({"signaled": true}),
             vec![ToolIntentExecutionOutcome::Executed {
                 identity,
-                kind: ToolIntentKind::SignalProcess,
-                result: echoed,
+                realized: lash_core::ToolIntentRealized::SignalProcess(Box::new(
+                    lash_core::ProcessEvent {
+                        process_id: victim_id.clone(),
+                        sequence: 1,
+                        event_type: "signal".to_string(),
+                        payload: echoed,
+                        invocation: lash_core::runtime::causal::process_event_invocation(
+                            &victim_id, 1, "signal", None,
+                        ),
+                        semantics: Default::default(),
+                        occurred_at: 0,
+                    },
+                )),
             }],
         );
         let (session, possessed) = {

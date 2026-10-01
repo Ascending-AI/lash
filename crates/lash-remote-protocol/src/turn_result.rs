@@ -563,29 +563,16 @@ pub struct RemoteToolIntentIdentity {
     pub minting_emission_replay_key: Option<String>,
 }
 
-/// Wire mirror of the core tool-intent kind set.
-///
-/// Deliberately spelled out rather than generated from
-/// `lash_sansio::tool_intent_variants!`: the version-bump gate projects this
-/// enum's literal text, so generating it would move the variant list out of
-/// the `REMOTE_PROTOCOL_VERSION` guard's sight. The two `From` impls in
-/// `core_conversions::turn_result` are generated from that list instead, so a
-/// variant added to the core set fails to compile until it is added here and
-/// the wire version is bumped (FIG-2994).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteToolIntentKind {
-    StartProcess,
-    SignalProcess,
-    CancelProcess,
-    EmitProcessEvent,
-    EmitTrigger,
-    PublishDefinition,
-    GetDefinition,
-    RegisterTrigger,
+macro_rules! define_remote_tool_intent_kind {
+    ($($variant:ident $wire:literal,)*) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+        #[serde(rename_all = "snake_case")]
+        pub enum RemoteToolIntentKind { $($variant,)* }
+    };
 }
+lash_sansio::tool_intent_variants!(define_remote_tool_intent_kind);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum RemoteToolIntentRefusalReason {
     UnsupportedProtocolVersion {
@@ -608,20 +595,19 @@ pub enum RemoteToolIntentRefusalReason {
         maximum: usize,
     },
     OwnerMismatch {
-        expected: String,
-        recorded: String,
+        expected: lash_sansio::RuntimeOwner,
+        recorded: lash_sansio::RuntimeOwner,
     },
     ForeignTriggerOwnerScope {
-        expected: String,
-        recorded: String,
+        expected: crate::RemoteTriggerOwnerScope,
+        recorded: crate::RemoteTriggerOwnerScope,
     },
     ForeignTriggerActor {
-        expected: String,
-        recorded: String,
+        expected: crate::RemoteProcessOriginator,
+        recorded: crate::RemoteProcessOriginator,
     },
     CommandFailed {
-        code: String,
-        message: String,
+        cause: lash_core_execution::ToolIntentCommandFailure,
     },
     MintingGroupChildCancelled,
     DeclaredStartIdentityMismatch {
@@ -631,12 +617,11 @@ pub enum RemoteToolIntentRefusalReason {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteToolIntentExecutionOutcome {
     Executed {
         identity: RemoteToolIntentIdentity,
-        kind: RemoteToolIntentKind,
-        result: serde_json::Value,
+        realized: RemoteToolIntentRealized,
     },
     Refused {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -762,3 +747,37 @@ pub struct RemoteTurnIssue {
 #[cfg(test)]
 #[path = "turn_result_tests.rs"]
 mod turn_result_tests;
+
+macro_rules! remote_realized_payload {
+    (StartProcess) => { crate::RemoteProcessHandleView };
+    (SignalProcess) => { Box<crate::RemoteProcessEvent> };
+    (CancelProcess) => { Box<crate::RemoteProcessCancelReceipt> };
+    (EmitProcessEvent) => { Box<crate::RemoteProcessEvent> };
+    (EmitTrigger) => { crate::RemoteTriggerEmitReport };
+    (GetDefinition) => { crate::RemoteProcessDefinition };
+    (PublishDefinition) => { crate::RemoteProcessDefinition };
+    (RegisterTrigger) => { Box<RemoteTriggerMutationReceipt> };
+}
+macro_rules! define_remote_realized {
+    ($($variant:ident $wire:literal,)*) => {
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+        #[serde(tag = "kind", content = "result", rename_all = "snake_case", deny_unknown_fields)]
+        pub enum RemoteToolIntentRealized { $($variant(remote_realized_payload!($variant)),)* }
+    };
+}
+lash_sansio::tool_intent_variants!(define_remote_realized);
+
+/// The admitted trigger registration result, including its recorded subscription.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteTriggerMutationReceipt {
+    pub owner_scope: crate::RemoteTriggerOwnerScope,
+    pub subscription_key: String,
+    pub subscription_id: String,
+    pub incarnation: String,
+    pub revision: u64,
+    pub definition_fingerprint: String,
+    pub enabled: bool,
+    pub disposition: lash_core_execution::TriggerMutationOutcome,
+    pub record_snapshot: crate::RemoteTriggerSubscriptionRecord,
+}

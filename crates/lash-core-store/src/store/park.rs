@@ -875,7 +875,9 @@ pub struct ParkFeedEvent<Target> {
 /// comparable, and neither is comparable across stores. Backends expose
 /// constructors/accessors so store implementations can persist and bind the
 /// position; consumers treat values as cursors, never as timestamps.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct ParkFeedCursor(u64);
 

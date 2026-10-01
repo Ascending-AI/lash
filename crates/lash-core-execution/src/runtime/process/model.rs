@@ -31,7 +31,9 @@ pub type ProcessOutcome = ProcessAwaitOutput;
 /// it. Backends expose constructors/accessors so external store implementations
 /// can persist and bind the position, but consumers should treat values as
 /// cursors, not comparable timestamps.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct ProcessChangeCursor(u64);
 

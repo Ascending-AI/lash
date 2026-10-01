@@ -544,7 +544,7 @@ outside_manifest = "versions captured test fixtures, not bytes a lash build writ
 
 [[surface]]
 constant = "SCOPE_STORAGE_PAYLOAD_VERSION"
-constant_path = "crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs"
+constant_path = "crates/lash-core-store/src/scope_identity.rs"
 upgrade = "migrate"
 description = "versioned typed scope persisted beside a scope-close row's (kind, id) index projection"
 manifest = "ScopeStoragePayload"

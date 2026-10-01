@@ -13,7 +13,16 @@ const VALUE_LIMIT: usize = 32 * 1024;
 const STORE_LIMIT: usize = 128 * 1024;
 
 /// A deterministic rejection of a plugin-state key.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 pub enum KeyRejection {
     #[error("empty key")]
     Empty,
@@ -24,7 +33,16 @@ pub enum KeyRejection {
 }
 
 /// Rejections are atomic: neither values nor generation change.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginStateError {
     #[error("invalid key `{key}`: {reason}")]

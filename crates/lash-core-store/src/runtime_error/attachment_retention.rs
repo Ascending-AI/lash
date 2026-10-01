@@ -6,7 +6,9 @@ use crate::{AttachmentId, StoreError};
 
 /// Structured attachment failure evidence. Backend diagnostics remain on the
 /// runtime error's message; classification and refusal data remain typed.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AttachmentRetentionFailure {
@@ -58,15 +60,19 @@ pub enum AttachmentRetentionFailure {
 
 /// A nested store cause with the store's authoritative retry class and its
 /// runtime code and structured refusal. The diagnostic is carried separately.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AttachmentRetentionStoreFailure {
     Transient {
+        #[schemars(with = "String")]
         code: RuntimeErrorCode,
         cause: Option<Box<RuntimeErrorCause>>,
     },
     Refused {
+        #[schemars(with = "String")]
         code: RuntimeErrorCode,
         cause: Option<Box<RuntimeErrorCause>>,
     },

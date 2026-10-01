@@ -29,7 +29,7 @@ pub const WORKER_PROTOCOL_VERSION: u32 = 2;
 /// Oldest worker wire version the parent can read.
 pub const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION: u32 = WORKER_PROTOCOL_VERSION;
 
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[error(
     "worker protocol {worker_version} is outside parent range {minimum_supported_version}..={parent_version} (parent crate {parent_crate_version}, worker crate {worker_crate_version})"
 )]

@@ -1325,7 +1325,9 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 }
 /// The identity of a submission refused for using another ingress kind's
 /// reserved source-key namespace.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct IngressReservedSourceKeyRefusal {
     pub session_id: SessionId,
     pub ingress_kind: String,
@@ -1573,7 +1575,9 @@ impl RuntimeError {
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
-            | RuntimeErrorCause::PluginFormat { .. } => None,
+            | RuntimeErrorCause::PluginFormat { .. }
+            | RuntimeErrorCause::ProcessParentEnded { .. }
+            | RuntimeErrorCause::ProcessStartKeyConflict { .. } => None,
         }
     }
 
@@ -1646,7 +1650,7 @@ impl From<lash_sansio::EffectIdentityError> for RuntimeError {
 impl std::error::Error for RuntimeError {}
 
 /// Compact, content-free mismatch evidence retained on the controller error.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RuntimeEffectReplayMismatchReport {
     pub divergent_path_count: usize,
     pub first_divergent_paths: Vec<String>,

@@ -202,8 +202,8 @@ impl DeclaredStart {
     ) -> Result<(), crate::ToolIntentRefusalReason> {
         if self.start.owner != declaring.owner {
             return Err(crate::ToolIntentRefusalReason::OwnerMismatch {
-                expected: declaring.owner.to_string(),
-                recorded: self.start.owner.to_string(),
+                expected: declaring.owner.clone(),
+                recorded: self.start.owner.clone(),
             });
         }
         if *self.identity != *declaring {
@@ -932,8 +932,8 @@ mod tests {
         assert_eq!(
             foreign.bound_to(&declaring),
             Err(crate::ToolIntentRefusalReason::OwnerMismatch {
-                expected: "session:parent".to_string(),
-                recorded: "session:other".to_string(),
+                expected: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
+                recorded: crate::RuntimeOwner::Session(crate::SessionId::from("other")),
             }),
             "a start naming another session is refused"
         );

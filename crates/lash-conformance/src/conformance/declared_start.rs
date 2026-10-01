@@ -1376,13 +1376,15 @@ pub async fn spawn_agent_record_carries_child_identity(tier: DeclaredStartTier) 
     assert_eq!(receipts.len(), 1, "one intent outcome: {receipts:#?}");
     let (call_id, receipt) = &receipts[0];
     assert_eq!(call_id, "declared-start-spawn-0");
-    let crate::ToolIntentExecutionOutcome::Executed { kind, result, .. } = receipt else {
+    let crate::ToolIntentExecutionOutcome::Executed {
+        realized: crate::ToolIntentRealized::StartProcess(result),
+        ..
+    } = receipt
+    else {
         panic!("the receipt is an executed start: {receipt:?}");
     };
-    assert_eq!(*kind, crate::ToolIntentKind::StartProcess);
     assert_eq!(
-        crate::process_id_from_handle_json(result).ok().as_ref(),
-        Some(&child.id),
+        &result.process_id, &child.id,
         "the receipt names the child process"
     );
     let saw = world.script.parent_saw();
@@ -2064,10 +2066,34 @@ pub async fn declared_start_refusal_settles_the_call(tier: DeclaredStartTier) {
     let turn = finished(&world, world.run().await);
     let spawns = spawn_records(&turn);
     assert_eq!(spawns.len(), 1, "one spawn record");
-    assert!(
-        matches!(spawns[0].output.outcome, crate::ToolCallOutcome::Failure(_)),
-        "a refused start settles the call as a failure: {:?}",
-        spawns[0].output
+    let crate::ToolCallOutcome::Failure(failure) = &spawns[0].output.outcome else {
+        panic!(
+            "a refused start settles the call as a failure: {:?}",
+            spawns[0].output
+        );
+    };
+    assert_eq!(
+        failure.class,
+        crate::ToolFailureClass::InvalidRequest,
+        "a closed starter scope is a permanent refusal, including after journal settlement"
+    );
+    let receipts = world.intent_outcomes();
+    let (_, receipt) = receipts
+        .first()
+        .expect("the refused launch retains a receipt");
+    let encoded = serde_json::to_value(receipt).expect("encode the durable refusal");
+    assert_eq!(
+        encoded["refusal"]["cause"]["message"]["cause"]["kind"], "process_parent_ended",
+        "the journaled receipt carries the closed-scope cause"
+    );
+    assert_eq!(
+        encoded["refusal"]["cause"]["message"]["cause"]["parent"],
+        serde_json::to_value(crate::ScopeId::turn(
+            world.session_id.clone(),
+            world.turn_id.clone()
+        ))
+        .expect("encode the closed scope"),
+        "the refusal retains the exact typed scope that closed"
     );
     let children = world.children().await;
     assert!(children.is_empty(), "no child registered: {children:#?}");
@@ -2229,9 +2255,8 @@ pub async fn declared_start_rejects_foreign_or_reused_serialized_identity_before
                     assert_eq!(
                         (expected.clone(), recorded.clone()),
                         (
-                            crate::RuntimeOwner::Session(world.session_id.clone()).to_string(),
+                            crate::RuntimeOwner::Session(world.session_id.clone()),
                             crate::RuntimeOwner::Session(SessionId::from(FOREIGN_SESSION))
-                                .to_string()
                         ),
                         "foreign-session: the refusal names both owners"
                     );
