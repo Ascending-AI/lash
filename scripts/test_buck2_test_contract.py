@@ -26,6 +26,26 @@ def step(job: dict, name: str) -> dict:
     return next(item for item in job["steps"] if item.get("name") == name)
 
 
+# One job per build of the store package (scripts/ci_plan.py owns the tuple).
+POSTGRES_STORE_JOBS = ("postgres-store", "postgres-store-synthetic-next")
+
+
+def store_suites(job: dict) -> list[str]:
+    """The suites a job's steps hand to store-tests.sh, in step order."""
+    return [
+        item["run"].split("scripts/ci/store-tests.sh", 1)[1].split()[0]
+        for item in job["steps"]
+        if "scripts/ci/store-tests.sh" in item.get("run", "")
+    ]
+
+
+def suite_labels(suite: str) -> list[str]:
+    return subprocess.run(
+        ["bash", str(ROOT / "scripts/ci/store-tests.sh"), "--labels", suite],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout.split()
+
+
 def shared_action() -> dict:
     return yaml.safe_load(
         (ROOT / ".github/actions/buck2-shared-cache/action.yml").read_text(
@@ -347,7 +367,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('inventory["service_test_targets"]', text)
         self.assertIn("cargo test -p lash-internal-postgres-store", text)
         self.assertNotRegex(text, r"\bbazel\b")
-        for job_name in ("postgres-store", "s3-store"):
+        for job_name in (*POSTGRES_STORE_JOBS, "s3-store"):
             job = self.ci["jobs"][job_name]
             upload = next(
                 item for item in job["steps"]
@@ -444,7 +464,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_store_jobs_keep_the_same_suites_on_both_trust_paths(self) -> None:
         suites = []
-        for job_name in ("postgres-store", "s3-store"):
+        for job_name in (*POSTGRES_STORE_JOBS, "s3-store"):
             job = self.ci["jobs"][job_name]
             self.assertEqual("${{ needs.plan.outputs.buck2_trusted }}", job["env"]["BUCK2_TRUSTED"])
             for item in job["steps"]:
@@ -462,6 +482,7 @@ class WorkflowTests(unittest.TestCase):
                 "pg-sim-backend-faults",
                 "pg-cross-backend",
                 "pg-catalog-compatibility",
+                "pg-store-synthetic-next",
                 "s3-store",
                 "s3-attachment-differential",
             ],
@@ -476,6 +497,115 @@ class WorkflowTests(unittest.TestCase):
         dispatcher = script.split("run_uniform_store_suite() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("render_buck2_suite", dispatcher)
         self.assertIn("render_cargo_suite", dispatcher)
+
+    def test_every_build_of_the_postgres_store_package_has_a_job(self) -> None:
+        """A feature variant of a service binary cannot fall out of CI.
+
+        The generated inventory names every PostgreSQL service binary, the
+        default build and each feature variant. Each build is one suite and
+        one job; together the jobs' package suites run every label once.
+        """
+        inventory = json.loads(
+            (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+        )
+        variants = {
+            unit["label"] for unit in inventory["feature_lane_units"]
+        } & set(inventory["service_test_targets"]["postgres"])
+        self.assertTrue(variants)
+        package_labels = []
+        for job_name in POSTGRES_STORE_JOBS:
+            job = self.ci["jobs"][job_name]
+            package_suites = [
+                suite for suite in store_suites(job) if suite.startswith("pg-store")
+            ]
+            self.assertEqual(1, len(package_suites), job_name)
+            self.assertEqual(
+                job_name.replace("postgres-store", "pg-store"), package_suites[0]
+            )
+            labels = suite_labels(package_suites[0])
+            if job_name == "postgres-store":
+                self.assertEqual(
+                    "//crates/lash-restate:lash-restate__unit_test", labels.pop()
+                )
+                self.assertFalse(set(labels) & variants)
+            else:
+                self.assertLessEqual(set(labels), variants)
+            package_labels += labels
+        self.assertEqual(
+            sorted(inventory["service_test_targets"]["postgres"]), sorted(package_labels)
+        )
+
+    def test_postgres_jobs_build_their_binaries_before_a_slot_opens(self) -> None:
+        for job_name in POSTGRES_STORE_JOBS:
+            with self.subTest(job=job_name):
+                job = self.ci["jobs"][job_name]
+                self.assertEqual("ubuntu-24.04", job["runs-on"])
+                self.assertEqual("plan", job["needs"])
+                self.assertEqual(self.ci["jobs"]["postgres-store"]["if"], job["if"])
+                self.assertEqual(self.ci["jobs"]["postgres-store"]["env"], job["env"])
+                names = [item.get("name") for item in job["steps"]]
+                build = step(job, "Build the Postgres store test binaries")
+                self.assertEqual("needs.plan.outputs.buck2_trusted == 'true'", build["if"])
+                services = [
+                    index for index, item in enumerate(job["steps"])
+                    if "scripts/ci/with-service.sh" in item.get("run", "")
+                ]
+                self.assertLess(names.index(build["name"]), min(services))
+                command = build["run"].replace("\\\n", " ").split()
+                self.assertEqual(["bash", "scripts/ci/store-build.sh"], command[:2])
+                # Every suite the job can run, whatever the event selects.
+                self.assertEqual(store_suites(job), command[2:])
+
+    def test_the_store_build_is_one_remote_build_at_the_default_jobs(self) -> None:
+        suites = ["pg-store", "pg-model-keys", "pg-catalog-compatibility"]
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = Path(directory) / "hermetic-build"
+            calls = Path(directory) / "calls.jsonl"
+            recorder.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "with open(os.environ['STORE_BUILD_CALLS'], 'a') as output:\n"
+                "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n",
+                encoding="utf-8",
+            )
+            recorder.chmod(0o755)
+            environment = {
+                name: value for name, value in os.environ.items()
+                if name != "BUCK2_TRUSTED"
+            } | {
+                "HERMETIC_BUILD": str(recorder),
+                "RUNNER_TEMP": directory,
+                "STORE_BUILD_CALLS": str(calls),
+            }
+            subprocess.run(
+                ["bash", str(ROOT / "scripts/ci/store-build.sh"), *suites],
+                cwd=ROOT, env=environment, check=True, capture_output=True, text=True,
+            )
+            invocation, = [
+                json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual("build", invocation[0])
+            # The driver's default jobs, not the PostgreSQL slot count.
+            self.assertNotIn("--jobs", invocation)
+            self.assertEqual(
+                "final", invocation[invocation.index("--materializations") + 1]
+            )
+            for option in ("--build-report", "--event-log"):
+                report = Path(invocation[invocation.index(option) + 1])
+                self.assertEqual(Path(directory) / "store-test-results", report.parent.parent)
+            targets = [argument for argument in invocation if argument.startswith("//")]
+            self.assertEqual(
+                sorted({label for suite in suites for label in suite_labels(suite)}),
+                targets,
+            )
+            self.assertEqual(targets, invocation[-len(targets):])
+            unknown = subprocess.run(
+                ["bash", str(ROOT / "scripts/ci/store-build.sh"), "pg-store", "conformance"],
+                cwd=ROOT, env=environment, capture_output=True, text=True,
+            )
+            self.assertNotEqual(0, unknown.returncode)
+            self.assertIn("unknown store suite: conformance", unknown.stderr)
+            self.assertEqual(1, len(calls.read_text(encoding="utf-8").splitlines()))
 
     def test_nightly_forces_only_test_execution_uncached(self) -> None:
         nightly = workflow("test262-nightly.yml")["jobs"]["test262-full"]

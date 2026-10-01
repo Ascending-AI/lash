@@ -1515,6 +1515,11 @@ jobs:
     # events receive no credentials and keep the Cargo compile. See
     # scripts/ci/store-tests.sh.
     #
+    # This job runs the default build of the store package. Each feature
+    # variant of it has a job, a runner and a PostgreSQL service of its own
+    # (`postgres-store-synthetic-next` below), so the variants run side by
+    # side instead of queueing for one runner's slots.
+    #
     # Each suite runs inside `scripts/ci/with-service.sh pg<major>`, which owns
     # the image, the container environment, the readiness probe and the
     # connection URL, publishes the database on a free ephemeral port of the
@@ -1583,6 +1588,25 @@ jobs:
       - name: Install mold
         if: needs.plan.outputs.buck2_trusted != 'true'
         uses: ./.github/actions/setup-mold
+
+      # One remote build of every binary the steps below run, before any
+      # PostgreSQL slot opens. A test invocation's jobs are the slot count, so
+      # a binary first linked there queues behind the running tests and leaves
+      # its slot idle (scripts/ci/store-build.sh). The list is every suite of
+      # this job; a suite this event skips costs pool time, not runner time.
+      - name: Build the Postgres store test binaries
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        run: |
+          bash scripts/ci/store-build.sh \
+            pg-store \
+            pg-artifact-referrers \
+            pg-attachment-referrers \
+            pg-model-keys \
+            pg-rlm-frame-open \
+            pg-pool-wait \
+            pg-sim-backend-faults \
+            pg-cross-backend \
+            pg-catalog-compatibility
 
       # `with-service.sh` exports LASH_REQUIRE_POSTGRES=1 alongside the URL, so
       # a database this step could not reach fails the lane instead of silently
@@ -1672,6 +1696,79 @@ jobs:
             bash scripts/ci/with-service.sh "pg${major}" -- \
               bash scripts/ci/store-tests.sh pg-catalog-compatibility
           done
+
+      - name: Upload PostgreSQL Buck2 reports and event logs
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: buck2-reports-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/store-test-results/
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Remove client credentials
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+  postgres-store-synthetic-next:
+    name: Test Postgres store (synthetic-next)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: plan
+    # The synthetic successor's build (FIG-4262) of every binary the package
+    # step of `postgres-store` runs, on the primary major: the same package
+    # with `synthetic-next`, on a runner, a PostgreSQL service and slots of its
+    # own. One runner carried both builds until their twelve conformance
+    # shards queued for its four slots and set the wall time of the whole run.
+    # It runs whenever `postgres-store` does, and `CI conclusion` holds both to
+    # one rule (scripts/ci_plan.py `POSTGRES_STORE_JOBS`).
+    environment: build-cache
+    env:
+      BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
+      LASH_REQUIRE_POSTGRES: "1"
+      POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
+    if: >-
+      (github.event_name == 'pull_request' && needs.plan.outputs.pr_pg_store == 'true')
+      || (github.event_name != 'pull_request' && needs.plan.outputs.stores == 'true')
+    steps:
+      - *checkout
+
+      - name: Configure shared build cache
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Install Rust toolchain
+        if: needs.plan.outputs.buck2_trusted != 'true'
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install protoc and nextest
+        if: needs.plan.outputs.buck2_trusted != 'true'
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc,nextest
+
+      # Provides the linker the workflow-level RUSTFLAGS names.
+      - name: Install mold
+        if: needs.plan.outputs.buck2_trusted != 'true'
+        uses: ./.github/actions/setup-mold
+
+      - name: Build the Postgres store test binaries
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        run: bash scripts/ci/store-build.sh pg-store-synthetic-next
+
+      - name: Test Postgres store (synthetic-next)
+        run: |
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+            bash scripts/ci/store-tests.sh pg-store-synthetic-next
 
       - name: Upload PostgreSQL Buck2 reports and event logs
         if: always() && needs.plan.outputs.buck2_trusted == 'true'
@@ -2953,6 +3050,7 @@ jobs:
       - hygiene
       - unicode-tests
       - postgres-store
+      - postgres-store-synthetic-next
       - s3-store
       - fuzz-smoke
       - stack-budget

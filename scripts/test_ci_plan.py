@@ -1528,9 +1528,10 @@ class RestateSuiteSelectionTests(unittest.TestCase):
                     self.assertEqual("skipped", needs[job]["result"])
                 for job in ci_plan.WORKERS_E2E_JOBS:
                     needs[job]["result"] = "skipped"
-                needs["postgres-store"]["result"] = (
-                    "success" if event == "merge_group" else "skipped"
-                )
+                for job in ci_plan.POSTGRES_STORE_JOBS:
+                    needs[job]["result"] = (
+                        "success" if event == "merge_group" else "skipped"
+                    )
                 needs["workspace-tests"]["result"] = "success" if not trusted else "skipped"
                 needs["check"]["result"] = "success" if not trusted else "skipped"
                 for job in ci_plan.BUCK2_TEST_JOBS:
@@ -1594,9 +1595,10 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
         needs["buck2-tests-tail"]["result"] = "skipped"
         for job in ci_plan.WORKERS_E2E_JOBS:
             needs[job]["result"] = "skipped"
-        needs["postgres-store"]["result"] = (
-            "success" if needs["plan"]["outputs"]["pr_pg_store"] == "true" else "skipped"
-        )
+        for job in ci_plan.POSTGRES_STORE_JOBS:
+            needs[job]["result"] = (
+                "success" if needs["plan"]["outputs"]["pr_pg_store"] == "true" else "skipped"
+            )
         needs["functional-e2e"]["result"] = (
             "success"
             if trusted and needs["plan"]["outputs"]["pr_host_restate"] == "true"
@@ -1920,7 +1922,7 @@ class ConclusionTests(unittest.TestCase):
             {family: "false" for family in ci_plan.FAMILIES} | {"tooling": "true"}
         )
         for job in ("buck2-tests", "buck2-tests-tail", "workspace-tests", "check",
-                    "postgres-store", "unused-deps", "feature-lanes"):
+                    *ci_plan.POSTGRES_STORE_JOBS, "unused-deps", "feature-lanes"):
             needs[job]["result"] = "skipped"
         apply_event_deferrals(needs, "pull_request")
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
@@ -2228,30 +2230,37 @@ class PostgresMatrixTests(unittest.TestCase):
             "merge_group": ("skipped", "failure", "cancelled"),
             "workflow_dispatch": ("skipped", "failure", "cancelled"),
         }
-        for event, results in invalid.items():
-            for result in results:
-                with self.subTest(event=event, result=result):
-                    needs = successful_needs()
-                    apply_event_deferrals(needs, event)
-                    needs["postgres-store"]["result"] = result
-                    problems = ci_plan.evaluate_conclusion(needs, event_name=event)
-                    self.assertTrue(
-                        any("postgres-store" in problem for problem in problems)
-                    )
-            with self.subTest(event=event, result="missing"):
-                needs = successful_needs()
-                apply_event_deferrals(needs, event)
-                del needs["postgres-store"]
-                problems = ci_plan.evaluate_conclusion(needs, event_name=event)
-                self.assertTrue(any("postgres-store" in problem for problem in problems))
-            with self.subTest(event=event, result="expected"):
-                needs = successful_needs()
-                apply_event_deferrals(needs, event)
-                needs["postgres-store"]["result"] = (
+        def expected_board(event: str) -> dict:
+            needs = successful_needs()
+            apply_event_deferrals(needs, event)
+            for job in ci_plan.POSTGRES_STORE_JOBS:
+                needs[job]["result"] = (
                     "skipped" if event == "pull_request" else "success"
                 )
+            return needs
+
+        def names(job: str, problems: list[str]) -> bool:
+            return any(problem.startswith(f"{job} ") for problem in problems)
+
+        # Each build's job is held on its own: the other one succeeding or
+        # skipping as expected never covers for it.
+        for job in ci_plan.POSTGRES_STORE_JOBS:
+            for event, results in invalid.items():
+                for result in results:
+                    with self.subTest(job=job, event=event, result=result):
+                        needs = expected_board(event)
+                        needs[job]["result"] = result
+                        problems = ci_plan.evaluate_conclusion(needs, event_name=event)
+                        self.assertTrue(names(job, problems), problems)
+                with self.subTest(job=job, event=event, result="missing"):
+                    needs = expected_board(event)
+                    del needs[job]
+                    problems = ci_plan.evaluate_conclusion(needs, event_name=event)
+                    self.assertTrue(any(job in problem for problem in problems))
+        for event in invalid:
+            with self.subTest(event=event, result="expected"):
                 self.assertEqual(
-                    [], ci_plan.evaluate_conclusion(needs, event_name=event)
+                    [], ci_plan.evaluate_conclusion(expected_board(event), event_name=event)
                 )
 
 
@@ -2568,7 +2577,10 @@ class WorkflowRegistrationTests(unittest.TestCase):
             self.assertEqual(
                 f"${{{{ steps.classify.outputs.{selector} }}}}", plan[selector]
             )
-        self.assertIn("pr_pg_store", jobs["postgres-store"]["if"])
+        for job in ci_plan.POSTGRES_STORE_JOBS:
+            self.assertIn("pr_pg_store", jobs[job]["if"])
+            self.assertEqual(jobs["postgres-store"]["if"], jobs[job]["if"])
+            self.assertIn(job, jobs["ci-conclusion"]["needs"])
         self.assertIn("pr_host_restate", jobs["functional-e2e"]["if"])
         self.assertIn("pr_host_restate", jobs["pr-host-workers"]["if"])
         self.assertEqual("ubuntu-24.04", jobs["pr-host-workers"]["runs-on"])
@@ -2578,7 +2590,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
 
     def test_pr_service_checks_are_required_only_when_selected(self) -> None:
         for selector, jobs in (
-            ("pr_pg_store", ("postgres-store",)),
+            ("pr_pg_store", ci_plan.POSTGRES_STORE_JOBS),
             ("pr_host_restate", ("functional-e2e", "pr-host-workers")),
         ):
             for selected in ("true", "false"):
@@ -2729,7 +2741,8 @@ class DispatchOnlyJobTests(unittest.TestCase):
             for job in ci_plan.GATED_JOBS:
                 needs[job]["result"] = "skipped"
             if event in ci_plan.DEFERRED_EVENTS:
-                needs["postgres-store"]["result"] = "skipped"
+                for job in ci_plan.POSTGRES_STORE_JOBS:
+                    needs[job]["result"] = "skipped"
             needs[ci_plan.BUCK2_TEST_JOB]["result"] = "skipped"
         apply_event_deferrals(needs, event)
         return needs
@@ -2919,7 +2932,8 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
         )
         needs["plan"]["outputs"]["rust"] = "true"
         needs["plan"]["outputs"].update(families)
-        needs["postgres-store"]["result"] = "skipped"
+        for job in ci_plan.POSTGRES_STORE_JOBS:
+            needs[job]["result"] = "skipped"
         needs["workspace-tests"]["result"] = "skipped"
         apply_event_deferrals(needs, event)
         if event == "workflow_dispatch":
@@ -2932,13 +2946,13 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
 
     def test_core_only_diff_accepts_seal_postgres_and_repo_gates_skipped(self) -> None:
         needs = self.board()
-        for job in ("check", "postgres-store", "repo-gates"):
+        for job in ("check", *ci_plan.POSTGRES_STORE_JOBS, "repo-gates"):
             needs[job]["result"] = "skipped"
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(needs, "pull_request")
         )
         # Running them anyway is also accepted.
-        for job in ("check", "postgres-store", "repo-gates"):
+        for job in ("check", *ci_plan.POSTGRES_STORE_JOBS, "repo-gates"):
             trial = self.board()
             problems = ci_plan.evaluate_conclusion(trial, "pull_request")
             self.assertFalse(
@@ -3014,19 +3028,23 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
         # The fast board covers a store diff through its affected Buck2
         # labels: postgres-store is merge-group and dispatch work, and a run
         # on a pull request is a contract violation, not spare coverage.
-        needs = self.board(stores="true")
-        self.assertEqual("skipped", needs["postgres-store"]["result"])
-        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
-        needs["postgres-store"]["result"] = "success"
-        problems = ci_plan.evaluate_conclusion(needs, "pull_request")
-        self.assertTrue(any("postgres-store" in problem for problem in problems))
-        # The merge group keeps requiring the selected suite.
-        needs = self.board("merge_group", stores="true")
-        needs["postgres-store"]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs, "merge_group")
-        self.assertTrue(any("postgres-store" in problem for problem in problems))
-        needs["postgres-store"]["result"] = "success"
-        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "merge_group"))
+        for job in ci_plan.POSTGRES_STORE_JOBS:
+            with self.subTest(job=job):
+                needs = self.board(stores="true")
+                self.assertEqual("skipped", needs[job]["result"])
+                self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+                needs[job]["result"] = "success"
+                problems = ci_plan.evaluate_conclusion(needs, "pull_request")
+                self.assertTrue(any(problem.startswith(f"{job} ") for problem in problems))
+                # The merge group keeps requiring the selected suite.
+                needs = self.board("merge_group", stores="true")
+                for other in ci_plan.POSTGRES_STORE_JOBS:
+                    needs[other]["result"] = "success"
+                needs[job]["result"] = "skipped"
+                problems = ci_plan.evaluate_conclusion(needs, "merge_group")
+                self.assertTrue(any(problem.startswith(f"{job} ") for problem in problems))
+                needs[job]["result"] = "success"
+                self.assertEqual([], ci_plan.evaluate_conclusion(needs, "merge_group"))
 
 
 if __name__ == "__main__":

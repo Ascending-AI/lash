@@ -20,10 +20,22 @@
 #     loopback hosts the database or bucket. Compilation still uses the pool.
 #
 # Usage: scripts/ci/store-tests.sh <suite>
+#        scripts/ci/store-tests.sh --labels <suite>
+#
+# `--labels` prints the Buck2 labels the suite executes, one per line, and runs
+# nothing. `scripts/ci/store-build.sh` builds them before a service starts.
 set -euo pipefail
 
-suite="${1:?usage: store-tests.sh <suite>}"
-trusted="${BUCK2_TRUSTED:?BUCK2_TRUSTED must be 'true' or 'false'}"
+labels_only=false
+if [ "${1:-}" = --labels ]; then
+  labels_only=true
+  shift
+fi
+suite="${1:?usage: store-tests.sh [--labels] <suite>}"
+trusted=true
+if [ "${labels_only}" = false ]; then
+  trusted="${BUCK2_TRUSTED:?BUCK2_TRUSTED must be 'true' or 'false'}"
+fi
 case "${trusted}" in
   true | false) ;;
   *)
@@ -85,14 +97,47 @@ cargo_test() {
 
 labels() {
   # Generated inventory: a new service-gated binary joins its service job
-  # without a hand edit here.
-  python3 - "$1" <<'PY'
+  # without a hand edit here. A second argument selects one build of the
+  # service's binaries: `default`, or the Cargo feature a feature-lane variant
+  # is built with. Each PostgreSQL build has a suite and a CI job of its own.
+  python3 - "$@" <<'PY'
 import json
 import sys
 with open("tools/buck2/target-inventory.json", encoding="utf-8") as source:
     inventory = json.load(source)
-print(*inventory["service_test_targets"][sys.argv[1]])
+selected = inventory["service_test_targets"][sys.argv[1]]
+if len(sys.argv) > 2:
+    features = {unit["label"]: unit["features"] for unit in inventory["feature_lane_units"]}
+    if sys.argv[2] == "default":
+        selected = [label for label in selected if label not in features]
+    else:
+        selected = [label for label in selected if sys.argv[2] in features.get(label, ())]
+    if not selected:
+        raise SystemExit(f"no {sys.argv[1]} service test is built as {sys.argv[2]}")
+print(*selected)
 PY
+}
+
+# The labels the shaped suites below name outside the generated inventory.
+readonly restate_ingress_label=//crates/lash-restate:lash-restate__unit_test
+readonly catalog_shape_label=//crates/lash-postgres-store:lash-postgres-store__unit_test
+readonly catalog_drift_label=//crates/lash-postgres-store:schema_drift__test
+
+# The sharded binaries' shards and the other binaries run in parallel
+# (FIG-3572), each under the generated slot wrapper, which gives every test
+# action a database of its own out of the LASH_POSTGRES_SLOT_COUNT slots
+# `with-service.sh` created; `--jobs` never runs more tests than there are
+# slots.
+postgres_slot_test() {
+  : "${LASH_POSTGRES_SLOT_COUNT:?with-service.sh sets LASH_POSTGRES_SLOT_COUNT}"
+  if [ -z "${LASH_POSTGRES_SLOT_DIR:-}" ]; then
+    LASH_POSTGRES_SLOT_DIR="$(mktemp -d)"
+    export LASH_POSTGRES_SLOT_DIR
+  fi
+  buck2_test \
+    --test_env=LASH_POSTGRES_SLOT_DIR \
+    --test_env=LASH_POSTGRES_SLOT_COUNT \
+    "$@"
 }
 
 
@@ -220,6 +265,34 @@ run_uniform_store_suite() {
   done
 }
 
+# Every label a suite executes, for the build that precedes the service.
+suite_labels() {
+  if [ -n "${uniform_store_suites[$1]+set}" ]; then
+    echo "${uniform_store_suites[$1]%%|*}"
+    return
+  fi
+  local listed
+  case "$1" in
+    pg-catalog-compatibility) echo "$catalog_shape_label" "$catalog_drift_label" ;;
+    pg-store)
+      listed="$(labels postgres default)"
+      echo "$listed" "$restate_ingress_label"
+      ;;
+    pg-store-synthetic-next) labels postgres synthetic-next ;;
+    s3-store) labels s3 ;;
+    *)
+      echo "unknown store suite: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+if [ "${labels_only}" = true ]; then
+  listed="$(suite_labels "$suite")"
+  tr ' ' '\n' <<<"$listed"
+  exit 0
+fi
+
 if [ -n "${uniform_store_suites[$suite]+set}" ]; then
   run_uniform_store_suite "$suite"
   exit 0
@@ -232,10 +305,10 @@ case "${suite}" in
   pg-catalog-compatibility)
     if [ "${trusted}" = true ]; then
       buck2_test --test_arg=committed_shape_artifact_matches_the_ddl_artifact \
-        //crates/lash-postgres-store:lash-postgres-store__unit_test
+        "$catalog_shape_label"
       buck2_test \
         --test_arg=a_compatible_expansion_still_reports_column_drift \
-        //crates/lash-postgres-store:schema_drift__test
+        "$catalog_drift_label"
     else
       cargo_test cargo test -p lash-internal-postgres-store --locked --lib \
         committed_shape_artifact_matches_the_ddl_artifact
@@ -246,39 +319,34 @@ case "${suite}" in
 
   # Package-wide by design: the integration and schema binaries are part of
   # this gate, so narrowing to the conformance binary would silently drop them.
-  # The label file carries the synthetic successor's variants too, so the
-  # synthetic tier's PostgreSQL suites run against the same service.
   # The suites self-serialize on a per-process guard, and two processes on one
   # database would truncate each other's tables. Cargo runs the binaries one at
-  # a time against the one database. Buck2 runs the sharded binaries' shards
-  # and the other binaries in parallel (FIG-3572), each under the generated
-  # slot wrapper, which gives every test action a
-  # database of its own out of the LASH_POSTGRES_SLOT_COUNT slots
-  # `with-service.sh` created; `--jobs` never runs more tests than there are
-  # slots.
+  # a time against the one database; Buck2 gives each test a slot.
   pg-store)
     if [ "${trusted}" = true ]; then
-      : "${LASH_POSTGRES_SLOT_COUNT:?with-service.sh sets LASH_POSTGRES_SLOT_COUNT}"
-      LASH_POSTGRES_SLOT_DIR="$(mktemp -d)"
-      export LASH_POSTGRES_SLOT_DIR
       # shellcheck disable=SC2046
-      buck2_test \
-        --test_env=LASH_POSTGRES_SLOT_DIR \
-        --test_env=LASH_POSTGRES_SLOT_COUNT \
-        $(labels postgres)
-      buck2_test \
-        --test_env=LASH_POSTGRES_SLOT_DIR \
-        --test_env=LASH_POSTGRES_SLOT_COUNT \
+      postgres_slot_test $(labels postgres default)
+      postgres_slot_test \
         --test_arg=postgres_ingress \
         --test_arg=--ignored \
-        //crates/lash-restate:lash-restate__unit_test
+        "$restate_ingress_label"
     else
       cargo_test cargo test -p lash-internal-postgres-store --locked
-      # The synthetic successor's suites (FIG-4262), the Cargo spelling of
-      # the feature-lane variants the generated label file adds above.
+      cargo_test cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
+    fi
+    ;;
+
+  # The synthetic successor's build of the same package (FIG-4262): the
+  # feature-lane variants of every binary `pg-store` runs. It has a suite, a
+  # service and a CI job of its own, so its shards never wait for a slot behind
+  # the default build's.
+  pg-store-synthetic-next)
+    if [ "${trusted}" = true ]; then
+      # shellcheck disable=SC2046
+      postgres_slot_test $(labels postgres synthetic-next)
+    else
       cargo_test cargo test -p lash-internal-postgres-store --locked --no-default-features \
         --features synthetic-next
-      cargo_test cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
     fi
     ;;
 

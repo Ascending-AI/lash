@@ -800,11 +800,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             needs[job] = {"result": "skipped", "outputs": {}}
         needs["functional-e2e"] = {"result": "skipped", "outputs": {}}
         needs["pr-host-workers"] = {"result": "skipped", "outputs": {}}
-        needs["postgres-store"] = {"result": "skipped", "outputs": {}}
+        for job in plan["POSTGRES_STORE_JOBS"]:
+            needs[job] = {"result": "skipped", "outputs": {}}
         needs["buck2-tests-tail"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
         needs["buck2-tests-tail"] = {"result": "success", "outputs": {}}
-        needs["postgres-store"] = {"result": "success", "outputs": {}}
+        for job in plan["POSTGRES_STORE_JOBS"]:
+            needs[job] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group", False), [])
         # A pull request keeps the live Restate legs skipped even when the
         # diff selects `restate_suites` — the selection is dispatch work now —
@@ -818,7 +820,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         restate_needs["plan"]["outputs"]["restate_suites"] = "true"
         self.assertEqual(evaluate(restate_needs, "merge_group", False), [])
         restate_needs["buck2-tests-tail"]["result"] = "skipped"
-        restate_needs["postgres-store"]["result"] = "skipped"
+        for job in plan["POSTGRES_STORE_JOBS"]:
+            restate_needs[job]["result"] = "skipped"
         self.assertEqual(evaluate(restate_needs, "pull_request"), [])
         restate_needs["functional-e2e"]["result"] = "success"
         self.assertEqual(
@@ -839,7 +842,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for job in workers:
             needs[job] = {"result": "skipped", "outputs": {}}
         needs["buck2-tests-tail"]["result"] = "skipped"
-        needs["postgres-store"]["result"] = "skipped"
+        for job in plan["POSTGRES_STORE_JOBS"]:
+            needs[job]["result"] = "skipped"
         self.assertEqual([], evaluate(needs, "pull_request"))
         needs["restate-postgres-workers"]["result"] = "success"
         self.assertIn(
@@ -3148,7 +3152,7 @@ derive_mutation_jobs() {{
             runner_temp / "store-test-results",
         )
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-        for job_name in ("postgres-store", "s3-store"):
+        for job_name in ("postgres-store", "postgres-store-synthetic-next", "s3-store"):
             uploads = [
                 step
                 for step in workflow["jobs"][job_name]["steps"]
@@ -3170,9 +3174,10 @@ derive_mutation_jobs() {{
         three arms and "both halves non-empty" for the rest.
 
         Every workflow suite participates, including newly registered suites.
-        Three keep explicit arms because their shape varies
-        (`pg-catalog-compatibility` runs two invocations; `pg-store` and
-        `s3-store` take a generated label file rather than one label).
+        Four keep explicit arms because their shape varies
+        (`pg-catalog-compatibility` runs two invocations; `pg-store`,
+        `pg-store-synthetic-next` and `s3-store` take generated inventory
+        labels rather than one label).
         """
         script = STORE_TESTS.read_text(encoding="utf-8")
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -3190,7 +3195,13 @@ derive_mutation_jobs() {{
 
         self.assertTrue(uniform)
         self.assertEqual(
-            {"pg-catalog-compatibility", "pg-store", "s3-store"}, shaped
+            {
+                "pg-catalog-compatibility",
+                "pg-store",
+                "pg-store-synthetic-next",
+                "s3-store",
+            },
+            shaped,
         )
         self.assertEqual(suites, dispatched)
         # A suite cannot be in both halves, or the table would be shadowed.

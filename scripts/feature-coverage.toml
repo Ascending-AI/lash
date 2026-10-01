@@ -421,8 +421,9 @@ commands = [
 # `synthetic-next` to the crates whose blocks it moves, and `just e2e-rolling`
 # builds the node binary both ways. The SQLite store's every test target runs
 # in `//:feature_lane_tests`; the PostgreSQL store's synthetic `cargo test`
-# variants are service-gated, so `scripts/ci/store-tests.sh pg-store` runs
-# them beside the default build's (FIG-4262).
+# variants are service-gated, so `scripts/ci/store-tests.sh
+# pg-store-synthetic-next` runs them, in a CI job of its own beside the
+# default build's (FIG-4262).
 [[lane]]
 name = "upgrade-harness-synthetic-next"
 features = [

@@ -276,6 +276,7 @@ GATED_JOBS = {
     "heavy-tests": "rust",
     "stack-budget": "rust",
     "postgres-store": "stores",
+    "postgres-store-synthetic-next": "stores",
     "pr-host-workers": "pr_host_restate",
     "rolling-upgrade": "rolling_upgrade",
     "s3-store": "stores",
@@ -321,6 +322,11 @@ DISPATCH_ONLY_JOBS = {
 }
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
+
+# One job per build of the store package -- the default build and each feature
+# variant -- so each has a runner and PostgreSQL slots of its own. They share
+# one job condition, so the conclusion holds them to one rule.
+POSTGRES_STORE_JOBS = ("postgres-store", "postgres-store-synthetic-next")
 
 # The PostgreSQL majors. One `postgres-store` job builds the store binaries
 # once and runs every selected major against its own container, so a second
@@ -2112,7 +2118,7 @@ def evaluate_conclusion(
                     f" expected {wanted}"
                 )
             continue
-        if job == "postgres-store" and event_name in DEFERRED_EVENTS:
+        if job in POSTGRES_STORE_JOBS and event_name in DEFERRED_EVENTS:
             wanted = (
                 "success"
                 if (
