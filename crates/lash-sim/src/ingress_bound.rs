@@ -187,9 +187,8 @@ impl World {
                 clock: self.clock.as_ref(),
                 duties,
                 relays: &relays,
-                lanes: &lash_core::runtime::drive::RelayLanes::new(
-                    Arc::clone(&self.clock) as Arc<dyn lash_core::Clock>,
-                    lash_core::engine::RecoveryPassBudget::default(),
+                lanes: &lash_conformance::law_tick_lanes(
+                    Arc::clone(&self.clock) as Arc<dyn lash_core::Clock>
                 ),
             },
             &ReconcileCursor::default(),

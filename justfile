@@ -212,6 +212,13 @@ effect-group-conformance-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
     --artifacts "$artifacts"
 
+  # Root-control's crash-gap laws run on both server legs (FIG-4516).
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite root-control --leg live \
+    --artifacts "$artifacts"
+
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite root-control --leg replay \
+    --artifacts "$artifacts"
+
   # The admission-fence law is its own named suite (FIG-4395): same recipe,
   # same legs.
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg live \

@@ -513,9 +513,8 @@ async fn lease_pass(
     let sessions = deployment.backend.session_store_factory();
     let work = lash_core::NoSessionWork::new();
     let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![Arc::new(relay)];
-    let lanes = lash_core::drive::RelayLanes::new(
-        Arc::clone(&deployment.clock) as Arc<dyn lash_core::Clock>,
-        lash_core::engine::RecoveryPassBudget::default(),
+    let lanes = lash_conformance::law_tick_lanes(
+        Arc::clone(&deployment.clock) as Arc<dyn lash_core::Clock>
     );
     lash_core::drive::reconcile_once(
         &lash_core::drive::ReconcileParts {

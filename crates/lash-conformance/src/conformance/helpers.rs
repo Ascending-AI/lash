@@ -372,6 +372,17 @@ pub fn law_tick_lanes(clock: Arc<dyn crate::Clock>) -> lash_core::runtime::drive
     )
 }
 
+/// Persistent lanes for a law of the deployment schedule (ADR 0109 §1.8).
+/// Unlike a single-pass fixture, it runs successive ticks on the same lanes
+/// and observes busy passes, bounded leader arms and later completions.
+#[must_use]
+pub fn deployment_tick_lanes(
+    clock: Arc<dyn crate::Clock>,
+    budget: lash_core::engine::RecoveryPassBudget,
+) -> lash_core::runtime::drive::RelayLanes {
+    lash_core::runtime::drive::RelayLanes::new(clock, budget)
+}
+
 #[cfg(test)]
 mod law_tick_tests {
     use super::*;

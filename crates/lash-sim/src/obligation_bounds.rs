@@ -562,7 +562,7 @@ impl SessionControlEngine for HeldRecovery {
 async fn held_recovery_preserves_the_interval_and_due_retry_bound() {
     use lash_core::engine::{ReconcileArm, ReconcileCursor, RecoveryPassBudget};
     use lash_core::runtime::drive::{
-        RECOVERY_TICK, ReconcileParts, RecoveryInterval, RelayLanes, reconcile_once,
+        RECOVERY_TICK, ReconcileParts, RecoveryInterval, reconcile_once,
     };
     let clock = SimClock::new();
     let work = Arc::new(Work(Arc::new(HeldRecovery)));
@@ -583,7 +583,10 @@ async fn held_recovery_preserves_the_interval_and_due_retry_bound() {
             vec![world.relay.clone(), world.scope_close.clone()];
         let ticks = ticks.clone();
         tokio::spawn(async move {
-            let lanes = RelayLanes::new(clock.clone(), RecoveryPassBudget::default());
+            let lanes = lash_conformance::deployment_tick_lanes(
+                clock.clone(),
+                RecoveryPassBudget::default(),
+            );
             let mut interval = RecoveryInterval::new(clock.clone(), RECOVERY_TICK);
             let mut cursor = ReconcileCursor::default();
             loop {
@@ -695,7 +698,7 @@ impl SessionControlEngine for SlowReleases {
 async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
     use lash_core::engine::{ReconcileCursor, RecoveryPassBudget};
     use lash_core::runtime::drive::{
-        RECOVERY_TICK, ReconcileParts, RecoveryInterval, RelayLanes, reconcile_once,
+        RECOVERY_TICK, ReconcileParts, RecoveryInterval, reconcile_once,
     };
     use settlements::Progress;
 
@@ -744,7 +747,10 @@ async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
         let close = Arc::clone(&world.close);
         let relays = vec![control_relay, scope_relay];
         tokio::spawn(async move {
-            let lanes = RelayLanes::new(Arc::clone(&clock) as Arc<dyn Clock>, budget);
+            let lanes = lash_conformance::deployment_tick_lanes(
+                Arc::clone(&clock) as Arc<dyn Clock>,
+                budget,
+            );
             let mut interval =
                 RecoveryInterval::new(Arc::clone(&clock) as Arc<dyn Clock>, RECOVERY_TICK);
             let mut cursor = ReconcileCursor::default();

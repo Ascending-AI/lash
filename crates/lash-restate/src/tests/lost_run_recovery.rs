@@ -5,7 +5,7 @@
 
 use super::*;
 use lash_core::StoreSet;
-use lash_core::engine::{BuildGeneration, ReconcileCursor, RecoveryPassBudget};
+use lash_core::engine::{BuildGeneration, ReconcileCursor};
 use lash_core::runtime::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
 use lash_core::runtime::drive::{ReconcileParts, ReconcileProcesses, RelayLanes, reconcile_once};
 use lash_core::runtime::recovery_lease::RecoveryDuties;
@@ -265,7 +265,10 @@ fn driver(
         ),
     );
     Arc::new(RecoveryDriver {
-        lanes: RelayLanes::new(stores.clock(), RecoveryPassBudget::default()),
+        lanes: lash_conformance::deployment_tick_lanes(
+            stores.clock(),
+            lash_core::engine::RecoveryPassBudget::default(),
+        ),
         relay: Arc::new(PulseRelay {
             ledger: stores.obligation_ledger(ObligationKind::ProcessStart),
             delivered: AtomicUsize::new(0),

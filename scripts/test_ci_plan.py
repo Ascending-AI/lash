@@ -1165,6 +1165,49 @@ class PrTailLabelTests(unittest.TestCase):
         )
 
 
+class LawTickLaneTests(unittest.TestCase):
+    def test_no_law_constructs_fresh_deployment_lanes(self) -> None:
+        import check_law_tick_lanes
+
+        self.assertEqual([], check_law_tick_lanes.violations(ROOT))
+
+    def test_the_mechanical_guard_runs_in_ci(self) -> None:
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
+        runs = "\n".join(step.get("run", "") for step in jobs["lint"]["steps"])
+        self.assertIn("python3 scripts/check_law_tick_lanes.py", runs)
+
+    def test_the_guard_finds_new_test_modules_and_ignores_literals(self) -> None:
+        import check_law_tick_lanes
+
+        (ROOT / "target").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=ROOT / "target") as temp:
+            root = Path(temp)
+            source = root / "src"
+            source.mkdir()
+            (source / "lib.rs").write_text('#[cfg(test)] mod new_laws;\n')
+            law = source / "new_laws.rs"
+            for budget in ("RecoveryPassBudget::default()", "budget"):
+                law.write_text(f"fn tick() {{ RelayLanes::new(clock, {budget}); }}")
+                self.assertEqual(["src/new_laws.rs:1"], check_law_tick_lanes.violations(root))
+            law.write_text('fn tick() { law_tick_lanes(clock); }\n'
+                           '// RelayLanes::new(clock, budget)\n'
+                           'const EXAMPLE: &str = "RelayLanes::new(clock, budget)";\n')
+            self.assertEqual([], check_law_tick_lanes.violations(root))
+            law.write_text('use lash_core::drive::RelayLanes as Lanes;\n'
+                           'fn tick() { Lanes::new(clock, budget); }\n')
+            self.assertEqual(["src/new_laws.rs:2"], check_law_tick_lanes.violations(root))
+            law.write_text("fn tick() { law_tick_lanes(clock); }")
+            (root / "Cargo.toml").write_text(
+                '[workspace]\nmembers = [".", "crates/lash-conformance"]\n'
+            )
+            library = root / check_law_tick_lanes.HELPERS.parent / "new_law.rs"
+            library.parent.mkdir(parents=True)
+            library.write_text("pub async fn a_new_law() { RelayLanes::new(clock, budget); }")
+            self.assertEqual(
+                [f"{library.relative_to(root)}:1"], check_law_tick_lanes.violations(root)
+            )
+
+
 class RestateSuiteSelectionTests(unittest.TestCase):
     """`restate_suites` selects the live Restate board on a pull request.
 
@@ -1177,6 +1220,27 @@ class RestateSuiteSelectionTests(unittest.TestCase):
 
     def plan(self, *paths: str) -> dict[str, str]:
         return ci_plan.classify([("M", path) for path in paths])
+
+    def test_root_control_runs_both_legs_in_a_ci_selected_recipe(self) -> None:
+        import tomllib
+
+        registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
+        self.assertIn("root-control", registry)
+        recipes = ci_plan._justfile_recipes((ROOT / "justfile").read_text())
+        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["functional-e2e"]
+        selected = {row["recipe"] for row in job["strategy"]["matrix"]["include"]}
+        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run functional E2E")
+        self.assertIn("just ${{ matrix.recipe }}", run)
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("parse only")):
+            for leg in ("live", "replay"):
+                with self.subTest(leg=leg):
+                    command = re.compile(
+                        rf'^\s*python3\s+"\{{\{{repo\}}\}}/scripts/ci/restate_suite\.py"'
+                        rf'\s+suite\s+root-control\s+--leg\s+{leg}\b',
+                        re.MULTILINE,
+                    )
+                    self.assertTrue(any(command.search(recipes[recipe]) for recipe in selected),
+                                    f"root-control {leg} has no CI-selected recipe")
 
     def test_load_replay_suites_run_both_legs_in_a_ci_selected_recipe(self) -> None:
         import tomllib

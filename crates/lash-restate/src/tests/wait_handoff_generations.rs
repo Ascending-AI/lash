@@ -760,10 +760,7 @@ impl HandOff {
                 clock: &clock,
                 duties: lease.duties(clock.timestamp_ms()),
                 relays: &[],
-                lanes: &lash_core::drive::RelayLanes::new(
-                    Arc::new(clock),
-                    lash_core::engine::RecoveryPassBudget::default(),
-                ),
+                lanes: &lash_conformance::law_tick_lanes(Arc::new(clock)),
             },
             cursor,
             NonZeroUsize::new(16).unwrap_or(NonZeroUsize::MIN),

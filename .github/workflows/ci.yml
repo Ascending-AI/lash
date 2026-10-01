@@ -1410,6 +1410,9 @@ jobs:
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh
 
+      - name: Check law tick lanes
+        run: python3 scripts/check_law_tick_lanes.py
+
       - name: Check substrate boundary
         run: bash scripts/check-substrate-boundary.sh
 

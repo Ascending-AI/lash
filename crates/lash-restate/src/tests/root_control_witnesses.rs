@@ -1050,10 +1050,7 @@ async fn crash_gaps(server: HarnessServer) {
                     clock: &later,
                     duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
                     relays: &relays,
-                    lanes: &lash_core::drive::RelayLanes::new(
-                        Arc::new(LaterClock(3_600_000)),
-                        lash_core::engine::RecoveryPassBudget::default(),
-                    ),
+                    lanes: &lash_conformance::law_tick_lanes(Arc::new(LaterClock(3_600_000))),
                 },
                 &ReconcileCursor::default(),
                 NonZeroUsize::MIN.saturating_add(15),
@@ -1621,7 +1618,7 @@ async fn recovery_tick_keeps_cadence_with_slow_control_rpc(server: HarnessServer
         work,
         scopes: Arc::clone(&scopes),
         relays: vec![intent_relay, scope_close],
-        lanes: lash_core::drive::RelayLanes::new(Arc::clone(&clock), pass),
+        lanes: lash_conformance::deployment_tick_lanes(Arc::clone(&clock), pass),
         ticks: std::sync::Mutex::new(Vec::new()),
     });
     let started = std::time::Instant::now();
