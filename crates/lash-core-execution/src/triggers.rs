@@ -1646,24 +1646,19 @@ pub struct TriggerIngressReceipt {
     pub realization: crate::StoreRealization,
 }
 
-/// An emission's journaled decision about one delivery it ingested
-/// (FIG-4297), recorded before the delivery's start is prepared.
+/// The process an emission recorded one of its deliveries bound to
+/// (FIG-4297, FIG-4503).
 ///
-/// The first execution decides from the reservation the store answered: an
-/// unbound delivery is admitted to start, a bound one to the process it is
-/// bound to. Every replay serves the recorded decision and never the
-/// reservation the store answers now, which a later bind or a replayed ingest
-/// has moved on (FIG-806). So a replay of an emission that found the delivery
-/// unbound consumes the start it journaled, and an emission that found it
-/// bound never registers or schedules a process: after that process was
-/// pruned, its start key would mint another one.
+/// An emission's ingest is a recorded step, and the emission acts on the
+/// receipt it recorded: a delivery the receipt holds bound answers its
+/// process and starts nothing, and one it holds unbound starts. The start's
+/// bind is this recorded step, as is the binding read after a start refused
+/// as bound (FIG-4369). Every replay serves the recorded process and never
+/// binds or reads the delivery, which retention may have reclaimed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "admission", rename_all = "snake_case")]
 pub enum TriggerDeliveryAdmission {
-    /// The delivery was unbound: start the process its start key names, and
-    /// bind it.
-    Start,
-    /// The delivery was bound to `process_id`: answer it, starting nothing.
+    /// The delivery is bound to `process_id`.
     Bound { process_id: ProcessId },
 }
 

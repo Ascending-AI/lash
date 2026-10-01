@@ -648,6 +648,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::ResolveTurnConfig { .. }
             | RuntimeEffectCommand::RecordCompactionBase { .. }
             | RuntimeEffectCommand::ResolveConfigTransaction { .. }
+            | RuntimeEffectCommand::IngestTriggerOccurrence { .. }
             | RuntimeEffectCommand::AdmitTriggerDelivery { .. }
             | RuntimeEffectCommand::ReadSessionCommandRun { .. }
             | RuntimeEffectCommand::CloseRootScope { .. }

@@ -401,9 +401,16 @@ pub enum RuntimeEffectCommand {
     Trigger {
         command: Box<crate::TriggerCommand>,
     },
-    /// Record an emission's admission of one delivery it ingested before
-    /// the delivery's start is prepared (FIG-4297). The envelope names only
-    /// the delivery; the decision is the step's outcome.
+    /// Ingest an emission's occurrence as one recorded step (FIG-4503). The
+    /// store's receipt is the step's outcome: a replay serves the occurrence
+    /// and the reservations the first execution was answered, and writes
+    /// nothing to the trigger store.
+    IngestTriggerOccurrence {
+        request: Box<crate::TriggerOccurrenceRequest>,
+    },
+    /// Record the process one delivery an emission ingested is bound to
+    /// (FIG-4297, FIG-4503). The envelope names only the delivery; the
+    /// binding is the step's outcome.
     AdmitTriggerDelivery {
         occurrence_id: String,
         subscription_id: String,
@@ -612,6 +619,7 @@ impl RuntimeEffectCommand {
             }
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
+            Self::IngestTriggerOccurrence { .. } => RuntimeEffectKind::IngestTriggerOccurrence,
             Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
@@ -1249,7 +1257,12 @@ pub enum RuntimeEffectOutcome {
     Trigger {
         result: Box<crate::TriggerEffectResult>,
     },
-    /// The admission an
+    /// The receipt the trigger store answered an
+    /// [`IngestTriggerOccurrence`](RuntimeEffectCommand::IngestTriggerOccurrence).
+    IngestTriggerOccurrence {
+        receipt: Box<crate::TriggerIngressReceipt>,
+    },
+    /// The binding an
     /// [`AdmitTriggerDelivery`](RuntimeEffectCommand::AdmitTriggerDelivery)
     /// recorded for its delivery.
     AdmitTriggerDelivery {
@@ -1593,7 +1606,21 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// Extracts the admission an emission recorded for one trigger delivery
+    /// Extracts the receipt an emission's recorded ingest was answered
+    /// (FIG-4503).
+    pub fn into_trigger_ingress_receipt(
+        self,
+    ) -> Result<crate::TriggerIngressReceipt, RuntimeEffectControllerError> {
+        match self {
+            Self::IngestTriggerOccurrence { receipt } => Ok(*receipt),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::IngestTriggerOccurrence,
+                other.kind(),
+            )),
+        }
+    }
+
+    /// Extracts the binding an emission recorded for one trigger delivery
     /// (FIG-4297).
     pub(crate) fn into_trigger_delivery_admission(
         self,
@@ -1695,6 +1722,7 @@ impl RuntimeEffectOutcome {
             }
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
+            Self::IngestTriggerOccurrence { .. } => RuntimeEffectKind::IngestTriggerOccurrence,
             Self::AdmitTriggerDelivery { .. } => RuntimeEffectKind::AdmitTriggerDelivery,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,

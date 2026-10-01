@@ -9,7 +9,8 @@ async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_
     let backend = double.lash_backend();
     #[derive(Clone)]
     struct ControllerOwnedTriggerEmitter<'h> {
-        admissions: Arc<std::sync::atomic::AtomicUsize>,
+        ingests: Arc<std::sync::atomic::AtomicUsize>,
+        binds: Arc<std::sync::atomic::AtomicUsize>,
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
         native: lash_core::ScopedEffectController<'h>,
     }
@@ -28,11 +29,14 @@ async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_
             envelope: RuntimeEffectEnvelope,
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-            // A non-tool trigger emission issues only its delivery's
-            // admission (FIG-4297) and the reserved process start.
+            // A non-tool trigger emission issues only its ingest, the
+            // reserved process start and the start's bind (FIG-4503).
             match &envelope.command {
+                RuntimeEffectCommand::IngestTriggerOccurrence { .. } => {
+                    self.ingests.fetch_add(1, Ordering::SeqCst);
+                }
                 RuntimeEffectCommand::AdmitTriggerDelivery { .. } => {
-                    self.admissions.fetch_add(1, Ordering::SeqCst);
+                    self.binds.fetch_add(1, Ordering::SeqCst);
                 }
                 RuntimeEffectCommand::Process { .. } => {
                     self.process_starts.fetch_add(1, Ordering::SeqCst);
@@ -169,7 +173,8 @@ async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_
         .await
         .expect("open the scope's handler");
     let controller = ControllerOwnedTriggerEmitter {
-        admissions: Arc::default(),
+        ingests: Arc::default(),
+        binds: Arc::default(),
         process_starts: Arc::default(),
         native: handler.scoped(),
     };
@@ -205,15 +210,17 @@ async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_
         redrive, first,
         "the redrive reports the delivery the first emission started (FIG-4272)"
     );
-    // The second emission records its own admission, and the delivery it
-    // meets is bound: it answers the bound process and starts nothing.
+    // The second emission records its own ingest, and the delivery its
+    // receipt holds is bound: it answers the bound process and starts nothing.
     assert_eq!(
         (
-            controller.admissions.load(Ordering::SeqCst),
+            controller.ingests.load(Ordering::SeqCst),
             controller.process_starts.load(Ordering::SeqCst),
+            controller.binds.load(Ordering::SeqCst),
         ),
-        (2, 1),
-        "the re-emission records its admission of the bound delivery and starts nothing"
+        (2, 1, 1),
+        "the re-emission records its own ingest, whose receipt holds the delivery bound: it \
+         answers the bound process, and starts and binds nothing"
     );
     assert_eq!(
         lash_core::TriggerStore::list_deliveries(store.as_ref())

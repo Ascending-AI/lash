@@ -1887,6 +1887,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::ResolveConfigTransaction
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose
+                | RuntimeEffectKind::IngestTriggerOccurrence
                 | RuntimeEffectKind::AdmitTriggerDelivery
                 | RuntimeEffectKind::Process
         ) || self.code == RuntimeErrorCode::TransientCancelWatch

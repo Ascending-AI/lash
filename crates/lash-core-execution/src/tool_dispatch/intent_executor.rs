@@ -532,8 +532,9 @@ async fn execute_one(
             // owns its occurrence identity. Stamp the request with that
             // declaration's replay key so two declarations cannot collapse
             // merely because their callers reused a key. A redrive retains the
-            // same replay key, so it still re-ingests the same occurrence and
-            // replays the same deterministic delivery starts.
+            // same replay key, so it ingests the same occurrence, or is served
+            // its recorded ingest, and replays the same deterministic delivery
+            // starts.
             // `emit_recorded` settles the report those two dedupe points make
             // replay-varying, so the recorded `Executed` result is byte-stable.
             let router = context.trigger_router.as_ref().ok_or_else(|| {

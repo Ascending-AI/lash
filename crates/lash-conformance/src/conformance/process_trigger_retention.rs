@@ -2169,7 +2169,9 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
             _
         ))
     ));
-    let controller = crate::testing::UnavailableEffectController;
+    // The emission's ingest is a recorded step, so it needs a host that runs
+    // steps; the revoked route refuses the delivery before its start's step.
+    let controller = InPlaceStepController;
     let scoped = crate::ScopedEffectController::borrowed(
         &controller,
         crate::admit(crate::ExecutionScope::runtime_operation(
@@ -2195,4 +2197,47 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
         crate::TriggerDeliveryEmitOutcome::Failed { .. }
     ));
     assert!(report.deliveries[0].process_id.is_none());
+}
+
+/// A controller that runs each step's body in place and journals nothing.
+struct InPlaceStepController;
+
+impl crate::AwaitEventResolver for InPlaceStepController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for InPlaceStepController {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        local_executor.execute(envelope).await
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("InPlaceStepController"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::TurnCancelWait,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("InPlaceStepController"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("InPlaceStepController"))
+    }
 }

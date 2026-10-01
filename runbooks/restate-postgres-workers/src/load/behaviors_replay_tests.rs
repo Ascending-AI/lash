@@ -401,9 +401,11 @@ async fn starts(core: &lash::LashCore) -> Starts {
     }
 }
 
-/// No replay starts a process or emits an occurrence the first attempt did
-/// not: the registry holds exactly what it held after the advance, and every
-/// occurrence and delivery is the recorded one, bound to the recorded start.
+/// No replay starts a process, emits an occurrence or writes a trigger row:
+/// the registry and the trigger store hold exactly what they held after the
+/// advance, so an occurrence and a delivery retention reclaimed stay gone
+/// (FIG-4503), and every row left is the recorded one, bound to the recorded
+/// start.
 fn assert_no_new_starts(
     storage: &str,
     case: Advance,
@@ -416,13 +418,25 @@ fn assert_no_new_starts(
         "{storage} {case:?}: the replay started or revived a process"
     );
     assert!(
-        replayed.occurrences.is_subset(&recorded.occurrences),
-        "{storage} {case:?}: the replay emitted a new occurrence: {replayed:?} over {recorded:?}"
+        advanced.occurrences.is_subset(&recorded.occurrences)
+            && advanced.deliveries.is_subset(&recorded.deliveries)
+            && advanced.deliveries.iter().all(|(_, bound)| bound.is_some()),
+        "{storage} {case:?}: the advance kept only recorded rows: {advanced:?} over {recorded:?}"
     );
-    assert!(
-        replayed.deliveries.is_subset(&recorded.deliveries)
-            && replayed.deliveries.iter().all(|(_, bound)| bound.is_some()),
-        "{storage} {case:?}: the replay reserved a new delivery: {replayed:?} over {recorded:?}"
+    if matches!(case, Advance::PrunePromotion) {
+        assert!(
+            advanced.occurrences.is_empty() && advanced.deliveries.is_empty(),
+            "{storage} {case:?}: retention reclaimed the pruned process's occurrence and \
+             delivery: {advanced:?}"
+        );
+    }
+    assert_eq!(
+        replayed.occurrences, advanced.occurrences,
+        "{storage} {case:?}: the replay wrote an occurrence row"
+    );
+    assert_eq!(
+        replayed.deliveries, advanced.deliveries,
+        "{storage} {case:?}: the replay wrote a delivery row"
     );
 }
 

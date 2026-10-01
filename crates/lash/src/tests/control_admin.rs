@@ -925,7 +925,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     );
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -944,13 +944,9 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     let before = session.admin().state().persist_current().await?;
 
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")?;
-    let scoped_effect_controller = backend
-        .clone()
-        .effect_host()
-        .scoped_static(lash_core::AdmittedScope::runtime_operation(
-            "trigger:button-press-1",
-        ))?
-        .expect("the backend host lends a static controller");
+    // An emission journals its ingest, so it runs in a host operation's
+    // handler.
+    let scoped_effect_controller = runtime_operation_scope(&core, "trigger:button-press-1").await;
     let report = core
         .triggers()
         .emit(
