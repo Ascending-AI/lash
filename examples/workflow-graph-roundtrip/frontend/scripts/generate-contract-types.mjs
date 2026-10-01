@@ -2,9 +2,13 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { compileFromFile } from 'json-schema-to-typescript';
+import { compile } from 'json-schema-to-typescript';
+import { schemaForTypescript } from './schema-for-typescript.mjs';
 
-const frontend = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const frontend = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
 const repository = path.resolve(frontend, '../../..');
 const generated = path.join(frontend, 'src/generated');
 const check = process.argv.slice(2).includes('--check');
@@ -29,12 +33,17 @@ for (const [schemaName, outputName] of documents) {
     ? path.resolve(repository, 'schemas/host', schemaName)
     : path.join(repository, 'schemas/host', schemaName);
   const output = path.join(generated, outputName);
-  const contents = await compileFromFile(schema, {
-    bannerComment: schemaName.startsWith('../')
-      ? '/* Generated from the example Rust HTTP DTOs by npm run generate:types. Do not edit directly. */'
-      : '/* Generated from schemas/host by npm run generate:types. Do not edit directly. */',
-    style: { singleQuote: true },
-  });
+  const contents = await compile(
+    schemaForTypescript(JSON.parse(await readFile(schema, 'utf8'))),
+    path.basename(schema, path.extname(schema)),
+    {
+      cwd: path.dirname(schema),
+      bannerComment: schemaName.startsWith('../')
+        ? '/* Generated from the example Rust HTTP DTOs by npm run generate:types. Do not edit directly. */'
+        : '/* Generated from schemas/host by npm run generate:types. Do not edit directly. */',
+      style: { singleQuote: true },
+    },
+  );
   if (check) {
     const current = await readFile(output, 'utf8').catch(() => null);
     if (current !== contents) stale.push(path.relative(frontend, output));

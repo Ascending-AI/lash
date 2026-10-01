@@ -23,15 +23,15 @@ impl AstString {
 }
 
 impl JsonSchema for AstString {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         String::schema_name()
     }
 
-    fn is_referenceable() -> bool {
-        String::is_referenceable()
+    fn inline_schema() -> bool {
+        String::inline_schema()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         String::json_schema(generator)
     }
 }

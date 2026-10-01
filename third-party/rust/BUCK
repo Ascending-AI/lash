@@ -19060,7 +19060,6 @@ third_party_rust_library(
         "OUT_DIR": "$(location :schemars-0.8-build-script-run[out_dir])",
     },
     features = [
-        "chrono",
         "default",
         "derive",
         "schemars_derive",
@@ -19071,7 +19070,6 @@ third_party_rust_library(
     rustc_flags = ["@$(location :schemars-0.8-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
-        ":chrono-0.4",
         ":dyn-clone-1",
         ":schemars_derive-0.8",
         ":serde-1",
@@ -19103,7 +19101,6 @@ third_party_rust_binary(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "chrono",
         "default",
         "derive",
         "schemars_derive",
@@ -19131,7 +19128,6 @@ third_party_buildscript_run(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
-        "chrono",
         "default",
         "derive",
         "schemars_derive",

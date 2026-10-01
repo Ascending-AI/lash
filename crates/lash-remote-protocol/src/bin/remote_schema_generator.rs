@@ -40,7 +40,7 @@ fn document<T: JsonSchema>(shape: &'static str) -> Result<Document, String> {
         "x-lash-version-constant".to_string(),
         json!("REMOTE_PROTOCOL_VERSION"),
     );
-    if let Some(definitions) = root.get_mut("definitions").and_then(Value::as_object_mut) {
+    if let Some(definitions) = root.get_mut("$defs").and_then(Value::as_object_mut) {
         for name in TRACE_DEFINITIONS {
             if let Some(definition) = definitions.get_mut(name) {
                 definition
@@ -87,28 +87,150 @@ mod tests {
     use super::*;
 
     #[test]
+    fn published_integer_schemas_preserve_their_existing_validation_range() {
+        let documents = documents().expect("schemas generate");
+        for (shape, name, mut value, path) in [
+            (
+                "remote-process-observation-item",
+                "TraceChargeSafetyDecision",
+                json!({"outcome": "authorized", "tokens_at_stake": 0, "attempt_number": 256}),
+                "/attempt_number",
+            ),
+            (
+                "remote-process-events-response",
+                "AttachmentSource",
+                json!({"source": "inline", "media_type": "application/octet-stream", "bytes": [256]}),
+                "/bytes/0",
+            ),
+            (
+                "remote-session-observation-event",
+                "RemoteNormalizedError",
+                json!({"class": "transport", "http_status": 65536}),
+                "/http_status",
+            ),
+            (
+                "remote-session-observation-event",
+                "RemoteToolIntentRefusalReason",
+                json!({"reason": "unsupported_protocol_version", "recorded": 65536}),
+                "/recorded",
+            ),
+        ] {
+            let schema = &documents
+                .iter()
+                .find(|document| document.shape == shape)
+                .unwrap()
+                .schema;
+            let schema = json!({
+                "$schema": schema["$schema"],
+                "$defs": schema["$defs"],
+                "$ref": format!("#/$defs/{name}"),
+            });
+            let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+            assert!(
+                validator.is_valid(&value),
+                "{name} gained an integer upper bound"
+            );
+            *value.pointer_mut(path).unwrap() = json!(-1);
+            assert!(
+                !validator.is_valid(&value),
+                "{name} lost its zero lower bound"
+            );
+        }
+    }
+
+    #[test]
+    fn observation_event_schema_validates_serialized_variants_and_rejects_unknown_fields() {
+        use lash_remote_protocol::{
+            RemoteSessionObservationEventPayload as Payload, RemoteSessionProcessEventKind,
+            RemoteSessionQueueEventKind, RemoteTurnActivity, RemoteTurnEvent,
+        };
+        let schema = document::<RemoteSessionObservationEvent>("remote-session-observation-event")
+            .expect("observation event schema generates")
+            .schema;
+        let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+        let events = [
+            Payload::TurnActivity {
+                activity: Box::new(RemoteTurnActivity {
+                    sequence: 1,
+                    id: "activity".to_string(),
+                    correlation_id: "correlation".to_string(),
+                    event: RemoteTurnEvent::TurnStarted {
+                        turn_id: "turn".into(),
+                    },
+                }),
+            },
+            Payload::Committed,
+            Payload::ResidentChanged,
+            Payload::AgentFrameSwitched {
+                frame_id: "frame".to_string(),
+            },
+            Payload::QueueChanged {
+                kind: RemoteSessionQueueEventKind::Enqueued,
+                batch_ids: vec!["batch".to_string()],
+            },
+            Payload::ProcessChanged {
+                kind: RemoteSessionProcessEventKind::Started { sequence: 1 },
+                process_ids: Vec::new(),
+            },
+        ];
+        for event in events {
+            let event = RemoteSessionObservationEvent {
+                session_id: "session".into(),
+                replay_incarnation_id: "incarnation".to_string(),
+                turn_id: Some("turn".into()),
+                revision: 1,
+                cursor: "cursor".to_string(),
+                event,
+            };
+            event.validate().expect("valid event document");
+            let mut value = serde_json::to_value(&event).expect("event serializes");
+            assert!(
+                validator.is_valid(&value),
+                "schema rejected {}",
+                value["type"]
+            );
+            value.as_object_mut().unwrap().remove("turn_id");
+            assert!(
+                validator.is_valid(&value),
+                "optional turn_id may be omitted"
+            );
+            value["unexpected"] = json!(true);
+            assert!(
+                !validator.is_valid(&value),
+                "schema accepted an unknown event field"
+            );
+            value.as_object_mut().unwrap().remove("unexpected");
+            value.as_object_mut().unwrap().remove("cursor");
+            assert!(
+                !validator.is_valid(&value),
+                "schema accepted an incomplete envelope"
+            );
+        }
+    }
+
+    #[test]
     fn observation_item_types_the_snapshot_graph_and_node_event_record() {
         let item = documents()
             .expect("schemas generate")
             .into_iter()
             .find(|document| document.shape == "remote-process-observation-item")
             .expect("observation item is registered");
-        let definitions = &item.schema["definitions"];
+        let definitions = &item.schema["$defs"];
         assert_eq!(
             definitions["RemoteProcessObservationProjection"]["properties"]["graph"],
             json!({
-                "anyOf": [{ "$ref": "#/definitions/TraceLashlangGraph" }, { "type": "null" }]
+                "anyOf": [{ "$ref": "#/$defs/TraceLashlangGraph" }, { "type": "null" }]
             })
         );
         let event = item.schema["oneOf"]
             .as_array()
             .expect("item variants")
             .iter()
-            .find(|variant| variant["properties"]["type"]["enum"] == json!(["event"]))
+            .find(|variant| variant["properties"]["type"]["const"] == json!("event"))
             .expect("event variant");
         assert_eq!(
             event["properties"]["record"],
-            json!({ "$ref": "#/definitions/TraceRecord" })
+            json!({ "$ref": "#/$defs/TraceRecord" })
         );
         for name in TRACE_DEFINITIONS {
             assert_eq!(

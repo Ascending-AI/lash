@@ -1,13 +1,10 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-events-response/v100",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "AttachmentRef": {
       "properties": {
         "byte_len": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "id": {
@@ -25,7 +22,7 @@
         "type_metadata": {
           "anyOf": [
             {
-              "$ref": "#/definitions/AttachmentTypeMetadata"
+              "$ref": "#/$defs/AttachmentTypeMetadata"
             },
             {
               "type": "null"
@@ -34,14 +31,14 @@
         }
       },
       "required": [
-        "byte_len",
         "id",
-        "media_type"
+        "media_type",
+        "byte_len"
       ],
       "type": "object"
     },
     "AttachmentSource": {
-      "description": "The ownership-explicit attachment source at the LLM/content seam.\n\nInline bytes are transient and must be normalized to `Stored` before a durable effect is emitted. Borrowed sources are never fetched by Lash and never enter the attachment manifest.",
+      "description": "The ownership-explicit attachment source at the LLM/content seam.\n\nInline bytes are transient and must be normalized to `Stored` before a\ndurable effect is emitted. Borrowed sources are never fetched by Lash and\nnever enter the attachment manifest.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -49,7 +46,7 @@
             "bytes": {
               "items": {
                 "format": "uint8",
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               "type": "array"
@@ -58,16 +55,14 @@
               "type": "string"
             },
             "source": {
-              "enum": [
-                "inline"
-              ],
+              "const": "inline",
               "type": "string"
             }
           },
           "required": [
-            "bytes",
+            "source",
             "media_type",
-            "source"
+            "bytes"
           ],
           "type": "object"
         },
@@ -75,18 +70,16 @@
           "additionalProperties": false,
           "properties": {
             "attachment_ref": {
-              "$ref": "#/definitions/AttachmentRef"
+              "$ref": "#/$defs/AttachmentRef"
             },
             "source": {
-              "enum": [
-                "stored"
-              ],
+              "const": "stored",
               "type": "string"
             }
           },
           "required": [
-            "attachment_ref",
-            "source"
+            "source",
+            "attachment_ref"
           ],
           "type": "object"
         },
@@ -97,9 +90,7 @@
               "type": "string"
             },
             "source": {
-              "enum": [
-                "external_url"
-              ],
+              "const": "external_url",
               "type": "string"
             },
             "url": {
@@ -107,8 +98,8 @@
             }
           },
           "required": [
-            "media_type",
             "source",
+            "media_type",
             "url"
           ],
           "type": "object"
@@ -126,19 +117,17 @@
               ]
             },
             "provider_scope": {
-              "$ref": "#/definitions/ProviderFileScope"
+              "$ref": "#/$defs/ProviderFileScope"
             },
             "source": {
-              "enum": [
-                "provider_file"
-              ],
+              "const": "provider_file",
               "type": "string"
             }
           },
           "required": [
-            "id",
+            "source",
             "provider_scope",
-            "source"
+            "id"
           ],
           "type": "object"
         }
@@ -151,21 +140,19 @@
           "properties": {
             "height": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "image"
-              ],
+              "const": "image",
               "type": "string"
             },
             "width": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
@@ -194,7 +181,7 @@
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
         "execution_scope": {
-          "$ref": "#/definitions/ExecutionScope"
+          "$ref": "#/$defs/ExecutionScope"
         },
         "replay_key": {
           "type": "string"
@@ -207,7 +194,7 @@
       "type": "object"
     },
     "ExecutionScope": {
-      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic work begins. Its journal encoding is an existing durable contract; effect addresses compose it with a replay key without changing those bytes.",
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
       "oneOf": [
         {
           "properties": {
@@ -218,16 +205,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "turn"
-              ],
+              "const": "turn",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "session_id",
-            "turn_id",
-            "type"
+            "turn_id"
           ],
           "type": "object"
         },
@@ -237,15 +222,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "process_id",
-            "type"
+            "type",
+            "process_id"
           ],
           "type": "object"
         },
@@ -258,16 +241,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "queue_drain"
-              ],
+              "const": "queue_drain",
               "type": "string"
             }
           },
           "required": [
-            "drain_id",
+            "type",
             "session_id",
-            "type"
+            "drain_id"
           ],
           "type": "object"
         },
@@ -277,15 +258,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "session_delete"
-              ],
+              "const": "session_delete",
               "type": "string"
             }
           },
           "required": [
-            "session_id",
-            "type"
+            "type",
+            "session_id"
           ],
           "type": "object"
         },
@@ -295,15 +274,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "runtime_operation"
-              ],
+              "const": "runtime_operation",
               "type": "string"
             }
           },
           "required": [
-            "operation_id",
-            "type"
+            "type",
+            "operation_id"
           ],
           "type": "object"
         }
@@ -323,13 +300,11 @@
           "properties": {
             "pruned_at_ms": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "reason": {
-              "enum": [
-                "pruned"
-              ],
+              "const": "pruned",
               "type": "string"
             },
             "terminal_label": {
@@ -337,9 +312,9 @@
             }
           },
           "required": [
-            "pruned_at_ms",
             "reason",
-            "terminal_label"
+            "terminal_label",
+            "pruned_at_ms"
           ],
           "type": "object"
         }
@@ -354,17 +329,34 @@
         },
         "sequence": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "event_type",
-        "sequence"
+        "sequence",
+        "event_type"
       ],
       "type": "object"
     },
-    "ProcessEventPageEvents_for_RemoteProcessEvent_and_ProcessEventLite": {
+    "ProcessEventPage": {
+      "additionalProperties": false,
+      "description": "One bounded page from a retained process-event history.",
+      "properties": {
+        "events": {
+          "$ref": "#/$defs/ProcessEventPageEvents"
+        },
+        "more": {
+          "$ref": "#/$defs/ProcessEventPageMore"
+        }
+      },
+      "required": [
+        "events",
+        "more"
+      ],
+      "type": "object"
+    },
+    "ProcessEventPageEvents": {
       "description": "Projection-specific contents of one bounded event page.",
       "oneOf": [
         {
@@ -372,20 +364,18 @@
           "properties": {
             "events": {
               "items": {
-                "$ref": "#/definitions/RemoteProcessEvent"
+                "$ref": "#/$defs/RemoteProcessEvent"
               },
               "type": "array"
             },
             "mode": {
-              "enum": [
-                "full"
-              ],
+              "const": "full",
               "type": "string"
             }
           },
           "required": [
-            "events",
-            "mode"
+            "mode",
+            "events"
           ],
           "type": "object"
         },
@@ -394,35 +384,31 @@
           "properties": {
             "events": {
               "items": {
-                "$ref": "#/definitions/ProcessEventLite"
+                "$ref": "#/$defs/ProcessEventLite"
               },
               "type": "array"
             },
             "mode": {
-              "enum": [
-                "lite"
-              ],
+              "const": "lite",
               "type": "string"
             }
           },
           "required": [
-            "events",
-            "mode"
+            "mode",
+            "events"
           ],
           "type": "object"
         }
       ]
     },
     "ProcessEventPageMore": {
-      "description": "Whether a bounded event page completed the retained history.\n\nA host continues through the process cursor the facade returns with the page; the registry-level boundary is the last returned sequence.",
+      "description": "Whether a bounded event page completed the retained history.\n\nA host continues through the process cursor the facade returns with the\npage; the registry-level boundary is the last returned sequence.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
             "status": {
-              "enum": [
-                "complete"
-              ],
+              "const": "complete",
               "type": "string"
             }
           },
@@ -437,55 +423,34 @@
             "after_sequence": {
               "description": "The exclusive sequence boundary the next page starts after.",
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "status": {
-              "enum": [
-                "more"
-              ],
+              "const": "more",
               "type": "string"
             }
           },
           "required": [
-            "after_sequence",
-            "status"
+            "status",
+            "after_sequence"
           ],
           "type": "object"
         }
       ]
     },
-    "ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite": {
-      "additionalProperties": false,
-      "description": "One bounded page from a retained process-event history.",
-      "properties": {
-        "events": {
-          "$ref": "#/definitions/ProcessEventPageEvents_for_RemoteProcessEvent_and_ProcessEventLite"
-        },
-        "more": {
-          "$ref": "#/definitions/ProcessEventPageMore"
-        }
-      },
-      "required": [
-        "events",
-        "more"
-      ],
-      "type": "object"
-    },
-    "ProcessEventReadOutcome_for_ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite": {
-      "description": "Result of reading a process-event history without collapsing retention into an empty page.",
+    "ProcessEventReadOutcome": {
+      "description": "Result of reading a process-event history without collapsing retention into\nan empty page.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
             "retention": {
-              "enum": [
-                "retained"
-              ],
+              "const": "retained",
               "type": "string"
             },
             "value": {
-              "$ref": "#/definitions/ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite"
+              "$ref": "#/$defs/ProcessEventPage"
             }
           },
           "required": [
@@ -498,13 +463,11 @@
           "additionalProperties": false,
           "properties": {
             "retention": {
-              "enum": [
-                "no_longer_retained"
-              ],
+              "const": "no_longer_retained",
               "type": "string"
             },
             "value": {
-              "$ref": "#/definitions/ProcessEventHistoryRetention"
+              "$ref": "#/$defs/ProcessEventHistoryRetention"
             }
           },
           "required": [
@@ -527,8 +490,8 @@
         }
       },
       "required": [
-        "credential_scope",
-        "provider"
+        "provider",
+        "credential_scope"
       ],
       "type": "object"
     },
@@ -537,13 +500,13 @@
       "properties": {
         "epoch_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "owner": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteLeaseOwnerIdentity"
+              "$ref": "#/$defs/RemoteLeaseOwnerIdentity"
             },
             {
               "type": "null"
@@ -551,12 +514,12 @@
           ]
         },
         "writer": {
-          "$ref": "#/definitions/RemoteAbandonWriter"
+          "$ref": "#/$defs/RemoteAbandonWriter"
         }
       },
       "required": [
-        "epoch_ms",
-        "writer"
+        "writer",
+        "epoch_ms"
       ],
       "type": "object"
     },
@@ -575,7 +538,7 @@
             "resume_refused": {
               "properties": {
                 "reason": {
-                  "$ref": "#/definitions/RemoteProcessResumeRefusal"
+                  "$ref": "#/$defs/RemoteProcessResumeRefusal"
                 }
               },
               "required": [
@@ -602,34 +565,30 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "turn"
-              ],
+              "const": "turn",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "session_id",
-            "turn_id",
-            "type"
+            "turn_id"
           ],
           "type": "object"
         },
         {
           "properties": {
             "address": {
-              "$ref": "#/definitions/EffectAddress"
+              "$ref": "#/$defs/EffectAddress"
             },
             "type": {
-              "enum": [
-                "effect"
-              ],
+              "const": "effect",
               "type": "string"
             }
           },
           "required": [
-            "address",
-            "type"
+            "type",
+            "address"
           ],
           "type": "object"
         },
@@ -642,16 +601,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "tool_call"
-              ],
+              "const": "tool_call",
               "type": "string"
             }
           },
           "required": [
-            "call_id",
+            "type",
             "session_id",
-            "type"
+            "call_id"
           ],
           "type": "object"
         },
@@ -661,15 +618,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "process_id",
-            "type"
+            "type",
+            "process_id"
           ],
           "type": "object"
         },
@@ -680,20 +635,18 @@
             },
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "process_event"
-              ],
+              "const": "process_event",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "process_id",
-            "sequence",
-            "type"
+            "sequence"
           ],
           "type": "object"
         },
@@ -716,22 +669,20 @@
             },
             "subscription_revision": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "trigger_occurrence"
-              ],
+              "const": "trigger_occurrence",
               "type": "string"
             }
           },
           "required": [
-            "occurrence_id",
-            "type"
+            "type",
+            "occurrence_id"
           ],
           "type": "object"
         },
@@ -744,23 +695,21 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "session_node"
-              ],
+              "const": "session_node",
               "type": "string"
             }
           },
           "required": [
-            "node_id",
+            "type",
             "session_id",
-            "type"
+            "node_id"
           ],
           "type": "object"
         }
       ]
     },
     "RemoteLeaseOwnerIdentity": {
-      "description": "Wire mirror of one lease holder incarnation. Fencing identity is the full `(owner_id, incarnation_id)` pair; neither component may be erased into an untyped JSON carrier.",
+      "description": "Wire mirror of one lease holder incarnation. Fencing identity is the full\n`(owner_id, incarnation_id)` pair; neither component may be erased into an\nuntyped JSON carrier.",
       "properties": {
         "incarnation_id": {
           "type": "string"
@@ -770,8 +719,8 @@
         }
       },
       "required": [
-        "incarnation_id",
-        "owner_id"
+        "owner_id",
+        "incarnation_id"
       ],
       "type": "object"
     },
@@ -780,18 +729,16 @@
         {
           "properties": {
             "output": {
-              "$ref": "#/definitions/RemoteProcessToolCallOutput"
+              "$ref": "#/$defs/RemoteProcessToolCallOutput"
             },
             "type": {
-              "enum": [
-                "settled"
-              ],
+              "const": "settled",
               "type": "string"
             }
           },
           "required": [
-            "output",
-            "type"
+            "type",
+            "output"
           ],
           "type": "object"
         },
@@ -799,18 +746,16 @@
           "properties": {
             "control": true,
             "evidence": {
-              "$ref": "#/definitions/RemoteAbandonEvidence"
+              "$ref": "#/$defs/RemoteAbandonEvidence"
             },
             "type": {
-              "enum": [
-                "abandoned"
-              ],
+              "const": "abandoned",
               "type": "string"
             }
           },
           "required": [
-            "evidence",
-            "type"
+            "type",
+            "evidence"
           ],
           "type": "object"
         },
@@ -818,23 +763,21 @@
           "properties": {
             "pruned_at_ms": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "terminal_label": {
               "type": "string"
             },
             "type": {
-              "enum": [
-                "no_longer_retained"
-              ],
+              "const": "no_longer_retained",
               "type": "string"
             }
           },
           "required": [
-            "pruned_at_ms",
+            "type",
             "terminal_label",
-            "type"
+            "pruned_at_ms"
           ],
           "type": "object"
         }
@@ -849,7 +792,7 @@
         "invocation": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteRuntimeInvocation"
+              "$ref": "#/$defs/RemoteRuntimeInvocation"
             },
             {
               "type": "null"
@@ -858,7 +801,7 @@
         },
         "occurred_at_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "payload": {
@@ -868,24 +811,20 @@
           "type": "string"
         },
         "semantics": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RemoteProcessEventSemantics"
-            }
-          ],
+          "$ref": "#/$defs/RemoteProcessEventSemantics",
           "default": {}
         },
         "sequence": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "event_type",
-        "occurred_at_ms",
         "process_id",
-        "sequence"
+        "sequence",
+        "event_type",
+        "occurred_at_ms"
       ],
       "type": "object"
     },
@@ -894,18 +833,18 @@
         "signal_wait": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProcessSignalWaitBinding"
+              "$ref": "#/$defs/RemoteProcessSignalWaitBinding"
             },
             {
               "type": "null"
             }
           ],
-          "description": "The wait a signal event resolves, selected by the append that admitted the signal."
+          "description": "The wait a signal event resolves, selected by the append that\nadmitted the signal."
         },
         "terminal": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProcessTerminalSemantics"
+              "$ref": "#/$defs/RemoteProcessTerminalSemantics"
             },
             {
               "type": "null"
@@ -915,7 +854,7 @@
         "wake": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteProcessWake"
+              "$ref": "#/$defs/RemoteProcessWake"
             },
             {
               "type": "null"
@@ -958,11 +897,11 @@
     },
     "RemoteProcessSignalWaitBinding": {
       "additionalProperties": false,
-      "description": "Wire mirror of the wait one signal event resolves: the ordinal of the process's wait for the signal's name (FIG-4298).",
+      "description": "Wire mirror of the wait one signal event resolves: the ordinal of the\nprocess's wait for the signal's name (FIG-4298).",
       "properties": {
         "ordinal": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
@@ -985,10 +924,8 @@
           "type": "string"
         },
         {
-          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably distinguishable, deliberately never terminal.",
-          "enum": [
-            "caller_departed"
-          ],
+          "const": "caller_departed",
+          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably\ndistinguishable, deliberately never terminal.",
           "type": "string"
         }
       ]
@@ -996,15 +933,15 @@
     "RemoteProcessTerminalSemantics": {
       "properties": {
         "outcome": {
-          "$ref": "#/definitions/RemoteProcessAwaitOutput"
+          "$ref": "#/$defs/RemoteProcessAwaitOutput"
         },
         "status": {
-          "$ref": "#/definitions/RemoteProcessStatus"
+          "$ref": "#/$defs/RemoteProcessStatus"
         }
       },
       "required": [
-        "outcome",
-        "status"
+        "status",
+        "outcome"
       ],
       "type": "object"
     },
@@ -1014,51 +951,45 @@
           "properties": {
             "payload": true,
             "status": {
-              "enum": [
-                "success"
-              ],
+              "const": "success",
               "type": "string"
             }
           },
           "required": [
-            "payload",
-            "status"
+            "status",
+            "payload"
           ],
           "type": "object"
         },
         {
           "properties": {
             "payload": {
-              "$ref": "#/definitions/RemoteProcessToolFailure"
+              "$ref": "#/$defs/RemoteProcessToolFailure"
             },
             "status": {
-              "enum": [
-                "failure"
-              ],
+              "const": "failure",
               "type": "string"
             }
           },
           "required": [
-            "payload",
-            "status"
+            "status",
+            "payload"
           ],
           "type": "object"
         },
         {
           "properties": {
             "payload": {
-              "$ref": "#/definitions/RemoteProcessToolCancellation"
+              "$ref": "#/$defs/RemoteProcessToolCancellation"
             },
             "status": {
-              "enum": [
-                "cancelled"
-              ],
+              "const": "cancelled",
               "type": "string"
             }
           },
           "required": [
-            "payload",
-            "status"
+            "status",
+            "payload"
           ],
           "type": "object"
         }
@@ -1068,13 +999,13 @@
       "properties": {
         "control": true,
         "outcome": {
-          "$ref": "#/definitions/RemoteProcessToolCallOutcome"
+          "$ref": "#/$defs/RemoteProcessToolCallOutcome"
         },
         "projection_value": true,
         "view": {
           "anyOf": [
             {
-              "$ref": "#/definitions/ToolView"
+              "$ref": "#/$defs/ToolView"
             },
             {
               "type": "null"
@@ -1095,7 +1026,7 @@
         "origin": {
           "anyOf": [
             {
-              "$ref": "#/definitions/CancelOrigin"
+              "$ref": "#/$defs/CancelOrigin"
             },
             {
               "type": "null"
@@ -1104,7 +1035,7 @@
         },
         "raw": true,
         "source": {
-          "$ref": "#/definitions/RemoteProcessToolFailureSource"
+          "$ref": "#/$defs/RemoteProcessToolFailureSource"
         }
       },
       "required": [
@@ -1116,7 +1047,7 @@
     "RemoteProcessToolFailure": {
       "properties": {
         "class": {
-          "$ref": "#/definitions/RemoteToolFailureClass"
+          "$ref": "#/$defs/RemoteToolFailureClass"
         },
         "code": {
           "type": "string"
@@ -1126,18 +1057,18 @@
         },
         "raw": true,
         "retry": {
-          "$ref": "#/definitions/RemoteProcessToolRetryStatus"
+          "$ref": "#/$defs/RemoteProcessToolRetryStatus"
         },
         "source": {
-          "$ref": "#/definitions/RemoteProcessToolFailureSource"
+          "$ref": "#/$defs/RemoteProcessToolFailureSource"
         }
       },
       "required": [
         "class",
         "code",
         "message",
-        "retry",
-        "source"
+        "source",
+        "retry"
       ],
       "type": "object"
     },
@@ -1157,9 +1088,7 @@
         {
           "properties": {
             "type": {
-              "enum": [
-                "never"
-              ],
+              "const": "never",
               "type": "string"
             }
           },
@@ -1172,16 +1101,14 @@
           "properties": {
             "after_ms": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "safe"
-              ],
+              "const": "safe",
               "type": "string"
             }
           },
@@ -1194,28 +1121,24 @@
           "properties": {
             "attempts": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "exhausted"
-              ],
+              "const": "exhausted",
               "type": "string"
             }
           },
           "required": [
-            "attempts",
-            "type"
+            "type",
+            "attempts"
           ],
           "type": "object"
         },
         {
           "properties": {
             "type": {
-              "enum": [
-                "unknown_legacy"
-              ],
+              "const": "unknown_legacy",
               "type": "string"
             }
           },
@@ -1241,7 +1164,7 @@
       "properties": {
         "protocol_iteration": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -1261,7 +1184,7 @@
         },
         "turn_index": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -1273,12 +1196,12 @@
     "RemoteRuntimeInvocation": {
       "properties": {
         "attribution": {
-          "$ref": "#/definitions/RemoteRuntimeAttribution"
+          "$ref": "#/$defs/RemoteRuntimeAttribution"
         },
         "caused_by": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteCausalRef"
+              "$ref": "#/$defs/RemoteCausalRef"
             },
             {
               "type": "null"
@@ -1288,7 +1211,7 @@
         "replay": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteRuntimeReplay"
+              "$ref": "#/$defs/RemoteRuntimeReplay"
             },
             {
               "type": "null"
@@ -1296,7 +1219,7 @@
           ]
         },
         "subject": {
-          "$ref": "#/definitions/RemoteRuntimeSubject"
+          "$ref": "#/$defs/RemoteRuntimeSubject"
         }
       },
       "required": [
@@ -1310,7 +1233,7 @@
         "attribution": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RemoteRuntimeReplayAttribution"
+              "$ref": "#/$defs/RemoteRuntimeReplayAttribution"
             },
             {
               "type": "null"
@@ -1331,18 +1254,16 @@
         {
           "properties": {
             "identity": {
-              "$ref": "#/definitions/RemoteToolIntentIdentity"
+              "$ref": "#/$defs/RemoteToolIntentIdentity"
             },
             "kind": {
-              "enum": [
-                "tool_intent"
-              ],
+              "const": "tool_intent",
               "type": "string"
             }
           },
           "required": [
-            "identity",
-            "kind"
+            "kind",
+            "identity"
           ],
           "type": "object"
         }
@@ -1353,7 +1274,7 @@
         {
           "properties": {
             "address": {
-              "$ref": "#/definitions/EffectAddress"
+              "$ref": "#/$defs/EffectAddress"
             },
             "effect_id": {
               "type": "string"
@@ -1361,7 +1282,7 @@
             "replay_attribution": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/RemoteRuntimeReplayAttribution"
+                  "$ref": "#/$defs/RemoteRuntimeReplayAttribution"
                 },
                 {
                   "type": "null"
@@ -1369,16 +1290,14 @@
               ]
             },
             "type": {
-              "enum": [
-                "effect"
-              ],
+              "const": "effect",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "address",
-            "effect_id",
-            "type"
+            "effect_id"
           ],
           "type": "object"
         },
@@ -1388,15 +1307,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "process_id",
-            "type"
+            "type",
+            "process_id"
           ],
           "type": "object"
         },
@@ -1410,21 +1327,19 @@
             },
             "sequence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "process_event"
-              ],
+              "const": "process_event",
               "type": "string"
             }
           },
           "required": [
-            "event_type",
+            "type",
             "process_id",
             "sequence",
-            "type"
+            "event_type"
           ],
           "type": "object"
         },
@@ -1447,22 +1362,20 @@
             },
             "subscription_revision": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "trigger_occurrence"
-              ],
+              "const": "trigger_occurrence",
               "type": "string"
             }
           },
           "required": [
-            "occurrence_id",
-            "type"
+            "type",
+            "occurrence_id"
           ],
           "type": "object"
         },
@@ -1475,16 +1388,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "session_node"
-              ],
+              "const": "session_node",
               "type": "string"
             }
           },
           "required": [
-            "node_id",
+            "type",
             "session_id",
-            "type"
+            "node_id"
           ],
           "type": "object"
         }
@@ -1511,7 +1422,7 @@
         },
         "intent_index": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "minting_emission_replay_key": {
@@ -1521,11 +1432,7 @@
           ]
         },
         "owner": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/RuntimeOwner"
-            }
-          ],
+          "$ref": "#/$defs/RuntimeOwner",
           "description": "Who the intent was declared under: a session, or a process."
         },
         "replay_key": {
@@ -1536,16 +1443,16 @@
         }
       },
       "required": [
-        "execution_scope_id",
-        "intent_index",
         "owner",
-        "replay_key",
-        "tool_call_id"
+        "execution_scope_id",
+        "tool_call_id",
+        "intent_index",
+        "replay_key"
       ],
       "type": "object"
     },
     "RuntimeOwner": {
-      "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the plugin session, the tool catalog, the attachment facade, the authority a tool intent is declared under \u2014 and those interfaces take a `RuntimeOwner`. A process runtime is never handed a session id as a stand-in for its own identity.",
+      "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the\nplugin session, the tool catalog, the attachment facade, the authority a\ntool intent is declared under \u2014 and those interfaces take a\n`RuntimeOwner`. A process runtime is never handed a session id as a\nstand-in for its own identity.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -1578,7 +1485,7 @@
       "properties": {
         "blocks": {
           "items": {
-            "$ref": "#/definitions/ToolViewBlock"
+            "$ref": "#/$defs/ToolViewBlock"
           },
           "type": "array"
         }
@@ -1594,21 +1501,19 @@
           "additionalProperties": false,
           "properties": {
             "meta": {
-              "$ref": "#/definitions/ToolViewMeta"
+              "$ref": "#/$defs/ToolViewMeta"
             },
             "text": {
               "type": "string"
             },
             "type": {
-              "enum": [
-                "text"
-              ],
+              "const": "text",
               "type": "string"
             }
           },
           "required": [
-            "text",
-            "type"
+            "type",
+            "text"
           ],
           "type": "object"
         },
@@ -1616,21 +1521,19 @@
           "additionalProperties": false,
           "properties": {
             "meta": {
-              "$ref": "#/definitions/ToolViewMeta"
+              "$ref": "#/$defs/ToolViewMeta"
             },
             "source": {
-              "$ref": "#/definitions/AttachmentSource"
+              "$ref": "#/$defs/AttachmentSource"
             },
             "type": {
-              "enum": [
-                "attachment"
-              ],
+              "const": "attachment",
               "type": "string"
             }
           },
           "required": [
-            "source",
-            "type"
+            "type",
+            "source"
           ],
           "type": "object"
         },
@@ -1644,7 +1547,7 @@
               ]
             },
             "meta": {
-              "$ref": "#/definitions/ToolViewMeta"
+              "$ref": "#/$defs/ToolViewMeta"
             },
             "mime_type": {
               "type": [
@@ -1662,9 +1565,7 @@
               ]
             },
             "type": {
-              "enum": [
-                "resource_link"
-              ],
+              "const": "resource_link",
               "type": "string"
             },
             "uri": {
@@ -1672,9 +1573,9 @@
             }
           },
           "required": [
-            "name",
             "type",
-            "uri"
+            "uri",
+            "name"
           ],
           "type": "object"
         }
@@ -1700,26 +1601,25 @@
       "type": "object"
     }
   },
+  "$id": "https://lash.dev/schemas/remote-process-events-response/v100",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "properties": {
     "cursor": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/ProcessCursor"
-        }
-      ],
-      "description": "The cursor after this page: its sequence is the last event returned, or the request's when the page returned none."
+      "$ref": "#/$defs/ProcessCursor",
+      "description": "The cursor after this page: its sequence is the last event returned,\nor the request's when the page returned none."
     },
     "outcome": {
-      "$ref": "#/definitions/ProcessEventReadOutcome_for_ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite"
+      "$ref": "#/$defs/ProcessEventReadOutcome"
     },
     "process_id": {
       "type": "string"
     }
   },
   "required": [
-    "cursor",
+    "process_id",
     "outcome",
-    "process_id"
+    "cursor"
   ],
   "title": "RemoteProcessEventsResponse",
   "type": "object",

@@ -62,6 +62,16 @@ seconds, it prints unfinished Restate invocations and recent worker events,
 then exits so the shell harness can append per-service logs and process state.
 Override that bound with `LASH_E2E_STALL_TIMEOUT_SECS` while debugging.
 
+Queued-work cleanup uses the store's `list_queued_work` query, which includes
+live open and admitted batches and excludes terminal tombstones. Segment 1
+also requires the two consumed kitchen-sink wakes to remain as `delivered`
+tombstones with their admission bindings released. The runner prints each
+batch's source key, cause and terminal timestamp, redelivers its original wake,
+and requires the original terminal batch back. It compares all retained batch
+and item columns before and after redelivery and checks that no live work or
+additional driven root appeared. Missing retained evidence fails the run;
+cleanup never deletes tombstones.
+
 ## Recovery laws with independent evidence (FIG-608)
 
 The runner also checks four recovery laws, and it checks them only against the

@@ -1,15 +1,11 @@
 {
-  "$id": "https://lash.dev/schemas/trace-record/v36",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "AttachmentMaterializationReason": {
       "description": "Why Lash replaced an attachment with a model-visible placeholder.",
       "oneOf": [
         {
+          "const": "no_provider_accepts_mime_and_source",
           "description": "No provider in the shared adapter capability registry accepts this MIME/source pair.",
-          "enum": [
-            "no_provider_accepts_mime_and_source"
-          ],
           "type": "string"
         }
       ]
@@ -18,31 +14,23 @@
       "description": "Stable source category carried by an attachment-materialization notice.",
       "oneOf": [
         {
+          "const": "inline",
           "description": "Transient caller bytes.",
-          "enum": [
-            "inline"
-          ],
           "type": "string"
         },
         {
+          "const": "stored",
           "description": "Session-owned durable bytes.",
-          "enum": [
-            "stored"
-          ],
           "type": "string"
         },
         {
+          "const": "external_url",
           "description": "Borrowed URL whose bytes Lash does not fetch.",
-          "enum": [
-            "external_url"
-          ],
           "type": "string"
         },
         {
+          "const": "provider_file",
           "description": "Provider-owned file reference.",
-          "enum": [
-            "provider_file"
-          ],
           "type": "string"
         }
       ]
@@ -51,7 +39,7 @@
       "description": "Structured failure returned by a code executor.",
       "properties": {
         "kind": {
-          "$ref": "#/definitions/CellFailureKind"
+          "$ref": "#/$defs/CellFailureKind"
         },
         "message": {
           "type": "string"
@@ -67,24 +55,18 @@
       "description": "Why an executed code cell failed.",
       "oneOf": [
         {
+          "const": "policy",
           "description": "The runtime refused the program because it violates a dialect or policy bound.",
-          "enum": [
-            "policy"
-          ],
           "type": "string"
         },
         {
+          "const": "program",
           "description": "The authored program failed to compile or execute correctly.",
-          "enum": [
-            "program"
-          ],
           "type": "string"
         },
         {
+          "const": "host",
           "description": "Host infrastructure failed while preparing or executing the program.",
-          "enum": [
-            "host"
-          ],
           "type": "string"
         }
       ]
@@ -93,7 +75,7 @@
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
         "execution_scope": {
-          "$ref": "#/definitions/ExecutionScope"
+          "$ref": "#/$defs/ExecutionScope"
         },
         "replay_key": {
           "type": "string"
@@ -106,40 +88,32 @@
       "type": "object"
     },
     "ExecCodeFailureReason": {
-      "description": "Why an `exec_code` effect failed before the executor produced a response.\n\nThis is the closed classification offline trace analysis keys on; the human detail lives in [`ExecCodeFailure::message`]. Serialized snake_case on the durable journal and trace surfaces.",
+      "description": "Why an `exec_code` effect failed before the executor produced a response.\n\nThis is the closed classification offline trace analysis keys on; the human\ndetail lives in [`ExecCodeFailure::message`]. Serialized snake_case on the\ndurable journal and trace surfaces.",
       "oneOf": [
         {
+          "const": "executor_unavailable",
           "description": "No code executor is installed on the session.",
-          "enum": [
-            "executor_unavailable"
-          ],
           "type": "string"
         },
         {
+          "const": "runtime_stopped",
           "description": "The executor's language runtime exited unexpectedly.",
-          "enum": [
-            "runtime_stopped"
-          ],
           "type": "string"
         },
         {
+          "const": "session",
           "description": "Any other session-layer failure; `message` carries the detail.",
-          "enum": [
-            "session"
-          ],
           "type": "string"
         },
         {
-          "description": "A journal entry written before the reason was typed: only the human message survived the erasure, so no closed reason can be recovered.",
-          "enum": [
-            "erased"
-          ],
+          "const": "erased",
+          "description": "A journal entry written before the reason was typed: only the human\nmessage survived the erasure, so no closed reason can be recovered.",
           "type": "string"
         }
       ]
     },
     "ExecutionNodeKind": {
-      "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may expose more than one site kind. Declaration order is the canonical order: a node's execution sites sort by it, so reordering the variants changes the serialized workflow graph and needs a graph schema bump.",
+      "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may\nexpose more than one site kind. Declaration order is the canonical order:\na node's execution sites sort by it, so reordering the variants changes\nthe serialized workflow graph and needs a graph schema bump.",
       "enum": [
         "resource_operation",
         "sleep",
@@ -154,7 +128,7 @@
       "type": "string"
     },
     "ExecutionScope": {
-      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic work begins. Its journal encoding is an existing durable contract; effect addresses compose it with a replay key without changing those bytes.",
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
       "oneOf": [
         {
           "properties": {
@@ -165,16 +139,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "turn"
-              ],
+              "const": "turn",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "session_id",
-            "turn_id",
-            "type"
+            "turn_id"
           ],
           "type": "object"
         },
@@ -184,15 +156,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "process_id",
-            "type"
+            "type",
+            "process_id"
           ],
           "type": "object"
         },
@@ -205,16 +175,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "queue_drain"
-              ],
+              "const": "queue_drain",
               "type": "string"
             }
           },
           "required": [
-            "drain_id",
+            "type",
             "session_id",
-            "type"
+            "drain_id"
           ],
           "type": "object"
         },
@@ -224,15 +192,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "session_delete"
-              ],
+              "const": "session_delete",
               "type": "string"
             }
           },
           "required": [
-            "session_id",
-            "type"
+            "type",
+            "session_id"
           ],
           "type": "object"
         },
@@ -242,154 +208,98 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "runtime_operation"
-              ],
+              "const": "runtime_operation",
               "type": "string"
             }
           },
           "required": [
-            "operation_id",
-            "type"
+            "type",
+            "operation_id"
           ],
           "type": "object"
         }
       ]
     },
     "GenerationOptionOutcome": {
-      "description": "What became of one host-set generation setting on one request.\n\nA setting a host sets is sent, or the call is refused before any I/O with a typed failure; nothing is silently dropped. The receipt therefore names only the two deliberate non-send dispositions besides `Applied`: a cap reduced to the model's capacity, and stop sequences a protocol owns. `Applied` means lash put the value on the wire, never that the provider complied.",
+      "description": "What became of one host-set generation setting on one request.\n\nA setting a host sets is sent, or the call is refused before any I/O with a\ntyped failure; nothing is silently dropped. The receipt therefore names only\nthe two deliberate non-send dispositions besides `Applied`: a cap reduced to\nthe model's capacity, and stop sequences a protocol owns. `Applied` means\nlash put the value on the wire, never that the provider complied.",
       "oneOf": [
         {
+          "const": "not_requested",
           "description": "The host expressed no preference, so there was nothing to apply.",
-          "enum": [
-            "not_requested"
-          ],
           "type": "string"
         },
         {
+          "const": "applied",
           "description": "The host asked for it and the request carries it.",
-          "enum": [
-            "applied"
-          ],
           "type": "string"
         },
         {
-          "description": "A protocol suppressed the caller's non-empty stop list because its grammar owns the response boundary. This is intentional protocol ownership, but the caller's requested value did not reach the wire.",
-          "enum": [
-            "suppressed_protocol_owned"
-          ],
+          "const": "suppressed_protocol_owned",
+          "description": "A protocol suppressed the caller's non-empty stop list because its\ngrammar owns the response boundary. This is intentional protocol\nownership, but the caller's requested value did not reach the wire.",
           "type": "string"
         },
         {
-          "description": "Explicit prompt-cache breakpoints the protocol placed that this adapter's wire has no cache directive for. Only the `cache` row, which reports protocol-placed breakpoints rather than a host setting, uses it.",
-          "enum": [
-            "omitted_unsupported"
-          ],
+          "const": "omitted_unsupported",
+          "description": "Explicit prompt-cache breakpoints the protocol placed that this\nadapter's wire has no cache directive for. Only the `cache` row, which\nreports protocol-placed breakpoints rather than a host setting, uses it.",
           "type": "string"
         },
         {
-          "description": "The caller asked for an output-token cap above what this model can produce, and the request carries the model's capacity instead. The bound the caller asked for still holds; the number on the wire is smaller than the one they named.",
-          "enum": [
-            "clamped_to_capacity"
-          ],
+          "const": "clamped_to_capacity",
+          "description": "The caller asked for an output-token cap above what this model can\nproduce, and the request carries the model's capacity instead. The\nbound the caller asked for still holds; the number on the wire is\nsmaller than the one they named.",
           "type": "string"
         }
       ]
     },
     "GenerationReceipt": {
-      "description": "Per-call account of every host generation setting: resolution supplies what was requested, the adapter supplies what it emitted.\n\nThis is request-side, adapter-owned bookkeeping and deliberately separate from [`ExecutionEvidence`], which carries only facts the provider reported about the execution.",
+      "description": "Per-call account of every host generation setting: resolution supplies\nwhat was requested, the adapter supplies what it emitted.\n\nThis is request-side, adapter-owned bookkeeping and deliberately separate\nfrom [`ExecutionEvidence`], which carries only facts the provider reported\nabout the execution.",
       "properties": {
         "cache": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested",
           "description": "Fate of explicit prompt-cache breakpoints in the request."
         },
         "output_token_cap": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested",
           "description": "The effective cap: the request's, else the provider options'."
         },
         "parallel_tool_calls": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested"
         },
         "passthrough": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested"
         },
         "reasoning": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested",
           "description": "The model spec's reasoning selection; `ProviderDefault` is not a request."
         },
         "reasoning_retention": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested",
           "description": "The model spec's reasoning-history retention selection."
         },
         "seed": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested"
         },
         "stop_sequences": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested"
         },
         "temperature": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested"
         },
         "thinking_summary": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested",
-          "description": "`expose_thinking`'s wire half: a reasoning summary requested from the provider."
+          "description": "`expose_thinking`'s wire half: a reasoning summary requested from the\nprovider."
         },
         "thinking_visibility": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/GenerationOptionOutcome"
-            }
-          ],
+          "$ref": "#/$defs/GenerationOptionOutcome",
           "default": "not_requested",
           "description": "`expose_thinking`'s local half: reasoning output published to the host."
         }
@@ -397,27 +307,21 @@
       "type": "object"
     },
     "GroupWakePolicy": {
-      "description": "Wake rule recorded in a durable effect group's identity.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the caller's early exit on rejection is not a host wake rule. The wire shape has no default, so a missing rule cannot be replayed under a guess.",
+      "description": "Wake rule recorded in a durable effect group's identity.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the\ncaller's early exit on rejection is not a host wake rule. The wire shape\nhas no default, so a missing rule cannot be replayed under a guess.",
       "oneOf": [
         {
+          "const": "first",
           "description": "Wake on the first settlement of any kind.",
-          "enum": [
-            "first"
-          ],
           "type": "string"
         },
         {
+          "const": "first_success",
           "description": "Wake on the first success, or after every child fails.",
-          "enum": [
-            "first_success"
-          ],
           "type": "string"
         },
         {
+          "const": "all",
           "description": "Deliver every settlement in durable rank order.",
-          "enum": [
-            "all"
-          ],
           "type": "string"
         }
       ]
@@ -426,17 +330,17 @@
       "properties": {
         "limit_chars": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "original_chars": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "projected_chars": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "truncated": {
@@ -444,10 +348,10 @@
         }
       },
       "required": [
-        "limit_chars",
+        "truncated",
         "original_chars",
         "projected_chars",
-        "truncated"
+        "limit_chars"
       ],
       "type": "object"
     },
@@ -478,10 +382,8 @@
           "type": "string"
         },
         {
+          "const": "unknown_legacy",
           "description": "Provenance was not persisted by a legacy wire or durable payload.",
-          "enum": [
-            "unknown_legacy"
-          ],
           "type": "string"
         }
       ]
@@ -491,9 +393,7 @@
         {
           "properties": {
             "type": {
-              "enum": [
-                "never"
-              ],
+              "const": "never",
               "type": "string"
             }
           },
@@ -506,16 +406,14 @@
           "properties": {
             "after_ms": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "safe"
-              ],
+              "const": "safe",
               "type": "string"
             }
           },
@@ -528,19 +426,17 @@
           "properties": {
             "attempts": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "exhausted"
-              ],
+              "const": "exhausted",
               "type": "string"
             }
           },
           "required": [
-            "attempts",
-            "type"
+            "type",
+            "attempts"
           ],
           "type": "object"
         },
@@ -548,9 +444,7 @@
           "description": "Retry status was not persisted by a legacy wire or durable payload.",
           "properties": {
             "type": {
-              "enum": [
-                "unknown_legacy"
-              ],
+              "const": "unknown_legacy",
               "type": "string"
             }
           },
@@ -576,7 +470,7 @@
       "properties": {
         "bytes_len": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -610,34 +504,26 @@
       "type": "object"
     },
     "TraceAttemptUsageOutcome": {
-      "description": "Why an attempt's provider-reported usage is present or absent.\n\nMirrors `lash_sansio::llm::types::AttemptUsageOutcome`, the vocabulary's owner, with the same wire spellings; the trace layer was the only one that flattened it to a free-form string.\n\n# Integrator class\n\nReporting integrations exhaustively render these outcomes when explaining a call whose usage never arrived.",
+      "description": "Why an attempt's provider-reported usage is present or absent.\n\nMirrors `lash_sansio::llm::types::AttemptUsageOutcome`, the vocabulary's\nowner, with the same wire spellings; the trace layer was the only one that\nflattened it to a free-form string.\n\n# Integrator class\n\nReporting integrations exhaustively render these outcomes when\nexplaining a call whose usage never arrived.",
       "oneOf": [
         {
+          "const": "reported",
           "description": "The provider reported usage for this attempt.",
-          "enum": [
-            "reported"
-          ],
           "type": "string"
         },
         {
+          "const": "unreported_by_provider",
           "description": "The provider completed the attempt without reporting usage.",
-          "enum": [
-            "unreported_by_provider"
-          ],
           "type": "string"
         },
         {
+          "const": "unreported_after_abort",
           "description": "The attempt was aborted before usage could be collected.",
-          "enum": [
-            "unreported_after_abort"
-          ],
           "type": "string"
         },
         {
+          "const": "unreported_after_failure",
           "description": "The attempt failed before usage could be collected.",
-          "enum": [
-            "unreported_after_failure"
-          ],
           "type": "string"
         }
       ]
@@ -645,15 +531,15 @@
     "TraceBranchMembership": {
       "properties": {
         "arm": {
-          "$ref": "#/definitions/TraceBranchSelection"
+          "$ref": "#/$defs/TraceBranchSelection"
         },
         "branch_node_id": {
           "type": "string"
         }
       },
       "required": [
-        "arm",
-        "branch_node_id"
+        "branch_node_id",
+        "arm"
       ],
       "type": "object"
     },
@@ -665,7 +551,7 @@
       "type": "string"
     },
     "TraceChargeSafetyDecision": {
-      "description": "Typed trace projection of one host charge-safety decision.\n\n# Integrator class\n\nReporting integrations consume this optional component on an LLM retry attempt.",
+      "description": "Typed trace projection of one host charge-safety decision.\n\n# Integrator class\n\nReporting integrations consume this optional component on an LLM retry\nattempt.",
       "oneOf": [
         {
           "description": "Host policy permits this otherwise unsafe retry.",
@@ -673,26 +559,24 @@
             "attempt_number": {
               "description": "One-based unsafe retry number within the logical LLM call.",
               "format": "uint8",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "outcome": {
-              "enum": [
-                "authorized"
-              ],
+              "const": "authorized",
               "type": "string"
             },
             "tokens_at_stake": {
               "description": "Provider-reported tokens billed for the abandoned generation.",
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
-            "attempt_number",
             "outcome",
-            "tokens_at_stake"
+            "tokens_at_stake",
+            "attempt_number"
           ],
           "type": "object"
         },
@@ -702,69 +586,55 @@
             "attempt_number": {
               "description": "One-based unsafe retry number within the logical LLM call.",
               "format": "uint8",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "outcome": {
-              "enum": [
-                "denied"
-              ],
+              "const": "denied",
               "type": "string"
             },
             "reason": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/TraceChargeSafetyDenialReason"
-                }
-              ],
+              "$ref": "#/$defs/TraceChargeSafetyDenialReason",
               "description": "Typed policy bound that refused the retry."
             },
             "tokens_at_stake": {
               "description": "Provider-reported tokens billed for the abandoned generation.",
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
-            "attempt_number",
             "outcome",
-            "reason",
-            "tokens_at_stake"
+            "tokens_at_stake",
+            "attempt_number",
+            "reason"
           ],
           "type": "object"
         }
       ]
     },
     "TraceChargeSafetyDenialReason": {
-      "description": "Why host charge-safety policy denied an otherwise transport-retryable generation.\n\n# Integrator class\n\nReporting integrations exhaustively render these typed denial reasons.",
+      "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nReporting integrations exhaustively render these typed denial reasons.",
       "oneOf": [
         {
+          "const": "guarantee_required",
           "description": "Host policy requires a provider idempotency or resume guarantee.",
-          "enum": [
-            "guarantee_required"
-          ],
           "type": "string"
         },
         {
+          "const": "unsafe_retry_limit_exceeded",
           "description": "The per-call unsafe retry allowance is exhausted.",
-          "enum": [
-            "unsafe_retry_limit_exceeded"
-          ],
           "type": "string"
         },
         {
+          "const": "duplicate_cost_limit_exceeded",
           "description": "Provider-reported tokens exceed the host's duplicate-cost bound.",
-          "enum": [
-            "duplicate_cost_limit_exceeded"
-          ],
           "type": "string"
         },
         {
+          "const": "retry_after_exceeds_cap",
           "description": "The provider's requested retry delay exceeds the host cap.",
-          "enum": [
-            "retry_after_exceeds_cap"
-          ],
           "type": "string"
         }
       ]
@@ -777,9 +647,7 @@
               "type": "boolean"
             },
             "kind": {
-              "enum": [
-                "text"
-              ],
+              "const": "text",
               "type": "string"
             },
             "text": {
@@ -795,13 +663,11 @@
         {
           "properties": {
             "kind": {
-              "enum": [
-                "attachment"
-              ],
+              "const": "attachment",
               "type": "string"
             },
             "source": {
-              "$ref": "#/definitions/TraceAttachment"
+              "$ref": "#/$defs/TraceAttachment"
             }
           },
           "required": [
@@ -829,9 +695,7 @@
               ]
             },
             "kind": {
-              "enum": [
-                "tool_call"
-              ],
+              "const": "tool_call",
               "type": "string"
             },
             "tool_name": {
@@ -839,10 +703,10 @@
             }
           },
           "required": [
-            "has_signature",
-            "input_json",
             "kind",
-            "tool_name"
+            "tool_name",
+            "input_json",
+            "has_signature"
           ],
           "type": "object"
         },
@@ -856,14 +720,12 @@
             },
             "content": {
               "items": {
-                "$ref": "#/definitions/TraceToolResultBlock"
+                "$ref": "#/$defs/TraceToolResultBlock"
               },
               "type": "array"
             },
             "kind": {
-              "enum": [
-                "tool_result"
-              ],
+              "const": "tool_result",
               "type": "string"
             },
             "tool_name": {
@@ -874,8 +736,8 @@
             }
           },
           "required": [
-            "content",
-            "kind"
+            "kind",
+            "content"
           ],
           "type": "object"
         },
@@ -891,9 +753,7 @@
               ]
             },
             "kind": {
-              "enum": [
-                "reasoning"
-              ],
+              "const": "reasoning",
               "type": "string"
             },
             "redacted": {
@@ -910,11 +770,11 @@
             }
           },
           "required": [
-            "has_encrypted",
             "kind",
-            "redacted",
+            "text",
             "summary",
-            "text"
+            "has_encrypted",
+            "redacted"
           ],
           "type": "object"
         }
@@ -953,7 +813,7 @@
           ]
         },
         "graph_node_id": {
-          "description": "Stable id of the span this record represents (e.g. `turn:<session>:<turn>`, `llm:<call_id>`, `tool:<call_id>`). Populated by the runtime for turn / llm / tool / session records so a consumer can build a nested span tree from `(graph_node_id, parent_graph_node_id)` with a single `id -> span` map. A language-execution record for a node event carries the observed node's structural id here, equal to the `WorkflowGraph` node id (ADR 0100 R0), so a host joins trace to graph on this key; a child start carries its parent node's id, and execution start and finish leave it unset.",
+          "description": "Stable id of the span this record represents (e.g. `turn:<session>:<turn>`,\n`llm:<call_id>`, `tool:<call_id>`). Populated by the runtime for turn /\nllm / tool / session records so a consumer can build a nested span tree\nfrom `(graph_node_id, parent_graph_node_id)` with a single `id -> span`\nmap. A language-execution record for a node event carries the observed\nnode's structural id here, equal to the `WorkflowGraph` node id (ADR\n0100 R0), so a host joins trace to graph on this key; a child start\ncarries its parent node's id, and execution start and finish leave it\nunset.",
           "type": [
             "string",
             "null"
@@ -970,7 +830,7 @@
           "type": "object"
         },
         "parent_graph_node_id": {
-          "description": "Id of the enclosing span \u2014 the value of some other record's `graph_node_id`. A turn's parent is its causal origin (the spawning tool call / effect, via `caused_by`) when known, otherwise the session root.",
+          "description": "Id of the enclosing span \u2014 the value of some other record's\n`graph_node_id`. A turn's parent is its causal origin (the spawning tool\ncall / effect, via `caused_by`) when known, otherwise the session root.",
           "type": [
             "string",
             "null"
@@ -978,7 +838,7 @@
         },
         "protocol_iteration": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -1010,7 +870,7 @@
         },
         "turn_index": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -1023,31 +883,23 @@
       "description": "How a durable timer left its sleep.",
       "oneOf": [
         {
+          "const": "resolved",
           "description": "The timer elapsed.",
-          "enum": [
-            "resolved"
-          ],
           "type": "string"
         },
         {
+          "const": "cancelled",
           "description": "The enclosing turn was cancelled while the timer was pending.",
-          "enum": [
-            "cancelled"
-          ],
           "type": "string"
         },
         {
+          "const": "session_revoked",
           "description": "The session was revoked while the timer was pending.",
-          "enum": [
-            "session_revoked"
-          ],
           "type": "string"
         },
         {
+          "const": "failed",
           "description": "The controller could not complete the sleep.",
-          "enum": [
-            "failed"
-          ],
           "type": "string"
         }
       ]
@@ -1056,59 +908,43 @@
       "description": "How a durable wait left its park.",
       "oneOf": [
         {
+          "const": "ok",
           "description": "The awaited event delivered a value.",
-          "enum": [
-            "ok"
-          ],
           "type": "string"
         },
         {
+          "const": "error",
           "description": "The awaited event delivered a host-domain error value.",
-          "enum": [
-            "error"
-          ],
           "type": "string"
         },
         {
+          "const": "timeout",
           "description": "The wait reached its deadline.",
-          "enum": [
-            "timeout"
-          ],
           "type": "string"
         },
         {
+          "const": "cancelled",
           "description": "The wait itself was cancelled.",
-          "enum": [
-            "cancelled"
-          ],
           "type": "string"
         },
         {
+          "const": "resolved",
           "description": "A parked process command completed.",
-          "enum": [
-            "resolved"
-          ],
           "type": "string"
         },
         {
+          "const": "turn_cancelled",
           "description": "The enclosing turn was cancelled while the wait was parked.",
-          "enum": [
-            "turn_cancelled"
-          ],
           "type": "string"
         },
         {
+          "const": "session_revoked",
           "description": "The session was revoked while the wait was parked.",
-          "enum": [
-            "session_revoked"
-          ],
           "type": "string"
         },
         {
+          "const": "failed",
           "description": "The controller could not complete the wait.",
-          "enum": [
-            "failed"
-          ],
           "type": "string"
         }
       ]
@@ -1119,25 +955,25 @@
           "type": "string"
         },
         "reconstructed": {
-          "$ref": "#/definitions/TraceEffectEnvelopeDiffValue"
+          "$ref": "#/$defs/TraceEffectEnvelopeDiffValue"
         },
         "recorded": {
-          "$ref": "#/definitions/TraceEffectEnvelopeDiffValue"
+          "$ref": "#/$defs/TraceEffectEnvelopeDiffValue"
         }
       },
       "required": [
         "path",
-        "reconstructed",
-        "recorded"
+        "recorded",
+        "reconstructed"
       ],
       "type": "object"
     },
     "TraceEffectEnvelopeDiffEvent": {
-      "description": "Structural differences between the canonical envelopes on a failed durable replay validation. This event may contain prompt and tool-result values and must therefore only be emitted through the extended-trace gate.",
+      "description": "Structural differences between the canonical envelopes on a failed durable\nreplay validation. This event may contain prompt and tool-result values and\nmust therefore only be emitted through the extended-trace gate.",
       "properties": {
         "divergent_paths": {
           "items": {
-            "$ref": "#/definitions/TraceEffectEnvelopeDiffEntry"
+            "$ref": "#/$defs/TraceEffectEnvelopeDiffEntry"
           },
           "type": "array"
         },
@@ -1149,21 +985,19 @@
         }
       },
       "required": [
-        "divergent_paths",
+        "recorded_envelope_hash",
         "reconstructed_envelope_hash",
-        "recorded_envelope_hash"
+        "divergent_paths"
       ],
       "type": "object"
     },
     "TraceEffectEnvelopeDiffValue": {
-      "description": "One side of a divergent canonical-envelope value.\n\nLarge values are omitted whole. Their exact serialized length and digest remain available, but no prefix is retained.",
+      "description": "One side of a divergent canonical-envelope value.\n\nLarge values are omitted whole. Their exact serialized length and digest\nremain available, but no prefix is retained.",
       "oneOf": [
         {
           "properties": {
             "state": {
-              "enum": [
-                "missing"
-              ],
+              "const": "missing",
               "type": "string"
             }
           },
@@ -1176,16 +1010,14 @@
           "properties": {
             "json_len": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "json_sha256": {
               "type": "string"
             },
             "state": {
-              "enum": [
-                "present"
-              ],
+              "const": "present",
               "type": "string"
             },
             "value_json": true,
@@ -1197,9 +1029,9 @@
             }
           },
           "required": [
+            "state",
             "json_len",
-            "json_sha256",
-            "state"
+            "json_sha256"
           ],
           "type": "object"
         }
@@ -1208,7 +1040,7 @@
     "TraceError": {
       "properties": {
         "code": {
-          "description": "The failure code's spelling within its namespace \u2014 never the namespaced form. OTel `lash.error.code` projects this verbatim.",
+          "description": "The failure code's spelling within its namespace \u2014 never the\nnamespaced form. OTel `lash.error.code` projects this verbatim.",
           "type": [
             "string",
             "null"
@@ -1222,7 +1054,7 @@
           ]
         },
         "failure_kind": {
-          "description": "The transport's failure classification (`timeout`, `auth`, \u2026), when the failure carried a known one. OTel `error.type` projects this \u2014 an absent or unrecognized kind projects `_OTHER`.",
+          "description": "The transport's failure classification (`timeout`, `auth`, \u2026), when\nthe failure carried a known one. OTel `error.type` projects this \u2014\nan absent or unrecognized kind projects `_OTHER`.",
           "type": [
             "string",
             "null"
@@ -1252,7 +1084,7 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/TraceToolCallStatus"
+          "$ref": "#/$defs/TraceToolCallStatus"
         }
       },
       "required": [
@@ -1291,7 +1123,7 @@
         },
         "reasoning_output_tokens": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -1335,7 +1167,7 @@
       "properties": {
         "attempt": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -1363,12 +1195,12 @@
           "type": "string"
         },
         "scope": {
-          "$ref": "#/definitions/TraceRuntimeScope"
+          "$ref": "#/$defs/TraceRuntimeScope"
         }
       },
       "required": [
-        "process_id",
-        "scope"
+        "scope",
+        "process_id"
       ],
       "type": "object"
     },
@@ -1377,18 +1209,16 @@
         {
           "properties": {
             "execution_map": {
-              "$ref": "#/definitions/TraceLanguageExecutionMap"
+              "$ref": "#/$defs/TraceLanguageExecutionMap"
             },
             "kind": {
-              "enum": [
-                "execution_started"
-              ],
+              "const": "execution_started",
               "type": "string"
             }
           },
           "required": [
-            "execution_map",
-            "kind"
+            "kind",
+            "execution_map"
           ],
           "type": "object"
         },
@@ -1401,13 +1231,11 @@
               ]
             },
             "kind": {
-              "enum": [
-                "execution_finished"
-              ],
+              "const": "execution_finished",
               "type": "string"
             },
             "status": {
-              "$ref": "#/definitions/TraceLanguageExecutionStatus"
+              "$ref": "#/$defs/TraceLanguageExecutionStatus"
             }
           },
           "required": [
@@ -1425,9 +1253,7 @@
               ]
             },
             "kind": {
-              "enum": [
-                "node_started"
-              ],
+              "const": "node_started",
               "type": "string"
             },
             "label": {
@@ -1437,33 +1263,31 @@
               "type": "string"
             },
             "node_kind": {
-              "$ref": "#/definitions/ExecutionNodeKind"
+              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
             "kind",
-            "label",
             "node_id",
             "node_kind",
+            "label",
             "occurrence"
           ],
           "type": "object"
         },
         {
-          "description": "The named occurrence has parked on an observed wait. Its `since` is the enclosing trace record timestamp, not a separately sampled clock.",
+          "description": "The named occurrence has parked on an observed wait. Its `since` is\nthe enclosing trace record timestamp, not a separately sampled clock.",
           "properties": {
             "awaited": {
-              "$ref": "#/definitions/TraceNodeAwaited"
+              "$ref": "#/$defs/TraceNodeAwaited"
             },
             "kind": {
-              "enum": [
-                "node_waiting"
-              ],
+              "const": "node_waiting",
               "type": "string"
             },
             "label": {
@@ -1473,31 +1297,29 @@
               "type": "string"
             },
             "node_kind": {
-              "$ref": "#/definitions/ExecutionNodeKind"
+              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
-            "awaited",
             "kind",
-            "label",
             "node_id",
             "node_kind",
-            "occurrence"
+            "label",
+            "occurrence",
+            "awaited"
           ],
           "type": "object"
         },
         {
-          "description": "A parked occurrence resolved, including cancellation. Its node terminal remains a separate fact.",
+          "description": "A parked occurrence resolved, including cancellation. Its node terminal\nremains a separate fact.",
           "properties": {
             "kind": {
-              "enum": [
-                "node_resumed"
-              ],
+              "const": "node_resumed",
               "type": "string"
             },
             "label": {
@@ -1507,22 +1329,22 @@
               "type": "string"
             },
             "node_kind": {
-              "$ref": "#/definitions/ExecutionNodeKind"
+              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "resolution": {
-              "$ref": "#/definitions/TraceNodeWaitResolution"
+              "$ref": "#/$defs/TraceNodeWaitResolution"
             }
           },
           "required": [
             "kind",
-            "label",
             "node_id",
             "node_kind",
+            "label",
             "occurrence",
             "resolution"
           ],
@@ -1532,9 +1354,7 @@
           "description": "Only an occurrence observed in flight may be cancelled.",
           "properties": {
             "kind": {
-              "enum": [
-                "node_cancelled"
-              ],
+              "const": "node_cancelled",
               "type": "string"
             },
             "label": {
@@ -1544,19 +1364,19 @@
               "type": "string"
             },
             "node_kind": {
-              "$ref": "#/definitions/ExecutionNodeKind"
+              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
             "kind",
-            "label",
             "node_id",
             "node_kind",
+            "label",
             "occurrence"
           ],
           "type": "object"
@@ -1570,9 +1390,7 @@
               ]
             },
             "kind": {
-              "enum": [
-                "node_completed"
-              ],
+              "const": "node_completed",
               "type": "string"
             },
             "label": {
@@ -1582,19 +1400,19 @@
               "type": "string"
             },
             "node_kind": {
-              "$ref": "#/definitions/ExecutionNodeKind"
+              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
             "kind",
-            "label",
             "node_id",
             "node_kind",
+            "label",
             "occurrence"
           ],
           "type": "object"
@@ -1608,12 +1426,10 @@
               ]
             },
             "failure": {
-              "$ref": "#/definitions/TraceLanguageExecutionFailure"
+              "$ref": "#/$defs/TraceLanguageExecutionFailure"
             },
             "kind": {
-              "enum": [
-                "node_failed"
-              ],
+              "const": "node_failed",
               "type": "string"
             },
             "label": {
@@ -1623,21 +1439,21 @@
               "type": "string"
             },
             "node_kind": {
-              "$ref": "#/definitions/ExecutionNodeKind"
+              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
           "required": [
-            "failure",
             "kind",
-            "label",
             "node_id",
             "node_kind",
-            "occurrence"
+            "label",
+            "occurrence",
+            "failure"
           ],
           "type": "object"
         },
@@ -1647,9 +1463,7 @@
               "type": "string"
             },
             "kind": {
-              "enum": [
-                "branch_selected"
-              ],
+              "const": "branch_selected",
               "type": "string"
             },
             "node_id": {
@@ -1657,18 +1471,18 @@
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "selected": {
-              "$ref": "#/definitions/TraceBranchSelection"
+              "$ref": "#/$defs/TraceBranchSelection"
             }
           },
           "required": [
-            "edge_id",
             "kind",
             "node_id",
             "occurrence",
+            "edge_id",
             "selected"
           ],
           "type": "object"
@@ -1676,17 +1490,15 @@
         {
           "properties": {
             "child": {
-              "$ref": "#/definitions/TraceLanguageChildExecution"
+              "$ref": "#/$defs/TraceLanguageChildExecution"
             },
             "kind": {
-              "enum": [
-                "child_started"
-              ],
+              "const": "child_started",
               "type": "string"
             },
             "occurrence": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "parent_node_id": {
@@ -1694,10 +1506,10 @@
             }
           },
           "required": [
-            "child",
             "kind",
+            "parent_node_id",
             "occurrence",
-            "parent_node_id"
+            "child"
           ],
           "type": "object"
         }
@@ -1707,7 +1519,7 @@
           "type": "string"
         },
         "identity": {
-          "$ref": "#/definitions/TraceLanguageExecutionIdentity"
+          "$ref": "#/$defs/TraceLanguageExecutionIdentity"
         }
       },
       "required": [
@@ -1720,18 +1532,16 @@
       "description": "The observed cause of a failed language node.",
       "oneOf": [
         {
-          "description": "A dispatched tool effect failed with its recorded classification and recorded source and retry status. `replay_key` is the causing effect's identity.",
+          "description": "A dispatched tool effect failed with its recorded classification and\nrecorded source and retry status. `replay_key` is the causing effect's identity.",
           "properties": {
             "class": {
-              "$ref": "#/definitions/ToolFailureClass"
+              "$ref": "#/$defs/ToolFailureClass"
             },
             "code": {
               "type": "string"
             },
             "kind": {
-              "enum": [
-                "effect"
-              ],
+              "const": "effect",
               "type": "string"
             },
             "message": {
@@ -1741,20 +1551,20 @@
               "type": "string"
             },
             "retry": {
-              "$ref": "#/definitions/ToolRetryStatus"
+              "$ref": "#/$defs/ToolRetryStatus"
             },
             "source": {
-              "$ref": "#/definitions/ToolFailureSource"
+              "$ref": "#/$defs/ToolFailureSource"
             }
           },
           "required": [
+            "kind",
             "class",
             "code",
-            "kind",
             "message",
             "replay_key",
-            "retry",
-            "source"
+            "source",
+            "retry"
           ],
           "type": "object"
         },
@@ -1765,9 +1575,7 @@
               "type": "string"
             },
             "kind": {
-              "enum": [
-                "runtime"
-              ],
+              "const": "runtime",
               "type": "string"
             },
             "message": {
@@ -1775,8 +1583,8 @@
             }
           },
           "required": [
-            "code",
             "kind",
+            "code",
             "message"
           ],
           "type": "object"
@@ -1787,7 +1595,7 @@
       "properties": {
         "attempt": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "engine_execution_id": {
@@ -1812,39 +1620,39 @@
           "type": "string"
         },
         "scope": {
-          "$ref": "#/definitions/TraceRuntimeScope"
+          "$ref": "#/$defs/TraceRuntimeScope"
         },
         "source_identity": {
           "type": "string"
         },
         "subject": {
-          "$ref": "#/definitions/TraceRuntimeSubject"
+          "$ref": "#/$defs/TraceRuntimeSubject"
         }
       },
       "required": [
-        "entry_kind",
-        "entry_name",
-        "module_ref",
         "scope",
+        "subject",
         "source_identity",
-        "subject"
+        "module_ref",
+        "entry_kind",
+        "entry_name"
       ],
       "type": "object"
     },
     "TraceLanguageExecutionMap": {
-      "description": "The static graph of an execution, carried once on [`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity (`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the enclosing [`TraceLanguageExecutionIdentity`]; the map never restates it.",
+      "description": "The static graph of an execution, carried once on\n[`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity\n(`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the\nenclosing [`TraceLanguageExecutionIdentity`]; the map never restates it.",
       "properties": {
         "edges": {
           "default": [],
           "items": {
-            "$ref": "#/definitions/TraceLanguageExecutionMapEdge"
+            "$ref": "#/$defs/TraceLanguageExecutionMapEdge"
           },
           "type": "array"
         },
         "nodes": {
           "default": [],
           "items": {
-            "$ref": "#/definitions/TraceLanguageExecutionMapNode"
+            "$ref": "#/$defs/TraceLanguageExecutionMapNode"
           },
           "type": "array"
         }
@@ -1867,10 +1675,10 @@
         }
       },
       "required": [
-        "from",
         "id",
-        "label",
-        "to"
+        "from",
+        "to",
+        "label"
       ],
       "type": "object"
     },
@@ -1879,7 +1687,7 @@
         "branch_memberships": {
           "description": "Observed branch selections that admit this node's arm.",
           "items": {
-            "$ref": "#/definitions/TraceBranchMembership"
+            "$ref": "#/$defs/TraceBranchMembership"
           },
           "type": "array"
         },
@@ -1887,7 +1695,7 @@
           "type": "string"
         },
         "kind": {
-          "$ref": "#/definitions/ExecutionNodeKind"
+          "$ref": "#/$defs/ExecutionNodeKind"
         },
         "label": {
           "type": "string"
@@ -1895,7 +1703,7 @@
         "label_metadata": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceLabelMetadata"
+              "$ref": "#/$defs/TraceLabelMetadata"
             },
             {
               "type": "null"
@@ -1903,14 +1711,14 @@
           ]
         },
         "site": {
-          "$ref": "#/definitions/WorkflowExecutionSite"
+          "$ref": "#/$defs/WorkflowExecutionSite"
         }
       },
       "required": [
         "id",
+        "site",
         "kind",
-        "label",
-        "site"
+        "label"
       ],
       "type": "object"
     },
@@ -1927,7 +1735,7 @@
       "properties": {
         "blocks": {
           "items": {
-            "$ref": "#/definitions/TraceContentBlock"
+            "$ref": "#/$defs/TraceContentBlock"
           },
           "type": "array"
         },
@@ -1936,8 +1744,8 @@
         }
       },
       "required": [
-        "blocks",
-        "role"
+        "role",
+        "blocks"
       ],
       "type": "object"
     },
@@ -1945,7 +1753,7 @@
       "properties": {
         "messages": {
           "items": {
-            "$ref": "#/definitions/TraceLlmMessage"
+            "$ref": "#/$defs/TraceLlmMessage"
           },
           "type": "array"
         },
@@ -1967,16 +1775,16 @@
         },
         "tools": {
           "items": {
-            "$ref": "#/definitions/TraceToolSpec"
+            "$ref": "#/$defs/TraceToolSpec"
           },
           "type": "array"
         }
       },
       "required": [
-        "messages",
         "model",
-        "stream",
-        "tool_choice"
+        "messages",
+        "tool_choice",
+        "stream"
       ],
       "type": "object"
     },
@@ -1984,11 +1792,11 @@
       "properties": {
         "duration_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "generation_disposition": {
-          "description": "Which of the caller's generation options the adapter put on the wire, as the runtime's `GenerationReceipt` serializes. Absent when the adapter does not report, which is not the same as reporting that nothing was requested."
+          "description": "Which of the caller's generation options the adapter put on the wire,\nas the runtime's `GenerationReceipt` serializes. Absent when the\nadapter does not report, which is not the same as reporting that\nnothing was requested."
         },
         "parts": true,
         "request_model": {
@@ -2006,9 +1814,9 @@
         }
       },
       "required": [
+        "text",
         "duration_ms",
-        "request_model",
-        "text"
+        "request_model"
       ],
       "type": "object"
     },
@@ -2018,16 +1826,14 @@
           "properties": {
             "deadline_ms": {
               "format": "uint64",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "sleep"
-              ],
+              "const": "sleep",
               "type": "string"
             }
           },
@@ -2045,16 +1851,14 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "signal"
-              ],
+              "const": "signal",
               "type": "string"
             }
           },
           "required": [
-            "key",
+            "type",
             "name",
-            "type"
+            "key"
           ],
           "type": "object"
         },
@@ -2067,15 +1871,13 @@
               "type": "array"
             },
             "type": {
-              "enum": [
-                "child_processes"
-              ],
+              "const": "child_processes",
               "type": "string"
             }
           },
           "required": [
-            "process_ids",
-            "type"
+            "type",
+            "process_ids"
           ],
           "type": "object"
         },
@@ -2086,20 +1888,18 @@
             },
             "position": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "tool_batch"
-              ],
+              "const": "tool_batch",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "batch_id",
-            "position",
-            "type"
+            "position"
           ],
           "type": "object"
         },
@@ -2110,23 +1910,21 @@
             },
             "position": {
               "format": "uint",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "type": {
-              "enum": [
-                "effect_group"
-              ],
+              "const": "effect_group",
               "type": "string"
             },
             "wake": {
-              "$ref": "#/definitions/GroupWakePolicy"
+              "$ref": "#/$defs/GroupWakePolicy"
             }
           },
           "required": [
+            "type",
             "group_key",
             "position",
-            "type",
             "wake"
           ],
           "type": "object"
@@ -2145,7 +1943,7 @@
       "properties": {
         "chars": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -2162,9 +1960,9 @@
         }
       },
       "required": [
-        "hash",
         "id",
-        "kind"
+        "kind",
+        "hash"
       ],
       "type": "object"
     },
@@ -2173,7 +1971,7 @@
         "minting_route": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceProviderRouteIdentity"
+              "$ref": "#/$defs/TraceProviderRouteIdentity"
             },
             {
               "type": "null"
@@ -2181,18 +1979,18 @@
           ]
         },
         "reason": {
-          "$ref": "#/definitions/TraceProviderReplayDropReason"
+          "$ref": "#/$defs/TraceProviderReplayDropReason"
         },
         "replay_kind": {
-          "$ref": "#/definitions/TraceProviderReplayKind"
+          "$ref": "#/$defs/TraceProviderReplayKind"
         },
         "serving_route": {
-          "$ref": "#/definitions/TraceProviderRouteIdentity"
+          "$ref": "#/$defs/TraceProviderRouteIdentity"
         }
       },
       "required": [
-        "reason",
         "replay_kind",
+        "reason",
         "serving_route"
       ],
       "type": "object"
@@ -2205,7 +2003,7 @@
       "type": "string"
     },
     "TraceProviderReplayKind": {
-      "description": "Opaque replay state rejected before an LLM Provider request was serialized. A missing minting route identifies a session written before provenance was introduced (or another unstamped producer); it is intentionally not inferred from the currently selected route.",
+      "description": "Opaque replay state rejected before an LLM Provider request was serialized.\nA missing minting route identifies a session written before provenance was\nintroduced (or another unstamped producer); it is intentionally not\ninferred from the currently selected route.",
       "enum": [
         "response_text",
         "reasoning",
@@ -2225,16 +2023,16 @@
         },
         "body_len": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "body_sha256": {
-          "description": "SHA-256 of the exact serialized wire bytes. `body_json` is a parsed structured view whose re-serialization may not reproduce these bytes.",
+          "description": "SHA-256 of the exact serialized wire bytes. `body_json` is a parsed\nstructured view whose re-serialization may not reproduce these bytes.",
           "type": "string"
         },
         "elapsed_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "endpoint": {
@@ -2245,17 +2043,17 @@
         },
         "sequence": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "body_len",
-        "body_sha256",
+        "provider",
+        "sequence",
         "elapsed_ms",
         "endpoint",
-        "provider",
-        "sequence"
+        "body_len",
+        "body_sha256"
       ],
       "type": "object"
     },
@@ -2272,9 +2070,9 @@
         }
       },
       "required": [
+        "provider",
         "endpoint",
-        "model",
-        "provider"
+        "model"
       ],
       "type": "object"
     },
@@ -2282,7 +2080,7 @@
       "properties": {
         "elapsed_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "event_name": {
@@ -2307,7 +2105,7 @@
         "raw_json": true,
         "raw_len": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "raw_sha256": {
@@ -2315,37 +2113,37 @@
         },
         "sequence": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
+        "provider",
+        "sequence",
         "elapsed_ms",
         "event_name",
-        "provider",
         "raw_len",
-        "raw_sha256",
-        "sequence"
+        "raw_sha256"
       ],
       "type": "object"
     },
     "TraceRetryAttempt": {
-      "description": "One provider or tool retry attempt projected from the retry owner's sealed record. The trace does not own retry bookkeeping; it only renders it.",
+      "description": "One provider or tool retry attempt projected from the retry owner's sealed\nrecord. The trace does not own retry bookkeeping; it only renders it.",
       "properties": {
         "charge_safety": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceChargeSafetyDecision"
+              "$ref": "#/$defs/TraceChargeSafetyDecision"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Typed host risk-appetite outcome when this attempt considered an otherwise unsafe duplicate generation."
+          "description": "Typed host risk-appetite outcome when this attempt considered an\notherwise unsafe duplicate generation."
         },
         "delay_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -2354,7 +2152,7 @@
         "execution_evidence": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceExecutionEvidence"
+              "$ref": "#/$defs/TraceExecutionEvidence"
             },
             {
               "type": "null"
@@ -2364,7 +2162,7 @@
         "generation_disposition": {
           "anyOf": [
             {
-              "$ref": "#/definitions/GenerationReceipt"
+              "$ref": "#/$defs/GenerationReceipt"
             },
             {
               "type": "null"
@@ -2374,11 +2172,11 @@
         },
         "ordinal": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "outcome": {
-          "$ref": "#/definitions/TraceRetryAttemptOutcome"
+          "$ref": "#/$defs/TraceRetryAttemptOutcome"
         },
         "reason": {
           "type": [
@@ -2389,7 +2187,7 @@
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceTokenUsage"
+              "$ref": "#/$defs/TraceTokenUsage"
             },
             {
               "type": "null"
@@ -2400,13 +2198,13 @@
         "usage_disposition": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceAttemptUsageOutcome"
+              "$ref": "#/$defs/TraceAttemptUsageOutcome"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Why `usage` is absent when it is. LLM attempts only; tool attempts carry none."
+          "description": "Why `usage` is absent when it is. LLM attempts only; tool attempts\ncarry none."
         }
       },
       "required": [
@@ -2416,41 +2214,31 @@
       "type": "object"
     },
     "TraceRetryAttemptOutcome": {
-      "description": "Terminal state of one provider or tool attempt in a trace retry ladder.\n\n# Integrator class\n\nTrace consumers exhaustively render these outcomes when explaining which attempt completed a call and why earlier attempts did not.",
+      "description": "Terminal state of one provider or tool attempt in a trace retry ladder.\n\n# Integrator class\n\nTrace consumers exhaustively render these outcomes when explaining which\nattempt completed a call and why earlier attempts did not.",
       "oneOf": [
         {
+          "const": "completed",
           "description": "The attempt completed successfully.",
-          "enum": [
-            "completed"
-          ],
           "type": "string"
         },
         {
+          "const": "failed",
           "description": "The attempt failed.",
-          "enum": [
-            "failed"
-          ],
           "type": "string"
         },
         {
+          "const": "aborted",
           "description": "Protocol handling aborted after observing the provider response.",
-          "enum": [
-            "aborted"
-          ],
           "type": "string"
         },
         {
+          "const": "interrupted",
           "description": "The attempt was interrupted before it could complete.",
-          "enum": [
-            "interrupted"
-          ],
           "type": "string"
         },
         {
+          "const": "cancelled",
           "description": "A tool attempt was cancelled.",
-          "enum": [
-            "cancelled"
-          ],
           "type": "string"
         }
       ]
@@ -2459,7 +2247,7 @@
       "properties": {
         "protocol_iteration": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -2479,7 +2267,7 @@
         },
         "turn_index": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -2491,7 +2279,7 @@
     "TraceRuntimeStreamEvent": {
       "properties": {
         "block_id": {
-          "description": "The streamed block's own identity. Several blocks can share one `item_id` (OpenAI summary parts of one reasoning item), so block-level granularity needs this field.",
+          "description": "The streamed block's own identity. Several blocks can share one\n`item_id` (OpenAI summary parts of one reasoning item), so block-level\ngranularity needs this field.",
           "type": [
             "string",
             "null"
@@ -2505,7 +2293,7 @@
         },
         "elapsed_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "event_name": {
@@ -2533,7 +2321,7 @@
         },
         "sequence": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "tool_name": {
@@ -2545,7 +2333,7 @@
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceTokenUsage"
+              "$ref": "#/$defs/TraceTokenUsage"
             },
             {
               "type": "null"
@@ -2560,9 +2348,9 @@
         }
       },
       "required": [
+        "sequence",
         "elapsed_ms",
-        "event_name",
-        "sequence"
+        "event_name"
       ],
       "type": "object"
     },
@@ -2571,22 +2359,20 @@
         {
           "properties": {
             "address": {
-              "$ref": "#/definitions/EffectAddress"
+              "$ref": "#/$defs/EffectAddress"
             },
             "effect_id": {
               "type": "string"
             },
             "type": {
-              "enum": [
-                "effect"
-              ],
+              "const": "effect",
               "type": "string"
             }
           },
           "required": [
+            "type",
             "address",
-            "effect_id",
-            "type"
+            "effect_id"
           ],
           "type": "object"
         },
@@ -2596,15 +2382,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "process_id",
-            "type"
+            "type",
+            "process_id"
           ],
           "type": "object"
         }
@@ -2634,10 +2418,10 @@
         }
       },
       "required": [
-        "cache_read_input_tokens",
-        "cache_write_input_tokens",
         "input_tokens",
         "output_tokens",
+        "cache_read_input_tokens",
+        "cache_write_input_tokens",
         "reasoning_output_tokens"
       ],
       "type": "object"
@@ -2648,15 +2432,13 @@
           "properties": {
             "payload": true,
             "status": {
-              "enum": [
-                "success"
-              ],
+              "const": "success",
               "type": "string"
             }
           },
           "required": [
-            "payload",
-            "status"
+            "status",
+            "payload"
           ],
           "type": "object"
         },
@@ -2664,15 +2446,13 @@
           "properties": {
             "payload": true,
             "status": {
-              "enum": [
-                "failure"
-              ],
+              "const": "failure",
               "type": "string"
             }
           },
           "required": [
-            "payload",
-            "status"
+            "status",
+            "payload"
           ],
           "type": "object"
         },
@@ -2680,15 +2460,13 @@
           "properties": {
             "payload": true,
             "status": {
-              "enum": [
-                "cancelled"
-              ],
+              "const": "cancelled",
               "type": "string"
             }
           },
           "required": [
-            "payload",
-            "status"
+            "status",
+            "payload"
           ],
           "type": "object"
         }
@@ -2698,7 +2476,7 @@
       "properties": {
         "control": true,
         "outcome": {
-          "$ref": "#/definitions/TraceToolCallOutcome"
+          "$ref": "#/$defs/TraceToolCallOutcome"
         }
       },
       "required": [
@@ -2715,14 +2493,12 @@
       "type": "string"
     },
     "TraceToolResultBlock": {
-      "description": "One ordered block of a traced tool result: text, or an attachment at the position the tool's value placed it.",
+      "description": "One ordered block of a traced tool result: text, or an attachment at the\nposition the tool's value placed it.",
       "oneOf": [
         {
           "properties": {
             "kind": {
-              "enum": [
-                "text"
-              ],
+              "const": "text",
               "type": "string"
             },
             "text": {
@@ -2738,13 +2514,11 @@
         {
           "properties": {
             "kind": {
-              "enum": [
-                "attachment"
-              ],
+              "const": "attachment",
               "type": "string"
             },
             "source": {
-              "$ref": "#/definitions/TraceAttachment"
+              "$ref": "#/$defs/TraceAttachment"
             }
           },
           "required": [
@@ -2767,15 +2541,15 @@
         "output_schema": true
       },
       "required": [
+        "name",
         "description",
         "input_schema",
-        "name",
         "output_schema"
       ],
       "type": "object"
     },
     "TraceTurnCancellationEvidence": {
-      "description": "Durable evidence that the traced turn was cancelled. Mirrors the runtime's `TurnCancellationEvidence`, which only [`TurnStop::Cancelled`] can carry, so a cancelled trace outcome can never be stated without saying which request produced it.\n\n[`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled",
+      "description": "Durable evidence that the traced turn was cancelled. Mirrors the runtime's\n`TurnCancellationEvidence`, which only [`TurnStop::Cancelled`] can carry, so\na cancelled trace outcome can never be stated without saying which request\nproduced it.\n\n[`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled",
       "properties": {
         "origin": {
           "description": "Opaque host-domain data. Lash records and returns it unchanged.",
@@ -2809,7 +2583,7 @@
       "type": "string"
     },
     "TraceTurnFailureReason": {
-      "description": "Why a [`TraceTurnOutcome::Failed`] turn stopped. Mirrors the non-cancelled `TurnStop` reasons.",
+      "description": "Why a [`TraceTurnOutcome::Failed`] turn stopped. Mirrors the non-cancelled\n`TurnStop` reasons.",
       "enum": [
         "incomplete",
         "invalid_input",
@@ -2825,24 +2599,22 @@
       "type": "string"
     },
     "TraceTurnOutcome": {
-      "description": "The single terminal outcome of a traced turn.\n\nOne closed shape replaces the former `status` / `done_reason` / `agent_frame_switch` triple: each variant owns exactly the data its state can carry, so an agent-frame switch cannot be reported without a frame key and a cancellation cannot be reported without its evidence. Cancellation is its own variant rather than a failure reason \u2014 [`Self::is_failed`] is `false` for it.",
+      "description": "The single terminal outcome of a traced turn.\n\nOne closed shape replaces the former `status` / `done_reason` /\n`agent_frame_switch` triple: each variant owns exactly the data its state\ncan carry, so an agent-frame switch cannot be reported without a frame key\nand a cancellation cannot be reported without its evidence. Cancellation is\nits own variant rather than a failure reason \u2014 [`Self::is_failed`] is\n`false` for it.",
       "oneOf": [
         {
           "description": "The turn reached a terminal result the caller asked for.",
           "properties": {
             "done_reason": {
-              "$ref": "#/definitions/TraceTurnCompletionReason"
+              "$ref": "#/$defs/TraceTurnCompletionReason"
             },
             "status": {
-              "enum": [
-                "completed"
-              ],
+              "const": "completed",
               "type": "string"
             }
           },
           "required": [
-            "done_reason",
-            "status"
+            "status",
+            "done_reason"
           ],
           "type": "object"
         },
@@ -2850,18 +2622,16 @@
           "description": "The turn ended by handing control to another agent frame.",
           "properties": {
             "frame_switch": {
-              "$ref": "#/definitions/TraceAgentFrameSwitch"
+              "$ref": "#/$defs/TraceAgentFrameSwitch"
             },
             "status": {
-              "enum": [
-                "agent_frame_switch"
-              ],
+              "const": "agent_frame_switch",
               "type": "string"
             }
           },
           "required": [
-            "frame_switch",
-            "status"
+            "status",
+            "frame_switch"
           ],
           "type": "object"
         },
@@ -2869,18 +2639,16 @@
           "description": "The turn was cancelled. Not a failure.",
           "properties": {
             "evidence": {
-              "$ref": "#/definitions/TraceTurnCancellationEvidence"
+              "$ref": "#/$defs/TraceTurnCancellationEvidence"
             },
             "status": {
-              "enum": [
-                "cancelled"
-              ],
+              "const": "cancelled",
               "type": "string"
             }
           },
           "required": [
-            "evidence",
-            "status"
+            "status",
+            "evidence"
           ],
           "type": "object"
         },
@@ -2888,18 +2656,16 @@
           "description": "The turn stopped short of a result.",
           "properties": {
             "done_reason": {
-              "$ref": "#/definitions/TraceTurnFailureReason"
+              "$ref": "#/$defs/TraceTurnFailureReason"
             },
             "status": {
-              "enum": [
-                "failed"
-              ],
+              "const": "failed",
               "type": "string"
             }
           },
           "required": [
-            "done_reason",
-            "status"
+            "status",
+            "done_reason"
           ],
           "type": "object"
         }
@@ -2909,7 +2675,7 @@
       "description": "Stable source-level location of one runtime site under a workflow node.",
       "properties": {
         "kind": {
-          "$ref": "#/definitions/ExecutionNodeKind"
+          "$ref": "#/$defs/ExecutionNodeKind"
         },
         "label": {
           "type": "string"
@@ -2921,21 +2687,23 @@
           "default": [],
           "items": {
             "format": "uint32",
-            "minimum": 0.0,
+            "minimum": 0,
             "type": "integer"
           },
           "type": "array"
         }
       },
       "required": [
+        "owner",
         "kind",
-        "label",
-        "owner"
+        "label"
       ],
       "type": "object"
     }
   },
-  "description": "One durable trace record: the envelope fields plus the flattened event, whose `type` tag names the variant.",
+  "$id": "https://lash.dev/schemas/trace-record/v36",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One durable trace record: the envelope fields plus the flattened\nevent, whose `type` tag names the variant.",
   "oneOf": [
     {
       "properties": {
@@ -2944,9 +2712,7 @@
           "type": "object"
         },
         "type": {
-          "enum": [
-            "turn_started"
-          ],
+          "const": "turn_started",
           "type": "string"
         }
       },
@@ -2959,29 +2725,27 @@
       "properties": {
         "components": {
           "items": {
-            "$ref": "#/definitions/TracePromptComponent"
+            "$ref": "#/$defs/TracePromptComponent"
           },
           "type": "array"
         },
         "prompt_chars": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "prompt_hash": {
           "type": "string"
         },
         "type": {
-          "enum": [
-            "prompt_built"
-          ],
+          "const": "prompt_built",
           "type": "string"
         }
       },
       "required": [
-        "prompt_chars",
+        "type",
         "prompt_hash",
-        "type"
+        "prompt_chars"
       ],
       "type": "object"
     },
@@ -3007,54 +2771,50 @@
           ]
         },
         "reason": {
-          "$ref": "#/definitions/AttachmentMaterializationReason"
+          "$ref": "#/$defs/AttachmentMaterializationReason"
         },
         "source": {
-          "$ref": "#/definitions/AttachmentMaterializationSource"
+          "$ref": "#/$defs/AttachmentMaterializationSource"
         },
         "type": {
-          "enum": [
-            "attachment_degraded"
-          ],
+          "const": "attachment_degraded",
           "type": "string"
         }
       },
       "required": [
-        "reason",
+        "type",
         "source",
-        "type"
+        "reason"
       ],
       "type": "object"
     },
     {
-      "description": "Complete model-facing composition captured only when its fingerprint changes for a resident session.",
+      "description": "Complete model-facing composition captured only when its fingerprint\nchanges for a resident session.",
       "properties": {
         "fingerprint": {
-          "description": "SHA-256 of the rendered system prompt plus ordered fingerprints of the model-facing tool contracts.",
+          "description": "SHA-256 of the rendered system prompt plus ordered fingerprints of\nthe model-facing tool contracts.",
           "type": "string"
         },
         "rendered_system_prompt": {
           "type": "string"
         },
         "tool_schemas": {
-          "description": "Full model-facing tool contracts in request order. This is kept even when empty so the event is a self-contained snapshot.",
+          "description": "Full model-facing tool contracts in request order. This is kept\neven when empty so the event is a self-contained snapshot.",
           "items": {
-            "$ref": "#/definitions/TraceToolSpec"
+            "$ref": "#/$defs/TraceToolSpec"
           },
           "type": "array"
         },
         "type": {
-          "enum": [
-            "composition_changed"
-          ],
+          "const": "composition_changed",
           "type": "string"
         }
       },
       "required": [
+        "type",
         "fingerprint",
         "rendered_system_prompt",
-        "tool_schemas",
-        "type"
+        "tool_schemas"
       ],
       "type": "object"
     },
@@ -3062,31 +2822,29 @@
       "properties": {
         "max_context_tokens": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "threshold_tokens": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "type": {
-          "enum": [
-            "compaction_needed"
-          ],
+          "const": "compaction_needed",
           "type": "string"
         },
         "used_tokens": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "max_context_tokens",
-        "threshold_tokens",
         "type",
-        "used_tokens"
+        "used_tokens",
+        "max_context_tokens",
+        "threshold_tokens"
       ],
       "type": "object"
     },
@@ -3097,20 +2855,18 @@
         },
         "source_messages": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "type": {
-          "enum": [
-            "compaction_started"
-          ],
+          "const": "compaction_started",
           "type": "string"
         }
       },
       "required": [
-        "instructions_present",
+        "type",
         "source_messages",
-        "type"
+        "instructions_present"
       ],
       "type": "object"
     },
@@ -3118,19 +2874,17 @@
       "properties": {
         "summary_nodes": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "type": {
-          "enum": [
-            "compaction_completed"
-          ],
+          "const": "compaction_completed",
           "type": "string"
         }
       },
       "required": [
-        "summary_nodes",
-        "type"
+        "type",
+        "summary_nodes"
       ],
       "type": "object"
     },
@@ -3138,49 +2892,45 @@
       "properties": {
         "max_context_tokens": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "pruned_attachments": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "type": {
-          "enum": [
-            "prompt_view_attachments_pruned"
-          ],
+          "const": "prompt_view_attachments_pruned",
           "type": "string"
         },
         "used_tokens": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "max_context_tokens",
-        "pruned_attachments",
         "type",
-        "used_tokens"
+        "used_tokens",
+        "max_context_tokens",
+        "pruned_attachments"
       ],
       "type": "object"
     },
     {
       "properties": {
         "request": {
-          "$ref": "#/definitions/TraceLlmRequest"
+          "$ref": "#/$defs/TraceLlmRequest"
         },
         "type": {
-          "enum": [
-            "llm_call_started"
-          ],
+          "const": "llm_call_started",
           "type": "string"
         }
       },
       "required": [
-        "request",
-        "type"
+        "type",
+        "request"
       ],
       "type": "object"
     },
@@ -3188,7 +2938,7 @@
       "properties": {
         "attempts": {
           "items": {
-            "$ref": "#/definitions/TraceRetryAttempt"
+            "$ref": "#/$defs/TraceRetryAttempt"
           },
           "type": [
             "array",
@@ -3197,19 +2947,17 @@
         },
         "provider_usage": true,
         "response": {
-          "$ref": "#/definitions/TraceLlmResponse"
+          "$ref": "#/$defs/TraceLlmResponse"
         },
         "stream_summary": true,
         "type": {
-          "enum": [
-            "llm_call_completed"
-          ],
+          "const": "llm_call_completed",
           "type": "string"
         },
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TraceTokenUsage"
+              "$ref": "#/$defs/TraceTokenUsage"
             },
             {
               "type": "null"
@@ -3218,8 +2966,8 @@
         }
       },
       "required": [
-        "response",
-        "type"
+        "type",
+        "response"
       ],
       "type": "object"
     },
@@ -3227,7 +2975,7 @@
       "properties": {
         "attempts": {
           "items": {
-            "$ref": "#/definitions/TraceRetryAttempt"
+            "$ref": "#/$defs/TraceRetryAttempt"
           },
           "type": [
             "array",
@@ -3235,109 +2983,97 @@
           ]
         },
         "error": {
-          "$ref": "#/definitions/TraceError"
+          "$ref": "#/$defs/TraceError"
         },
         "stream_summary": true,
         "type": {
-          "enum": [
-            "llm_call_failed"
-          ],
+          "const": "llm_call_failed",
           "type": "string"
         }
       },
       "required": [
-        "error",
-        "type"
+        "type",
+        "error"
       ],
       "type": "object"
     },
     {
       "properties": {
         "event": {
-          "$ref": "#/definitions/TraceProviderRequestEvent"
+          "$ref": "#/$defs/TraceProviderRequestEvent"
         },
         "type": {
-          "enum": [
-            "provider_request"
-          ],
+          "const": "provider_request",
           "type": "string"
         }
       },
       "required": [
-        "event",
-        "type"
+        "type",
+        "event"
       ],
       "type": "object"
     },
     {
       "properties": {
         "event": {
-          "$ref": "#/definitions/TraceProviderReplayDropEvent"
+          "$ref": "#/$defs/TraceProviderReplayDropEvent"
         },
         "type": {
-          "enum": [
-            "provider_replay_dropped"
-          ],
+          "const": "provider_replay_dropped",
           "type": "string"
         }
       },
       "required": [
-        "event",
-        "type"
+        "type",
+        "event"
       ],
       "type": "object"
     },
     {
       "properties": {
         "event": {
-          "$ref": "#/definitions/TraceEffectEnvelopeDiffEvent"
+          "$ref": "#/$defs/TraceEffectEnvelopeDiffEvent"
         },
         "type": {
-          "enum": [
-            "effect_envelope_diff"
-          ],
+          "const": "effect_envelope_diff",
           "type": "string"
         }
       },
       "required": [
-        "event",
-        "type"
+        "type",
+        "event"
       ],
       "type": "object"
     },
     {
       "properties": {
         "event": {
-          "$ref": "#/definitions/TraceProviderStreamEvent"
+          "$ref": "#/$defs/TraceProviderStreamEvent"
         },
         "type": {
-          "enum": [
-            "provider_stream_event"
-          ],
+          "const": "provider_stream_event",
           "type": "string"
         }
       },
       "required": [
-        "event",
-        "type"
+        "type",
+        "event"
       ],
       "type": "object"
     },
     {
       "properties": {
         "event": {
-          "$ref": "#/definitions/TraceRuntimeStreamEvent"
+          "$ref": "#/$defs/TraceRuntimeStreamEvent"
         },
         "type": {
-          "enum": [
-            "runtime_stream_event"
-          ],
+          "const": "runtime_stream_event",
           "type": "string"
         }
       },
       "required": [
-        "event",
-        "type"
+        "type",
+        "event"
       ],
       "type": "object"
     },
@@ -3365,17 +3101,15 @@
           ]
         },
         "type": {
-          "enum": [
-            "tool_call_started"
-          ],
+          "const": "tool_call_started",
           "type": "string"
         }
       },
       "required": [
-        "args",
+        "type",
         "call_id",
         "name",
-        "type"
+        "args"
       ],
       "type": "object"
     },
@@ -3384,7 +3118,7 @@
         "args": true,
         "attempts": {
           "items": {
-            "$ref": "#/definitions/TraceRetryAttempt"
+            "$ref": "#/$defs/TraceRetryAttempt"
           },
           "type": [
             "array",
@@ -3397,7 +3131,7 @@
         },
         "duration_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "issuing_node_id": {
@@ -3410,7 +3144,7 @@
           "type": "string"
         },
         "output": {
-          "$ref": "#/definitions/TraceToolCallOutput"
+          "$ref": "#/$defs/TraceToolCallOutput"
         },
         "provider_call_id": {
           "description": "The model provider's id for the call, when a model issued it.",
@@ -3420,19 +3154,17 @@
           ]
         },
         "type": {
-          "enum": [
-            "tool_call_completed"
-          ],
+          "const": "tool_call_completed",
           "type": "string"
         }
       },
       "required": [
-        "args",
+        "type",
         "call_id",
-        "duration_ms",
         "name",
+        "args",
         "output",
-        "type"
+        "duration_ms"
       ],
       "type": "object"
     },
@@ -3443,20 +3175,18 @@
         },
         "code_chars": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "type": {
-          "enum": [
-            "exec_code_started"
-          ],
+          "const": "exec_code_started",
           "type": "string"
         }
       },
       "required": [
+        "type",
         "code",
-        "code_chars",
-        "type"
+        "code_chars"
       ],
       "type": "object"
     },
@@ -3464,13 +3194,13 @@
       "properties": {
         "duration_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "error": {
           "anyOf": [
             {
-              "$ref": "#/definitions/CellFailure"
+              "$ref": "#/$defs/CellFailure"
             },
             {
               "type": "null"
@@ -3479,12 +3209,12 @@
         },
         "observation_count": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "observation_projections": {
           "items": {
-            "$ref": "#/definitions/TextProjectionMetadata"
+            "$ref": "#/$defs/TextProjectionMetadata"
           },
           "type": "array"
         },
@@ -3493,31 +3223,29 @@
         },
         "output_chars": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "terminal_finish": true,
         "tool_calls": {
           "items": {
-            "$ref": "#/definitions/TraceExecToolCall"
+            "$ref": "#/$defs/TraceExecToolCall"
           },
           "type": "array"
         },
         "type": {
-          "enum": [
-            "exec_code_completed"
-          ],
+          "const": "exec_code_completed",
           "type": "string"
         }
       },
       "required": [
+        "type",
         "duration_ms",
-        "observation_count",
-        "observation_projections",
         "output",
         "output_chars",
-        "tool_calls",
-        "type"
+        "observation_count",
+        "observation_projections",
+        "tool_calls"
       ],
       "type": "object"
     },
@@ -3528,24 +3256,18 @@
           "type": "string"
         },
         "reason": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExecCodeFailureReason"
-            }
-          ],
-          "description": "Closed failure classification; offline analysis keys on this rather than matching `error` prose."
+          "$ref": "#/$defs/ExecCodeFailureReason",
+          "description": "Closed failure classification; offline analysis keys on this rather\nthan matching `error` prose."
         },
         "type": {
-          "enum": [
-            "exec_code_failed"
-          ],
+          "const": "exec_code_failed",
           "type": "string"
         }
       },
       "required": [
-        "error",
+        "type",
         "reason",
-        "type"
+        "error"
       ],
       "type": "object"
     },
@@ -3553,20 +3275,18 @@
       "properties": {
         "projections": {
           "items": {
-            "$ref": "#/definitions/TextProjectionMetadata"
+            "$ref": "#/$defs/TextProjectionMetadata"
           },
           "type": "array"
         },
         "type": {
-          "enum": [
-            "observation_projection"
-          ],
+          "const": "observation_projection",
           "type": "string"
         }
       },
       "required": [
-        "projections",
-        "type"
+        "type",
+        "projections"
       ],
       "type": "object"
     },
@@ -3580,16 +3300,14 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "journaled_effect_started"
-          ],
+          "const": "journaled_effect_started",
           "type": "string"
         }
       },
       "required": [
-        "effect_kind",
+        "type",
         "effect_name",
-        "type"
+        "effect_kind"
       ],
       "type": "object"
     },
@@ -3603,20 +3321,18 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/TraceJournaledEffectStatus"
+          "$ref": "#/$defs/TraceJournaledEffectStatus"
         },
         "type": {
-          "enum": [
-            "journaled_effect_settled"
-          ],
+          "const": "journaled_effect_settled",
           "type": "string"
         }
       },
       "required": [
-        "effect_kind",
+        "type",
         "effect_name",
-        "status",
-        "type"
+        "effect_kind",
+        "status"
       ],
       "type": "object"
     },
@@ -3624,9 +3340,7 @@
       "description": "A Restate durable wait has issued its park command.",
       "properties": {
         "type": {
-          "enum": [
-            "durable_wait_parked"
-          ],
+          "const": "durable_wait_parked",
           "type": "string"
         },
         "wait_kind": {
@@ -3643,12 +3357,10 @@
       "description": "A Restate durable wait resumed with a terminal resolution.",
       "properties": {
         "resolution": {
-          "$ref": "#/definitions/TraceDurableWaitResolution"
+          "$ref": "#/$defs/TraceDurableWaitResolution"
         },
         "type": {
-          "enum": [
-            "durable_wait_resolved"
-          ],
+          "const": "durable_wait_resolved",
           "type": "string"
         },
         "wait_kind": {
@@ -3656,9 +3368,9 @@
         }
       },
       "required": [
-        "resolution",
         "type",
-        "wait_kind"
+        "wait_kind",
+        "resolution"
       ],
       "type": "object"
     },
@@ -3667,19 +3379,17 @@
       "properties": {
         "duration_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "type": {
-          "enum": [
-            "durable_timer_started"
-          ],
+          "const": "durable_timer_started",
           "type": "string"
         }
       },
       "required": [
-        "duration_ms",
-        "type"
+        "type",
+        "duration_ms"
       ],
       "type": "object"
     },
@@ -3688,23 +3398,21 @@
       "properties": {
         "duration_ms": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "status": {
-          "$ref": "#/definitions/TraceDurableTimerStatus"
+          "$ref": "#/$defs/TraceDurableTimerStatus"
         },
         "type": {
-          "enum": [
-            "durable_timer_resolved"
-          ],
+          "const": "durable_timer_resolved",
           "type": "string"
         }
       },
       "required": [
+        "type",
         "duration_ms",
-        "status",
-        "type"
+        "status"
       ],
       "type": "object"
     },
@@ -3713,12 +3421,12 @@
       "properties": {
         "effects_executed": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "journaled_bytes_estimate": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -3728,16 +3436,14 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "durable_segment_boundary"
-          ],
+          "const": "durable_segment_boundary",
           "type": "string"
         }
       },
       "required": [
-        "effects_executed",
+        "type",
         "reason",
-        "type"
+        "effects_executed"
       ],
       "type": "object"
     },
@@ -3754,17 +3460,15 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "store_error_observed"
-          ],
+          "const": "store_error_observed",
           "type": "string"
         }
       },
       "required": [
-        "error_class",
-        "message",
+        "type",
         "operation",
-        "type"
+        "error_class",
+        "message"
       ],
       "type": "object"
     },
@@ -3775,9 +3479,7 @@
           "description": "The program compiled and linked successfully.",
           "properties": {
             "outcome": {
-              "enum": [
-                "ok"
-              ],
+              "const": "ok",
               "type": "string"
             }
           },
@@ -3794,15 +3496,13 @@
               "type": "string"
             },
             "outcome": {
-              "enum": [
-                "failure"
-              ],
+              "const": "failure",
               "type": "string"
             }
           },
           "required": [
-            "diagnostic",
-            "outcome"
+            "outcome",
+            "diagnostic"
           ],
           "type": "object"
         }
@@ -3811,19 +3511,17 @@
         "step_index": {
           "description": "Protocol iteration of the submitted program within its turn.",
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "type": {
-          "enum": [
-            "rlm_step"
-          ],
+          "const": "rlm_step",
           "type": "string"
         }
       },
       "required": [
-        "step_index",
-        "type"
+        "type",
+        "step_index"
       ],
       "type": "object"
     },
@@ -3834,56 +3532,50 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "protocol_step"
-          ],
+          "const": "protocol_step",
           "type": "string"
         }
       },
       "required": [
-        "payload",
+        "type",
         "plugin_id",
-        "type"
+        "payload"
       ],
       "type": "object"
     },
     {
       "properties": {
         "event": {
-          "$ref": "#/definitions/TraceLanguageExecution"
+          "$ref": "#/$defs/TraceLanguageExecution"
         },
         "language": {
           "type": "string"
         },
         "type": {
-          "enum": [
-            "language_execution"
-          ],
+          "const": "language_execution",
           "type": "string"
         }
       },
       "required": [
-        "event",
+        "type",
         "language",
-        "type"
+        "event"
       ],
       "type": "object"
     },
     {
       "properties": {
         "outcome": {
-          "$ref": "#/definitions/TraceTurnOutcome"
+          "$ref": "#/$defs/TraceTurnOutcome"
         },
         "type": {
-          "enum": [
-            "turn_completed"
-          ],
+          "const": "turn_completed",
           "type": "string"
         }
       },
       "required": [
-        "outcome",
-        "type"
+        "type",
+        "outcome"
       ],
       "type": "object"
     },
@@ -3894,23 +3586,21 @@
         },
         "payload": true,
         "type": {
-          "enum": [
-            "custom"
-          ],
+          "const": "custom",
           "type": "string"
         }
       },
       "required": [
+        "type",
         "name",
-        "payload",
-        "type"
+        "payload"
       ],
       "type": "object"
     }
   ],
   "properties": {
     "context": {
-      "$ref": "#/definitions/TraceContext"
+      "$ref": "#/$defs/TraceContext"
     },
     "id": {
       "type": "string"
@@ -3920,7 +3610,7 @@
         36
       ],
       "format": "uint32",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "timestamp": {
@@ -3929,10 +3619,10 @@
     }
   },
   "required": [
-    "context",
-    "id",
     "schema_version",
-    "timestamp"
+    "id",
+    "timestamp",
+    "context"
   ],
   "title": "TraceRecord",
   "type": "object",

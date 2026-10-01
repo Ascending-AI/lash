@@ -6,6 +6,11 @@ named `v<version>.schema.json`. The document records the Rust version constant
 in `x-lash-version-constant` and its numeric value in
 `x-lash-schema-version`.
 
+Schemars-generated documents use JSON Schema Draft 2020-12, with `$defs`
+references and `prefixItems` for tuples. The runtime-owned process-event
+documents retain Draft 7. Before 1.0, the version freeze permits refreshing
+these documents and their generated TypeScript in place without version bumps.
+
 Run `python3 scripts/generate-workflow-schemas.py` after a schema owner changes.
 Run the same command with `--check` to detect drift. The check also rejects an
 obsolete versioned document left beside the current one.

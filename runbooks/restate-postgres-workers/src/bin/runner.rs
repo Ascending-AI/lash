@@ -472,7 +472,10 @@ async fn async_main() -> Result<()> {
     if selection.includes(WorkflowSegment::One) {
         assert_processes_terminal(storage.pool()).await?;
     }
-    assert_no_duplicate_runtime_rows(storage.pool()).await?;
+    assert_no_duplicate_runtime_rows(&storage).await?;
+    if selection.includes(WorkflowSegment::One) {
+        assert_retained_wake_tombstones(&storage).await?;
+    }
     assert_worker_distribution(storage.pool()).await?;
     assert_failover(storage.pool(), selection).await?;
     assert_provider_calls(&witness_pool, selection).await?;
@@ -543,6 +546,8 @@ mod control_scenarios;
 mod environment;
 #[path = "runner/process_assertions.rs"]
 mod process_assertions;
+#[path = "runner/queued_work_assertions.rs"]
+mod queued_work_assertions;
 #[path = "runner/response_assertions.rs"]
 mod response_assertions;
 #[path = "runner/segment_one.rs"]
@@ -555,5 +560,6 @@ mod tests;
 use control_scenarios::*;
 use environment::*;
 use process_assertions::*;
+use queued_work_assertions::*;
 use response_assertions::*;
 use segment_one::*;

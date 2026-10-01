@@ -116,15 +116,15 @@ impl<'de> serde::Deserialize<'de> for AttachmentId {
 /// The wire shape is the validated identity string; the id alphabet is
 /// enforced by `parse`, which no schema assertion can express.
 impl schemars::JsonSchema for AttachmentId {
-    fn is_referenceable() -> bool {
-        false
+    fn inline_schema() -> bool {
+        true
     }
 
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <String as schemars::JsonSchema>::schema_name()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         <String as schemars::JsonSchema>::json_schema(generator)
     }
 }
@@ -253,15 +253,15 @@ impl<'de> serde::Deserialize<'de> for MediaType {
 /// The wire shape is the validated string: MIME-syntax refinement happens in
 /// `parse`, which no schema assertion can express.
 impl schemars::JsonSchema for MediaType {
-    fn is_referenceable() -> bool {
-        false
+    fn inline_schema() -> bool {
+        true
     }
 
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         <String as schemars::JsonSchema>::schema_name()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         <String as schemars::JsonSchema>::json_schema(generator)
     }
 }

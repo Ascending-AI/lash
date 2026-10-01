@@ -78,6 +78,7 @@ impl RemoteSessionObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(extend("unevaluatedProperties" = false))]
 pub struct RemoteSessionObservationEvent {
     pub session_id: SessionId,
     pub replay_incarnation_id: String,

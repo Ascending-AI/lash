@@ -1,10 +1,8 @@
 {
-  "$id": "https://lash.dev/schemas/remote-config-transaction-outcome/v100",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "RemoteConfigRefusal": {
       "additionalProperties": false,
-      "description": "Why an owner refused a config transaction: which command, by which owner, and the owner's typed refusal as data.",
+      "description": "Why an owner refused a config transaction: which command, by which\nowner, and the owner's typed refusal as data.",
       "properties": {
         "command": {
           "type": [
@@ -13,9 +11,9 @@
           ]
         },
         "index": {
-          "description": "The refused command's position; absent when the final candidate as a whole failed an owner's validation.",
+          "description": "The refused command's position; absent when the final candidate as a\nwhole failed an owner's validation.",
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -32,13 +30,15 @@
         }
       },
       "required": [
-        "message",
         "owner",
-        "refusal"
+        "refusal",
+        "message"
       ],
       "type": "object"
     }
   },
+  "$id": "https://lash.dev/schemas/remote-config-transaction-outcome/v100",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "What a config transaction settled as.",
   "oneOf": [
     {
@@ -47,13 +47,11 @@
       "properties": {
         "base_revision": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "kind": {
-          "enum": [
-            "applied"
-          ],
+          "const": "applied",
           "type": "string"
         },
         "outputs": {
@@ -62,43 +60,41 @@
         },
         "revision": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "base_revision",
         "kind",
-        "outputs",
-        "revision"
+        "base_revision",
+        "revision",
+        "outputs"
       ],
       "type": "object"
     },
     {
       "additionalProperties": false,
-      "description": "The transaction was written against `expected`, but the session's config was at `actual`: nothing was published.",
+      "description": "The transaction was written against `expected`, but the session's\nconfig was at `actual`: nothing was published.",
       "properties": {
         "actual": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "expected": {
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "kind": {
-          "enum": [
-            "stale"
-          ],
+          "const": "stale",
           "type": "string"
         }
       },
       "required": [
-        "actual",
+        "kind",
         "expected",
-        "kind"
+        "actual"
       ],
       "type": "object"
     },
@@ -107,13 +103,11 @@
       "description": "An owner refused: nothing was published.",
       "properties": {
         "kind": {
-          "enum": [
-            "refused"
-          ],
+          "const": "refused",
           "type": "string"
         },
         "refusal": {
-          "$ref": "#/definitions/RemoteConfigRefusal"
+          "$ref": "#/$defs/RemoteConfigRefusal"
         }
       },
       "required": [

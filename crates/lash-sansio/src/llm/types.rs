@@ -554,6 +554,17 @@ impl ProviderFileScope {
     }
 }
 
+fn inline_bytes_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let mut schema = Vec::<u8>::json_schema(generator);
+    if let Some(items) = schema
+        .get_mut("items")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        items.remove("maximum");
+    }
+    schema
+}
+
 /// The ownership-explicit attachment source at the LLM/content seam.
 ///
 /// Inline bytes are transient and must be normalized to `Stored` before a
@@ -564,6 +575,7 @@ impl ProviderFileScope {
 pub enum AttachmentSource {
     Inline {
         media_type: MediaType,
+        #[schemars(schema_with = "inline_bytes_schema")]
         bytes: Vec<u8>,
     },
     Stored {

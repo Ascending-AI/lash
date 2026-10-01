@@ -1938,7 +1938,7 @@ features = []
 package = "schemars"
 version = "=0.8.22"
 default-features = false
-features = ["chrono", "default", "derive", "schemars_derive"]
+features = ["default", "derive", "schemars_derive"]
 
 [dependencies.p0322]
 package = "schemars"

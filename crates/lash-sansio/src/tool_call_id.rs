@@ -398,15 +398,15 @@ impl<'de> serde::Deserialize<'de> for ToolCallId {
 }
 
 impl schemars::JsonSchema for ToolCallId {
-    fn is_referenceable() -> bool {
-        false
+    fn inline_schema() -> bool {
+        true
     }
 
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         String::schema_name()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         String::json_schema(generator)
     }
 }
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn json_schema_is_the_plain_string_schema() {
-        let mut generator = schemars::r#gen::SchemaGenerator::default();
+        let mut generator = schemars::SchemaGenerator::default();
         assert_eq!(
             serde_json::to_value(<ToolCallId as schemars::JsonSchema>::json_schema(
                 &mut generator

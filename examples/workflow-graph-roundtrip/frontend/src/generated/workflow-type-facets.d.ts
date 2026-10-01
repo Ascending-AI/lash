@@ -3,7 +3,9 @@
 /**
  * A serialized value-type expression.
  *
- * Host decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.
+ * Host decoders must refuse unknown variants. `TypeExpr` is decoded only
+ * after its graph or facet carrier version is accepted; adding a variant
+ * therefore requires the owning carrier version to advance.
  */
 export type TypeExpr =
   | ('Any' | 'Str' | 'Int' | 'Float' | 'Bool' | 'Dict')
@@ -43,7 +45,8 @@ export type ProcessType =
  */
 export type UnionMembers = [TypeExpr, TypeExpr, ...TypeExpr[]];
 /**
- * Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.
+ * Whether a diagnostic establishes an admission failure for the analyzed
+ * program and host environment or gives advice without establishing a failure.
  */
 export type WorkflowDiagnosticClassification = 'definite' | 'advisory';
 /**
@@ -101,6 +104,10 @@ export type WorkflowDiagnosticKind =
   | 'module_hash'
   | 'invalid_ast';
 /**
+ * A deterministic node identifier minted from structural owner and AST path.
+ */
+export type WorkflowNodeId = string;
+/**
  * One structural step in a [`WorkflowSlotPath`].
  */
 export type WorkflowSlotPathSegment =
@@ -116,6 +123,14 @@ export type WorkflowSlotPathSegment =
   | {
       index: number;
     };
+/**
+ * An unambiguous address for one input location inside a workflow node.
+ *
+ * The serialized list is authoritative. [`Display`](std::fmt::Display) is a
+ * derived spelling for text-only host contracts; field names use JSON string
+ * quoting so they cannot collide with structural indexes or separators.
+ */
+export type WorkflowSlotPath = WorkflowSlotPathSegment[];
 
 export interface WorkflowNodeTypeFacets {
   available_variables?: WorkflowTypedVariable[];
@@ -141,8 +156,8 @@ export interface WorkflowTypeDiagnostic {
   classification: WorkflowDiagnosticClassification;
   kind: WorkflowDiagnosticKind;
   message: string;
-  node_id: string;
-  slot?: WorkflowSlotPathSegment[] | null;
+  node_id: WorkflowNodeId;
+  slot?: WorkflowSlotPath | null;
   span?: Span | null;
   [k: string]: unknown;
 }
@@ -152,7 +167,7 @@ export interface Span {
   [k: string]: unknown;
 }
 export interface WorkflowExpectedArgument {
-  slot: WorkflowSlotPathSegment[];
+  slot: WorkflowSlotPath;
   ty: TypeExpr;
   [k: string]: unknown;
 }

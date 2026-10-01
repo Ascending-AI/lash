@@ -1,6 +1,6 @@
 use anyhow::{Result, ensure};
 use rand_chacha::rand_core::RngCore;
-use schemars::{JsonSchema, r#gen::SchemaGenerator, schema::Schema};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,14 +19,12 @@ struct Probability(#[schemars(range(min = 0, max = 1))] f64);
 
 fn array_schema<T: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {
     let mut schema = <Vec<(T, Probability)>>::json_schema(generator);
-    if let Schema::Object(object) = &mut schema {
-        object.array().min_items = Some(1);
-    }
+    schema.insert("minItems".to_string(), serde_json::json!(1));
     schema
 }
 
 impl JsonSchema for Distribution {
-    fn schema_name() -> String {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
         "Distribution".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {

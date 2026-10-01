@@ -174,17 +174,15 @@ macro_rules! string_identity_surface {
         }
 
         impl schemars::JsonSchema for $name {
-            fn is_referenceable() -> bool {
-                false
+            fn inline_schema() -> bool {
+                true
             }
 
-            fn schema_name() -> String {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
                 <String as schemars::JsonSchema>::schema_name()
             }
 
-            fn json_schema(
-                generator: &mut schemars::r#gen::SchemaGenerator,
-            ) -> schemars::schema::Schema {
+            fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
                 <String as schemars::JsonSchema>::json_schema(generator)
             }
         }
@@ -594,7 +592,7 @@ mod tests {
     /// published tool and process schema that carries an identity.
     #[test]
     fn json_schema_is_the_plain_string_schema() {
-        let mut generator = schemars::r#gen::SchemaGenerator::default();
+        let mut generator = schemars::SchemaGenerator::default();
         let string_schema = serde_json::to_value(<String as schemars::JsonSchema>::json_schema(
             &mut generator,
         ))

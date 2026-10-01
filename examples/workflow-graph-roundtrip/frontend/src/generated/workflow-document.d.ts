@@ -1,9 +1,16 @@
 /* Generated from the example Rust HTTP DTOs by npm run generate:types. Do not edit directly. */
 
 /**
- * A node's display name together with the one fact that decides whether the host may throw it away: who chose it.
+ * A node's display name together with the one fact that decides whether the
+ * host may throw it away: who chose it.
  *
- * Rendering emits an `@label` annotation only for an authored name, so a payload that carries a title without saying where the name came from is a rename waiting to evaporate. The tag is therefore mandatory and carries the title inside the variant: "title present, tag absent" is unrepresentable, and an unknown tag is a decode error rather than a silent `derived`. The wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the browser client already writes on every node.
+ * Rendering emits an `@label` annotation only for an authored name, so a
+ * payload that carries a title without saying where the name came from is a
+ * rename waiting to evaporate. The tag is therefore mandatory and carries the
+ * title inside the variant: "title present, tag absent" is unrepresentable,
+ * and an unknown tag is a decode error rather than a silent `derived`. The
+ * wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the
+ * browser client already writes on every node.
  */
 export type NodeData = {
   availableVars?: TypedVariable[];
@@ -23,7 +30,9 @@ export type NodeData = {
   operation?: string | null;
   params?: EditableProcessField[];
   /**
-   * The receiver the catalog entry this node came from belongs to, carried so a call node posted with no `expression` can be synthesized against the receiver it actually names (FIG-3178).
+   * The receiver the catalog entry this node came from belongs to, carried
+   * so a call node posted with no `expression` can be synthesized against
+   * the receiver it actually names (FIG-3178).
    */
   receiver?: string | null;
   signals?: EditableProcessField[];
@@ -34,11 +43,13 @@ export type NodeData = {
   [k: string]: unknown;
 } & NodeData1;
 /**
- * Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.
+ * Whether a diagnostic establishes an admission failure for the analyzed
+ * program and host environment or gives advice without establishing a failure.
  */
 export type WorkflowDiagnosticClassification = 'definite' | 'advisory';
 /**
- * An editable field carries its authored kind at every depth. Literal keys are data, including `$expr`, `kind` and `value`.
+ * An editable field carries its authored kind at every depth. Literal keys
+ * are data, including `$expr`, `kind` and `value`.
  */
 export type EditableValue =
   | {
@@ -86,7 +97,9 @@ export type NodeData1 =
 
 export interface WorkflowDocument {
   /**
-   * The source identity of the admitted artifact this document's graph is the view of; absent for a draft whose source does not admit. A run overlay shows a run's events only when their `definition` is this one.
+   * The source identity of the admitted artifact this document's graph
+   * is the view of; absent for a draft whose source does not admit. A run
+   * overlay shows a run's events only when their `definition` is this one.
    */
   definition?: string | null;
   edges: FlowEdge[];

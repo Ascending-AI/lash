@@ -10,7 +10,7 @@
     "generate:types": "python3 ../scripts/generate-contract-schema.py && node scripts/generate-contract-types.mjs",
     "preview": "vite preview",
     "test": "npm run check:types && vitest run",
-    "check:generated-types": "node scripts/generate-contract-types.mjs --check && tsc --noEmit"
+    "check:generated-types": "node --test scripts/schema-for-typescript.test.mjs && node scripts/generate-contract-types.mjs --check && tsc --noEmit"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",

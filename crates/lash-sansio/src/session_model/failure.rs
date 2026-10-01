@@ -989,11 +989,11 @@ impl serde::Serialize for FailureCode {
 }
 
 impl schemars::JsonSchema for FailureCode {
-    fn schema_name() -> String {
-        "FailureCode".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "FailureCode".into()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         <String as schemars::JsonSchema>::json_schema(generator)
     }
 }
@@ -1033,13 +1033,11 @@ macro_rules! string_wire_serde {
         }
 
         impl schemars::JsonSchema for $ty {
-            fn schema_name() -> String {
-                stringify!($ty).to_string()
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($ty).into()
             }
 
-            fn json_schema(
-                generator: &mut schemars::r#gen::SchemaGenerator,
-            ) -> schemars::schema::Schema {
+            fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
                 <String as schemars::JsonSchema>::json_schema(generator)
             }
         }

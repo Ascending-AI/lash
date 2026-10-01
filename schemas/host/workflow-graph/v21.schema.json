@@ -1,8 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v21",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "AssignPathStep": {
       "oneOf": [
         {
@@ -21,7 +18,7 @@
           "additionalProperties": false,
           "properties": {
             "Index": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -38,7 +35,7 @@
         },
         "steps": {
           "items": {
-            "$ref": "#/definitions/AssignPathStep"
+            "$ref": "#/$defs/AssignPathStep"
           },
           "type": "array"
         }
@@ -49,15 +46,15 @@
       "type": "object"
     },
     "AstPath": {
-      "description": "A node's address in a `Program`: the root it hangs from plus the `Expr::children()` index chain that reaches it.",
+      "description": "A node's address in a `Program`: the root it hangs from plus the\n`Expr::children()` index chain that reaches it.",
       "properties": {
         "root": {
-          "$ref": "#/definitions/AstRoot"
+          "$ref": "#/$defs/AstRoot"
         },
         "steps": {
           "items": {
             "format": "uint32",
-            "minimum": 0.0,
+            "minimum": 0,
             "type": "integer"
           },
           "type": "array"
@@ -69,7 +66,7 @@
       "type": "object"
     },
     "AstRoot": {
-      "description": "Which tree an [`AstPath`] walks down: `Program::main`, or one entry of `Program::declarations`.",
+      "description": "Which tree an [`AstPath`] walks down: `Program::main`, or one entry of\n`Program::declarations`.",
       "oneOf": [
         {
           "enum": [
@@ -82,7 +79,7 @@
           "properties": {
             "declaration": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -99,7 +96,7 @@
           "type": "string"
         },
         "body": {
-          "$ref": "#/definitions/Expr"
+          "$ref": "#/$defs/Expr"
         }
       },
       "required": [
@@ -109,7 +106,7 @@
       "type": "object"
     },
     "ExecutionNodeKind": {
-      "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may expose more than one site kind. Declaration order is the canonical order: a node's execution sites sort by it, so reordering the variants changes the serialized workflow graph and needs a graph schema bump.",
+      "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may\nexpose more than one site kind. Declaration order is the canonical order:\na node's execution sites sort by it, so reordering the variants changes\nthe serialized workflow graph and needs a graph schema bump.",
       "enum": [
         "resource_operation",
         "sleep",
@@ -138,7 +135,7 @@
           "properties": {
             "Block": {
               "items": {
-                "$ref": "#/definitions/Expr"
+                "$ref": "#/$defs/Expr"
               },
               "type": "array"
             }
@@ -154,15 +151,15 @@
             "LabelAnnotated": {
               "properties": {
                 "expr": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "label": {
-                  "$ref": "#/definitions/LabelMetadata"
+                  "$ref": "#/$defs/LabelMetadata"
                 }
               },
               "required": [
-                "expr",
-                "label"
+                "label",
+                "expr"
               ],
               "type": "object"
             }
@@ -173,10 +170,8 @@
           "type": "object"
         },
         {
+          "const": "Undefined",
           "description": "The JavaScript `undefined` value. This node is AST-only.",
-          "enum": [
-            "Undefined"
-          ],
           "type": "string"
         },
         {
@@ -193,10 +188,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "A number literal. Its identity and stored form follow the one IR number rule ([`number`]): distinct `-0`, one canonical NaN, and a lossless spelling for non-finite values.",
+          "description": "A number literal. Its identity and stored form follow the one IR\nnumber rule ([`number`]): distinct `-0`, one canonical NaN, and a\nlossless spelling for non-finite values.",
           "properties": {
             "Number": {
-              "$ref": "#/definitions/IrNumber"
+              "$ref": "#/$defs/IrNumber"
             }
           },
           "required": [
@@ -233,7 +228,7 @@
           "properties": {
             "List": {
               "items": {
-                "$ref": "#/definitions/Expr"
+                "$ref": "#/$defs/Expr"
               },
               "type": "array"
             }
@@ -248,16 +243,16 @@
           "properties": {
             "Record": {
               "items": {
-                "items": [
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
                   {
                     "type": "string"
                   },
                   {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   }
                 ],
-                "maxItems": 2,
-                "minItems": 2,
                 "type": "array"
               },
               "type": "array"
@@ -274,15 +269,15 @@
             "Assign": {
               "properties": {
                 "expr": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "target": {
-                  "$ref": "#/definitions/AssignTarget"
+                  "$ref": "#/$defs/AssignTarget"
                 }
               },
               "required": [
-                "expr",
-                "target"
+                "target",
+                "expr"
               ],
               "type": "object"
             }
@@ -298,19 +293,19 @@
             "If": {
               "properties": {
                 "condition": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "else_block": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "then_block": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
                 "condition",
-                "else_block",
-                "then_block"
+                "then_block",
+                "else_block"
               ],
               "type": "object"
             }
@@ -322,12 +317,12 @@
         },
         {
           "additionalProperties": false,
-          "description": "Iteration: for each element of `iterable`, bind it to `binding`, run `bind` (the generated code that binds the element into the authored names, if the front end needs any), then run `body`. `bind` belongs to the loop itself; only `body` holds the authored statements.",
+          "description": "Iteration: for each element of `iterable`, bind it to `binding`, run\n`bind` (the generated code that binds the element into the authored\nnames, if the front end needs any), then run `body`. `bind` belongs to\nthe loop itself; only `body` holds the authored statements.",
           "properties": {
             "For": {
               "properties": {
                 "authored_binding": {
-                  "description": "The authored name of a renamed lexical element binding. Display metadata only; `binding` and `bind` retain their linker identities.",
+                  "description": "The authored name of a renamed lexical element binding. Display\nmetadata only; `binding` and `bind` retain their linker identities.",
                   "type": [
                     "string",
                     "null"
@@ -336,7 +331,7 @@
                 "bind": {
                   "anyOf": [
                     {
-                      "$ref": "#/definitions/Expr"
+                      "$ref": "#/$defs/Expr"
                     },
                     {
                       "type": "null"
@@ -347,16 +342,16 @@
                   "type": "string"
                 },
                 "body": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "iterable": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
                 "binding",
-                "body",
-                "iterable"
+                "iterable",
+                "body"
               ],
               "type": "object"
             }
@@ -372,15 +367,15 @@
             "While": {
               "properties": {
                 "body": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "condition": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "body",
-                "condition"
+                "condition",
+                "body"
               ],
               "type": "object"
             }
@@ -392,20 +387,20 @@
         },
         {
           "additionalProperties": false,
-          "description": "A language-neutral structural role around front-end-generated IR.\n\nA role never changes what runs: it executes, links and types exactly as `expr`. It tells every structural consumer (ownership, the projector, a dialect's printer) what the wrapped shape *is*, so none of them has to infer structure from generated names. [`validate_ast`] refuses a role whose `expr` does not have the role's shape.",
+          "description": "A language-neutral structural role around front-end-generated IR.\n\nA role never changes what runs: it executes, links and types exactly\nas `expr`. It tells every structural consumer (ownership, the\nprojector, a dialect's printer) what the wrapped shape *is*, so none of\nthem has to infer structure from generated names. [`validate_ast`]\nrefuses a role whose `expr` does not have the role's shape.",
           "properties": {
             "Role": {
               "properties": {
                 "expr": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "role": {
-                  "$ref": "#/definitions/StructuralRole"
+                  "$ref": "#/$defs/StructuralRole"
                 }
               },
               "required": [
-                "expr",
-                "role"
+                "role",
+                "expr"
               ],
               "type": "object"
             }
@@ -441,15 +436,15 @@
             "HostDescriptorConstructor": {
               "properties": {
                 "input": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "type_name": {
                   "type": "string"
                 }
               },
               "required": [
-                "input",
-                "type_name"
+                "type_name",
+                "input"
               ],
               "type": "object"
             }
@@ -463,7 +458,7 @@
           "additionalProperties": false,
           "properties": {
             "ResourceRef": {
-              "$ref": "#/definitions/ResourceRefExpr"
+              "$ref": "#/$defs/ResourceRefExpr"
             }
           },
           "required": [
@@ -478,7 +473,7 @@
               "properties": {
                 "args": {
                   "items": {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   },
                   "type": "array"
                 },
@@ -486,13 +481,13 @@
                   "type": "string"
                 },
                 "receiver": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "args",
+                "receiver",
                 "operation",
-                "receiver"
+                "args"
               ],
               "type": "object"
             }
@@ -506,7 +501,7 @@
           "additionalProperties": false,
           "properties": {
             "Await": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -518,7 +513,7 @@
           "additionalProperties": false,
           "properties": {
             "SleepFor": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -550,7 +545,7 @@
           "additionalProperties": false,
           "properties": {
             "ResultUnwrap": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -562,7 +557,7 @@
           "additionalProperties": false,
           "properties": {
             "Print": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -574,7 +569,7 @@
           "additionalProperties": false,
           "properties": {
             "Finish": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -586,7 +581,7 @@
           "additionalProperties": false,
           "properties": {
             "Fail": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -601,7 +596,7 @@
               "properties": {
                 "args": {
                   "items": {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   },
                   "type": "array"
                 },
@@ -610,8 +605,8 @@
                 }
               },
               "required": [
-                "args",
-                "name"
+                "name",
+                "args"
               ],
               "type": "object"
             }
@@ -623,10 +618,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "A user-defined function value. This node is AST-only; the parser never produces it. Captures are copied when the closure is created.",
+          "description": "A user-defined function value. This node is AST-only; the parser never\nproduces it. Captures are copied when the closure is created.",
           "properties": {
             "Function": {
-              "$ref": "#/definitions/FunctionExpr"
+              "$ref": "#/$defs/FunctionExpr"
             }
           },
           "required": [
@@ -636,10 +631,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "An inline process body written where a `Process`-typed slot is expected. This node is AST-only and never survives the link: the linker's expected-type hook lifts it to a hoisted [`ProcessDecl`], and a literal whose slot is not a process is a type error.",
+          "description": "An inline process body written where a `Process`-typed slot is\nexpected. This node is AST-only and never survives the link: the\nlinker's expected-type hook lifts it to a hoisted [`ProcessDecl`], and a\nliteral whose slot is not a process is a type error.",
           "properties": {
             "ProcessLiteral": {
-              "$ref": "#/definitions/ProcessLiteralExpr"
+              "$ref": "#/$defs/ProcessLiteralExpr"
             }
           },
           "required": [
@@ -654,17 +649,17 @@
               "properties": {
                 "args": {
                   "items": {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   },
                   "type": "array"
                 },
                 "function": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "args",
-                "function"
+                "function",
+                "args"
               ],
               "type": "object"
             }
@@ -676,27 +671,27 @@
         },
         {
           "additionalProperties": false,
-          "description": "Calls the function stored at a member of `receiver`, with the receiver value as the callee's receiver.\n\n`receiver` is evaluated once, then `method` (and its key, when it is computed), then the member is read, then `args`, and the call binds the receiver into the callee's [`FunctionExpr::receiver`] slot. This is the member call of a language with method receivers; a plain [`Expr::Call`] binds `undefined`.",
+          "description": "Calls the function stored at a member of `receiver`, with the receiver\nvalue as the callee's receiver.\n\n`receiver` is evaluated once, then `method` (and its key, when it is\ncomputed), then the member is read, then `args`, and the call binds the\nreceiver into the callee's [`FunctionExpr::receiver`] slot. This is the\nmember call of a language with method receivers; a plain [`Expr::Call`]\nbinds `undefined`.",
           "properties": {
             "MethodCall": {
               "properties": {
                 "args": {
                   "items": {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   },
                   "type": "array"
                 },
                 "method": {
-                  "$ref": "#/definitions/MethodKey"
+                  "$ref": "#/$defs/MethodKey"
                 },
                 "receiver": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "args",
+                "receiver",
                 "method",
-                "receiver"
+                "args"
               ],
               "type": "object"
             }
@@ -708,27 +703,27 @@
         },
         {
           "additionalProperties": false,
-          "description": "Calls `function` with an explicit receiver: `this`, then `function`, then `args` are evaluated in that order. A front end uses it where a builtin passes a receiver of its choosing (a callback's `thisArg`, a JSON replacer's holder).",
+          "description": "Calls `function` with an explicit receiver: `this`, then `function`,\nthen `args` are evaluated in that order. A front end uses it where a\nbuiltin passes a receiver of its choosing (a callback's `thisArg`, a\nJSON replacer's holder).",
           "properties": {
             "ThisCall": {
               "properties": {
                 "args": {
                   "items": {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   },
                   "type": "array"
                 },
                 "function": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "this": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "args",
+                "this",
                 "function",
-                "this"
+                "args"
               ],
               "type": "object"
             }
@@ -740,13 +735,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "Calls a declared [`FunctionDecl`] by name.\n\nThe parser never produces this node: source spells a call to a declared function exactly like a builtin call, and the linker is the resolver that rewrites the `BuiltinCall` whose name it recognises. Keeping the resolved shape distinct is what lets the compiler emit a static callee and lets every later pass tell a pure declared call apart from a first-class closure call.",
+          "description": "Calls a declared [`FunctionDecl`] by name.\n\nThe parser never produces this node: source spells a call to a declared\nfunction exactly like a builtin call, and the linker is the resolver\nthat rewrites the `BuiltinCall` whose name it recognises. Keeping the\nresolved shape distinct is what lets the compiler emit a static callee\nand lets every later pass tell a pure declared call apart from a\nfirst-class closure call.",
           "properties": {
             "FunctionCall": {
               "properties": {
                 "args": {
                   "items": {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   },
                   "type": "array"
                 },
@@ -755,8 +750,8 @@
                 }
               },
               "required": [
-                "args",
-                "function"
+                "function",
+                "args"
               ],
               "type": "object"
             }
@@ -773,15 +768,15 @@
             "Map": {
               "properties": {
                 "function": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "items": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "function",
-                "items"
+                "items",
+                "function"
               ],
               "type": "object"
             }
@@ -793,10 +788,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "AST-only structured exception scope. The parser intentionally has no production for this node; dialects construct it directly.",
+          "description": "AST-only structured exception scope. The parser intentionally has no\nproduction for this node; dialects construct it directly.",
           "properties": {
             "Try": {
-              "$ref": "#/definitions/TryExpr"
+              "$ref": "#/$defs/TryExpr"
             }
           },
           "required": [
@@ -809,7 +804,7 @@
           "description": "AST-only explicit throw. The thrown value is transferred unchanged.",
           "properties": {
             "Throw": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -819,10 +814,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "AST-only JavaScript function return. The compiler runs every enclosing `finally` before returning from the current function.",
+          "description": "AST-only JavaScript function return. The compiler runs every enclosing\n`finally` before returning from the current function.",
           "properties": {
             "Return": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -839,12 +834,12 @@
                   "type": "string"
                 },
                 "target": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "field",
-                "target"
+                "target",
+                "field"
               ],
               "type": "object"
             }
@@ -860,15 +855,15 @@
             "Index": {
               "properties": {
                 "index": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "target": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "index",
-                "target"
+                "target",
+                "index"
               ],
               "type": "object"
             }
@@ -885,15 +880,15 @@
             "JavaScriptUnary": {
               "properties": {
                 "expr": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "op": {
-                  "$ref": "#/definitions/JavaScriptUnaryOp"
+                  "$ref": "#/$defs/JavaScriptUnaryOp"
                 }
               },
               "required": [
-                "expr",
-                "op"
+                "op",
+                "expr"
               ],
               "type": "object"
             }
@@ -910,13 +905,13 @@
             "JavaScriptBinary": {
               "properties": {
                 "left": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "op": {
-                  "$ref": "#/definitions/JavaScriptBinaryOp"
+                  "$ref": "#/$defs/JavaScriptBinaryOp"
                 },
                 "right": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
@@ -939,13 +934,13 @@
             "JavaScriptLogical": {
               "properties": {
                 "left": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 "op": {
-                  "$ref": "#/definitions/JavaScriptLogicalOp"
+                  "$ref": "#/$defs/JavaScriptLogicalOp"
                 },
                 "right": {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
@@ -963,10 +958,36 @@
         }
       ]
     },
+    "FunctionDecl": {
+      "description": "A user-defined pure synchronous function.\n\nA function is the language's only reusable *synchronous* abstraction:\n`process` is durable and asynchronous, so shared pure logic previously had\nto be inlined at every use. The declaration is deliberately narrower than\n`process`: parameters and the return type are both mandatory, and the linker\nrejects every effect inside the body. That ban is what keeps effect identity\nuntouched \u2014 every effect stays at a stable top-level syntactic site, so\ncall-site exactly-once identity and continuation snapshots see no new shape.",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Expr"
+        },
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "items": {
+            "$ref": "#/$defs/FunctionParam"
+          },
+          "type": "array"
+        },
+        "return_ty": {
+          "$ref": "#/$defs/TypeExpr"
+        }
+      },
+      "required": [
+        "name",
+        "return_ty",
+        "body"
+      ],
+      "type": "object"
+    },
     "FunctionExpr": {
       "properties": {
         "body": {
-          "$ref": "#/definitions/Expr"
+          "$ref": "#/$defs/Expr"
         },
         "captures": {
           "items": {
@@ -975,7 +996,7 @@
           "type": "array"
         },
         "js_name": {
-          "description": "The ECMA-262 `name` own property the closure value carries: the function's own binding name, or the name a `NamedEvaluation` / `SetFunctionName` context assigned it. `None` is the anonymous `\"\"` ECMA reports for a function no naming context reached.",
+          "description": "The ECMA-262 `name` own property the closure value carries: the\nfunction's own binding name, or the name a `NamedEvaluation` /\n`SetFunctionName` context assigned it. `None` is the anonymous `\"\"`\nECMA reports for a function no naming context reached.",
           "type": [
             "string",
             "null"
@@ -994,7 +1015,7 @@
           "type": "array"
         },
         "receiver": {
-          "description": "The slot the call's receiver is bound to, for a function that reads it. A call through [`Expr::MethodCall`] or [`Expr::ThisCall`] binds the receiver it names; every other call binds `undefined`. A function without one (an arrow, or one that never reads its receiver) ignores the receiver entirely; an arrow reads its enclosing function's slot as an ordinary capture.",
+          "description": "The slot the call's receiver is bound to, for a function that reads\nit. A call through [`Expr::MethodCall`] or [`Expr::ThisCall`] binds the\nreceiver it names; every other call binds `undefined`. A function\nwithout one (an arrow, or one that never reads its receiver) ignores\nthe receiver entirely; an arrow reads its enclosing function's slot as\nan ordinary capture.",
           "type": [
             "string",
             "null"
@@ -1012,7 +1033,7 @@
           "type": "string"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -1028,7 +1049,7 @@
           "type": "number"
         },
         {
-          "$ref": "#/definitions/NonFiniteNumber"
+          "$ref": "#/$defs/NonFiniteNumber"
         }
       ],
       "description": "The stored form of an IR number literal."
@@ -1078,10 +1099,8 @@
           "type": "string"
         },
         {
-          "description": "ECMA-262 ToString: `String(value)` and a template substitution. It asks an object for its primitive with the string hint, `toString` first.",
-          "enum": [
-            "ToString"
-          ],
+          "const": "ToString",
+          "description": "ECMA-262 ToString: `String(value)` and a template substitution. It\nasks an object for its primitive with the string hint, `toString`\nfirst.",
           "type": "string"
         }
       ]
@@ -1122,7 +1141,7 @@
           "additionalProperties": false,
           "properties": {
             "Index": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -1142,28 +1161,28 @@
       "type": "string"
     },
     "ProcessLiteralExpr": {
-      "description": "The authored shape of an inline process body, as a dialect lowers it.\n\n`params` carries the parameter names and their declared types, so a TypeScript arrow's annotations reach the lifted declaration's signature instead of widening to `Any`. `body` is the same wrapper a process literal run lowers to: the authored statements inside the process-failure wrapper, with the params passed through by name.",
+      "description": "The authored shape of an inline process body, as a dialect lowers it.\n\n`params` carries the parameter names and their declared types, so a\nTypeScript arrow's annotations reach the lifted declaration's signature\ninstead of widening to `Any`. `body` is the same wrapper a process literal\nrun lowers to: the authored statements inside the process-failure wrapper,\nwith the params passed through by name.",
       "properties": {
         "body": {
-          "$ref": "#/definitions/Expr"
+          "$ref": "#/$defs/Expr"
         },
         "hidden_args": {
-          "description": "Immutable, durably representable cell locals the body reads; each becomes a hidden start argument carrying the value the variable had when the process started (FIG-2998).",
+          "description": "Immutable, durably representable cell locals the body reads; each\nbecomes a hidden start argument carrying the value the variable had\nwhen the process started (FIG-2998).",
           "items": {
-            "$ref": "#/definitions/ProcessParam"
+            "$ref": "#/$defs/ProcessParam"
           },
           "type": "array"
         },
         "params": {
           "items": {
-            "$ref": "#/definitions/ProcessParam"
+            "$ref": "#/$defs/ProcessParam"
           },
           "type": "array"
         },
         "return_ty": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TypeExpr"
+              "$ref": "#/$defs/TypeExpr"
             },
             {
               "type": "null"
@@ -1173,8 +1192,8 @@
         }
       },
       "required": [
-        "body",
-        "params"
+        "params",
+        "body"
       ],
       "type": "object"
     },
@@ -1186,9 +1205,7 @@
           "description": "Authored as a module declaration.",
           "properties": {
             "kind": {
-              "enum": [
-                "declared"
-              ],
+              "const": "declared",
               "type": "string"
             }
           },
@@ -1199,38 +1216,36 @@
         },
         {
           "additionalProperties": false,
-          "description": "Lifted by the linker from the inline process literal at `site`, the literal's path in the program before lifting. The lifted declaration's name digests that literal's body and site ([`super::lifted_process_identity`]). Its last `hidden_params` parameters are the literal's hidden start arguments, not authored parameters.",
+          "description": "Lifted by the linker from the inline process literal at `site`, the\nliteral's path in the program before lifting. The lifted declaration's\nname digests that literal's body and site\n([`super::lifted_process_identity`]). Its last `hidden_params`\nparameters are the literal's hidden start arguments, not authored\nparameters.",
           "properties": {
             "declared_return_ty": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/TypeExpr"
+                  "$ref": "#/$defs/TypeExpr"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "The authored settled output annotation. An inferred output remains on the declaration, so rendering can infer it again without inventing an annotation the source never declared."
+              "description": "The authored settled output annotation. An inferred output remains\non the declaration, so rendering can infer it again without\ninventing an annotation the source never declared."
             },
             "hidden_params": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             },
             "kind": {
-              "enum": [
-                "lifted"
-              ],
+              "const": "lifted",
               "type": "string"
             },
             "site": {
-              "$ref": "#/definitions/AstPath"
+              "$ref": "#/$defs/AstPath"
             }
           },
           "required": [
-            "hidden_params",
             "kind",
-            "site"
+            "site",
+            "hidden_params"
           ],
           "type": "object"
         }
@@ -1242,7 +1257,7 @@
           "type": "string"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -1258,7 +1273,7 @@
           "type": "string"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -1273,7 +1288,7 @@
           "type": "string"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -1288,9 +1303,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "unknown"
-              ],
+              "const": "unknown",
               "type": "string"
             }
           },
@@ -1303,25 +1316,23 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "known"
-              ],
+              "const": "known",
               "type": "string"
             },
             "output": {
-              "$ref": "#/definitions/TypeExpr"
+              "$ref": "#/$defs/TypeExpr"
             },
             "params": {
               "items": {
-                "$ref": "#/definitions/ProcessParamWire"
+                "$ref": "#/$defs/ProcessParamWire"
               },
               "type": "array"
             }
           },
           "required": [
             "kind",
-            "output",
-            "params"
+            "params",
+            "output"
           ],
           "type": "object"
         }
@@ -1343,8 +1354,8 @@
         }
       },
       "required": [
-        "alias",
-        "resource_type"
+        "resource_type",
+        "alias"
       ],
       "type": "object"
     },
@@ -1352,32 +1363,30 @@
       "properties": {
         "end": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "start": {
           "format": "uint",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "end",
-        "start"
+        "start",
+        "end"
       ],
       "type": "object"
     },
     "StructuralRole": {
-      "description": "The structural roles a front end marks its generated IR with.\n\nEach role is language-neutral: it names what a shape does, not the source construct that produced it, and each front end chooses which of its constructs lower to which role.",
+      "description": "The structural roles a front end marks its generated IR with.\n\nEach role is language-neutral: it names what a shape does, not the source\nconstruct that produced it, and each front end chooses which of its\nconstructs lower to which role.",
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "An authored nested statement scope. `expr` is a `Block` whose every element is a statement.",
+          "description": "An authored nested statement scope. `expr` is a `Block` whose every\nelement is a statement.",
           "properties": {
             "kind": {
-              "enum": [
-                "scope"
-              ],
+              "const": "scope",
               "type": "string"
             }
           },
@@ -1388,12 +1397,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "A statement list closed by a generated completion value. `expr` is a non-empty `Block`; every element but the last is a statement, and the last is the pure completion value the list evaluates to.",
+          "description": "A statement list closed by a generated completion value. `expr` is a\nnon-empty `Block`; every element but the last is a statement, and the\nlast is the pure completion value the list evaluates to.",
           "properties": {
             "kind": {
-              "enum": [
-                "completion"
-              ],
+              "const": "completion",
               "type": "string"
             }
           },
@@ -1404,12 +1411,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "A member assignment `root.path = value` that pins its reference base before evaluating the value. `expr` is `Block([base = object, (key = index)?, result = value, base.step = result, result])`, where `step` reads `key` when present. The value reads the pinned base only as the left operand of an arithmetic update (`base.step op operand`, the compound `object.step op= operand`); see [`AttributeAssignParts`].",
+          "description": "A member assignment `root.path = value` that pins its reference base\nbefore evaluating the value. `expr` is `Block([base = object,\n(key = index)?, result = value, base.step = result, result])`, where\n`step` reads `key` when present. The value reads the pinned base only\nas the left operand of an arithmetic update (`base.step op operand`,\nthe compound `object.step op= operand`); see [`AttributeAssignParts`].",
           "properties": {
             "kind": {
-              "enum": [
-                "attribute_assign"
-              ],
+              "const": "attribute_assign",
               "type": "string"
             }
           },
@@ -1420,12 +1425,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "A callback-driven collection transform (`map`, `filter`, ...). `expr` is `Block([receiver = r, callback = f, operand = x*, driver = function, result+])`: it binds the receiver, then the callback, then any further operands (an initial value, evaluated extra arguments), then a driver function that captures the receiver and the callback, and ends with the one or two expressions that run the driver and yield the transform's result. A transform whose call binds its member before its arguments evaluate puts everything after the receiver binding in the else of an `If` whose then arm is the bound member call: `Block([receiver = r, If { condition, then: MethodCall, else: Block([callback = f, operand = x*, driver = function, result+]) }])`. `operation` is the front end's name for the transform; structure never depends on it. See [`CollectionTransformParts`].",
+          "description": "A callback-driven collection transform (`map`, `filter`, ...). `expr`\nis `Block([receiver = r, callback = f, operand = x*, driver =\nfunction, result+])`: it binds the receiver, then the callback, then\nany further operands (an initial value, evaluated extra arguments),\nthen a driver function that captures the receiver and the callback,\nand ends with the one or two expressions that run the driver and yield\nthe transform's result. A transform whose call binds its member before\nits arguments evaluate puts everything after the receiver binding in\nthe else of an `If` whose then arm is the bound member call:\n`Block([receiver = r, If { condition, then: MethodCall, else:\nBlock([callback = f, operand = x*, driver = function, result+]) }])`.\n`operation` is the front end's name for the transform; structure never\ndepends on it. See [`CollectionTransformParts`].",
           "properties": {
             "kind": {
-              "enum": [
-                "collection_transform"
-              ],
+              "const": "collection_transform",
               "type": "string"
             },
             "operation": {
@@ -1440,12 +1443,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "A recursive JSON value traversal. The block binds its input and options, then runs a traversal or dispatches to it. This role is display metadata: its children and execution hashes are those of the block, so adding it preserves existing execution identities.",
+          "description": "A recursive JSON value traversal. The block binds its input and\noptions, then runs a traversal or dispatches to it. This role is\ndisplay metadata: its children and execution hashes are those of the\nblock, so adding it preserves existing execution identities.",
           "properties": {
             "kind": {
-              "enum": [
-                "json_traversal"
-              ],
+              "const": "json_traversal",
               "type": "string"
             }
           },
@@ -1456,12 +1457,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "The process failure wrapper around an authored run body. `expr` is `Try { body: Finish(Call { function: run, args }), catch e: Fail(e) }`, where `run` is a `Function` or a builtin call whose first argument is one; the run function's body is the authored process body.",
+          "description": "The process failure wrapper around an authored run body. `expr` is\n`Try { body: Finish(Call { function: run, args }), catch e: Fail(e) }`,\nwhere `run` is a `Function` or a builtin call whose first argument is\none; the run function's body is the authored process body.",
           "properties": {
             "kind": {
-              "enum": [
-                "process_wrapper"
-              ],
+              "const": "process_wrapper",
               "type": "string"
             }
           },
@@ -1475,12 +1474,12 @@
     "TryExpr": {
       "properties": {
         "body": {
-          "$ref": "#/definitions/Expr"
+          "$ref": "#/$defs/Expr"
         },
         "catch": {
           "anyOf": [
             {
-              "$ref": "#/definitions/CatchClause"
+              "$ref": "#/$defs/CatchClause"
             },
             {
               "type": "null"
@@ -1490,7 +1489,7 @@
         "finally": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             {
               "type": "null"
@@ -1504,7 +1503,7 @@
       "type": "object"
     },
     "TypeExpr": {
-      "description": "A serialized value-type expression.\n\nHost decoders must refuse unknown variants. `TypeExpr` is decoded only after its graph or facet carrier version is accepted; adding a variant therefore requires the owning carrier version to advance.",
+      "description": "A serialized value-type expression.\n\nHost decoders must refuse unknown variants. `TypeExpr` is decoded only\nafter its graph or facet carrier version is accepted; adding a variant\ntherefore requires the owning carrier version to advance.",
       "oneOf": [
         {
           "enum": [
@@ -1518,10 +1517,8 @@
           "type": "string"
         },
         {
-          "description": "The literal `null` type; usually only useful as part of a `Union` (e.g. `str | null` for a nullable field).",
-          "enum": [
-            "Null"
-          ],
+          "const": "Null",
+          "description": "The literal `null` type; usually only useful as part of a\n`Union` (e.g. `str | null` for a nullable field).",
           "type": "string"
         },
         {
@@ -1543,7 +1540,7 @@
           "additionalProperties": false,
           "properties": {
             "List": {
-              "$ref": "#/definitions/TypeExpr"
+              "$ref": "#/$defs/TypeExpr"
             }
           },
           "required": [
@@ -1556,7 +1553,7 @@
           "properties": {
             "Object": {
               "items": {
-                "$ref": "#/definitions/TypeField"
+                "$ref": "#/$defs/TypeField"
               },
               "type": "array"
             }
@@ -1582,7 +1579,7 @@
           "additionalProperties": false,
           "properties": {
             "Process": {
-              "$ref": "#/definitions/ProcessType"
+              "$ref": "#/$defs/ProcessType"
             }
           },
           "required": [
@@ -1594,7 +1591,7 @@
           "additionalProperties": false,
           "properties": {
             "TriggerHandle": {
-              "$ref": "#/definitions/TypeExpr"
+              "$ref": "#/$defs/TypeExpr"
             }
           },
           "required": [
@@ -1607,7 +1604,7 @@
           "description": "Union of alternative type shapes, e.g. `str | int | null`.",
           "properties": {
             "Union": {
-              "$ref": "#/definitions/UnionMembers"
+              "$ref": "#/$defs/UnionMembers"
             }
           },
           "required": [
@@ -1627,25 +1624,25 @@
           "type": "boolean"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
         "name",
-        "optional",
-        "ty"
+        "ty",
+        "optional"
       ],
       "type": "object"
     },
     "UnionMembers": {
       "items": {
-        "$ref": "#/definitions/TypeExpr"
+        "$ref": "#/$defs/TypeExpr"
       },
       "minItems": 2,
       "type": "array"
     },
     "UpdateOperator": {
-      "description": "An arithmetic operator a compound attribute assignment applies to the attribute's current value. Named neutrally: a front end's IR decides whether the operation is Lashlang's or ECMA-262's.",
+      "description": "An arithmetic operator a compound attribute assignment applies to the\nattribute's current value. Named neutrally: a front end's IR decides\nwhether the operation is Lashlang's or ECMA-262's.",
       "enum": [
         "add",
         "subtract",
@@ -1663,7 +1660,7 @@
         },
         "version": {
           "format": "uint32",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
@@ -1674,19 +1671,17 @@
       "type": "object"
     },
     "WorkflowArgument": {
-      "description": "One call or effect argument in graph order.\n\nType facets address these values with a serialized [`WorkflowSlotPath`]. Its typed call, argument, field, and index segments cannot collide when a field contains punctuation. Nodes with several nested receiver calls add a call segment in depth-first IR walk order.",
+      "description": "One call or effect argument in graph order.\n\nType facets address these values with a serialized [`WorkflowSlotPath`].\nIts typed call, argument, field, and index segments cannot collide when a\nfield contains punctuation. Nodes with several nested receiver calls add a\ncall segment in depth-first IR walk order.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "positional"
-              ],
+              "const": "positional",
               "type": "string"
             },
             "value": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
@@ -1700,30 +1695,28 @@
           "properties": {
             "fields": {
               "items": {
-                "items": [
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
                   {
                     "type": "string"
                   },
                   {
-                    "$ref": "#/definitions/Expr"
+                    "$ref": "#/$defs/Expr"
                   }
                 ],
-                "maxItems": 2,
-                "minItems": 2,
                 "type": "array"
               },
               "type": "array"
             },
             "kind": {
-              "enum": [
-                "named"
-              ],
+              "const": "named",
               "type": "string"
             }
           },
           "required": [
-            "fields",
-            "kind"
+            "kind",
+            "fields"
           ],
           "type": "object"
         }
@@ -1736,7 +1729,7 @@
           "description": "A named process is a container with its own child subgraph.",
           "properties": {
             "body": {
-              "$ref": "#/definitions/WorkflowSubgraph"
+              "$ref": "#/$defs/WorkflowSubgraph"
             },
             "description": {
               "type": [
@@ -1748,39 +1741,33 @@
               "type": "string"
             },
             "id": {
-              "type": "string"
+              "$ref": "#/$defs/WorkflowNodeId"
             },
             "kind": {
-              "enum": [
-                "process"
-              ],
+              "const": "process",
               "type": "string"
             },
             "name": {
               "type": "string"
             },
             "name_source": {
-              "$ref": "#/definitions/WorkflowNodeNameSource"
+              "$ref": "#/$defs/WorkflowNodeNameSource"
             },
             "origin": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ProcessOrigin"
-                }
-              ],
+              "$ref": "#/$defs/ProcessOrigin",
               "description": "Whether the process was declared or lifted from an inline literal."
             },
             "params": {
               "default": [],
               "items": {
-                "$ref": "#/definitions/ProcessParam"
+                "$ref": "#/$defs/ProcessParam"
               },
               "type": "array"
             },
             "return_ty": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/TypeExpr"
+                  "$ref": "#/$defs/TypeExpr"
                 },
                 {
                   "type": "null"
@@ -1790,58 +1777,39 @@
             "signals": {
               "default": [],
               "items": {
-                "$ref": "#/definitions/ProcessSignalDecl"
+                "$ref": "#/$defs/ProcessSignalDecl"
               },
               "type": "array"
             }
           },
           "required": [
-            "body",
-            "display_name",
-            "id",
             "kind",
+            "id",
             "name",
-            "name_source"
+            "display_name",
+            "name_source",
+            "body"
           ],
           "type": "object"
         },
         {
-          "description": "A declared pure function, carried through the document unprojected.\n\nA process becomes a container with a child subgraph because its body is made of durable steps the editor has to show and reorder. A function's body contains no effects by construction, so it contributes no steps and no execution sites: projecting it into nodes would invent graph structure with nothing behind it. It travels verbatim instead, exactly as `Type` does, so a round trip through the document is lossless.",
+          "$ref": "#/$defs/FunctionDecl",
+          "description": "A declared pure function, carried through the document unprojected.\n\nA process becomes a container with a child subgraph because its body is\nmade of durable steps the editor has to show and reorder. A function's\nbody contains no effects by construction, so it contributes no steps and\nno execution sites: projecting it into nodes would invent graph\nstructure with nothing behind it. It travels verbatim instead, exactly\nas `Type` does, so a round trip through the document is lossless.",
           "properties": {
-            "body": {
-              "$ref": "#/definitions/Expr"
-            },
             "kind": {
-              "enum": [
-                "function"
-              ],
+              "const": "function",
               "type": "string"
-            },
-            "name": {
-              "type": "string"
-            },
-            "params": {
-              "items": {
-                "$ref": "#/definitions/FunctionParam"
-              },
-              "type": "array"
-            },
-            "return_ty": {
-              "$ref": "#/definitions/TypeExpr"
             }
           },
           "required": [
-            "body",
-            "kind",
-            "name",
-            "return_ty"
+            "kind"
           ],
           "type": "object"
         }
       ]
     },
     "WorkflowDiagnosticClassification": {
-      "description": "Whether a diagnostic establishes an admission failure for the analyzed program and host environment or gives advice without establishing a failure.",
+      "description": "Whether a diagnostic establishes an admission failure for the analyzed\nprogram and host environment or gives advice without establishing a failure.",
       "enum": [
         "definite",
         "advisory"
@@ -1908,23 +1876,23 @@
       "additionalProperties": false,
       "properties": {
         "from": {
-          "type": "string"
+          "$ref": "#/$defs/WorkflowNodeId"
         },
         "id": {
           "type": "string"
         },
         "kind": {
-          "$ref": "#/definitions/WorkflowEdgeKind"
+          "$ref": "#/$defs/WorkflowEdgeKind"
         },
         "to": {
-          "type": "string"
+          "$ref": "#/$defs/WorkflowNodeId"
         }
       },
       "required": [
-        "from",
         "id",
-        "kind",
-        "to"
+        "from",
+        "to",
+        "kind"
       ],
       "type": "object"
     },
@@ -1934,9 +1902,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "data_dependency"
-              ],
+              "const": "data_dependency",
               "type": "string"
             },
             "variable": {
@@ -1944,7 +1910,7 @@
             },
             "version": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -1959,9 +1925,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "sequence"
-              ],
+              "const": "sequence",
               "type": "string"
             }
           },
@@ -1987,7 +1951,7 @@
       "description": "Stable source-level location of one runtime site under a workflow node.",
       "properties": {
         "kind": {
-          "$ref": "#/definitions/ExecutionNodeKind"
+          "$ref": "#/$defs/ExecutionNodeKind"
         },
         "label": {
           "type": "string"
@@ -1999,29 +1963,26 @@
           "default": [],
           "items": {
             "format": "uint32",
-            "minimum": 0.0,
+            "minimum": 0,
             "type": "integer"
           },
           "type": "array"
         }
       },
       "required": [
+        "owner",
         "kind",
-        "label",
-        "owner"
+        "label"
       ],
       "type": "object"
     },
     "WorkflowExpectedArgument": {
       "properties": {
         "slot": {
-          "items": {
-            "$ref": "#/definitions/WorkflowSlotPathSegment"
-          },
-          "type": "array"
+          "$ref": "#/$defs/WorkflowSlotPath"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -2048,32 +2009,32 @@
         },
         "execution_sites": {
           "items": {
-            "$ref": "#/definitions/WorkflowExecutionSite"
+            "$ref": "#/$defs/WorkflowExecutionSite"
           },
           "type": "array"
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/WorkflowNodeId"
         },
         "kind": {
-          "$ref": "#/definitions/WorkflowNodeKind"
+          "$ref": "#/$defs/WorkflowNodeKind"
         },
         "name": {
           "type": "string"
         },
         "name_source": {
-          "$ref": "#/definitions/WorkflowNodeNameSource"
+          "$ref": "#/$defs/WorkflowNodeNameSource"
         },
         "outputs": {
           "items": {
-            "$ref": "#/definitions/VariableVersion"
+            "$ref": "#/$defs/VariableVersion"
           },
           "type": "array"
         },
         "source_span": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Span"
+              "$ref": "#/$defs/Span"
             },
             {
               "type": "null"
@@ -2083,7 +2044,7 @@
         "type_facets": {
           "anyOf": [
             {
-              "$ref": "#/definitions/WorkflowNodeTypeFacets"
+              "$ref": "#/$defs/WorkflowNodeTypeFacets"
             },
             {
               "type": "null"
@@ -2094,11 +2055,15 @@
       },
       "required": [
         "id",
-        "kind",
         "name",
-        "name_source"
+        "name_source",
+        "kind"
       ],
       "type": "object"
+    },
+    "WorkflowNodeId": {
+      "description": "A deterministic node identifier minted from structural owner and AST path.",
+      "type": "string"
     },
     "WorkflowNodeKind": {
       "oneOf": [
@@ -2108,7 +2073,7 @@
             "binding": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/AssignTarget"
+                  "$ref": "#/$defs/AssignTarget"
                 },
                 {
                   "type": "null"
@@ -2116,18 +2081,16 @@
               ]
             },
             "expression": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             "kind": {
-              "enum": [
-                "data"
-              ],
+              "const": "data",
               "type": "string"
             }
           },
           "required": [
-            "expression",
-            "kind"
+            "kind",
+            "expression"
           ],
           "type": "object"
         },
@@ -2137,14 +2100,14 @@
             "arguments": {
               "default": [],
               "items": {
-                "$ref": "#/definitions/WorkflowArgument"
+                "$ref": "#/$defs/WorkflowArgument"
               },
               "type": "array"
             },
             "binding": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/AssignTarget"
+                  "$ref": "#/$defs/AssignTarget"
                 },
                 {
                   "type": "null"
@@ -2152,28 +2115,26 @@
               ]
             },
             "kind": {
-              "enum": [
-                "call"
-              ],
+              "const": "call",
               "type": "string"
             },
             "operation": {
               "type": "string"
             },
             "receiver": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             "result_steps": {
               "items": {
-                "$ref": "#/definitions/WorkflowResultStep"
+                "$ref": "#/$defs/WorkflowResultStep"
               },
               "type": "array"
             }
           },
           "required": [
             "kind",
-            "operation",
-            "receiver"
+            "receiver",
+            "operation"
           ],
           "type": "object"
         },
@@ -2183,14 +2144,14 @@
             "arguments": {
               "default": [],
               "items": {
-                "$ref": "#/definitions/WorkflowArgument"
+                "$ref": "#/$defs/WorkflowArgument"
               },
               "type": "array"
             },
             "binding": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/AssignTarget"
+                  "$ref": "#/$defs/AssignTarget"
                 },
                 {
                   "type": "null"
@@ -2198,24 +2159,22 @@
               ]
             },
             "effect": {
-              "$ref": "#/definitions/WorkflowEffectKind"
+              "$ref": "#/$defs/WorkflowEffectKind"
             },
             "kind": {
-              "enum": [
-                "effect"
-              ],
+              "const": "effect",
               "type": "string"
             },
             "result_steps": {
               "items": {
-                "$ref": "#/definitions/WorkflowResultStep"
+                "$ref": "#/$defs/WorkflowResultStep"
               },
               "type": "array"
             }
           },
           "required": [
-            "effect",
-            "kind"
+            "kind",
+            "effect"
           ],
           "type": "object"
         },
@@ -2225,7 +2184,7 @@
             "binding": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/AssignTarget"
+                  "$ref": "#/$defs/AssignTarget"
                 },
                 {
                   "type": "null"
@@ -2233,18 +2192,16 @@
               ]
             },
             "expression": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             "kind": {
-              "enum": [
-                "computation"
-              ],
+              "const": "computation",
               "type": "string"
             }
           },
           "required": [
-            "expression",
-            "kind"
+            "kind",
+            "expression"
           ],
           "type": "object"
         },
@@ -2252,26 +2209,20 @@
           "additionalProperties": false,
           "properties": {
             "expression": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Expr"
-                }
-              ],
-              "description": "The assigned value, or with `update`, the operand the update applies to the target's current value (`target op= expression`)."
+              "$ref": "#/$defs/Expr",
+              "description": "The assigned value, or with `update`, the operand the update applies\nto the target's current value (`target op= expression`)."
             },
             "kind": {
-              "enum": [
-                "state_update"
-              ],
+              "const": "state_update",
               "type": "string"
             },
             "target": {
-              "$ref": "#/definitions/AssignTarget"
+              "$ref": "#/$defs/AssignTarget"
             },
             "update": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/UpdateOperator"
+                  "$ref": "#/$defs/UpdateOperator"
                 },
                 {
                   "type": "null"
@@ -2280,9 +2231,9 @@
             }
           },
           "required": [
-            "expression",
             "kind",
-            "target"
+            "target",
+            "expression"
           ],
           "type": "object"
         },
@@ -2290,22 +2241,20 @@
           "additionalProperties": false,
           "properties": {
             "expression": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             "kind": {
-              "enum": [
-                "terminal"
-              ],
+              "const": "terminal",
               "type": "string"
             },
             "terminal": {
-              "$ref": "#/definitions/WorkflowTerminalKind"
+              "$ref": "#/$defs/WorkflowTerminalKind"
             }
           },
           "required": [
-            "expression",
             "kind",
-            "terminal"
+            "terminal",
+            "expression"
           ],
           "type": "object"
         },
@@ -2315,7 +2264,7 @@
             "binding": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/AssignTarget"
+                  "$ref": "#/$defs/AssignTarget"
                 },
                 {
                   "type": "null"
@@ -2323,29 +2272,25 @@
               ]
             },
             "condition": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             "container_kind": {
-              "enum": [
-                "if"
-              ],
+              "const": "if",
               "type": "string"
             },
             "else_graph": {
-              "$ref": "#/definitions/WorkflowSubgraph"
+              "$ref": "#/$defs/WorkflowSubgraph"
             },
             "else_is_block": {
               "description": "Whether the source's else branch is a block rather than a direct value or `else if`.",
               "type": "boolean"
             },
             "kind": {
-              "enum": [
-                "container"
-              ],
+              "const": "container",
               "type": "string"
             },
             "then_graph": {
-              "$ref": "#/definitions/WorkflowSubgraph"
+              "$ref": "#/$defs/WorkflowSubgraph"
             },
             "then_is_block": {
               "description": "Whether the source's then branch is a statement block rather than a value expression.",
@@ -2365,7 +2310,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "An iteration: the IR's element binding, iterable and bind, exactly as the loop runs them. A dialect's printer reads its authored loop header back off these fields.",
+          "description": "An iteration: the IR's element binding, iterable and bind, exactly as\nthe loop runs them. A dialect's printer reads its authored loop header\nback off these fields.",
           "properties": {
             "authored_binding": {
               "description": "The element binding's authored name, outside execution identity.",
@@ -2377,7 +2322,7 @@
             "bind": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Expr"
+                  "$ref": "#/$defs/Expr"
                 },
                 {
                   "type": "null"
@@ -2388,21 +2333,17 @@
               "type": "string"
             },
             "body": {
-              "$ref": "#/definitions/WorkflowSubgraph"
+              "$ref": "#/$defs/WorkflowSubgraph"
             },
             "container_kind": {
-              "enum": [
-                "for"
-              ],
+              "const": "for",
               "type": "string"
             },
             "iterable": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             "kind": {
-              "enum": [
-                "container"
-              ],
+              "const": "container",
               "type": "string"
             }
           },
@@ -2419,21 +2360,17 @@
           "additionalProperties": false,
           "properties": {
             "body": {
-              "$ref": "#/definitions/WorkflowSubgraph"
+              "$ref": "#/$defs/WorkflowSubgraph"
             },
             "condition": {
-              "$ref": "#/definitions/Expr"
+              "$ref": "#/$defs/Expr"
             },
             "container_kind": {
-              "enum": [
-                "while"
-              ],
+              "const": "while",
               "type": "string"
             },
             "kind": {
-              "enum": [
-                "container"
-              ],
+              "const": "container",
               "type": "string"
             }
           },
@@ -2449,9 +2386,7 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "opaque"
-              ],
+              "const": "opaque",
               "type": "string"
             },
             "source": {
@@ -2477,19 +2412,19 @@
       "properties": {
         "available_variables": {
           "items": {
-            "$ref": "#/definitions/WorkflowTypedVariable"
+            "$ref": "#/$defs/WorkflowTypedVariable"
           },
           "type": "array"
         },
         "diagnostics": {
           "items": {
-            "$ref": "#/definitions/WorkflowTypeDiagnostic"
+            "$ref": "#/$defs/WorkflowTypeDiagnostic"
           },
           "type": "array"
         },
         "expected_arguments": {
           "items": {
-            "$ref": "#/definitions/WorkflowExpectedArgument"
+            "$ref": "#/$defs/WorkflowExpectedArgument"
           },
           "type": "array"
         }
@@ -2504,6 +2439,13 @@
       ],
       "type": "string"
     },
+    "WorkflowSlotPath": {
+      "description": "An unambiguous address for one input location inside a workflow node.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
+      "items": {
+        "$ref": "#/$defs/WorkflowSlotPathSegment"
+      },
+      "type": "array"
+    },
     "WorkflowSlotPathSegment": {
       "description": "One structural step in a [`WorkflowSlotPath`].",
       "oneOf": [
@@ -2512,7 +2454,7 @@
           "properties": {
             "call": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -2526,7 +2468,7 @@
           "properties": {
             "arg": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -2552,7 +2494,7 @@
           "properties": {
             "index": {
               "format": "uint32",
-              "minimum": 0.0,
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -2569,14 +2511,14 @@
         "edges": {
           "default": [],
           "items": {
-            "$ref": "#/definitions/WorkflowEdge"
+            "$ref": "#/$defs/WorkflowEdge"
           },
           "type": "array"
         },
         "nodes": {
           "default": [],
           "items": {
-            "$ref": "#/definitions/WorkflowNode"
+            "$ref": "#/$defs/WorkflowNode"
           },
           "type": "array"
         }
@@ -2593,30 +2535,31 @@
     "WorkflowTypeDiagnostic": {
       "properties": {
         "classification": {
-          "$ref": "#/definitions/WorkflowDiagnosticClassification"
+          "$ref": "#/$defs/WorkflowDiagnosticClassification"
         },
         "kind": {
-          "$ref": "#/definitions/WorkflowDiagnosticKind"
+          "$ref": "#/$defs/WorkflowDiagnosticKind"
         },
         "message": {
           "type": "string"
         },
         "node_id": {
-          "type": "string"
+          "$ref": "#/$defs/WorkflowNodeId"
         },
         "slot": {
-          "items": {
-            "$ref": "#/definitions/WorkflowSlotPathSegment"
-          },
-          "type": [
-            "array",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowSlotPath"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "span": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Span"
+              "$ref": "#/$defs/Span"
             },
             {
               "type": "null"
@@ -2625,10 +2568,10 @@
         }
       },
       "required": [
-        "classification",
+        "node_id",
         "kind",
-        "message",
-        "node_id"
+        "classification",
+        "message"
       ],
       "type": "object"
     },
@@ -2638,7 +2581,7 @@
           "type": "string"
         },
         "ty": {
-          "$ref": "#/definitions/TypeExpr"
+          "$ref": "#/$defs/TypeExpr"
         }
       },
       "required": [
@@ -2648,36 +2591,39 @@
       "type": "object"
     }
   },
+  "$id": "https://lash.dev/schemas/workflow-graph/v21",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "The single serializable graph document used for editing and run overlays.",
   "properties": {
     "declarations": {
       "default": [],
       "items": {
-        "$ref": "#/definitions/WorkflowDeclaration"
+        "$ref": "#/$defs/WorkflowDeclaration"
       },
       "type": "array"
     },
     "facet_schema_version": {
       "format": "uint32",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": [
         "integer",
         "null"
       ]
     },
     "main": {
-      "$ref": "#/definitions/WorkflowSubgraph"
+      "$ref": "#/$defs/WorkflowSubgraph"
     },
     "schema_version": {
       "enum": [
         21
       ],
       "format": "uint32",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     },
     "source_identity": {
-      "description": "The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.",
+      "description": "The definition identity of the admitted module artifact this graph\nprojects ([`crate::ModuleArtifact::source_identity`]), which the\nmodule's traces carry too. A draft projected from source that has not\nbeen admitted claims no runtime identity and carries `None`.\n[`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape,\n`facet_schema_version` identifies optional derived facts.",
       "type": [
         "string",
         "null"
@@ -2685,8 +2631,8 @@
     }
   },
   "required": [
-    "main",
-    "schema_version"
+    "schema_version",
+    "main"
   ],
   "title": "WorkflowGraph",
   "type": "object",
