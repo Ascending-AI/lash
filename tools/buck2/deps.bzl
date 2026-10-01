@@ -988,8 +988,14 @@ PACKAGE_DEPS = {
     "lash-internal-vm-worker": {
         "build": {},
         "dev": {
+            "async_trait": "//third-party/rust:p0015",
+            "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
+            "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
-            "lashlang": "//crates/lashlang:lashlang"
+            "lashlang": "//crates/lashlang:lashlang",
+            "tempfile": "//third-party/rust:p0390",
+            "tokio": "//third-party/rust:p0399",
+            "tokio_util": "//third-party/rust:p0405"
         },
         "normal": {
             "blake3": "//third-party/rust:p0030",

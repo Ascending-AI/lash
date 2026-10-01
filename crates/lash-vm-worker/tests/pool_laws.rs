@@ -14,6 +14,10 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
+#[path = "pool_laws/native_oom.rs"]
+mod native_oom;
+
 fn config(mode: &str) -> PoolConfig {
     let mut entry = WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker-fixture"));
     if !mode.is_empty() {

@@ -527,11 +527,11 @@ lash_rust_feature_test(
         "//:Cargo.toml",
     ],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_8b24350f",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_398ebb90",
     ],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_8b24350f)"},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_398ebb90)"},
     tags = [
         "feature-lane",
         "manual",

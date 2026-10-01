@@ -47,8 +47,14 @@ serde_json = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
+lash-restate-test = { workspace = true }
+lash-vm-broker = { workspace = true, features = ["testing"] }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-util = { workspace = true }
 
 [[test]]
 name = "pool_laws"
