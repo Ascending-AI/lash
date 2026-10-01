@@ -107,12 +107,12 @@ fn test_attachment_store() -> Arc<dyn lash::persistence::AttachmentStore> {
 /// How long a cancel route stays attached waiting for a terminal before it
 /// reports the cancellation as recorded-but-pending.
 ///
-/// Under test the budget is deliberately large rather than small. No test
-/// reaches it: every test that must observe the recorded-but-pending branch
-/// drives it deterministically through the `TurnAttach` seam
-/// (`with_test_attach`), so shortening this bound buys no suite time and only
-/// makes the tests that assert the *attached* branch decide on how loaded the
-/// machine is.
+/// Under test the budget is deliberately large rather than small. Tests that
+/// must observe the recorded-but-pending branch hold the attachment open
+/// through the `TurnAttach` seam (`with_test_attach`) and hand the cancel
+/// route a short deadline instead, so shortening this bound buys no suite
+/// time and only makes the tests that assert the *attached* branch decide on
+/// how loaded the machine is.
 #[cfg(not(test))]
 const TURN_TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]

@@ -643,13 +643,17 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     let (mut failed_turn, failed_address) =
         submit_workbench_turn_via_restate(&harness.state, "trigger deterministic auth failure")
             .await;
-    let terminal = harness
-        .state
-        .core
-        .turn_work_driver()
-        .await_terminal_with_timeout(&failed_address, Duration::from_secs(20))
-        .await
-        .expect("auth failure must publish a turn terminal");
+    let terminal = tokio::time::timeout(
+        Duration::from_secs(20),
+        harness
+            .state
+            .core
+            .turn_work_driver()
+            .await_terminal(&failed_address),
+    )
+    .await
+    .expect("auth failure must publish a turn terminal")
+    .expect("attach auth-failure terminal");
     let lash::TurnTerminal::Committed { outcome, .. } = terminal else {
         panic!("provider auth failure did not settle through the turn contract: {terminal:#?}");
     };
@@ -706,13 +710,17 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     )
     .await;
     wait_for_workbench_turn_settled(&mut recovery_turn, Duration::from_secs(20)).await;
-    let recovery_terminal = harness
-        .state
-        .core
-        .turn_work_driver()
-        .await_terminal_with_timeout(&recovery_address, Duration::from_secs(20))
-        .await
-        .expect("recovery turn terminal");
+    let recovery_terminal = tokio::time::timeout(
+        Duration::from_secs(20),
+        harness
+            .state
+            .core
+            .turn_work_driver()
+            .await_terminal(&recovery_address),
+    )
+    .await
+    .expect("recovery turn terminal")
+    .expect("attach recovery turn terminal");
     assert!(
         matches!(recovery_terminal, lash::TurnTerminal::Committed { .. }),
         "next turn did not recover: {recovery_terminal:#?}"
@@ -823,13 +831,17 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
         submit_workbench_turn_via_restate(&harness.state, "trigger deterministic rate limit retry")
             .await;
     wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(20)).await;
-    let terminal = harness
-        .state
-        .core
-        .turn_work_driver()
-        .await_terminal_with_timeout(&address, Duration::from_secs(20))
-        .await
-        .expect("retry turn terminal");
+    let terminal = tokio::time::timeout(
+        Duration::from_secs(20),
+        harness
+            .state
+            .core
+            .turn_work_driver()
+            .await_terminal(&address),
+    )
+    .await
+    .expect("retry turn terminal")
+    .expect("attach retry turn terminal");
     assert!(
         matches!(terminal, lash::TurnTerminal::Committed { .. }),
         "successful retry did not commit: {terminal:#?}"
@@ -2004,10 +2016,10 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         ),
         "recovered turn cancellation did not reach the durable gate: {receipt:#?}"
     );
-    let terminal = driver
-        .await_terminal_with_timeout(&address, Duration::from_secs(20))
+    let terminal = tokio::time::timeout(Duration::from_secs(20), driver.await_terminal(&address))
         .await
-        .expect("recovered turn must commit a cancellation terminal");
+        .expect("recovered turn must commit a cancellation terminal")
+        .expect("attach recovered turn terminal");
     assert!(
         session_drive_epoch(&data_dir, backend, &session_id).await >= first_generation,
         "replacement must preserve the durable drive epoch through recovery"

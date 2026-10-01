@@ -373,6 +373,7 @@ impl AppState {
             session_id,
             &driver,
             WorkbenchTurnCancelMode::Abort,
+            TURN_TERMINAL_ATTACH_TIMEOUT,
         )
         .await
     }
@@ -382,6 +383,7 @@ impl AppState {
         session_id: &SessionId,
         driver: &lash::TurnWorkDriver,
         mode: WorkbenchTurnCancelMode,
+        terminal_attach_timeout: Duration,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         // A cancel names a session that exists; it never creates one
@@ -437,30 +439,23 @@ impl AppState {
                 .await
                 // Audited: revoked turn-cancel gates become an UnknownOrRevoked outcome; remaining failures are untyped control errors.
                 .map_err(|err| AppError::internal(err.to_string()))?;
+            let attach_terminal = |cancellation| {
+                attach_recorded_cancel_terminal(
+                    driver,
+                    address.clone(),
+                    cancellation,
+                    terminal_attach_timeout,
+                )
+            };
             let receipt = match cancel.outcome {
                 lash::TurnCancelOutcome::Requested(evidence) => {
-                    attach_recorded_cancel_terminal(
-                        driver,
-                        address.clone(),
-                        RecordedTurnCancellation::Requested(evidence),
-                    )
-                    .await?
+                    attach_terminal(RecordedTurnCancellation::Requested(evidence)).await?
                 }
                 lash::TurnCancelOutcome::AlreadyRequested(evidence) => {
-                    attach_recorded_cancel_terminal(
-                        driver,
-                        address.clone(),
-                        RecordedTurnCancellation::AlreadyRequested(evidence),
-                    )
-                    .await?
+                    attach_terminal(RecordedTurnCancellation::AlreadyRequested(evidence)).await?
                 }
                 lash::TurnCancelOutcome::Escalated(evidence) => {
-                    attach_recorded_cancel_terminal(
-                        driver,
-                        address.clone(),
-                        RecordedTurnCancellation::Escalated(evidence),
-                    )
-                    .await?
+                    attach_terminal(RecordedTurnCancellation::Escalated(evidence)).await?
                 }
                 lash::TurnCancelOutcome::PolicyConflict {
                     requested,

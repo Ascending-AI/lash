@@ -232,13 +232,14 @@ pub(crate) async fn cancel_turn(
     Query(query): Query<TurnCancelQuery>,
 ) -> Result<(StatusCode, Json<TurnCancelResponse>), AppError> {
     let driver = state.core.turn_work_driver();
-    cancel_turn_with_driver(state, query, &driver).await
+    cancel_turn_with_driver(state, query, &driver, TURN_TERMINAL_ATTACH_TIMEOUT).await
 }
 
 pub(crate) async fn cancel_turn_with_driver(
     state: AppState,
     query: TurnCancelQuery,
     driver: &lash::TurnWorkDriver,
+    terminal_attach_timeout: Duration,
 ) -> Result<(StatusCode, Json<TurnCancelResponse>), AppError> {
     let session_id = state
         .admit_session(&query.session, "api.turn.cancel")
@@ -249,7 +250,12 @@ pub(crate) async fn cancel_turn_with_driver(
             session_id: session_id.clone(),
         })?;
     let cancellations = state
-        .cancel_turns_for_session_with_driver(&session_id, driver, query.mode)
+        .cancel_turns_for_session_with_driver(
+            &session_id,
+            driver,
+            query.mode,
+            terminal_attach_timeout,
+        )
         .await?;
     let mut cancelled_processes = Vec::new();
     for receipt in cancellations
@@ -291,23 +297,19 @@ pub(crate) async fn attach_recorded_cancel_terminal(
     driver: &lash::TurnWorkDriver,
     address: lash::TurnAddress,
     cancellation: RecordedTurnCancellation,
+    terminal_attach_timeout: Duration,
 ) -> Result<TurnCancelReceipt, AppError> {
-    match driver
-        .await_terminal_with_timeout(&address, TURN_TERMINAL_ATTACH_TIMEOUT)
-        .await
-    {
-        Ok(terminal) => Ok(TurnCancelReceipt::TerminalAttached {
+    match tokio::time::timeout(terminal_attach_timeout, driver.await_terminal(&address)).await {
+        Ok(Ok(terminal)) => Ok(TurnCancelReceipt::TerminalAttached {
             address,
             cancellation,
             terminal,
         }),
-        Err(err) if err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout => {
-            Ok(TurnCancelReceipt::CancellationRecordedTerminalPending {
-                address,
-                cancellation,
-            })
-        }
         // Audited: terminal attachment lowers Restate transport and revocation failures to RuntimeError without a tombstone cause.
-        Err(err) => Err(AppError::internal(err.to_string())),
+        Ok(Err(err)) => Err(AppError::internal(err.to_string())),
+        Err(_) => Ok(TurnCancelReceipt::CancellationRecordedTerminalPending {
+            address,
+            cancellation,
+        }),
     }
 }

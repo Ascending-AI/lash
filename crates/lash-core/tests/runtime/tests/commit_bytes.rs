@@ -641,10 +641,12 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     // "Finished" waits for the host: no terminal, and the turn call has not
     // returned.
     assert!(
-        turn_driver
-            .await_terminal_with_timeout(&address, std::time::Duration::from_millis(200))
-            .await
-            .is_err(),
+        tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            turn_driver.await_terminal(&address),
+        )
+        .await
+        .is_err(),
         "the terminal is not published before the host has the stream"
     );
     assert!(!turn.is_finished(), "the turn call waits for the host");
@@ -655,10 +657,13 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
         .expect("the turn task completes")
         .expect("the turn assembles");
     assert!(matches!(assembled.outcome, TurnOutcome::Finished(_)));
-    let terminal = turn_driver
-        .await_terminal_with_timeout(&address, std::time::Duration::from_secs(5))
-        .await
-        .expect("the terminal is published once the host has the stream");
+    let terminal = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        turn_driver.await_terminal(&address),
+    )
+    .await
+    .expect("the terminal attach settles once the host has the stream")
+    .expect("the terminal is published once the host has the stream");
     assert!(matches!(
         terminal,
         lash_core::facade_support::TurnTerminal::Committed { .. }

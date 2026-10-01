@@ -1,7 +1,6 @@
 pub use lash_core_store::turn_control_binding::*;
 pub use lash_core_store::turn_control_vocabulary::*;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
@@ -650,30 +649,6 @@ impl TurnWorkDriver {
             .await_await_event(&key, CancellationToken::new(), None)
             .await?;
         decode_terminal(address, resolution)
-    }
-
-    /// Await a terminal publication for at most `timeout`.
-    ///
-    /// Timing out only stops this caller's attachment. It never resolves or
-    /// poisons the turn's first-writer-wins keyed promises.
-    pub async fn await_terminal_with_timeout(
-        &self,
-        address: &TurnAddress,
-        timeout: Duration,
-    ) -> Result<TurnTerminal, RuntimeError> {
-        tokio::time::timeout(timeout, self.await_terminal(address))
-            .await
-            .map_err(|_| {
-                RuntimeError::new(
-                    crate::RuntimeErrorCode::TurnTerminalAwaitTimeout,
-                    format!(
-                        "timed out awaiting terminal for turn `{}` in session `{}` after {} ms",
-                        address.turn_id,
-                        address.session_id,
-                        timeout.as_millis()
-                    ),
-                )
-            })?
     }
 }
 

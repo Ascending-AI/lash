@@ -435,8 +435,6 @@ impl RuntimeErrorCode {
             Self::TurnControlWaitCancelled => Redrivable,
             // the wait timed out in this process; the durable promise is untouched.
             Self::TurnControlWaitTimeout => Retryable,
-            // the terminal await timed out in this process.
-            Self::TurnTerminalAwaitTimeout => Retryable,
             // the terminal does not decode.
             Self::TurnTerminalDecode => Terminal,
             // the same terminal fails to encode again.

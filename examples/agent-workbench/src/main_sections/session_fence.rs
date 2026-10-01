@@ -222,7 +222,12 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
     restate::cancel_cron_jobs_for_session(state, session_id, "reset").await?;
     let driver = state.core.turn_work_driver();
     let cancellations = state
-        .cancel_turns_for_session_with_driver(session_id, &driver, WorkbenchTurnCancelMode::Abort)
+        .cancel_turns_for_session_with_driver(
+            session_id,
+            &driver,
+            WorkbenchTurnCancelMode::Abort,
+            TURN_TERMINAL_ATTACH_TIMEOUT,
+        )
         .await?;
     state.trace_for_session(
         session_id,

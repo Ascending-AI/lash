@@ -7,6 +7,11 @@ use super::*;
 use lash::SessionId;
 use lash::TurnId;
 
+/// The attach deadline the expiring-attach tests hand the cancel route: long
+/// enough for the `started` acknowledgement to prove the durable cancellation
+/// preceded attachment expiry, short enough to keep the tests fast.
+const EXPIRING_ATTACH_TIMEOUT: Duration = Duration::from_millis(200);
+
 struct ExpiringTerminalAttach {
     started: tokio::sync::mpsc::UnboundedSender<lash::TurnAddress>,
     release: tokio::sync::Mutex<tokio::sync::oneshot::Receiver<()>>,
@@ -24,10 +29,9 @@ impl lash::TurnAttach for ExpiringTerminalAttach {
         (&mut *self.release.lock().await)
             .await
             .expect("explicit attachment completion");
-        Err(lash::runtime::RuntimeError::new(
-            lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout,
-            "mock attachment completed without a terminal",
-        ))
+        // The attachment stays open: the cancel route's own deadline
+        // (`tokio::time::timeout`) is what expires it.
+        std::future::pending().await
     }
 }
 
@@ -491,7 +495,8 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
             state.cancel_turns_for_session_with_driver(
                 &cancel_session,
                 &driver,
-                WorkbenchTurnCancelMode::Abort
+                WorkbenchTurnCancelMode::Abort,
+                EXPIRING_ATTACH_TIMEOUT,
             ),
             acknowledge
         )
@@ -620,6 +625,7 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
                     mode: WorkbenchTurnCancelMode::Abort,
                 },
                 &driver,
+                EXPIRING_ATTACH_TIMEOUT,
             ),
             acknowledge
         )
@@ -939,6 +945,7 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
                     mode: WorkbenchTurnCancelMode::Abort,
                 },
                 &driver,
+                TURN_TERMINAL_ATTACH_TIMEOUT,
             )
         };
         let (first, second) = tokio::join!(cancel(), cancel());
@@ -1138,7 +1145,8 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
             state.cancel_turns_for_session_with_driver(
                 &cancel_session,
                 &driver,
-                WorkbenchTurnCancelMode::Abort
+                WorkbenchTurnCancelMode::Abort,
+                EXPIRING_ATTACH_TIMEOUT,
             ),
             acknowledge
         )
@@ -1232,6 +1240,7 @@ async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inn
                         mode,
                     },
                     &driver,
+                    EXPIRING_ATTACH_TIMEOUT,
                 ),
                 acknowledge
             )
@@ -1340,7 +1349,8 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
             state.cancel_turns_for_session_with_driver(
                 &cancel_session,
                 &driver,
-                WorkbenchTurnCancelMode::Abort
+                WorkbenchTurnCancelMode::Abort,
+                EXPIRING_ATTACH_TIMEOUT,
             ),
             acknowledge
         )
@@ -1506,7 +1516,8 @@ async fn a_pending_cancel_probes_the_roots_lash_turn_inner() {
             state.cancel_turns_for_session_with_driver(
                 &cancel_session,
                 &driver,
-                WorkbenchTurnCancelMode::Abort
+                WorkbenchTurnCancelMode::Abort,
+                EXPIRING_ATTACH_TIMEOUT,
             ),
             acknowledge
         )
