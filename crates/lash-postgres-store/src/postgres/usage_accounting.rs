@@ -4,7 +4,7 @@ use crate::{PostgresStore, begin_guarded};
 use async_trait::async_trait;
 use lash_core_execution::RuntimeOwner;
 use lash_core_execution::UsageAccountingStore;
-use lash_core_execution::{LlmCallId, StoreError, TokenUsage};
+use lash_core_execution::{LlmCallId, ModelKey, StoreError, TokenUsage};
 use lash_core_execution::{
     OutstandingUsageAttempt, OwnerUsage, OwnerUsageRow, UsageAdmissionError, UsageAppendError,
     UsageAppendReceipt, UsageCompleteness, UsageCorrection, UsageEffectKey, UsageFactConflict,
@@ -32,8 +32,8 @@ struct Statements {
 }
 lash_store_sql::statements! {
     pub(crate) struct UsageInsertPostgresStatements @ "usage_postgres" {
-        fact = "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) ON CONFLICT ON CONSTRAINT uq_usage_facts_identity DO NOTHING RETURNING seq";
-        run = "INSERT INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT (owner_kind, owner_id, effect_key, run_id) DO NOTHING";
+        fact = "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) ON CONFLICT ON CONSTRAINT uq_usage_facts_identity DO NOTHING RETURNING seq";
+        run = "INSERT INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, model_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (owner_kind, owner_id, effect_key, run_id) DO NOTHING";
         owner = "INSERT INTO usage_owner_retirements (owner_kind, owner_id, retired_at_ms) VALUES (?1, ?2, ?3) ON CONFLICT (owner_kind, owner_id) DO NOTHING";
         lock_owner = "SELECT pg_advisory_xact_lock(hashtextextended(?1, 0))";
         lock_writer = "SELECT pg_advisory_xact_lock_shared(hashtextextended('lash:usage:retention', 0))";
@@ -118,16 +118,18 @@ fn decode_fact(row: &PgRow) -> Result<UsageFactRecord, StoreError> {
         run: run.map(UsageRunId::try_from).transpose()?,
         llm_call_id: LlmCallId(row.try_get::<String, _>(9).map_err(store_sqlx_error)?),
         source: get!(10),
-        model: get!(11),
+        model_key: ModelKey::new(row.try_get::<String, _>(11).map_err(store_sqlx_error)?),
+        requested_model: get!(12),
+        served_model: get!(13),
         usage: TokenUsage {
-            input_tokens: get!(12),
-            output_tokens: get!(13),
-            cache_read_input_tokens: get!(14),
-            cache_write_input_tokens: get!(15),
-            reasoning_output_tokens: get!(16),
+            input_tokens: get!(14),
+            output_tokens: get!(15),
+            cache_read_input_tokens: get!(16),
+            cache_write_input_tokens: get!(17),
+            reasoning_output_tokens: get!(18),
         },
-        generation_id: get!(17),
-        recorded_at_ms: unsigned(get!(19))?,
+        generation_id: get!(19),
+        recorded_at_ms: unsigned(get!(21))?,
     })
 }
 fn decode_run(row: &PgRow) -> Result<UsageRunRecord, StoreError> {
@@ -136,17 +138,18 @@ fn decode_run(row: &PgRow) -> Result<UsageRunRecord, StoreError> {
             row.try_get($n).map_err(store_sqlx_error)?
         };
     }
-    let state: String = get!(6);
-    let reason: Option<String> = get!(7);
-    let detail: Option<String> = get!(8);
-    let resolved: Option<i64> = get!(9);
+    let state: String = get!(7);
+    let reason: Option<String> = get!(8);
+    let detail: Option<String> = get!(9);
+    let resolved: Option<i64> = get!(10);
     Ok(UsageRunRecord {
         effect: effect(get!(0))?,
         run: UsageRunId::try_from(row.try_get::<String, _>(1).map_err(store_sqlx_error)?)?,
         execution_scope_key: get!(2),
         source: get!(3),
-        model: get!(4),
-        admitted_at_ms: unsigned(get!(5))?,
+        model_key: ModelKey::new(row.try_get::<String, _>(4).map_err(store_sqlx_error)?),
+        requested_model: get!(5),
+        admitted_at_ms: unsigned(get!(6))?,
         state: match state.as_str() {
             "open" => UsageRunState::Open,
             "settled" => UsageRunState::Settled,
@@ -198,7 +201,9 @@ async fn insert_fact(
         .bind(record.run.as_ref().map(UsageRunId::as_str))
         .bind(record.llm_call_id.0.as_str())
         .bind(&record.source)
-        .bind(&record.model)
+        .bind(record.model_key.as_str())
+        .bind(&record.requested_model)
+        .bind(&record.served_model)
         .bind(record.usage.input_tokens)
         .bind(record.usage.output_tokens)
         .bind(record.usage.cache_read_input_tokens)
@@ -256,7 +261,8 @@ async fn ensure_settlement_run(
         .bind(s.run.as_str())
         .bind("")
         .bind(first.map_or("", |f| f.source.as_str()))
-        .bind(first.map_or("", |f| f.model.as_str()))
+        .bind(first.map_or("", |f| f.model_key.as_str()))
+        .bind(first.map_or("", |f| f.requested_model.as_str()))
         .bind(now)
         .bind(state)
         .bind(reason)
@@ -294,7 +300,8 @@ impl UsageAccountingStore for PostgresStore {
             .bind(a.run.as_str())
             .bind(&a.execution_scope_key)
             .bind(&a.source)
-            .bind(&a.model)
+            .bind(a.model_key.as_str())
+            .bind(&a.requested_model)
             .bind(integer(a.admitted_at_ms)?)
             .bind("open")
             .bind(Option::<&str>::None)
@@ -441,12 +448,7 @@ impl UsageAccountingStore for PostgresStore {
             if record.disposition != UsageReporting::Unreported {
                 return Err(UsageAppendError::CorrectionTargetReported { identity });
             }
-            let hash = usage_correction_payload_hash(
-                correction,
-                &record.llm_call_id,
-                &record.source,
-                &record.model,
-            );
+            let hash = usage_correction_payload_hash(correction, &record);
             record.identity.kind = UsageFactKind::Correction;
             record.disposition = UsageReporting::Reconciled;
             record.run = None;
@@ -535,17 +537,20 @@ impl UsageAccountingStore for PostgresStore {
             .map(|row| {
                 Ok(OwnerUsageRow {
                     source: row.try_get(0).map_err(store_sqlx_error)?,
-                    model: row.try_get(1).map_err(store_sqlx_error)?,
+                    model_key: ModelKey::new(
+                        row.try_get::<String, _>(1).map_err(store_sqlx_error)?,
+                    ),
+                    requested_model: row.try_get(2).map_err(store_sqlx_error)?,
                     usage: TokenUsage {
-                        input_tokens: row.try_get(2).map_err(store_sqlx_error)?,
-                        output_tokens: row.try_get(3).map_err(store_sqlx_error)?,
-                        cache_read_input_tokens: row.try_get(4).map_err(store_sqlx_error)?,
-                        cache_write_input_tokens: row.try_get(5).map_err(store_sqlx_error)?,
-                        reasoning_output_tokens: row.try_get(6).map_err(store_sqlx_error)?,
+                        input_tokens: row.try_get(3).map_err(store_sqlx_error)?,
+                        output_tokens: row.try_get(4).map_err(store_sqlx_error)?,
+                        cache_read_input_tokens: row.try_get(5).map_err(store_sqlx_error)?,
+                        cache_write_input_tokens: row.try_get(6).map_err(store_sqlx_error)?,
+                        reasoning_output_tokens: row.try_get(7).map_err(store_sqlx_error)?,
                     },
-                    reported_attempts: unsigned(row.try_get(7).map_err(store_sqlx_error)?)?,
-                    unreported_attempts: unsigned(row.try_get(8).map_err(store_sqlx_error)?)?,
-                    reconciled_attempts: unsigned(row.try_get(9).map_err(store_sqlx_error)?)?,
+                    reported_attempts: unsigned(row.try_get(8).map_err(store_sqlx_error)?)?,
+                    unreported_attempts: unsigned(row.try_get(9).map_err(store_sqlx_error)?)?,
+                    reconciled_attempts: unsigned(row.try_get(10).map_err(store_sqlx_error)?)?,
                 })
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
@@ -563,8 +568,11 @@ impl UsageAccountingStore for PostgresStore {
                     provider_attempt: ordinal(row.try_get(2).map_err(store_sqlx_error)?)?,
                     llm_call_id: LlmCallId(row.try_get::<String, _>(3).map_err(store_sqlx_error)?),
                     source: row.try_get(4).map_err(store_sqlx_error)?,
-                    model: row.try_get(5).map_err(store_sqlx_error)?,
-                    generation_id: row.try_get(6).map_err(store_sqlx_error)?,
+                    model_key: ModelKey::new(
+                        row.try_get::<String, _>(5).map_err(store_sqlx_error)?,
+                    ),
+                    requested_model: row.try_get(6).map_err(store_sqlx_error)?,
+                    generation_id: row.try_get(7).map_err(store_sqlx_error)?,
                 })
             })
             .collect::<Result<Vec<_>, StoreError>>()?;

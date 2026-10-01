@@ -192,7 +192,6 @@ struct DirectEffectPlan {
     provider: crate::ProviderHandle,
     envelope: crate::RuntimeEffectEnvelope,
     request: Box<crate::LlmRequest>,
-    usage_source: String,
 }
 
 #[derive(Clone, Copy)]
@@ -208,10 +207,15 @@ impl DirectCompletionCapability {
     /// Both the text-only (`DirectRequest`) and full-output entry points feed
     /// the same effect lane; they differ only in how the caller projects the
     /// resulting [`crate::LlmResponse`].
+    ///
+    /// `model_key` is the recorded key `provider` was bound from. The
+    /// envelope carries it, so the journaled effect and the usage ledger
+    /// both name the selection the completion ran under.
     async fn plan_direct_effect(
         &self,
         context: &DirectInvocationContext<'_>,
         provider: crate::ProviderHandle,
+        model_key: crate::ModelKey,
         request: crate::LlmRequest,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
@@ -249,15 +253,15 @@ impl DirectCompletionCapability {
         let envelope = crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::Direct {
+                model_key,
                 request: Box::new(request_spec),
-                usage_source: usage_source.clone(),
+                usage_source,
             },
         );
         Ok(DirectEffectPlan {
             provider,
             envelope,
             request: Box::new(request),
-            usage_source,
         })
     }
 
@@ -276,7 +280,6 @@ impl DirectCompletionCapability {
             provider,
             envelope,
             request,
-            usage_source,
         } = plan;
         let tracing = &current.host.core.tracing;
         let replay_trace = crate::RuntimeEffectReplayTrace::for_divergence(
@@ -292,7 +295,6 @@ impl DirectCompletionCapability {
             crate::runtime::effect::DirectUsage {
                 accounting: current.host.core.usage_accounting(),
                 owner: current.runtime_owner(),
-                source: usage_source,
             },
             replay_trace,
         );
@@ -321,6 +323,7 @@ impl DirectCompletionCapability {
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         let resolved = context.current.resolve_policy()?;
         let provider = resolved.provider().clone();
+        let model_key = resolved.model_config().key().clone();
         let model = request.model.clone();
         // Validate against the capability carried by the request before the
         // provider sees it; the selection travels unchanged.
@@ -356,6 +359,7 @@ impl DirectCompletionCapability {
             .plan_direct_effect(
                 &context,
                 provider,
+                model_key,
                 normalized,
                 usage_source,
                 DirectReplayPosition {
@@ -404,6 +408,7 @@ impl DirectCompletionCapability {
             .plan_direct_effect(
                 &context,
                 resolved.provider().clone(),
+                resolved.model_config().key().clone(),
                 request,
                 usage_source,
                 DirectReplayPosition {

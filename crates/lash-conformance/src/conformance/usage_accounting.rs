@@ -1022,7 +1022,8 @@ async fn assert_admission_refused(tier: &UsageAccountingTier, world: &World) {
             execution_scope_key: "usage-law-after-retirement".to_string(),
             run: crate::UsageRunId::mint(),
             source: "turn".to_string(),
-            model: "usage-law".to_string(),
+            model_key: crate::ModelKey::new("usage-law-key"),
+            requested_model: "usage-law".to_string(),
             admitted_at_ms: 1,
         })
         .await;
@@ -1052,8 +1053,9 @@ pub async fn a_settlement_retried_after_its_projection_counts_once(tier: &UsageA
 }
 
 /// Preservation: a completed, a cancelled and a failed stop keep the
-/// per-`(source, model)` totals the provider reported for the same script —
-/// every reported attempt under the turn's source and the session's model.
+/// per-attribution totals the provider reported for the same script — every
+/// reported attempt under the turn's source, the session's recorded model
+/// key and that model's wire name.
 pub async fn committed_turn_totals_are_preserved(tier: &UsageAccountingTier) {
     for (label, ending) in [
         ("completed", Ending::Completed),
@@ -1071,16 +1073,21 @@ pub async fn committed_turn_totals_are_preserved(tier: &UsageAccountingTier) {
         );
         let _turn = world.run().await;
         let usage = world.settled().await;
-        let model = crate::testing::mock_session_policy()
-            .wire_model()
-            .unwrap_or_default()
-            .to_string();
+        let policy = crate::testing::mock_session_policy();
+        let attribution = crate::UsageAttributionKey {
+            source: "turn".to_string(),
+            model_key: policy
+                .model_key()
+                .unwrap_or_else(|| panic!("{label}: the law's policy records a model"))
+                .clone(),
+            requested_model: policy.wire_model().unwrap_or_default().to_string(),
+        };
         let report = usage.report();
         let row = report
-            .by_source_model
-            .get(&("turn".to_string(), model.clone()))
-            .unwrap_or_else(|| panic!("{label}: the turn row for {model}: {report:?}"));
-        assert_eq!(report.by_source_model.len(), 1, "{label}: one row");
+            .by_attribution
+            .get(&attribution)
+            .unwrap_or_else(|| panic!("{label}: the turn row for {attribution:?}: {report:?}"));
+        assert_eq!(report.by_attribution.len(), 1, "{label}: one row");
         assert_eq!(
             row.usage,
             world.returned_total(),

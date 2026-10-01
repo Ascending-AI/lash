@@ -453,13 +453,13 @@ fn assert_usage_report_consistent(report: &lash::usage::SessionUsageReport) {
     assert!(report.usage.usage.input_tokens > 0);
     assert!(report.usage.usage.output_tokens > 0);
     let rows_total = report
-        .by_source_model
+        .by_attribution
         .values()
         .map(|row| row.total_tokens)
         .sum::<i64>();
     assert_eq!(report.usage.total_tokens, rows_total);
-    assert!(report.by_source_model.len() <= report.entry_count);
-    for row in report.by_source_model.values() {
+    assert!(report.by_attribution.len() <= report.entry_count);
+    for row in report.by_attribution.values() {
         assert!(report.usage.total_tokens >= row.total_tokens);
     }
 }

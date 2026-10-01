@@ -271,9 +271,12 @@ Accounting writes take no session lock, head row or drive fence (I4).
   live, parked, refused, deleted-but-retained and pruned-but-retained owners.
 - `LashSession::usage()`, `DurableSession::usage()` and `LashRuntime::usage()`
   are async durable reads of `OwnerUsage` for their session.
-  `OwnerUsage::report()` renders the per-`(source, model)`
-  `SessionUsageReport`. `completeness.is_settled()` tells a host whether
-  delivery is still pending. The sync resident `usage_report` and
+  `OwnerUsage::report()` renders the `SessionUsageReport`, keyed per
+  `(source, model_key, requested_model)`: the recorded model key the call
+  ran under and the wire model its request named, so two keys that share a
+  wire model stay two rows (FIG-4405). A fact also keeps the served model
+  the provider reported, and none where it reported none.
+  `completeness.is_settled()` tells a host whether delivery is still pending. The sync resident `usage_report` and
   `unreported_usage_attempts` are gone.
 - Visibility is eventual and explicit. A turn does not wait for its
   accounting: waiting would put the accounting call on the turn's path and

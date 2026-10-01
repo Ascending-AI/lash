@@ -2187,6 +2187,7 @@ macro_rules! usage_ledger_store_tests {
                 accounting_writes_never_touch_head_fence_or_receipts,
                 retention_reclaims_only_retired_owners_before_the_horizon,
                 reads_select_by_owner_without_a_committed_turn,
+                two_model_keys_that_share_a_wire_model_are_attributed_separately,
             );
         }
     };

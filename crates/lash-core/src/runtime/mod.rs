@@ -381,8 +381,8 @@ pub use turn_queue::{
 };
 use usage::nonzero_usage;
 pub use usage::{
-    ReconciledUsageAttempt, SessionUsageReport, UsageReconciliationReport, UsageReportRow,
-    UsageTotals, diff_usage_reports,
+    ReconciledUsageAttempt, SessionUsageReport, UsageAttributionKey, UsageReconciliationReport,
+    UsageReportRow, UsageTotals, diff_usage_reports,
 };
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no

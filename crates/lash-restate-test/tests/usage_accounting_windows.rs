@@ -122,7 +122,7 @@ fn core(
                                 .await
                                 .unwrap();
                             if runs.runs.iter().any(|run| {
-                                run.model == "mock-model"
+                                run.requested_model == "mock-model"
                                     && run.state == lash_core::UsageRunState::Settled
                             }) {
                                 break;

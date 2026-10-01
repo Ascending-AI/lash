@@ -8,7 +8,7 @@ use super::deployment_view::DeploymentViewExt;
 use lash_core::store::{AdmissionId, RetentionBound, RootStartNonce};
 use lash_core::usage_accounting::*;
 use lash_core::{
-    DeploymentStore, LlmCallId, RuntimeOwner, SessionId, TokenUsage, UsageAccountingStore,
+    DeploymentStore, LlmCallId, ModelKey, RuntimeOwner, SessionId, TokenUsage, UsageAccountingStore,
 };
 use std::future::Future;
 use std::num::NonZeroU32;
@@ -47,7 +47,8 @@ fn admission(
         execution_scope_key: "scope".into(),
         run,
         source: "turn".into(),
-        model: "model".into(),
+        model_key: ModelKey::new("model-key"),
+        requested_model: "model".into(),
         admitted_at_ms,
     }
 }
@@ -59,7 +60,9 @@ fn facts() -> Vec<UsageAttemptFact> {
                 provider_attempt: attempt,
                 llm_call_id: LlmCallId("deliberately-colliding-direct-id".into()),
                 source: "turn".into(),
-                model: "model".into(),
+                model_key: ModelKey::new("model-key"),
+                requested_model: "model".into(),
+                served_model: None,
                 outcome: if call == 1 && attempt == 0 {
                     AttemptFactOutcome::Unreported {
                         generation_id: Some("generation".into()),
@@ -297,7 +300,9 @@ pub async fn each_fact_counts_once_under_any_grouping_order_and_repeat(
                                 provider_attempt: 0,
                                 llm_call_id: LlmCallId("same-call".into()),
                                 source: "turn".into(),
-                                model: "model".into(),
+                                model_key: ModelKey::new("model-key"),
+                                requested_model: "model".into(),
+                                served_model: None,
                                 outcome: AttemptFactOutcome::Reported {
                                     usage: TokenUsage {
                                         input_tokens: 7,
@@ -705,4 +710,192 @@ pub async fn reads_select_by_owner_without_a_committed_turn(f: &UsageLedgerStore
                 .is_err()
         );
     }
+}
+
+/// FIG-4405: the ledger attributes usage to the recorded model key. Two keys
+/// that share a requested wire model aggregate as two rows, an unreported
+/// attempt and its run name their key, and a served model is stored only as
+/// the provider reported it.
+pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
+    f: &UsageLedgerStoreFixture,
+) {
+    let owner = owner("usage-two-keys");
+    let fact = |key: &str, served: Option<&str>, outcome: AttemptFactOutcome| UsageAttemptFact {
+        call_ordinal: 0,
+        provider_attempt: 0,
+        llm_call_id: LlmCallId(format!("call-{key}")),
+        source: "turn".into(),
+        model_key: ModelKey::new(key),
+        requested_model: "shared-wire".into(),
+        served_model: served.map(str::to_owned),
+        outcome,
+    };
+    let reported = |input_tokens| AttemptFactOutcome::Reported {
+        usage: TokenUsage {
+            input_tokens,
+            ..Default::default()
+        },
+        generation_id: None,
+    };
+    let settlements = [
+        ("key-a", fact("key-a", Some("served-a"), reported(3))),
+        ("key-b", fact("key-b", None, reported(4))),
+        (
+            "key-c",
+            fact(
+                "key-c",
+                None,
+                AttemptFactOutcome::Unreported {
+                    generation_id: Some("generation-c".into()),
+                },
+            ),
+        ),
+    ]
+    .map(|(key, fact)| UsageSettlement {
+        owner: owner.clone(),
+        effect: effect(&format!("effect-{key}")),
+        run: UsageRunId::mint(),
+        facts: vec![fact],
+        accounting: RunAccounting::Complete,
+    });
+    for (index, s) in settlements.iter().enumerate() {
+        let fact = &s.facts[0];
+        f.accounting
+            .admit_usage_run(&UsageRunAdmission {
+                owner: owner.clone(),
+                effect: s.effect.clone(),
+                execution_scope_key: "scope".into(),
+                run: s.run.clone(),
+                source: fact.source.clone(),
+                model_key: fact.model_key.clone(),
+                requested_model: fact.requested_model.clone(),
+                admitted_at_ms: 10 + index as u64,
+            })
+            .await
+            .expect("admit");
+        assert_eq!(
+            f.accounting
+                .settle_usage(s, 20)
+                .await
+                .expect("settle")
+                .inserted_facts,
+            1
+        );
+    }
+
+    let usage = f.accounting.load_owner_usage(&owner).await.unwrap();
+    assert_eq!(
+        usage
+            .rows
+            .iter()
+            .map(|row| (
+                row.source.as_str(),
+                row.model_key.as_str(),
+                row.requested_model.as_str(),
+                row.usage.input_tokens,
+                row.reported_attempts,
+                row.unreported_attempts,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("turn", "key-a", "shared-wire", 3, 1, 0),
+            ("turn", "key-b", "shared-wire", 4, 1, 0),
+            ("turn", "key-c", "shared-wire", 0, 0, 1),
+        ],
+        "one row per key, though every request named one wire model"
+    );
+    assert_eq!(
+        usage
+            .outstanding
+            .iter()
+            .map(|hole| (hole.model_key.as_str(), hole.requested_model.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("key-c", "shared-wire")],
+        "the reconciliation hole names its key"
+    );
+    let report = usage.report();
+    assert_eq!(report.by_attribution.len(), 3);
+    assert_eq!(report.by_model_key.len(), 3);
+    assert_eq!(report.by_requested_model.len(), 1);
+    assert_eq!(
+        report.by_requested_model["shared-wire"].usage.input_tokens,
+        7
+    );
+
+    assert_eq!(
+        all_facts(f, &owner)
+            .await
+            .iter()
+            .map(|fact| (
+                fact.model_key.as_str(),
+                fact.requested_model.as_str(),
+                fact.served_model.as_deref()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("key-a", "shared-wire", Some("served-a")),
+            ("key-b", "shared-wire", None),
+            ("key-c", "shared-wire", None),
+        ],
+        "a served model is the provider's report, and absent where it reported none"
+    );
+    let mut runs = f
+        .accounting
+        .load_usage_run_page(&owner, UsageRunFilter::All, None, limit(16))
+        .await
+        .unwrap()
+        .runs
+        .into_iter()
+        .map(|run| (run.model_key.as_str().to_owned(), run.requested_model))
+        .collect::<Vec<_>>();
+    runs.sort();
+    assert_eq!(
+        runs,
+        ["key-a", "key-b", "key-c"].map(|key| (key.to_owned(), "shared-wire".to_owned())),
+        "each run names the key of its first dispatch"
+    );
+
+    // The key is part of a fact's payload: the same identity offered under
+    // another key is a conflict, never a silent re-attribution.
+    let mut moved = settlements[0].clone();
+    moved.facts[0].model_key = ModelKey::new("key-b");
+    assert!(matches!(
+        f.accounting.settle_usage(&moved, 30).await,
+        Err(UsageAppendError::Conflict(_))
+    ));
+
+    // A correction keeps its attempt's attribution.
+    let hole = &usage.outstanding[0];
+    f.accounting
+        .append_usage_corrections(
+            &owner,
+            &[UsageCorrection {
+                effect: hole.effect.clone(),
+                call_ordinal: hole.call_ordinal,
+                provider_attempt: hole.provider_attempt,
+                usage: TokenUsage {
+                    input_tokens: 5,
+                    ..Default::default()
+                },
+                generation_id: "generation-c".into(),
+            }],
+            40,
+        )
+        .await
+        .expect("correct");
+    let corrected = f.accounting.load_owner_usage(&owner).await.unwrap();
+    let row = corrected
+        .rows
+        .iter()
+        .find(|row| row.model_key.as_str() == "key-c")
+        .expect("the corrected key's row");
+    assert_eq!(
+        (
+            row.requested_model.as_str(),
+            row.usage.input_tokens,
+            row.reconciled_attempts
+        ),
+        ("shared-wire", 5, 1)
+    );
+    assert_eq!(corrected.rows.len(), 3, "the correction adds no row");
 }

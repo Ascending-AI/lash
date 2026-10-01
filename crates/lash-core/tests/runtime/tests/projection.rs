@@ -645,7 +645,11 @@ async fn completed_turns_are_persisted_in_session_graph() {
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].source, "turn");
     assert_eq!(
-        Some(ledger[0].model.as_str()),
+        Some(&ledger[0].model_key),
+        standard_test_policy().model_key()
+    );
+    assert_eq!(
+        Some(ledger[0].requested_model.as_str()),
         standard_test_policy().wire_model()
     );
     assert_eq!(ledger[0].usage.input_tokens, 12);

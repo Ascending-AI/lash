@@ -617,7 +617,7 @@ table lash_usage_facts
   column generation_id text nullable
   column input_tokens bigint not-null
   column llm_call_id text not-null
-  column model text not-null
+  column model_key text not-null
   column output_tokens bigint not-null
   column owner_id text not-null
   column owner_kind text not-null
@@ -625,8 +625,10 @@ table lash_usage_facts
   column provider_attempt bigint not-null
   column reasoning_output_tokens bigint not-null
   column recorded_at_ms bigint not-null
+  column requested_model text not-null
   column run_id text nullable
   column seq bigint not-null default
+  column served_model text nullable
   column source text not-null
   unique (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
   primary-key (seq)
@@ -640,9 +642,10 @@ table lash_usage_runs
   column conflict_detail text nullable
   column effect_key text not-null
   column execution_scope_key text not-null
-  column model text not-null
+  column model_key text not-null
   column owner_id text not-null
   column owner_kind text not-null
+  column requested_model text not-null
   column resolved_at_ms bigint nullable
   column run_id text not-null
   column source text not-null

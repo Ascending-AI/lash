@@ -340,6 +340,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnLaneAdmissionPolicy;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
+    pub use crate::runtime::UsageAttributionKey;
     pub use crate::runtime::UsageReconciliationReport;
     pub use crate::runtime::UsageReportRow;
     pub use crate::runtime::UsageTotals;

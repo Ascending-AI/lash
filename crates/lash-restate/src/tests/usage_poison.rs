@@ -28,6 +28,7 @@ impl RuntimeEffectLocalRunner for PaidCall {
         usage_run: Option<lash_core::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
         let RuntimeEffectCommand::Direct {
+            model_key,
             request,
             usage_source,
         } = envelope.command
@@ -40,6 +41,7 @@ impl RuntimeEffectLocalRunner for PaidCall {
             .call(
                 lash_core::RuntimeOwner::Session(SessionId::from(SESSION)),
                 usage_source,
+                model_key,
                 request.model.clone(),
             )
             .expect("the run's one call");
@@ -118,6 +120,7 @@ async fn poisoned_paid_call(
     let envelope = RuntimeEffectEnvelope::new(
         test_turn_effect_invocation(SESSION, "usage-poison-turn", 0, 0, effect, effect),
         RuntimeEffectCommand::Direct {
+            model_key: lash_core::ModelKey::new("usage-poison-key"),
             request: Box::new(llm_spec()),
             usage_source: "turn".to_string(),
         },

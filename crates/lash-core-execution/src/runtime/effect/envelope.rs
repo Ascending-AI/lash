@@ -346,6 +346,11 @@ pub enum RuntimeEffectCommand {
         stream_hook_states: Vec<AssistantStreamHookState>,
     },
     Direct {
+        /// The recorded model key the completion runs under: the session's
+        /// (or the tool child's) recorded selection at the time of the call.
+        /// The usage ledger attributes the call to it, and a replay under
+        /// another key diverges instead of continuing on it.
+        model_key: crate::ModelKey,
         request: Box<LlmRequestSpec>,
         usage_source: String,
     },

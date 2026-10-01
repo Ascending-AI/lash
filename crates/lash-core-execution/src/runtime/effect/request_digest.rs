@@ -224,6 +224,53 @@ mod tests {
         assert_eq!(journaled["command"]["request"]["messages"]["len"], 2);
     }
 
+    fn direct(model_key: &str) -> RuntimeEffectEnvelope {
+        let mut envelope = llm_call(transcript("direct"));
+        envelope.command = RuntimeEffectCommand::Direct {
+            model_key: crate::ModelKey::new(model_key),
+            request: Box::new(request(transcript("direct"))),
+            usage_source: "direct-source".to_string(),
+        };
+        envelope
+    }
+
+    /// FIG-4405: a direct effect's envelope carries the recorded model key
+    /// beside its request's wire model, and a replay that names another key
+    /// for the same wire model diverges at the key.
+    #[test]
+    fn a_direct_envelope_journals_its_model_key_and_another_key_diverges() {
+        let recorded = direct("direct-key-a").canonical_form().expect("canonical");
+        let journaled: Value = serde_json::from_str(recorded.json()).expect("journaled json");
+        assert_eq!(journaled["command"]["type"], "direct");
+        assert_eq!(journaled["command"]["model_key"], "direct-key-a");
+        assert_eq!(journaled["command"]["request"]["model"], "digest-model");
+        assert_eq!(journaled["command"]["usage_source"], "direct-source");
+
+        let other_key = direct("direct-key-b").canonical_form().expect("canonical");
+        let error = validate_replayed_effect_envelope(
+            &recorded,
+            &other_key,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
+            None,
+        )
+        .expect_err("another key for the same wire model diverges");
+        assert_eq!(
+            error.summary.expect("summary").first_divergent_paths,
+            ["command.model_key"]
+        );
+        let same = direct("direct-key-a").canonical_form().expect("canonical");
+        assert!(
+            validate_replayed_effect_envelope(
+                &recorded,
+                &same,
+                crate::RuntimeErrorCode::EffectReplayDivergence,
+                None,
+            )
+            .is_ok(),
+            "the same key replays"
+        );
+    }
+
     #[test]
     fn a_replay_whose_transcript_differs_diverges_at_the_message_digest() {
         let recorded = llm_call(transcript("first"))

@@ -53,10 +53,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 }
                 Ok(RuntimeEffectOutcome::BeforeLlmCall { decision })
             }
-            RuntimeEffectCommand::LlmCall {
-                model_key: _,
-                request,
-            } => {
+            RuntimeEffectCommand::LlmCall { model_key, request } => {
                 // The recorded body races the model call against the turn's
                 // gate itself: this is the engine's cooperative cancel for a
                 // step it cannot select away, and what the body saw is its
@@ -79,13 +76,8 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .call(
                         crate::RuntimeOwner::Session(runner.driver.session_id.clone()),
                         "turn",
-                        runner
-                            .driver
-                            .policy
-                            .model_config()
-                            .model
-                            .wire_model()
-                            .to_string(),
+                        model_key,
+                        request.model.clone(),
                     )
                     .map_err(|error| {
                         RuntimeEffectControllerError::new(

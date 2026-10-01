@@ -756,9 +756,9 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
         assert_eq!(report.usage.reconciled_attempts, 0);
         assert_eq!(report.usage.total_tokens, 0);
         let row = report
-            .by_source_model
+            .by_attribution
             .iter()
-            .find(|((source, _), _)| source == "turn")
+            .find(|(attribution, _)| attribution.source == "turn")
             .map(|(_, totals)| totals)
             .expect("unreported turn row is written even at zero usage");
         assert_eq!(row.unreported_attempts, 1);

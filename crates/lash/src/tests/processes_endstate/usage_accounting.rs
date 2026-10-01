@@ -219,7 +219,8 @@ async fn process_usage_and_prune(backend: lash_core::Backend) -> Result<()> {
                 .into(),
             run: lash_core::UsageRunId::mint(),
             source: "process-direct".into(),
-            model: "mock-model".into(),
+            model_key: lash_core::ModelKey::new("mock-model"),
+            requested_model: "mock-model".into(),
             admitted_at_ms: 1,
         })
         .await;

@@ -6,11 +6,11 @@ use super::{LocalTarget, RuntimeEffectLocalExecutor, RuntimeEffectLocalExecutorS
 use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectOutcome};
 
 /// The accounting of one `Direct` effect: the ledger its run is admitted
-/// to, and the owner and source label its call is attributed to.
+/// to, and the owner its call is attributed to. The source label and the
+/// model key come from the effect's envelope.
 pub struct DirectUsage {
     pub accounting: crate::UsageAccountingBinding,
     pub owner: crate::RuntimeOwner,
-    pub source: String,
 }
 
 impl DirectUsage {
@@ -19,7 +19,9 @@ impl DirectUsage {
     pub(super) fn call(
         &self,
         usage_run: Option<&crate::UsageRun>,
-        model: &str,
+        source: String,
+        model_key: crate::ModelKey,
+        requested_model: &str,
     ) -> Result<crate::UsageCall, RuntimeEffectControllerError> {
         usage_run
             .ok_or_else(|| {
@@ -28,7 +30,12 @@ impl DirectUsage {
                     "a direct completion reached its provider outside any usage run",
                 )
             })?
-            .call(self.owner.clone(), self.source.clone(), model.to_string())
+            .call(
+                self.owner.clone(),
+                source,
+                model_key,
+                requested_model.to_string(),
+            )
             .map_err(|error| {
                 RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::UsageRunMissing,
@@ -39,14 +46,19 @@ impl DirectUsage {
 }
 
 impl super::LocalDirectEffectRunner {
-    /// Runs the direct request as its run's one call, and records the sealed
-    /// call record, failed attempts included, as that call's facts.
+    /// Runs the direct request as its run's one call, attributed to the
+    /// envelope's `usage_source` and `model_key`, and records the sealed call
+    /// record, failed attempts included, as that call's facts.
     pub(super) async fn run_direct_in_usage_run(
         &mut self,
         request: crate::LlmRequest,
+        usage_source: String,
+        model_key: crate::ModelKey,
         usage_run: Option<&crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let call = self.usage.call(usage_run, &request.model)?;
+        let call = self
+            .usage
+            .call(usage_run, usage_source, model_key, &request.model)?;
         let (result, call_record) = self.run_direct_llm_request(request, &call).await;
         if let Some(call_record) = &call_record {
             call.record(call_record);

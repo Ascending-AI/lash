@@ -1784,7 +1784,8 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
         run: run.clone(),
         execution_scope_key: "sweep".into(),
         source: "turn".into(),
-        model: "model".into(),
+        model_key: lash_core::ModelKey::new("model-key"),
+        requested_model: "model".into(),
         admitted_at_ms: 10,
     };
     let mut out = vec![format!(
@@ -1804,7 +1805,9 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
             provider_attempt: 0,
             llm_call_id: lash_core::LlmCallId("call".into()),
             source: "turn".into(),
-            model: "model".into(),
+            model_key: lash_core::ModelKey::new("model-key"),
+            requested_model: "model".into(),
+            served_model: None,
             outcome: AttemptFactOutcome::Unreported {
                 generation_id: Some("generation".into()),
             },

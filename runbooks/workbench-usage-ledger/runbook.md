@@ -32,7 +32,7 @@ provider-reported counters, canonical arithmetic, and equality between surfaces.
    boundary as a scan start and apply the turn id as the decisive filter, because idle
    polling can advance the trace file.
 4. **Totals dominate rows/calls.** API session totals must equal the sum of
-   `by_source_model` rows and be greater than or equal to this turn's completed-call sum.
+   `by_attribution` rows and be greater than or equal to this turn's completed-call sum.
    Input and output must be non-zero when the trace reports calls.
 5. **Restart equality is exact.** After the non-destructive same-configuration replacement,
    require the full `/api/state.usage` JSON object and rendered total/input/output strings to
@@ -64,7 +64,7 @@ database evidence (`usage_facts`, `usage_runs`) for RCA; do not edit accounting 
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment.
 - UI truth: left-rail **usage** total and **tokens** input/output rows, transcript,
   running/idle pill.
-- API truth: `GET /api/state`, especially `usage.usage`, `usage.by_source_model`, and
+- API truth: `GET /api/state`, especially `usage.usage`, `usage.by_attribution`, and
   `usage.entry_count`.
 - Disk truth: `<data-dir>/trace.jsonl` and the selected SQLite/Postgres session store — for
   SQLite that is `<data-dir>/lash-sessions/durable-core.db`, whose `usage_facts` rows are
@@ -106,7 +106,7 @@ and a positive canonical call sum. `llm_call_completed.response.usage` carries t
 counters but **no** `total_tokens` — compute the canonical sum from them (golden rule 2),
 and do not read a null field. Then gate:
 
-- the canonical session total equals the sum of every `by_source_model[].usage.total_tokens`;
+- the canonical session total equals the sum of every `by_attribution[].usage.total_tokens`;
 - each report row is no larger than the session total;
 - the session total is at least the sum of the selected trace call usage;
 - report input total (uncached + cache read + cache write) and output are non-zero wherever

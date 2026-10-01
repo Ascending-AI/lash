@@ -171,7 +171,7 @@ fn unreported_attempts_survive_close_and_reopen_with_their_attribution() -> Resu
         let alpha = by_call(&first_call);
         assert_eq!(alpha.provider_attempt, 1);
         assert_eq!(alpha.source, "turn");
-        assert_eq!(alpha.model, mock_model_spec().wire_model);
+        assert_eq!(alpha.requested_model, mock_model_spec().wire_model);
         assert_eq!(alpha.generation_id.as_deref(), Some("gen-alpha"));
         // An attempt with no generation id is a fact, not missing data: it
         // stays outstanding as unreconcilable rather than disappearing.

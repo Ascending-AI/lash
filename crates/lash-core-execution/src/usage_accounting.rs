@@ -116,12 +116,15 @@ impl UsageRun {
     }
 
     /// A call slot: its `call_ordinal` is the next one, and `owner` must
-    /// equal every other call's owner in this run.
+    /// equal every other call's owner in this run. The call is attributed to
+    /// `model_key`, the recorded key it runs under, and `requested_model`,
+    /// the wire model its request names.
     pub fn call(
         &self,
         owner: RuntimeOwner,
         source: impl Into<String>,
-        model: impl Into<String>,
+        model_key: crate::ModelKey,
+        requested_model: impl Into<String>,
     ) -> Result<UsageCall, UsageRunError> {
         let mut progress = self.inner.progress.lock_recover();
         match &progress.owner {
@@ -142,7 +145,8 @@ impl UsageRun {
                 run: self.clone(),
                 owner,
                 source: source.into(),
-                model: model.into(),
+                model_key,
+                requested_model: requested_model.into(),
                 call_ordinal,
             }),
         })
@@ -197,7 +201,8 @@ impl UsageRun {
             execution_scope_key: self.inner.execution_scope_key.clone(),
             run: self.inner.run.clone(),
             source: call.source.clone(),
-            model: call.model.clone(),
+            model_key: call.model_key.clone(),
+            requested_model: call.requested_model.clone(),
             admitted_at_ms: self.inner.clock.timestamp_ms(),
         };
         let verdict = match self.inner.store.admit_usage_run(&request).await {
@@ -251,7 +256,8 @@ struct UsageCallInner {
     run: UsageRun,
     owner: RuntimeOwner,
     source: String,
-    model: String,
+    model_key: crate::ModelKey,
+    requested_model: String,
     call_ordinal: u32,
 }
 
@@ -302,6 +308,12 @@ impl UsageCall {
                 .evidence
                 .as_ref()
                 .and_then(|evidence| evidence.provider_response_id.clone());
+            // Provider-reported only: an attempt whose provider named no
+            // served model records none, never the requested one.
+            let served_model = attempt
+                .evidence
+                .as_ref()
+                .and_then(|evidence| evidence.served_model.clone());
             let outcome = match (attempt.usage_disposition, attempt.usage.as_ref()) {
                 (AttemptUsageOutcome::Reported, Some(usage)) => AttemptFactOutcome::Reported {
                     usage: crate::runtime::effect::token_usage_from_llm(usage),
@@ -315,12 +327,13 @@ impl UsageCall {
                     _,
                 ) => AttemptFactOutcome::Unreported { generation_id },
             };
-            facts.push(self.fact(record, attempt.ordinal, outcome));
+            facts.push(self.fact(record, attempt.ordinal, served_model, outcome));
         }
         for ordinal in admitted.difference(&described) {
             facts.push(self.fact(
                 record,
                 *ordinal,
+                None,
                 AttemptFactOutcome::Unreported {
                     generation_id: None,
                 },
@@ -333,6 +346,7 @@ impl UsageCall {
         &self,
         record: &LlmCallRecord,
         attempt_ordinal: u32,
+        served_model: Option<String>,
         outcome: AttemptFactOutcome,
     ) -> UsageAttemptFact {
         UsageAttemptFact {
@@ -340,7 +354,9 @@ impl UsageCall {
             provider_attempt: attempt_ordinal,
             llm_call_id: record.call_id.clone(),
             source: self.inner.source.clone(),
-            model: self.inner.model.clone(),
+            model_key: self.inner.model_key.clone(),
+            requested_model: self.inner.requested_model.clone(),
+            served_model,
             outcome,
         }
     }
@@ -582,6 +598,10 @@ mod tests {
         RuntimeOwner::Session(crate::SessionId::from("usage-owner"))
     }
 
+    fn key() -> crate::ModelKey {
+        crate::ModelKey::new("model-key")
+    }
+
     fn run(store: Arc<AdmissionStore>) -> UsageRun {
         let address = crate::EffectAddress::new(
             crate::ExecutionScope::runtime_operation("usage-projection"),
@@ -656,7 +676,9 @@ mod tests {
     async fn a_billed_failure_and_its_retry_are_two_facts_under_one_run() {
         let store = Arc::new(AdmissionStore::default());
         let run = run(Arc::clone(&store));
-        let call = run.call(owner(), "turn", "model").expect("a call slot");
+        let call = run
+            .call(owner(), "turn", key(), "model")
+            .expect("a call slot");
         dispatch(&call, 1)
             .await
             .expect("the first attempt is admitted");
@@ -696,7 +718,9 @@ mod tests {
     #[tokio::test]
     async fn zero_is_a_fact_an_abort_is_unreported_and_unreported_by_provider_is_nothing() {
         let run = run(Arc::new(AdmissionStore::default()));
-        let call = run.call(owner(), "turn", "model").expect("a call slot");
+        let call = run
+            .call(owner(), "turn", key(), "model")
+            .expect("a call slot");
         for ordinal in 1..=3 {
             dispatch(&call, ordinal).await.expect("admitted");
         }
@@ -745,7 +769,9 @@ mod tests {
     #[tokio::test]
     async fn an_undescribed_attempt_is_unreported_and_an_unsealed_call_is_counted() {
         let run = run(Arc::new(AdmissionStore::default()));
-        let sealed = run.call(owner(), "turn", "model").expect("a call slot");
+        let sealed = run
+            .call(owner(), "turn", key(), "model")
+            .expect("a call slot");
         dispatch(&sealed, 1).await.expect("admitted");
         dispatch(&sealed, 2).await.expect("admitted");
         sealed.record(&record(vec![attempt(
@@ -755,7 +781,7 @@ mod tests {
             Some(5),
         )]));
         let unsealed = run
-            .call(owner(), "turn", "model")
+            .call(owner(), "turn", key(), "model")
             .expect("a second call slot");
         dispatch(&unsealed, 1).await.expect("admitted");
         drop(unsealed);
@@ -778,11 +804,14 @@ mod tests {
     #[tokio::test]
     async fn a_run_that_dispatched_nothing_has_no_usage_and_one_owner() {
         let run = run(Arc::new(AdmissionStore::default()));
-        let _call = run.call(owner(), "turn", "model").expect("a call slot");
+        let _call = run
+            .call(owner(), "turn", key(), "model")
+            .expect("a call slot");
         assert!(matches!(
             run.call(
                 RuntimeOwner::Session(crate::SessionId::from("someone-else")),
                 "turn",
+                key(),
                 "model",
             ),
             Err(UsageRunError::OwnerMismatch { .. })
@@ -798,7 +827,9 @@ mod tests {
             retired: true,
             ..AdmissionStore::default()
         }));
-        let call = retired.call(owner(), "turn", "model").expect("a call slot");
+        let call = retired
+            .call(owner(), "turn", key(), "model")
+            .expect("a call slot");
         let refused = dispatch(&call, 1)
             .await
             .expect_err("a retired owner refuses");
@@ -811,9 +842,75 @@ mod tests {
             faulted: true,
             ..AdmissionStore::default()
         }));
-        let call = faulted.call(owner(), "turn", "model").expect("a call slot");
+        let call = faulted
+            .call(owner(), "turn", key(), "model")
+            .expect("a call slot");
         let refused = dispatch(&call, 1).await.expect_err("a store fault refuses");
         assert!(refused.retryable);
         assert!(faulted.admission_fault().is_some());
+    }
+
+    /// FIG-4405: each call's facts and its run's admission carry the model
+    /// key the call ran under beside the requested wire model, so two keys
+    /// that share a wire model stay apart; the served model is what the
+    /// provider reported and nothing else.
+    #[tokio::test]
+    async fn facts_carry_the_model_key_and_only_a_provider_reported_served_model() {
+        let store = Arc::new(AdmissionStore::default());
+        let run = run(Arc::clone(&store));
+        let first = run
+            .call(
+                owner(),
+                "turn",
+                crate::ModelKey::new("key-a"),
+                "shared-wire",
+            )
+            .expect("a call slot");
+        dispatch(&first, 1).await.expect("admitted");
+        let mut reporting = attempt(
+            1,
+            AttemptOutcome::Completed,
+            AttemptUsageOutcome::Reported,
+            Some(3),
+        );
+        reporting.evidence = Some(crate::llm::types::ExecutionEvidence {
+            served_model: Some("provider-served".to_string()),
+            ..crate::llm::types::ExecutionEvidence::default()
+        });
+        first.record(&record(vec![reporting]));
+        let second = run
+            .call(
+                owner(),
+                "turn",
+                crate::ModelKey::new("key-b"),
+                "shared-wire",
+            )
+            .expect("a second call slot");
+        dispatch(&second, 1).await.expect("admitted");
+        second.record(&record(vec![attempt(
+            1,
+            AttemptOutcome::Completed,
+            AttemptUsageOutcome::Reported,
+            Some(4),
+        )]));
+        let usage = run.finish().expect("an admitted run has usage");
+        assert_eq!(
+            usage
+                .facts
+                .iter()
+                .map(|fact| (
+                    fact.model_key.as_str(),
+                    fact.requested_model.as_str(),
+                    fact.served_model.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("key-a", "shared-wire", Some("provider-served")),
+                ("key-b", "shared-wire", None),
+            ]
+        );
+        let admissions = store.admissions.lock_recover();
+        assert_eq!(admissions[0].model_key.as_str(), "key-a");
+        assert_eq!(admissions[0].requested_model, "shared-wire");
     }
 }

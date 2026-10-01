@@ -3,7 +3,7 @@ use crate::conn::TxOutcome;
 use crate::schema_layout::Schema;
 use crate::{SqliteStore, sqlite_error};
 use async_trait::async_trait;
-use lash_core_execution::{LlmCallId, StoreError, TokenUsage};
+use lash_core_execution::{LlmCallId, ModelKey, StoreError, TokenUsage};
 use lash_core_store::RuntimeOwner;
 use lash_core_store::store::usage_accounting::UsageAccountingStore;
 use lash_core_store::usage_accounting::*;
@@ -23,8 +23,8 @@ struct Statements {
 }
 lash_store_sql::statements! {
     pub(crate) struct UsageInsertStatements @ "usage_sqlite" {
-        fact = "INSERT OR IGNORE INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)";
-        run = "INSERT OR IGNORE INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+        fact = "INSERT OR IGNORE INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)";
+        run = "INSERT OR IGNORE INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, model_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
         owner = "INSERT OR IGNORE INTO usage_owner_retirements (owner_kind, owner_id, retired_at_ms) VALUES (?1, ?2, ?3)";
     }
 }
@@ -99,16 +99,18 @@ fn decode_fact(row: &Row<'_>) -> Result<UsageFactRecord, StoreError> {
         run: run.map(UsageRunId::try_from).transpose()?,
         llm_call_id: LlmCallId(row.get::<_, String>(9).map_err(sqlite_error)?),
         source: get!(10),
-        model: get!(11),
+        model_key: ModelKey::new(row.get::<_, String>(11).map_err(sqlite_error)?),
+        requested_model: get!(12),
+        served_model: get!(13),
         usage: TokenUsage {
-            input_tokens: get!(12),
-            output_tokens: get!(13),
-            cache_read_input_tokens: get!(14),
-            cache_write_input_tokens: get!(15),
-            reasoning_output_tokens: get!(16),
+            input_tokens: get!(14),
+            output_tokens: get!(15),
+            cache_read_input_tokens: get!(16),
+            cache_write_input_tokens: get!(17),
+            reasoning_output_tokens: get!(18),
         },
-        generation_id: get!(17),
-        recorded_at_ms: unsigned(get!(19))?,
+        generation_id: get!(19),
+        recorded_at_ms: unsigned(get!(21))?,
     })
 }
 fn decode_run(row: &Row<'_>) -> Result<UsageRunRecord, StoreError> {
@@ -117,17 +119,18 @@ fn decode_run(row: &Row<'_>) -> Result<UsageRunRecord, StoreError> {
             row.get($n).map_err(sqlite_error)?
         };
     }
-    let state: String = get!(6);
-    let reason: Option<String> = get!(7);
-    let detail: Option<String> = get!(8);
-    let resolved: Option<i64> = get!(9);
+    let state: String = get!(7);
+    let reason: Option<String> = get!(8);
+    let detail: Option<String> = get!(9);
+    let resolved: Option<i64> = get!(10);
     Ok(UsageRunRecord {
         effect: effect(get!(0))?,
         run: UsageRunId::try_from(row.get::<_, String>(1).map_err(sqlite_error)?)?,
         execution_scope_key: get!(2),
         source: get!(3),
-        model: get!(4),
-        admitted_at_ms: unsigned(get!(5))?,
+        model_key: ModelKey::new(row.get::<_, String>(4).map_err(sqlite_error)?),
+        requested_model: get!(5),
+        admitted_at_ms: unsigned(get!(6))?,
         state: match state.as_str() {
             "open" => UsageRunState::Open,
             "settled" => UsageRunState::Settled,
@@ -164,7 +167,9 @@ fn insert_fact(
                 record.run.as_ref().map(UsageRunId::as_str),
                 record.llm_call_id.0.as_str(),
                 record.source,
-                record.model,
+                record.model_key.as_str(),
+                record.requested_model,
+                record.served_model,
                 record.usage.input_tokens,
                 record.usage.output_tokens,
                 record.usage.cache_read_input_tokens,
@@ -256,7 +261,8 @@ impl UsageAccountingStore for SqliteStore {
                         a.run.as_str(),
                         a.execution_scope_key,
                         a.source,
-                        a.model,
+                        a.model_key.as_str(),
+                        a.requested_model,
                         integer(a.admitted_at_ms)?,
                         "open",
                         Option::<&str>::None,
@@ -309,7 +315,8 @@ impl UsageAccountingStore for SqliteStore {
                     s.run.as_str(),
                     "",
                     first.map_or("", |f| f.source.as_str()),
-                    first.map_or("", |f| f.model.as_str()),
+                    first.map_or("", |f| f.model_key.as_str()),
+                    first.map_or("", |f| f.requested_model.as_str()),
                     now,
                     state,
                     reason,
@@ -373,7 +380,8 @@ impl UsageAccountingStore for SqliteStore {
                     s.run.as_str(),
                     "",
                     first.map_or("", |f| f.source.as_str()),
-                    first.map_or("", |f| f.model.as_str()),
+                    first.map_or("", |f| f.model_key.as_str()),
+                    first.map_or("", |f| f.requested_model.as_str()),
                     now,
                     "open",
                     Option::<&str>::None,
@@ -434,12 +442,7 @@ impl UsageAccountingStore for SqliteStore {
                 if record.disposition != UsageReporting::Unreported {
                     return Err(UsageAppendError::CorrectionTargetReported { identity });
                 }
-                let hash = usage_correction_payload_hash(
-                    correction,
-                    &record.llm_call_id,
-                    &record.source,
-                    &record.model,
-                );
+                let hash = usage_correction_payload_hash(correction, &record);
                 record.identity.kind = UsageFactKind::Correction;
                 record.disposition = UsageReporting::Reconciled;
                 record.run = None;
@@ -518,25 +521,34 @@ impl UsageAccountingStore for SqliteStore {
                             Ok((
                                 row.get::<_, String>(0)?,
                                 row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
                                 TokenUsage {
-                                    input_tokens: row.get(2)?,
-                                    output_tokens: row.get(3)?,
-                                    cache_read_input_tokens: row.get(4)?,
-                                    cache_write_input_tokens: row.get(5)?,
-                                    reasoning_output_tokens: row.get(6)?,
+                                    input_tokens: row.get(3)?,
+                                    output_tokens: row.get(4)?,
+                                    cache_read_input_tokens: row.get(5)?,
+                                    cache_write_input_tokens: row.get(6)?,
+                                    reasoning_output_tokens: row.get(7)?,
                                 },
-                                row.get::<_, i64>(7)?,
                                 row.get::<_, i64>(8)?,
                                 row.get::<_, i64>(9)?,
+                                row.get::<_, i64>(10)?,
                             ))
                         })
                         .map_err(sqlite_error)?
                         .map(|row| {
-                            let (source, model, usage, reported, unreported, reconciled) =
-                                row.map_err(sqlite_error)?;
+                            let (
+                                source,
+                                model_key,
+                                requested_model,
+                                usage,
+                                reported,
+                                unreported,
+                                reconciled,
+                            ) = row.map_err(sqlite_error)?;
                             Ok(OwnerUsageRow {
                                 source,
-                                model,
+                                model_key: ModelKey::new(model_key),
+                                requested_model,
                                 usage,
                                 reported_attempts: unsigned(reported)?,
                                 unreported_attempts: unsigned(unreported)?,
@@ -555,20 +567,30 @@ impl UsageAccountingStore for SqliteStore {
                                 row.get::<_, String>(3)?,
                                 row.get::<_, String>(4)?,
                                 row.get::<_, String>(5)?,
-                                row.get::<_, Option<String>>(6)?,
+                                row.get::<_, String>(6)?,
+                                row.get::<_, Option<String>>(7)?,
                             ))
                         })
                         .map_err(sqlite_error)?
                         .map(|row| {
-                            let (key, call, attempt, llm_call, source, model, generation_id) =
-                                row.map_err(sqlite_error)?;
+                            let (
+                                key,
+                                call,
+                                attempt,
+                                llm_call,
+                                source,
+                                model_key,
+                                requested_model,
+                                generation_id,
+                            ) = row.map_err(sqlite_error)?;
                             Ok(OutstandingUsageAttempt {
                                 effect: effect(key)?,
                                 call_ordinal: ordinal(call)?,
                                 provider_attempt: ordinal(attempt)?,
                                 llm_call_id: LlmCallId(llm_call),
                                 source,
-                                model,
+                                model_key: ModelKey::new(model_key),
+                                requested_model,
                                 generation_id,
                             })
                         })

@@ -70,13 +70,15 @@ impl ConformanceTurnRunner for MutatingRunner {
                     .execute(
                         "INSERT INTO usage_facts (
                     owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind,
-                    disposition, run_id, llm_call_id, source, model, input_tokens, output_tokens,
-                    cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens,
-                    generation_id, payload_hash, recorded_at_ms)
+                    disposition, run_id, llm_call_id, source, model_key, requested_model,
+                    served_model, input_tokens, output_tokens, cache_read_input_tokens,
+                    cache_write_input_tokens, reasoning_output_tokens, generation_id,
+                    payload_hash, recorded_at_ms)
                     SELECT owner_kind, owner_id, effect_key || ':late-duplicate', call_ordinal,
-                    provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model,
-                    input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens,
-                    reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms
+                    provider_attempt, fact_kind, disposition, run_id, llm_call_id, source,
+                    model_key, requested_model, served_model, input_tokens, output_tokens,
+                    cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens,
+                    generation_id, payload_hash, recorded_at_ms
                     FROM usage_facts WHERE input_tokens > 0 LIMIT 1",
                         [],
                     )

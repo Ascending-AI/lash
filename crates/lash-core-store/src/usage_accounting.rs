@@ -1,6 +1,6 @@
 //! Owner-scoped, effect-keyed usage facts and dispatch liabilities.
-use crate::usage::{SessionUsageReport, UsageTotals};
-use crate::{RuntimeOwner, StoreError};
+use crate::usage::{SessionUsageReport, UsageAttributionKey, UsageTotals};
+use crate::{ModelKey, RuntimeOwner, StoreError};
 use lash_sansio::TokenUsage;
 use lash_sansio::llm::types::LlmCallId;
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,10 @@ pub struct UsageRunAdmission {
     pub run: UsageRunId,
     /// Attribution of the first dispatch; unknown liabilities report under it.
     pub source: String,
-    pub model: String,
+    /// The recorded model key the first dispatch ran under.
+    pub model_key: ModelKey,
+    /// The wire model the first dispatch's request named.
+    pub requested_model: String,
     pub admitted_at_ms: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,7 +116,14 @@ pub struct UsageAttemptFact {
     pub provider_attempt: u32,
     pub llm_call_id: LlmCallId,
     pub source: String,
-    pub model: String,
+    /// The recorded model key the call ran under: the host's registration,
+    /// which two keys that share a wire model keep apart.
+    pub model_key: ModelKey,
+    /// The wire model the request named.
+    pub requested_model: String,
+    /// The model the provider reported it served this attempt with. `None`
+    /// when the provider reported none: it is never filled from the request.
+    pub served_model: Option<String>,
     pub outcome: AttemptFactOutcome,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,11 +257,12 @@ impl UsageCompleteness {
     }
 }
 
-/// One `(source, model)` aggregate.
+/// One `(source, model_key, requested_model)` aggregate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnerUsageRow {
     pub source: String,
-    pub model: String,
+    pub model_key: ModelKey,
+    pub requested_model: String,
     /// Reported plus reconciled counters.
     pub usage: TokenUsage,
     pub reported_attempts: u64,
@@ -266,13 +277,14 @@ pub struct OutstandingUsageAttempt {
     pub provider_attempt: u32,
     pub llm_call_id: LlmCallId,
     pub source: String,
-    pub model: String,
+    pub model_key: ModelKey,
+    pub requested_model: String,
     pub generation_id: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnerUsage {
     pub owner: RuntimeOwner,
-    pub rows: Vec<OwnerUsageRow>, // sorted, unique by (source, model)
+    pub rows: Vec<OwnerUsageRow>, // sorted, unique by (source, model_key, requested_model)
     /// Unreported attempts no correction covers, oldest first: the order
     /// their facts were recorded, so reconciliation works through them in
     /// the order they were spent.
@@ -286,7 +298,10 @@ pub struct UsageFactRecord {
     pub identity: UsageFactIdentity,
     pub llm_call_id: LlmCallId,
     pub source: String,
-    pub model: String,
+    pub model_key: ModelKey,
+    pub requested_model: String,
+    /// Provider-reported only; a correction keeps its attempt's value.
+    pub served_model: Option<String>,
     pub usage: TokenUsage,
     pub disposition: UsageReporting, // Reported | Unreported | Reconciled
     pub run: Option<UsageRunId>,     // None for a correction
@@ -331,7 +346,8 @@ pub struct UsageRunRecord {
     pub run: UsageRunId,
     pub execution_scope_key: String,
     pub source: String,
-    pub model: String,
+    pub model_key: ModelKey,
+    pub requested_model: String,
     pub admitted_at_ms: u64,
     pub state: UsageRunState,
     pub resolved_at_ms: Option<u64>,
@@ -387,8 +403,9 @@ pub struct UsageRunPage {
 /// same value under the version freeze, new projection in place).
 pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
 /// BLAKE3 hex under domain `lash-usage-fact-payload/v4` of the framed
-/// projection: kind, disposition tag, source, model, the five counters
-/// (big-endian i64), llm_call_id, optional generation_id, optional run id.
+/// projection: kind, disposition tag, source, model key, requested model,
+/// optional served model, the five counters (big-endian i64), llm_call_id,
+/// optional generation_id, optional run id.
 /// The identity columns are not part of the payload. Full destructures, no `..`.
 pub fn usage_fact_payload_hash(fact: &UsageAttemptFact, run: &UsageRunId) -> String {
     crate::stable_hash::blake3_hex(
@@ -397,15 +414,15 @@ pub fn usage_fact_payload_hash(fact: &UsageAttemptFact, run: &UsageRunId) -> Str
     )
 }
 
+/// The payload hash of `correction` against `target`, the unreported attempt
+/// it fills: the correction keeps that attempt's call and attribution.
 pub fn usage_correction_payload_hash(
     correction: &UsageCorrection,
-    llm_call_id: &LlmCallId,
-    source: &str,
-    model: &str,
+    target: &UsageFactRecord,
 ) -> String {
     crate::stable_hash::blake3_hex(
         "lash-usage-fact-payload/v4",
-        &correction_payload_bytes(correction, llm_call_id, source, model),
+        &correction_payload_bytes(correction, target),
     )
 }
 
@@ -415,9 +432,17 @@ fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
         provider_attempt: _,
         llm_call_id,
         source,
-        model,
+        model_key,
+        requested_model,
+        served_model,
         outcome,
     } = fact;
+    let attribution = PayloadAttribution {
+        source,
+        model_key,
+        requested_model,
+        served_model: served_model.as_deref(),
+    };
     match outcome {
         AttemptFactOutcome::Reported {
             usage,
@@ -425,8 +450,7 @@ fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
         } => payload_bytes(
             0,
             0,
-            source,
-            model,
+            attribution,
             usage,
             llm_call_id,
             generation_id.as_deref(),
@@ -435,8 +459,7 @@ fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
         AttemptFactOutcome::Unreported { generation_id } => payload_bytes(
             0,
             1,
-            source,
-            model,
+            attribution,
             &TokenUsage::default(),
             llm_call_id,
             generation_id.as_deref(),
@@ -444,12 +467,7 @@ fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
         ),
     }
 }
-fn correction_payload_bytes(
-    correction: &UsageCorrection,
-    llm_call_id: &LlmCallId,
-    source: &str,
-    model: &str,
-) -> Vec<u8> {
+fn correction_payload_bytes(correction: &UsageCorrection, target: &UsageFactRecord) -> Vec<u8> {
     let UsageCorrection {
         effect: _,
         call_ordinal: _,
@@ -460,23 +478,29 @@ fn correction_payload_bytes(
     payload_bytes(
         1,
         2,
-        source,
-        model,
+        PayloadAttribution {
+            source: &target.source,
+            model_key: &target.model_key,
+            requested_model: &target.requested_model,
+            served_model: target.served_model.as_deref(),
+        },
         usage,
-        llm_call_id,
+        &target.llm_call_id,
         Some(generation_id),
         None,
     )
 }
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the pinned payload projection names each field"
-)]
+/// What a fact's payload says the spend is attributed to.
+struct PayloadAttribution<'a> {
+    source: &'a str,
+    model_key: &'a ModelKey,
+    requested_model: &'a str,
+    served_model: Option<&'a str>,
+}
 fn payload_bytes(
     kind: u8,
     disposition: u8,
-    source: &str,
-    model: &str,
+    attribution: PayloadAttribution<'_>,
     usage: &TokenUsage,
     call: &LlmCallId,
     generation: Option<&str>,
@@ -495,8 +519,16 @@ fn payload_bytes(
     );
     encoder.tag(kind);
     encoder.tag(disposition);
+    let PayloadAttribution {
+        source,
+        model_key,
+        requested_model,
+        served_model,
+    } = attribution;
     encoder.string(source);
-    encoder.string(model);
+    encoder.string(model_key.as_str());
+    encoder.string(requested_model);
+    encoder.optional(served_model, |encoder, value| encoder.string(value));
     for counter in [
         input_tokens,
         output_tokens,
@@ -567,13 +599,29 @@ impl OwnerUsage {
                 &mut report.saturated,
             );
             absorb_totals(
-                report.by_model.entry(row.model.clone()).or_default(),
+                report
+                    .by_model_key
+                    .entry(row.model_key.clone())
+                    .or_default(),
                 &totals,
                 &mut report.saturated,
             );
-            report
-                .by_source_model
-                .insert((row.source.clone(), row.model.clone()), totals);
+            absorb_totals(
+                report
+                    .by_requested_model
+                    .entry(row.requested_model.clone())
+                    .or_default(),
+                &totals,
+                &mut report.saturated,
+            );
+            report.by_attribution.insert(
+                UsageAttributionKey {
+                    source: row.source.clone(),
+                    model_key: row.model_key.clone(),
+                    requested_model: row.requested_model.clone(),
+                },
+                totals,
+            );
         }
         report
     }
@@ -622,7 +670,9 @@ impl UsageAttemptFact {
             provider_attempt,
             llm_call_id,
             source,
-            model,
+            model_key,
+            requested_model,
+            served_model,
             outcome,
         } = self;
         let (usage, disposition, generation_id) = match outcome {
@@ -651,7 +701,9 @@ impl UsageAttemptFact {
             },
             llm_call_id: llm_call_id.clone(),
             source: source.clone(),
-            model: model.clone(),
+            model_key: model_key.clone(),
+            requested_model: requested_model.clone(),
+            served_model: served_model.clone(),
             usage,
             disposition,
             run: Some(run.clone()),
@@ -723,7 +775,9 @@ mod tests {
             provider_attempt: 0,
             llm_call_id: LlmCallId("call:é".into()),
             source: "turn".into(),
-            model: "model".into(),
+            model_key: ModelKey::new("key"),
+            requested_model: "model".into(),
+            served_model: Some("served".into()),
             outcome: AttemptFactOutcome::Reported {
                 usage: TokenUsage {
                     input_tokens: 7,
@@ -761,7 +815,9 @@ mod tests {
         push("unreported_no_generation", unreported);
         let mut extremes = base.clone();
         extremes.source = "".into();
-        extremes.model = "a\0b".into();
+        extremes.model_key = ModelKey::new("");
+        extremes.requested_model = "a\0b".into();
+        extremes.served_model = None;
         extremes.outcome = AttemptFactOutcome::Reported {
             usage: TokenUsage {
                 input_tokens: i64::MIN,
@@ -784,15 +840,16 @@ mod tests {
             },
             generation_id: "recovered".into(),
         };
+        let target = base.record(
+            &RuntimeOwner::Session(lash_sansio::SessionId::from("owner")),
+            &correction.effect,
+            &run,
+            0,
+        );
         cases.push((
             "correction".into(),
-            correction_payload_bytes(&correction, &base.llm_call_id, &base.source, &base.model),
-            usage_correction_payload_hash(
-                &correction,
-                &base.llm_call_id,
-                &base.source,
-                &base.model,
-            ),
+            correction_payload_bytes(&correction, &target),
+            usage_correction_payload_hash(&correction, &target),
         ));
         cases
     }
@@ -831,7 +888,9 @@ mod tests {
             provider_attempt: 0,
             llm_call_id: LlmCallId("call".into()),
             source: "turn".into(),
-            model: "model".into(),
+            model_key: ModelKey::new("key"),
+            requested_model: "model".into(),
+            served_model: None,
             outcome: AttemptFactOutcome::Reported {
                 usage: Default::default(),
                 generation_id: None,
@@ -848,7 +907,13 @@ mod tests {
         changed.source.push('x');
         assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
         changed = fact.clone();
-        changed.model.push('x');
+        changed.model_key = ModelKey::new("another-key");
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
+        changed = fact.clone();
+        changed.requested_model.push('x');
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
+        changed = fact.clone();
+        changed.served_model = Some("model".into());
         assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
         changed = fact.clone();
         changed.outcome = AttemptFactOutcome::Unreported {

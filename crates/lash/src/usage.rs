@@ -48,8 +48,9 @@ pub use lash_core::{
     UsageCompleteness, UsageFactCursor, UsageFactPage, UsageFactRecord, UsageOwnerRetired,
     UsageReporting, UsageRunCursor, UsageRunFilter, UsageRunPage, UsageRunRecord, UsageRunState,
     UsageUnknownReason, facade_support::ReconciledUsageAttempt, facade_support::SessionUsageReport,
-    facade_support::UsageReconciliationReport, facade_support::UsageReportRow,
-    facade_support::UsageTotals, facade_support::diff_usage_reports,
+    facade_support::UsageAttributionKey, facade_support::UsageReconciliationReport,
+    facade_support::UsageReportRow, facade_support::UsageTotals,
+    facade_support::diff_usage_reports,
 };
 
 /// Well-known source labels used by the runtime and first-party plugins.

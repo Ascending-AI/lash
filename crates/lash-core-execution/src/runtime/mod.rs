@@ -195,8 +195,8 @@ pub use turn_queue::{
     process_wake_source_key,
 };
 pub use usage::{
-    ReconciledUsageAttempt, SessionUsageReport, UsageReconciliationReport, UsageReportRow,
-    UsageTotals, diff_usage_reports,
+    ReconciledUsageAttempt, SessionUsageReport, UsageAttributionKey, UsageReconciliationReport,
+    UsageReportRow, UsageTotals, diff_usage_reports,
 };
 pub use work::{
     NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,

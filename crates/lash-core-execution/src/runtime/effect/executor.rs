@@ -200,7 +200,7 @@ pub(super) struct LocalDirectEffectRunner {
     provider: ProviderHandle,
     charge_safety: crate::ChargeSafetyPolicy,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    /// Who the call spends for, under which source label (ADR 0125).
+    /// Who the call spends for (ADR 0125).
     usage: DirectUsage,
 }
 
@@ -1479,12 +1479,16 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
         usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
-            RuntimeEffectCommand::Direct { request, .. } => {
+            RuntimeEffectCommand::Direct {
+                model_key,
+                request,
+                usage_source,
+            } => {
                 let request = (*request).into_request(
                     crate::session_model::transport_stream_events(&self.provider, None),
                     None,
                 );
-                self.run_direct_in_usage_run(request, usage_run.as_ref())
+                self.run_direct_in_usage_run(request, usage_source, model_key, usage_run.as_ref())
                     .await
             }
             RuntimeEffectCommand::Sleep { spec } => {

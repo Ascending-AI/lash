@@ -26,6 +26,9 @@ const COMMANDED_MODEL: &str = "run-spec-commanded-model";
 const PINNED_MODEL: &str = "run-spec-pinned-model";
 /// The model a later deployment's definition would pick.
 const REDEPLOYED_MODEL: &str = "run-spec-redeployed-model";
+/// A second key for the wire model [`SESSION_MODEL`] names: another
+/// registration of the same model, as a host would make for a second route.
+const SHARED_WIRE_KEY: &str = "run-spec-shared-wire-key";
 /// Guidance only a spec's prompt layer carries.
 const PINNED_GUIDANCE: &str = "run-spec pinned guidance";
 
@@ -1071,5 +1074,176 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
     assert!(
         committed.pending_follow_on.is_none(),
         "the completed follow-on cleared its fact"
+    );
+}
+
+/// FIG-4405: usage is attributed to the recorded model key. Two roots of one
+/// session run under two keys that share a wire model, and the owner's
+/// ledger keeps one row per key: the wire model alone would merge them.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn usage_under_two_model_keys_that_share_a_wire_model_is_attributed_separately(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "usage-two-keys", &effect_host, &stores, 8).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let calls = Arc::clone(&calls);
+            move |_request| {
+                let index = calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    // The first root reports 10 input tokens, the second 20.
+                    let input_tokens = 10 * (i64::try_from(index).unwrap_or(i64::MAX) + 1);
+                    Ok(crate::LlmResponse {
+                        parts: vec![crate::LlmOutputPart::Text {
+                            text: format!("answer {}", index + 1),
+                            response_meta: None,
+                        }],
+                        terminal_reason: crate::LlmTerminalReason::Stop,
+                        usage: lash_core::llm::types::LlmUsage {
+                            input_tokens,
+                            ..lash_core::llm::types::LlmUsage::default()
+                        },
+                        provider_usage: Some(serde_json::json!({ "input_tokens": input_tokens })),
+                        ..crate::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let shared_wire = crate::testing::test_model_metadata(SESSION_MODEL);
+    parts.host.providers.models = Arc::new(
+        crate::ModelRegistry::new()
+            .register(
+                SESSION_MODEL,
+                crate::RegisteredModel::new(shared_wire.clone(), provider.clone()),
+            )
+            .and_then(|registry| {
+                registry.register(
+                    SHARED_WIRE_KEY,
+                    crate::RegisteredModel::new(shared_wire, provider),
+                )
+            })
+            .expect("the two keys register once each"),
+    );
+    enqueue(
+        &parts,
+        "usage-session-key",
+        "usage-session-key",
+        crate::RunSpec::default(),
+    )
+    .await;
+    enqueue(
+        &parts,
+        "usage-shared-key",
+        "usage-shared-key",
+        crate::RunSpec::overrides(crate::RunOverrides {
+            model: Some(model(SHARED_WIRE_KEY)),
+            ..crate::RunOverrides::default()
+        }),
+    )
+    .await;
+    let outcome = drive(&runner, &parts, "usage-two-keys-drive").await;
+    assert_eq!(
+        committed_roots(&outcome),
+        vec!["usage-session-key", "usage-shared-key"],
+        "one root per key: {outcome:?}"
+    );
+
+    // The engine delivers each settlement after the effect it rides is
+    // journaled, asynchronously to the drive.
+    let owner = crate::RuntimeOwner::Session(parts.session_id.clone());
+    let accounting = stores.usage_accounting();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    let usage = loop {
+        let usage = accounting
+            .load_owner_usage(&owner)
+            .await
+            .expect("read the owner's usage");
+        let reported = usage
+            .rows
+            .iter()
+            .map(|row| row.reported_attempts)
+            .sum::<u64>();
+        if usage.completeness.is_settled() && reported == 2 {
+            break usage;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "both roots' usage settles: {usage:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        usage.rows.len(),
+        2,
+        "two keys that share a wire model are two rows: {:?}",
+        usage.rows
+    );
+    assert_eq!(
+        usage
+            .rows
+            .iter()
+            .map(|row| (
+                row.source.as_str(),
+                row.model_key.as_str(),
+                row.requested_model.as_str(),
+                row.usage.input_tokens,
+                row.reported_attempts,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("turn", SESSION_MODEL, SESSION_MODEL, 10, 1),
+            ("turn", SHARED_WIRE_KEY, SESSION_MODEL, 20, 1),
+        ],
+        "each root's usage sits under the key its root recorded, beside the one wire model \
+         both requests named"
+    );
+    let report = usage.report();
+    assert_eq!(
+        report.by_requested_model.len(),
+        1,
+        "the per-requested-model view folds the two keys: {report:?}"
+    );
+    assert_eq!(
+        report.by_model_key[&model(SHARED_WIRE_KEY)]
+            .usage
+            .input_tokens,
+        20,
+        "the per-key view keeps them apart: {report:?}"
+    );
+    // The scripted provider names no served model, and the ledger never
+    // fills one from the request.
+    let facts = accounting
+        .load_usage_fact_page(
+            &owner,
+            None,
+            std::num::NonZeroU32::new(16).expect("nonzero page"),
+        )
+        .await
+        .expect("read the owner's usage facts")
+        .facts;
+    assert_eq!(
+        facts
+            .iter()
+            .map(|fact| (
+                fact.model_key.as_str(),
+                fact.requested_model.as_str(),
+                fact.served_model.as_deref()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (SESSION_MODEL, SESSION_MODEL, None),
+            (SHARED_WIRE_KEY, SESSION_MODEL, None),
+        ],
+        "each fact names its key and requested model, and no served model"
     );
 }

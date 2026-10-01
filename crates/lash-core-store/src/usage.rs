@@ -1,11 +1,13 @@
 //! Usage report shapes (ADR 0125).
 //!
 //! The ledger itself is engine-owned accounting in
-//! [`crate::usage_accounting`]; these are the per-`(source, model)` views a
-//! durable read renders, and the reconciliation report a host gets back.
+//! [`crate::usage_accounting`]; these are the per-attribution views a durable
+//! read renders (source, recorded model key and requested wire model), and
+//! the reconciliation report a host gets back.
 
 use std::collections::BTreeMap;
 
+use crate::ModelKey;
 use crate::session_model::TokenUsage;
 use crate::usage_accounting::OutstandingUsageAttempt;
 
@@ -76,10 +78,21 @@ impl UsageTotals {
     }
 }
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+/// What a row of usage is attributed to: the source label, the recorded
+/// model key the call ran under and the wire model its request named. Two
+/// keys that share a wire model are two attributions.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UsageAttributionKey {
+    pub source: String,
+    pub model_key: ModelKey,
+    pub requested_model: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct UsageReportRow {
     pub source: String,
-    pub model: String,
+    pub model_key: ModelKey,
+    pub requested_model: String,
     pub usage: UsageTotals,
 }
 
@@ -90,36 +103,41 @@ pub struct SessionUsageReport {
     /// display report. Reads saturate so reporting cannot fail a session.
     pub saturated: bool,
     pub usage: UsageTotals,
-    /// Per-source view, derived from `by_source_model`.
+    /// Per-source view, derived from `by_attribution`.
     pub by_source: BTreeMap<String, UsageTotals>,
-    /// Per-model view, derived from `by_source_model`.
-    pub by_model: BTreeMap<String, UsageTotals>,
+    /// Per-model-key view, derived from `by_attribution`.
+    pub by_model_key: BTreeMap<ModelKey, UsageTotals>,
+    /// Per-requested-wire-model view, derived from `by_attribution`: keys
+    /// that share a wire model fold into one entry here.
+    pub by_requested_model: BTreeMap<String, UsageTotals>,
     /// The report's keyed structure: one folded, netted row per
-    /// `(source, model)` pair. Serialized as a `UsageReportRow` array.
+    /// `(source, model_key, requested_model)`. Serialized as a
+    /// `UsageReportRow` array.
     #[serde(
-        serialize_with = "serialize_by_source_model",
-        deserialize_with = "deserialize_by_source_model"
+        serialize_with = "serialize_by_attribution",
+        deserialize_with = "deserialize_by_attribution"
     )]
-    pub by_source_model: BTreeMap<(String, String), UsageTotals>,
+    pub by_attribution: BTreeMap<UsageAttributionKey, UsageTotals>,
 }
 
-fn serialize_by_source_model<S>(
-    rows: &BTreeMap<(String, String), UsageTotals>,
+fn serialize_by_attribution<S>(
+    rows: &BTreeMap<UsageAttributionKey, UsageTotals>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    serializer.collect_seq(rows.iter().map(|((source, model), usage)| UsageReportRow {
-        source: source.clone(),
-        model: model.clone(),
+    serializer.collect_seq(rows.iter().map(|(attribution, usage)| UsageReportRow {
+        source: attribution.source.clone(),
+        model_key: attribution.model_key.clone(),
+        requested_model: attribution.requested_model.clone(),
         usage: usage.clone(),
     }))
 }
 
-fn deserialize_by_source_model<'de, D>(
+fn deserialize_by_attribution<'de, D>(
     deserializer: D,
-) -> Result<BTreeMap<(String, String), UsageTotals>, D::Error>
+) -> Result<BTreeMap<UsageAttributionKey, UsageTotals>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -127,34 +145,44 @@ where
     // A payload can carry more than one row per key; fold duplicates instead
     // of dropping them.
     let mut saturated = false;
-    let mut map = BTreeMap::<(String, String), UsageTotals>::new();
+    let mut map = BTreeMap::<UsageAttributionKey, UsageTotals>::new();
     for row in rows {
-        map.entry((row.source, row.model))
-            .or_default()
-            .absorb(&row.usage, &mut saturated);
+        map.entry(UsageAttributionKey {
+            source: row.source,
+            model_key: row.model_key,
+            requested_model: row.requested_model,
+        })
+        .or_default()
+        .absorb(&row.usage, &mut saturated);
     }
     Ok(map)
 }
 
 impl SessionUsageReport {
-    /// The report over already-netted `(source, model)` totals: the per-source
-    /// and per-model views and the overall total are folded from them.
-    pub fn from_source_model_totals(
+    /// The report over already-netted per-attribution totals: the per-source,
+    /// per-model-key and per-requested-model views and the overall total are
+    /// folded from them.
+    pub fn from_attribution_totals(
         entry_count: usize,
-        by_source_model: BTreeMap<(String, String), UsageTotals>,
+        by_attribution: BTreeMap<UsageAttributionKey, UsageTotals>,
     ) -> Self {
         let mut saturated = false;
         let mut usage = UsageTotals::default();
         let mut by_source = BTreeMap::<String, UsageTotals>::new();
-        let mut by_model = BTreeMap::<String, UsageTotals>::new();
-        for ((source, model), totals) in &by_source_model {
+        let mut by_model_key = BTreeMap::<ModelKey, UsageTotals>::new();
+        let mut by_requested_model = BTreeMap::<String, UsageTotals>::new();
+        for (attribution, totals) in &by_attribution {
             usage.absorb(totals, &mut saturated);
             by_source
-                .entry(source.clone())
+                .entry(attribution.source.clone())
                 .or_default()
                 .absorb(totals, &mut saturated);
-            by_model
-                .entry(model.clone())
+            by_model_key
+                .entry(attribution.model_key.clone())
+                .or_default()
+                .absorb(totals, &mut saturated);
+            by_requested_model
+                .entry(attribution.requested_model.clone())
                 .or_default()
                 .absorb(totals, &mut saturated);
         }
@@ -163,8 +191,9 @@ impl SessionUsageReport {
             saturated,
             usage,
             by_source,
-            by_model,
-            by_source_model,
+            by_model_key,
+            by_requested_model,
+            by_attribution,
         }
     }
 }
@@ -186,23 +215,29 @@ fn usage_total(usage: &TokenUsage) -> Option<i64> {
     .try_fold(0_i64, i64::checked_add)
 }
 
-/// The usage `after` holds beyond `before`, one row per `(source, model)` key
+/// The usage `after` holds beyond `before`, one row per attribution
 /// that grew. Reports only grow, so a key whose counters shrank is an error.
 pub fn diff_usage_reports(
     before: &SessionUsageReport,
     after: &SessionUsageReport,
 ) -> Result<SessionUsageReport, String> {
-    let mut rows = BTreeMap::<(String, String), UsageTotals>::new();
-    for ((source, model), after_row) in &after.by_source_model {
+    let mut rows = BTreeMap::<UsageAttributionKey, UsageTotals>::new();
+    for (attribution, after_row) in &after.by_attribution {
+        let UsageAttributionKey {
+            source,
+            model_key,
+            requested_model,
+        } = attribution;
         let before_row = before
-            .by_source_model
-            .get(&(source.clone(), model.clone()))
+            .by_attribution
+            .get(attribution)
             .cloned()
             .unwrap_or_default();
         let subtract = |after: i64, before: i64| match after.checked_sub(before) {
             Some(delta) if delta >= 0 => Ok(delta),
             _ => Err(format!(
-                "usage decreased for source/model ({source}, {model})"
+                "usage decreased for source/model key/requested model \
+                 ({source}, {model_key}, {requested_model})"
             )),
         };
         let delta = TokenUsage {
@@ -234,10 +269,13 @@ pub fn diff_usage_reports(
             continue;
         }
         let total_tokens = usage_total(&delta).ok_or_else(|| {
-            format!("usage delta total overflowed for source/model ({source}, {model})")
+            format!(
+                "usage delta total overflowed for source/model key/requested model \
+                 ({source}, {model_key}, {requested_model})"
+            )
         })?;
         rows.insert(
-            (source.clone(), model.clone()),
+            attribution.clone(),
             UsageTotals {
                 usage: delta,
                 total_tokens,
@@ -246,12 +284,15 @@ pub fn diff_usage_reports(
             },
         );
     }
-    for key in before.by_source_model.keys() {
-        if !after.by_source_model.contains_key(key) {
-            return Err(format!("usage row ({}, {}) disappeared", key.0, key.1));
+    for key in before.by_attribution.keys() {
+        if !after.by_attribution.contains_key(key) {
+            return Err(format!(
+                "usage row ({}, {}, {}) disappeared",
+                key.source, key.model_key, key.requested_model
+            ));
         }
     }
-    Ok(SessionUsageReport::from_source_model_totals(
+    Ok(SessionUsageReport::from_attribution_totals(
         after.entry_count.saturating_sub(before.entry_count),
         rows,
     ))
@@ -280,13 +321,21 @@ mod report_tests {
         }
     }
 
-    fn report(rows: &[(&str, &str, i64, u32)]) -> SessionUsageReport {
-        SessionUsageReport::from_source_model_totals(
+    fn attribution(source: &str, model_key: &str, requested_model: &str) -> UsageAttributionKey {
+        UsageAttributionKey {
+            source: source.to_string(),
+            model_key: ModelKey::new(model_key),
+            requested_model: requested_model.to_string(),
+        }
+    }
+
+    fn report(rows: &[(&str, &str, &str, i64, u32)]) -> SessionUsageReport {
+        SessionUsageReport::from_attribution_totals(
             rows.len(),
             rows.iter()
-                .map(|(source, model, input, unreported)| {
+                .map(|(source, model_key, requested_model, input, unreported)| {
                     (
-                        ((*source).to_string(), (*model).to_string()),
+                        attribution(source, model_key, requested_model),
                         totals(*input, *unreported),
                     )
                 })
@@ -297,33 +346,69 @@ mod report_tests {
     #[test]
     fn a_report_folds_its_views_from_the_keyed_rows() {
         let report = report(&[
-            ("turn", "a", 3, 1),
-            ("turn", "b", 4, 0),
-            ("direct", "a", 5, 0),
+            ("turn", "key-a", "a", 3, 1),
+            ("turn", "key-b", "b", 4, 0),
+            ("direct", "key-a", "a", 5, 0),
         ]);
         assert_eq!(report.usage.usage.input_tokens, 12);
         assert_eq!(report.usage.total_tokens, 12);
         assert_eq!(report.usage.unreported_attempts, 1);
         assert_eq!(report.by_source["turn"].usage.input_tokens, 7);
-        assert_eq!(report.by_model["a"].usage.input_tokens, 8);
+        assert_eq!(
+            report.by_model_key[&ModelKey::new("key-a")]
+                .usage
+                .input_tokens,
+            8
+        );
+        assert_eq!(report.by_requested_model["a"].usage.input_tokens, 8);
         assert!(!report.saturated);
         let encoded = serde_json::to_value(&report).expect("encode report");
         let decoded: SessionUsageReport = serde_json::from_value(encoded).expect("decode report");
         assert_eq!(decoded, report);
     }
 
+    /// FIG-4405: two keys that share a wire model stay two rows and two
+    /// per-key totals; only the per-requested-model view folds them.
+    #[test]
+    fn two_model_keys_that_share_a_wire_model_are_two_rows() {
+        let report = report(&[
+            ("turn", "key-a", "shared", 3, 0),
+            ("turn", "key-b", "shared", 4, 0),
+        ]);
+        assert_eq!(report.by_attribution.len(), 2);
+        assert_eq!(
+            report.by_model_key[&ModelKey::new("key-a")]
+                .usage
+                .input_tokens,
+            3
+        );
+        assert_eq!(
+            report.by_model_key[&ModelKey::new("key-b")]
+                .usage
+                .input_tokens,
+            4
+        );
+        assert_eq!(report.by_requested_model.len(), 1);
+        assert_eq!(report.by_requested_model["shared"].usage.input_tokens, 7);
+        let encoded = serde_json::to_value(&report).expect("encode report");
+        assert_eq!(encoded["by_attribution"][0]["model_key"], "key-a");
+        assert_eq!(encoded["by_attribution"][0]["requested_model"], "shared");
+        let decoded: SessionUsageReport = serde_json::from_value(encoded).expect("decode report");
+        assert_eq!(decoded, report);
+    }
+
     #[test]
     fn a_diff_keeps_only_the_rows_that_grew_and_refuses_a_shrink() {
-        let before = report(&[("turn", "a", 3, 0), ("turn", "b", 4, 0)]);
+        let before = report(&[("turn", "key-a", "a", 3, 0), ("turn", "key-b", "b", 4, 0)]);
         let after = report(&[
-            ("turn", "a", 3, 0),
-            ("turn", "b", 9, 1),
-            ("direct", "a", 2, 0),
+            ("turn", "key-a", "a", 3, 0),
+            ("turn", "key-b", "b", 9, 1),
+            ("direct", "key-a", "a", 2, 0),
         ]);
         let delta = diff_usage_reports(&before, &after).expect("diff");
-        assert_eq!(delta.by_source_model.len(), 2);
+        assert_eq!(delta.by_attribution.len(), 2);
         assert_eq!(
-            delta.by_source_model[&("turn".to_string(), "b".to_string())],
+            delta.by_attribution[&attribution("turn", "key-b", "b")],
             totals(5, 1)
         );
         assert_eq!(delta.usage.usage.input_tokens, 7);

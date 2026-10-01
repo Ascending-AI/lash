@@ -63,6 +63,7 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::Direct {
+                model_key: lash_core::ModelKey::new("test"),
                 request: Box::new(llm_spec()),
                 usage_source: "test".to_string(),
             },

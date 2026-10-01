@@ -89,6 +89,7 @@ mod tests {
         let envelope = RuntimeEffectEnvelope::new(
             invocation,
             RuntimeEffectCommand::Direct {
+                model_key: crate::ModelKey::new("test"),
                 request: Box::new(
                     LlmRequestSpec::from_request(&llm_request, &attachment_store)
                         .await

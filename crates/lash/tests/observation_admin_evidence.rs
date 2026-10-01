@@ -668,17 +668,17 @@ fn drain_area_witnesses() {
     });
     // W0169: lash::usage::SessionUsageReport [struct]
     type_witness::<lash::usage::SessionUsageReport>();
-    // W0170: lash::usage::SessionUsageReport::by_model [field]
+    // W0170: lash::usage::SessionUsageReport::by_requested_model [field]
     field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.by_model;
+        let _ = &value.by_requested_model;
     });
     // W0171: lash::usage::SessionUsageReport::by_source [field]
     field_witness(|value: &lash::usage::SessionUsageReport| {
         let _ = &value.by_source;
     });
-    // W0172: lash::usage::SessionUsageReport::by_source_model [field]
+    // W0172: lash::usage::SessionUsageReport::by_attribution [field]
     field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.by_source_model;
+        let _ = &value.by_attribution;
     });
     // W0173: lash::usage::SessionUsageReport::entry_count [field]
     field_witness(|value: &lash::usage::SessionUsageReport| {
@@ -706,9 +706,9 @@ fn drain_area_witnesses() {
     let _ = lash::usage::TokenUsageOverflow::counter;
     // W0185: lash::usage::UsageReportRow [struct]
     type_witness::<lash::usage::UsageReportRow>();
-    // W0186: lash::usage::UsageReportRow::model [field]
+    // W0186: lash::usage::UsageReportRow::requested_model [field]
     field_witness(|value: &lash::usage::UsageReportRow| {
-        let _ = &value.model;
+        let _ = &value.requested_model;
     });
     // W0187: lash::usage::UsageReportRow::source [field]
     field_witness(|value: &lash::usage::UsageReportRow| {

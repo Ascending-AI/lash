@@ -111,6 +111,8 @@ macro_rules! turn_config_tests {
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (the_default_spec_is_the_snapshot_after_the_command_drain, "run-spec-default"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (usage_under_two_model_keys_that_share_a_wire_model_is_attributed_separately, "usage-two-keys"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_root_resolves_its_spec_once_across_a_crash, "run-spec-once"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_missing_definition_retries_unrecorded_until_it_is_deployed, "run-spec-missing"));
