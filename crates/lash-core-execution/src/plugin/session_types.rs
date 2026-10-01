@@ -198,6 +198,14 @@ pub struct SessionCreateRequest {
     /// keeps the policy's recorded model verbatim; nothing re-resolves it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<crate::ModelKey>,
+    /// The binding the registering core's default selection minted for a
+    /// host session-turn start that names no model (FIG-4531). It is what
+    /// lash derived when the start was first registered, never part of what
+    /// the host stated: the start-key fence leaves it out
+    /// ([`Self::stated`]), and a retried start mints none. The child runs it
+    /// only when neither its policy nor its starter records a model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) default_model: Option<crate::ModelConfig>,
     #[serde(default)]
     pub plugin_source: SessionPluginSource,
     #[serde(default)]
@@ -239,6 +247,7 @@ impl SessionCreateRequest {
             plugin_options,
             plugin_init: None,
             model: None,
+            default_model: None,
         }
     }
 
@@ -263,6 +272,7 @@ impl SessionCreateRequest {
             plugin_options,
             plugin_init: None,
             model: None,
+            default_model: None,
         }
     }
 
@@ -288,6 +298,7 @@ impl SessionCreateRequest {
             plugin_options,
             plugin_init: None,
             model: None,
+            default_model: None,
         }
     }
 
@@ -295,6 +306,39 @@ impl SessionCreateRequest {
     pub fn with_model(mut self, key: crate::ModelKey) -> Self {
         self.model = Some(key);
         self
+    }
+
+    /// Whether the request names a model of its own: a key to mint, or a
+    /// policy that records one.
+    pub fn names_model(&self) -> bool {
+        self.model.is_some()
+            || self
+                .policy
+                .as_ref()
+                .is_some_and(|policy| policy.model.is_some())
+    }
+
+    /// The default binding the registering core recorded for a request that
+    /// names no model.
+    pub fn default_model(&self) -> Option<&crate::ModelConfig> {
+        self.default_model.as_ref()
+    }
+
+    /// Record the registering core's default binding, or none. Only the
+    /// core that registers a start writes it, and only when no start is
+    /// retained under the start's key.
+    pub fn record_default_model(&mut self, default_model: Option<crate::ModelConfig>) {
+        self.default_model = default_model;
+    }
+
+    /// The request as its author stated it: without the default binding
+    /// lash derived at registration.
+    #[must_use]
+    pub fn stated(&self) -> Self {
+        Self {
+            default_model: None,
+            ..self.clone()
+        }
     }
 
     pub fn with_plugin_source(mut self, plugin_source: SessionPluginSource) -> Self {

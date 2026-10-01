@@ -1,6 +1,9 @@
 use std::num::NonZeroUsize;
 
-use crate::provider::{CacheRetention, ModelCapability, ModelRequestDefaults, ReasoningSelection};
+use crate::provider::{
+    CacheRetention, ModelCapability, ModelEffortValidationCategory, ModelRequestDefaults,
+    ReasoningSelection,
+};
 
 /// The host's opaque name for one registered model.
 ///
@@ -306,6 +309,45 @@ impl ModelConfig {
     pub fn context_window_tokens(&self) -> usize {
         self.model.context_window_tokens()
     }
+
+    /// Judge the reasoning selection against the recorded capability of the
+    /// model it would run with. Every point that records a model or a
+    /// reasoning selection judges the pair it would record here — creation,
+    /// a config transaction, a per-run override and a child's model key — so
+    /// an unsupported selection is refused where it is stated and never
+    /// becomes a later turn failure (FIG-4531).
+    ///
+    /// # Errors
+    ///
+    /// [`ReasoningRefused`] when the capability does not accept the
+    /// selection.
+    pub fn validate_reasoning(&self) -> Result<(), ReasoningRefused> {
+        self.metadata()
+            .capability
+            .reasoning_intent(
+                self.model.wire_model(),
+                &format!("key `{}`", self.key()),
+                &self.reasoning,
+            )
+            .map(drop)
+            .map_err(|error| ReasoningRefused {
+                key: self.key().clone(),
+                reasoning: self.reasoning.clone(),
+                category: error.category,
+                message: error.message,
+            })
+    }
+}
+
+/// A reasoning selection the recorded capability of the model under `key`
+/// refuses.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("reasoning selection refused for model key `{key}`: {message}")]
+pub struct ReasoningRefused {
+    pub key: ModelKey,
+    pub reasoning: ReasoningSelection,
+    pub category: ModelEffortValidationCategory,
+    pub message: String,
 }
 
 #[derive(

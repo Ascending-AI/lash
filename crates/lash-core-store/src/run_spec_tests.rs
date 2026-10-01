@@ -48,18 +48,36 @@ impl RuntimeModels for Catalog {
     }
 }
 
+/// `key`'s binding: a 200k window and the `low`/`high` efforts, except the
+/// `plain-model` key, whose capability has no reasoning controls.
 fn recorded(key: &str) -> RecordedModel {
-    RecordedModel::mint(
-        ModelKey::new(key),
-        lash_core_llm::model::ModelMetadata::new(
-            format!("{key}-wire"),
-            std::num::NonZeroUsize::new(200_000).expect("non-zero window"),
-        ),
-    )
+    let metadata = lash_core_llm::model::ModelMetadata::new(
+        format!("{key}-wire"),
+        std::num::NonZeroUsize::new(200_000).expect("non-zero window"),
+    );
+    let metadata = if key == "plain-model" {
+        metadata
+    } else {
+        metadata.with_capability(crate::provider::ModelCapability {
+            reasoning: Some(crate::provider::ReasoningCapability {
+                efforts: vec!["low".to_string(), "high".to_string()],
+                encoding: crate::provider::ReasoningEncoding::Effort,
+                disable: false,
+                mandatory: false,
+            }),
+            ..crate::provider::ModelCapability::default()
+        })
+    };
+    RecordedModel::mint(ModelKey::new(key), metadata)
 }
 
 fn catalog() -> Catalog {
-    Catalog::serving(&["session-model", "root-model", "definition-model"])
+    Catalog::serving(&[
+        "session-model",
+        "root-model",
+        "definition-model",
+        "plain-model",
+    ])
 }
 
 fn snapshot() -> PersistedSessionConfig {
@@ -354,6 +372,50 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
         }
         other => panic!("an unserved key must fail typed, got {other:?}"),
     }
+}
+
+/// FIG-4531: a per-run override is judged when the root's shape resolves.
+/// A key whose capability has no reasoning controls cannot take the
+/// session's recorded effort, and an effort the session's model does not
+/// advertise cannot be overridden onto it: both are the typed refusal, never
+/// a recorded shape that fails its first turn.
+#[test]
+fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
+    let onto_plain = RunSpec::overrides(RunOverrides {
+        model: Some(ModelKey::new("plain-model")),
+        ..RunOverrides::default()
+    });
+    match onto_plain.resolve(&snapshot(), None, TerminationPolicy::default(), &catalog()) {
+        Err(RunResolveError::Reasoning(refused)) => {
+            assert_eq!(refused.key, ModelKey::new("plain-model"));
+            assert_eq!(
+                refused.reasoning,
+                ReasoningSelection::Effort("low".to_string())
+            );
+        }
+        other => panic!("an inherited effort the key cannot take is refused, got {other:?}"),
+    }
+
+    let unadvertised = RunSpec::overrides(RunOverrides {
+        reasoning: Some(ReasoningSelection::Effort("extreme".to_string())),
+        ..RunOverrides::default()
+    });
+    match unadvertised.resolve(&snapshot(), None, TerminationPolicy::default(), &catalog()) {
+        Err(RunResolveError::Reasoning(refused)) => {
+            assert_eq!(refused.key, ModelKey::new("session-model"));
+        }
+        other => panic!("an unadvertised effort is refused, got {other:?}"),
+    }
+
+    // The same key with a selection it accepts resolves.
+    let accepted = RunSpec::overrides(RunOverrides {
+        model: Some(ModelKey::new("plain-model")),
+        reasoning: Some(ReasoningSelection::ProviderDefault),
+        ..RunOverrides::default()
+    });
+    accepted
+        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
+        .expect("the provider's default reasoning fits a model with no controls");
 }
 
 #[test]

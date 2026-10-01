@@ -172,25 +172,59 @@ impl SendTarget {
     }
 }
 
-/// Refuse a spec whose model key this host's models do not register before
-/// the input is accepted. Nothing is minted here: the root mints the key's
-/// binding once, when it records its shape. A spec that names no key keeps
-/// the session's recorded binding and is not judged.
-fn refuse_unknown_model(context: &SendContext, spec: &RunSpec) -> Result<()> {
-    let Some(key) = spec.overrides.model.as_ref() else {
+/// Refuse a spec whose model selection cannot run before the input is
+/// accepted: a model key this host's models do not register, or reasoning
+/// the capability of the model the root would run refuses, judged as the
+/// root will judge it against the session's recorded config (FIG-4531).
+/// Nothing is recorded here: the root mints the key's binding once, when it
+/// records its shape. A spec that names neither keeps the session's recorded
+/// selection and is not judged.
+async fn refuse_unservable_selection(context: &SendContext, spec: &RunSpec) -> Result<()> {
+    let overrides = &spec.overrides;
+    if overrides.model.is_none() && overrides.reasoning.is_none() {
         return Ok(());
-    };
-    context
-        .parts
-        .models
-        .snapshot(key)
-        .map(drop)
+    }
+    let minted = overrides
+        .model
+        .as_ref()
+        .map(|key| context.parts.models.snapshot(key))
+        .transpose()
         .map_err(|error| {
             EmbedError::Runtime(lash_core::RuntimeError::new(
                 lash_core::RuntimeErrorCode::ModelUnknown,
                 format!("send refused: {error}"),
             ))
-        })
+        })?;
+    let selected = match (minted, overrides.reasoning.clone()) {
+        (Some(model), Some(reasoning)) => {
+            Some(lash_core::ModelConfig::new(model).with_reasoning(reasoning))
+        }
+        (minted, reasoning) => {
+            let recorded = context.session_snapshot().await?.policy.model;
+            match (minted, recorded) {
+                (Some(model), recorded) => Some(lash_core::ModelConfig {
+                    model,
+                    reasoning: recorded.map(|model| model.reasoning).unwrap_or_default(),
+                }),
+                (None, Some(recorded)) => Some(match reasoning {
+                    Some(reasoning) => recorded.with_reasoning(reasoning),
+                    None => recorded,
+                }),
+                // A session that records no model refuses the root when its
+                // shape resolves.
+                (None, None) => None,
+            }
+        }
+    };
+    let Some(selected) = selected else {
+        return Ok(());
+    };
+    selected.validate_reasoning().map_err(|error| {
+        EmbedError::Runtime(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::ReasoningRefused,
+            format!("send refused: {error}"),
+        ))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +375,7 @@ impl SendBuilder {
         input.trace_turn_id = None;
         let id = Some(host_id.unwrap_or_else(crate::turn::fresh_turn_id));
         let cursor = target.current_cursor();
-        refuse_unknown_model(&context, &run_spec)?;
+        refuse_unservable_selection(&context, &run_spec).await?;
         let enqueued = context
             .parts
             .ops

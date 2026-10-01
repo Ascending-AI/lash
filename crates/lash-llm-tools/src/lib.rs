@@ -13,36 +13,13 @@ use lash_tool_support::{
 };
 use serde_json::{Value, json};
 
+/// Installs `llm_query`. The tool has no model selection of its own: every
+/// query runs the model its session recorded, with that binding's
+/// capability, request extensions and request defaults, so a redrive sends
+/// what the first attempt sent whatever the deployment now installs
+/// (FIG-4531).
 #[derive(Clone, Debug, Default)]
-pub struct LlmToolsPluginFactory {
-    model: Option<String>,
-    model_variant: Option<lash_core::ReasoningSelection>,
-    model_capability: Option<lash_core::ModelCapability>,
-}
-
-impl LlmToolsPluginFactory {
-    pub fn with_model(
-        mut self,
-        model: impl Into<String>,
-        model_variant: Option<lash_core::ReasoningSelection>,
-    ) -> Self {
-        self.model = Some(model.into());
-        self.model_variant = model_variant;
-        self
-    }
-
-    pub fn with_model_variant(mut self, model_variant: impl Into<String>) -> Self {
-        self.model_variant = Some(lash_core::ReasoningSelection::Effort(model_variant.into()));
-        self
-    }
-
-    /// Capability metadata for an overridden model. Without it an override
-    /// model has no effort controls, so an explicit variant will be rejected.
-    pub fn with_model_capability(mut self, capability: lash_core::ModelCapability) -> Self {
-        self.model_capability = Some(capability);
-        self
-    }
-}
+pub struct LlmToolsPluginFactory {}
 
 impl PluginFactory for LlmToolsPluginFactory {
     fn id(&self) -> &'static str {
@@ -53,11 +30,7 @@ impl PluginFactory for LlmToolsPluginFactory {
         &self,
         ctx: &PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, PluginError> {
-        let provider: Arc<dyn ToolProvider> = Arc::new(llm_query_provider(
-            self.model.clone(),
-            self.model_variant.clone(),
-            self.model_capability.clone(),
-        ));
+        let provider: Arc<dyn ToolProvider> = Arc::new(llm_query_provider());
 
         PluginSpecFactory::new(
             "llm_tools",
@@ -67,25 +40,10 @@ impl PluginFactory for LlmToolsPluginFactory {
     }
 }
 
-pub struct LlmToolsProvider {
-    model: Option<String>,
-    model_variant: Option<lash_core::ReasoningSelection>,
-    model_capability: Option<lash_core::ModelCapability>,
-}
+pub struct LlmToolsProvider;
 
-pub fn llm_query_provider(
-    model: Option<String>,
-    model_variant: Option<lash_core::ReasoningSelection>,
-    model_capability: Option<lash_core::ModelCapability>,
-) -> StaticToolProvider<LlmToolsProvider> {
-    StaticToolProvider::new(
-        vec![llm_query_tool_definition()],
-        LlmToolsProvider {
-            model,
-            model_variant,
-            model_capability,
-        },
-    )
+pub fn llm_query_provider() -> StaticToolProvider<LlmToolsProvider> {
+    StaticToolProvider::new(vec![llm_query_tool_definition()], LlmToolsProvider)
 }
 
 impl LlmToolsProvider {
@@ -99,27 +57,6 @@ impl LlmToolsProvider {
             .model()
             .await
             .map_err(|err| format!("failed to read current session model: {err}"))?;
-        // An override model carries the override capability (empty when the
-        // host supplied none) and no request defaults; the session model
-        // carries the session's recorded ones.
-        let (model, model_capability, extra_body, request_defaults) = match self.model.clone() {
-            Some(model) => (
-                model,
-                self.model_capability.clone().unwrap_or_default(),
-                Default::default(),
-                Default::default(),
-            ),
-            None => (
-                session_model.model,
-                session_model.model_capability,
-                session_model.extra_body,
-                session_model.request_defaults,
-            ),
-        };
-        let model_variant = self
-            .model_variant
-            .clone()
-            .unwrap_or(session_model.model_variant);
         // The sub-question runs on the session's behalf, so it carries the
         // session's sampling intent rather than provider defaults.
         let generation = session_model.generation;
@@ -137,12 +74,12 @@ impl LlmToolsProvider {
             .complete(
                 DirectRequest {
                     instructions: Some(Arc::from("Answer the focused sub-question using only the supplied task and inputs. Return only JSON matching the requested result wrapper. Use kind=\"error\" with a concise error only when the task cannot be answered from the supplied inputs.")),
-                    model,
-                    model_variant,
-                    model_capability,
-                    attachment_acceptance: session_model.attachment_acceptance.clone(),
-                    extra_body,
-                    request_defaults,
+                    model: session_model.model,
+                    model_variant: session_model.model_variant,
+                    model_capability: session_model.model_capability,
+                    attachment_acceptance: session_model.attachment_acceptance,
+                    extra_body: session_model.extra_body,
+                    request_defaults: session_model.request_defaults,
                     messages: vec![
                         DirectMessage {
                             role: DirectRole::User,
@@ -506,7 +443,7 @@ mod tests {
 
     #[test]
     fn llm_definitions_include_llm_query_only() {
-        let provider = llm_query_provider(None, None, None);
+        let provider = llm_query_provider();
         let manifests = provider.tool_manifests();
         let names = manifests
             .iter()
@@ -537,7 +474,7 @@ mod tests {
                 r#"{"kind":"value","value":{"root_cause":"missing config","confidence":0.8},"error":null}"#
                     .to_string(),
         });
-        let provider = llm_query_provider(None, None, None);
+        let provider = llm_query_provider();
         let context = direct_completion_attempt_context(manager.clone());
 
         let args = json!({
@@ -578,12 +515,25 @@ mod tests {
         assert!(prompt.contains("\"log\": \"failed\""));
     }
 
+    /// `llm_query` has no model selection of its own: the request carries
+    /// the session's recorded wire model, reasoning, capability, request
+    /// extensions and request defaults, and nothing the plugin was built
+    /// with.
     #[tokio::test]
-    async fn llm_query_uses_configured_model_override() {
+    async fn llm_query_sends_only_what_the_session_recorded() {
+        let mut extra_body = serde_json::Map::new();
+        extra_body.insert("catalog_revision".to_string(), json!("r1"));
+        let metadata = lash_core::ModelMetadata::builder("root-model")
+            .context_window_tokens(64_000)
+            .extra_body(extra_body.clone())
+            .max_output_tokens(4096)
+            .build()
+            .expect("model metadata");
+        let recorded = lash_core::testing::test_model_config("root-model", metadata.clone());
         let manager = Arc::new(DirectCompletionManager {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
-                    model: model_spec("root-model", Some("medium")),
+                    model: Some(recorded),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -593,11 +543,7 @@ mod tests {
             requests: Mutex::new(Vec::new()),
             response_text: r#"{"kind":"value","value":"done","error":null}"#.to_string(),
         });
-        let provider = llm_query_provider(
-            Some("gpt-5.5".to_string()),
-            Some(lash_core::ReasoningSelection::Effort("low".to_string())),
-            None,
-        );
+        let provider = llm_query_provider();
         let context = direct_completion_attempt_context(manager.clone());
 
         let args = json!({ "task": "answer directly" });
@@ -606,10 +552,11 @@ mod tests {
         assert!(result.is_success(), "{:?}", result.value_for_projection());
         let requests = manager.requests.lock_recover();
         assert_eq!(requests.len(), 1);
-        let (request, usage_source) = &requests[0];
-        assert_eq!(usage_source, "llm_query");
-        assert_eq!(request.model, "gpt-5.5");
-        assert_eq!(request.model_variant.effort(), Some("low"));
+        let (request, _) = &requests[0];
+        assert_eq!(request.model, "root-model");
+        assert_eq!(request.extra_body, extra_body);
+        assert_eq!(request.request_defaults, metadata.request_defaults);
+        assert_eq!(request.model_capability, metadata.capability);
     }
 
     #[tokio::test]
@@ -628,7 +575,7 @@ mod tests {
             response_text: r#"{"kind":"error","value":null,"error":"missing required evidence"}"#
                 .to_string(),
         });
-        let provider = llm_query_provider(None, None, None);
+        let provider = llm_query_provider();
         let context = direct_completion_attempt_context(manager);
 
         let args = json!({ "task": "answer from missing evidence" });

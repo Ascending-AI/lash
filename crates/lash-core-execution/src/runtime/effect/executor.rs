@@ -173,10 +173,11 @@ pub struct ProcessLocalExecution {
     pub process_starts: Option<Arc<crate::runtime::process_start::ProcessStartRelay>>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub process_engines: Option<crate::ProcessEngineRegistry>,
-    /// The session catalog a root start's host session-lookup grant is
-    /// checked against inside the start's recorded admission. `None` refuses
-    /// every host-granted start: nothing can prove its session live.
-    pub session_catalog: Option<Arc<dyn crate::store::RuntimeStore>>,
+    /// What a host start's recorded admission consults: the session catalog
+    /// its host session-lookup grant is checked against, and the mint of a
+    /// session-turn start's default binding. `None` refuses every
+    /// host-granted start and records no default.
+    pub host_start: Option<Box<crate::runtime::HostStartAdmission>>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     /// The attachment referrers a delivered terminal is acquired through
@@ -678,7 +679,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
             &mut self.state
         {
-            execution.session_catalog = Some(catalog);
+            execution.host_start.get_or_insert_default().session_catalog = Some(catalog);
         }
         self
     }
@@ -719,7 +720,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     process_starts: None,
                     process_env_store: None,
                     process_engines: None,
-                    session_catalog: None,
+                    host_start: None,
                     turn_cancellation: None,
                     effect_controller: None,
                     attachments: None,

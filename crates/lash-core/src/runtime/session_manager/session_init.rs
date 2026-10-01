@@ -199,8 +199,10 @@ pub(in crate::runtime::session_manager) struct ChildFacts {
 /// re-resolving its key; only a request that names a model key of its own
 /// mints one, here, through the deployment's models, and the child records
 /// it. A key they do not register is refused with
-/// [`SessionError::ModelUnknown`](crate::SessionError::ModelUnknown). A
-/// namespace no installed owner registers, or a value its owner refuses, is
+/// [`RuntimeErrorCode::ModelUnknown`](crate::RuntimeErrorCode::ModelUnknown),
+/// and inherited reasoning the minted model's capability refuses with
+/// [`RuntimeErrorCode::ReasoningRefused`](crate::RuntimeErrorCode::ReasoningRefused).
+/// A namespace no installed owner registers, or a value its owner refuses, is
 /// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused):
 /// this deployment's plugin set cannot run the session, on any attempt.
 pub(in crate::runtime::session_manager) fn resolve_child_facts(
@@ -214,23 +216,38 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
         .unwrap_or_else(|| starter.policy.clone());
     if let Some(key) = request.model.as_ref() {
         let recorded = starter.models.snapshot(key).map_err(|source| {
-            crate::PluginError::Session(
+            crate::PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ModelUnknown,
                 crate::SessionError::ModelUnknown {
                     session_id: session_id.clone(),
                     source,
                 }
                 .to_string(),
-            )
+            ))
         })?;
         let reasoning = policy
             .model
             .as_ref()
             .map(|model| model.reasoning.clone())
             .unwrap_or_default();
-        policy.model = Some(crate::ModelConfig {
+        let model = crate::ModelConfig {
             model: recorded,
             reasoning,
-        });
+        };
+        // The reasoning the child inherits is judged against the capability
+        // of the model its key minted (FIG-4531).
+        model.validate_reasoning().map_err(|refused| {
+            crate::PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ReasoningRefused,
+                format!("session `{session_id}` create request is refused: {refused}"),
+            ))
+        })?;
+        policy.model = Some(model);
+    }
+    // A host session-turn start that names no model, on a starter that
+    // records none, runs the default binding its registration recorded.
+    if policy.model.is_none() {
+        policy.model = request.default_model().cloned();
     }
     let is_child = request.relation.parent_session_id().is_some();
     if is_child {
@@ -286,6 +303,17 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
         .clone()
         .unwrap_or_else(|| SessionId::from(format!("the child of {start_name}")));
     resolve_child_facts(&starter, create_request, &session_id).map(|_| ())
+}
+
+/// Whether `error` is the reasoning refusal [`resolve_child_facts`] mints:
+/// the recorded request's inherited reasoning does not fit the model its key
+/// mints.
+fn reasoning_refused(error: &crate::PluginError) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Runtime(runtime)
+            if runtime.code == crate::RuntimeErrorCode::ReasoningRefused
+    )
 }
 
 /// Whether `error` is the creation refusal [`resolve_child_facts`] mints.
@@ -639,26 +667,72 @@ pub(in crate::runtime::session_manager) async fn create_session(
 /// `ProcessInput::SessionTurn` initialisation: create the recorded session,
 /// or reopen it when a previous attempt already committed the durable row.
 /// Either way the result is an ordinary session runtime owned by the caller.
+///
+/// A committed child reopens from its durable row before the request is
+/// resolved against anything this deployment installs (FIG-4531): the
+/// session runs what it recorded, so a redelivery never reads today's
+/// catalog for it. Only a child that has no committed head resolves the
+/// recorded request, and a model key this worker does not serve on that
+/// path is the typed, retryable `ModelUnavailable`: the start was admitted
+/// with the key, so the deployment is at fault, never the request.
 async fn initialize_session(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
     owning_process_id: &crate::ProcessId,
 ) -> Result<InitializedSession, crate::PluginError> {
-    let mut plan = resolve_session_init(current, request).await?;
+    if let Some(session_id) = request
+        .session_id
+        .as_ref()
+        .filter(|session_id| !session_id.is_empty())
+        && let Some(store) = durable_session_store(current, session_id).await?
+        && let Some(state) = recorded_session_state(session_id, &request.relation, &store).await?
+    {
+        return reopen_committed_session(current, &request, session_id, store, state).await;
+    }
+    // A catalog row whose head no commit has written is a partial create: a
+    // previous attempt admitted the row, with the creation's config as its
+    // created head, and crashed before the initial head landed. The recorded
+    // request finishes the create — the admission is idempotent and the head
+    // commit completes what the crashed attempt started — so the session is
+    // not stranded retry-proof.
+    let mut plan = resolve_session_init(current, request)
+        .await
+        .map_err(unserved_model_key)?;
     plan.owning_process_id = Some(owning_process_id.clone());
-    match durable_session_store(current, &plan.session_id).await? {
-        Some(store) => match recorded_session_state(&plan, &store).await? {
-            Some(state) => reopen_committed_session(current, &plan, store, state).await,
-            // A catalog row whose head no commit has written is a partial
-            // create: a previous attempt admitted the row, with the
-            // creation's config as its created head, and crashed before the
-            // initial head landed. The recorded request finishes the create
-            // — the admission is idempotent and the head commit completes
-            // what the crashed attempt started — so the session is not
-            // stranded retry-proof.
-            None => Box::pin(commit_fresh_session_init(current, plan)).await,
-        },
-        None => Box::pin(commit_fresh_session_init(current, plan)).await,
+    Box::pin(commit_fresh_session_init(current, plan)).await
+}
+
+/// An admitted start's model key this worker's models do not register: the
+/// start's admission minted nothing but judged the key, so a worker that
+/// cannot mint it is a deployment that does not serve it. Retried, typed
+/// `ModelUnavailable`, as a root's per-run key in the same position is.
+fn unserved_model_key(error: crate::PluginError) -> crate::PluginError {
+    match error {
+        crate::PluginError::Runtime(runtime)
+            if runtime.code == crate::RuntimeErrorCode::ModelUnknown =>
+        {
+            crate::PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ModelUnavailable,
+                format!(
+                    "the start's model key is not served by this worker; the process retries \
+                     until a deployment serves it: {}",
+                    runtime.message
+                ),
+            ))
+        }
+        error => error,
+    }
+}
+
+/// A session error from assembling a recorded session's runtime, with the
+/// recorded model this worker cannot bind kept typed and retryable.
+fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
+    match error {
+        crate::SessionError::Plugin(error) => error,
+        error @ crate::SessionError::ModelUnavailable { .. } => crate::PluginError::Runtime(
+            crate::RuntimeError::new(crate::RuntimeErrorCode::ModelUnavailable, error.to_string()),
+        ),
+        error => crate::PluginError::Session(error.to_string()),
     }
 }
 
@@ -684,7 +758,8 @@ async fn commit_fresh_session_init(
 /// initial head commit — which the caller finishes as a create rather than
 /// reopening.
 async fn recorded_session_state(
-    plan: &SessionInitPlan,
+    session_id: &SessionId,
+    relation: &crate::SessionRelation,
     store: &crate::store::SessionStore,
 ) -> Result<Option<crate::RuntimeSessionState>, crate::PluginError> {
     // The durable row decides lineage. A redelivery replays the same recorded
@@ -693,15 +768,15 @@ async fn recorded_session_state(
     let meta = store.load_session_meta().await.map_err(|error| {
         crate::PluginError::Session(format!(
             "failed to inspect session `{}` before reopen: {error}",
-            plan.session_id
+            session_id
         ))
     })?;
     if let Some(meta) = &meta
-        && meta.relation != plan.relation
+        && meta.relation != *relation
     {
         return Err(crate::PluginError::Session(format!(
             "session `{}` already exists with relation {:?}; a redelivery must replay its recorded relation, not {:?}",
-            plan.session_id, meta.relation, plan.relation
+            session_id, meta.relation, relation
         )));
     }
     crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
@@ -714,7 +789,7 @@ async fn recorded_session_state(
         .map_err(|error| {
             crate::PluginError::Session(format!(
                 "failed to load session `{}` for reopen: {error}",
-                plan.session_id
+                session_id
             ))
         })
 }
@@ -724,10 +799,12 @@ async fn recorded_session_state(
 /// runtime under the resumed-session assembly.
 async fn reopen_committed_session(
     current: &CurrentOwnerCapability,
-    plan: &SessionInitPlan,
+    request: &SessionCreateRequest,
+    session_id: &SessionId,
     store: crate::store::SessionStore,
     state: crate::RuntimeSessionState,
 ) -> Result<InitializedSession, crate::PluginError> {
+    let parent_session_id = request.relation.parent_session_id().map(SessionId::from);
     // The reopened session runs the configuration it recorded, never the
     // redelivered request's (FIG-4379).
     let authority = crate::plugin::SessionAuthorityContext {
@@ -738,7 +815,7 @@ async fn reopen_committed_session(
     let plugin_host = current.plugins.host();
     let plugins = match state.plugin_state() {
         Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
-            parent_session_id: plan.parent_session_id.clone(),
+            parent_session_id: parent_session_id.clone(),
             ..PluginSessionRequest::rematerialization(
                 state.session_id.as_str(),
                 snapshot,
@@ -746,7 +823,7 @@ async fn reopen_committed_session(
             )
         }),
         None => plugin_host.build_session(PluginSessionRequest {
-            parent_session_id: plan.parent_session_id.clone(),
+            parent_session_id: parent_session_id.clone(),
             ..PluginSessionRequest::creation(state.session_id.as_str(), authority)
         }),
     }?;
@@ -764,14 +841,14 @@ async fn reopen_committed_session(
         ),
     )
     .await
-    .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+    .map_err(recorded_session_error)?;
     // Finish any observer intents a crashed create attempt left pending; the
     // settle is durable and idempotent, so completing it here is the same
     // work the create path performs.
-    settle_session_observer_intents(current, &plan.session_id, &store).await?;
+    settle_session_observer_intents(current, session_id, &store).await?;
     Ok(InitializedSession {
         handle: RuntimeHandle::new(runtime),
-        session_id: plan.session_id.clone(),
+        session_id: session_id.clone(),
     })
 }
 
@@ -908,6 +985,7 @@ impl RuntimeSessionServices {
                     // miss may resolve on the next admission.
                     if session_catalog_lookup_unsupported(&source)
                         || session_config_refused(&source)
+                        || reasoning_refused(&source)
                     {
                         return SessionTurnInitError::Refused {
                             session_id: requested_session_id.clone(),
@@ -1409,6 +1487,173 @@ pub fn take_spawned_child_runtimes()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const THINKER: &str = "thinker";
+    const PLAIN: &str = "plain";
+
+    /// A catalog of two keys: `thinker` advertises the `high` effort, and
+    /// `plain` has no reasoning controls.
+    fn child_models() -> std::sync::Arc<crate::ModelRegistry> {
+        let provider = || {
+            crate::testing::TestProvider::builder()
+                .kind("child-facts")
+                .build()
+                .into_handle()
+        };
+        let thinker = crate::ModelMetadata::builder("thinker-wire")
+            .context_window_tokens(64_000)
+            .capability(crate::ModelCapability {
+                reasoning: Some(crate::ReasoningCapability {
+                    efforts: vec!["high".to_string()],
+                    encoding: crate::ReasoningEncoding::Effort,
+                    disable: false,
+                    mandatory: false,
+                }),
+                ..crate::ModelCapability::default()
+            })
+            .build()
+            .expect("thinker metadata");
+        std::sync::Arc::new(
+            crate::ModelRegistry::new()
+                .register(THINKER, crate::RegisteredModel::new(thinker, provider()))
+                .and_then(|registry| {
+                    registry.register(
+                        PLAIN,
+                        crate::RegisteredModel::new(
+                            crate::testing::test_model_metadata("plain-wire"),
+                            provider(),
+                        ),
+                    )
+                })
+                .expect("two distinct keys register"),
+        )
+    }
+
+    /// Resolve `request`'s facts against a starter that records `policy`.
+    fn child_facts(
+        policy: &SessionPolicy,
+        request: &SessionCreateRequest,
+    ) -> Result<ChildFacts, crate::PluginError> {
+        let plugin_host = crate::testing::test_plugin_host(Vec::new());
+        let models = child_models();
+        resolve_child_facts(
+            &StarterFacts {
+                policy,
+                plugin_config: crate::AdmittedPluginConfig::default(),
+                plugin_host: &plugin_host,
+                protocol_plugin_id: "test_protocol",
+                models: models.as_ref(),
+            },
+            request,
+            &SessionId::from("child-facts"),
+        )
+    }
+
+    fn runtime_code(error: &crate::PluginError) -> Option<&crate::RuntimeErrorCode> {
+        match error {
+            crate::PluginError::Runtime(runtime) => Some(&runtime.code),
+            _ => None,
+        }
+    }
+
+    fn root_request() -> SessionCreateRequest {
+        SessionCreateRequest::root(
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        )
+    }
+
+    /// FIG-4531: a child's model key is judged where the child's facts
+    /// resolve. The reasoning the child inherits must fit the capability its
+    /// key mints, and a key the models do not register is typed: terminal at
+    /// admission, and the retryable `ModelUnavailable` on the worker of a
+    /// start that was admitted with it.
+    #[test]
+    fn a_child_model_key_is_judged_typed_when_its_facts_resolve() {
+        let models = child_models();
+        let starter = SessionPolicy {
+            model: Some(
+                crate::ModelConfig::new(
+                    crate::RuntimeModels::snapshot(models.as_ref(), &crate::ModelKey::new(THINKER))
+                        .expect("thinker mints"),
+                )
+                .with_reasoning(crate::ReasoningSelection::Effort("high".to_string())),
+            ),
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+        };
+
+        let onto_plain = root_request().with_model(crate::ModelKey::new(PLAIN));
+        let refused = child_facts(&starter, &onto_plain)
+            .err()
+            .expect("an inherited effort the key cannot take is refused");
+        assert_eq!(
+            runtime_code(&refused),
+            Some(&crate::RuntimeErrorCode::ReasoningRefused),
+            "{refused:?}"
+        );
+        assert!(reasoning_refused(&refused));
+
+        let onto_thinker = root_request().with_model(crate::ModelKey::new(THINKER));
+        let facts = child_facts(&starter, &onto_thinker).expect("the effort fits the key");
+        assert_eq!(
+            facts
+                .policy
+                .model
+                .expect("the child records a model")
+                .reasoning,
+            crate::ReasoningSelection::Effort("high".to_string())
+        );
+
+        let unknown = root_request().with_model(crate::ModelKey::new("retired"));
+        let refused = child_facts(&starter, &unknown)
+            .err()
+            .expect("an unregistered key is refused");
+        assert_eq!(
+            runtime_code(&refused),
+            Some(&crate::RuntimeErrorCode::ModelUnknown),
+            "admission refuses the key that was named: {refused:?}"
+        );
+        let on_worker = unserved_model_key(refused);
+        assert_eq!(
+            runtime_code(&on_worker),
+            Some(&crate::RuntimeErrorCode::ModelUnavailable)
+        );
+        assert!(
+            on_worker.is_retryable() && !on_worker.is_terminal(),
+            "an admitted start's unserved key retries until a deployment serves it"
+        );
+    }
+
+    /// FIG-4531: the default binding a host session-turn start recorded at
+    /// registration is the child's model only when neither its request nor
+    /// its starter records one, and it is copied as recorded.
+    #[test]
+    fn a_recorded_default_binding_is_the_child_model_of_last_resort() {
+        let models = child_models();
+        let minted = |key: &str| {
+            crate::ModelConfig::new(
+                crate::RuntimeModels::snapshot(models.as_ref(), &crate::ModelKey::new(key))
+                    .expect("the key mints"),
+            )
+        };
+        let bare = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let mut request = root_request();
+        request.record_default_model(Some(minted(PLAIN)));
+
+        let facts = child_facts(&bare, &request).expect("the default binding resolves");
+        assert_eq!(facts.policy.model, Some(minted(PLAIN)));
+
+        let starter = SessionPolicy {
+            model: Some(minted(THINKER)),
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+        };
+        let facts = child_facts(&starter, &request).expect("the starter's model resolves");
+        assert_eq!(
+            facts.policy.model,
+            Some(minted(THINKER)),
+            "a starter's recorded model wins over the default binding"
+        );
+    }
 
     #[test]
     fn contained_child_turn_panic_is_loud_in_test_builds() {

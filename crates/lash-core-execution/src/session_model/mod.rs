@@ -238,6 +238,9 @@ impl SessionSpec {
 
     /// Resolve this spec over `base`. A selected key is minted through
     /// `models` now; with none, `base`'s recorded model is kept as recorded.
+    /// A spec that selects a key or reasoning has the pair it records judged
+    /// against the recorded capability, so an unsupported selection is
+    /// refused here and nothing is created with it.
     pub fn resolve_against(
         &self,
         base: &SessionPolicy,
@@ -262,6 +265,13 @@ impl SessionSpec {
                 .as_mut()
                 .ok_or(SpecResolveError::ReasoningWithoutModel)?
                 .reasoning = reasoning.clone();
+        }
+        if (self.model.is_some() || self.reasoning.is_some())
+            && let Some(model) = policy.model.as_ref()
+        {
+            model
+                .validate_reasoning()
+                .map_err(SpecResolveError::Reasoning)?;
         }
         if let Some(acceptance) = self.attachment_acceptance.as_ref() {
             policy.attachment_acceptance = acceptance.clone();
@@ -298,6 +308,10 @@ pub enum SpecResolveError {
     /// model.
     #[error("a reasoning selection needs a model, and none is selected")]
     ReasoningWithoutModel,
+    /// The reasoning the spec records is one its model's recorded capability
+    /// refuses.
+    #[error(transparent)]
+    Reasoning(crate::ReasoningRefused),
 }
 
 impl Default for SessionSpec {
@@ -525,13 +539,25 @@ mod tests {
         }
     }
 
+    /// `key`'s binding with the `low`/`high` efforts, except `plain-model`,
+    /// whose capability has no reasoning controls.
     fn recorded(key: &str) -> ModelConfig {
+        let mut builder =
+            crate::ModelMetadata::builder(format!("{key}-wire")).context_window_tokens(200_000);
+        if key != "plain-model" {
+            builder = builder.capability(crate::ModelCapability {
+                reasoning: Some(crate::ReasoningCapability {
+                    efforts: vec!["low".to_string(), "high".to_string()],
+                    encoding: crate::ReasoningEncoding::Effort,
+                    disable: false,
+                    mandatory: false,
+                }),
+                ..crate::ModelCapability::default()
+            });
+        }
         ModelConfig::new(crate::RecordedModel::mint(
             ModelKey::new(key),
-            crate::ModelMetadata::builder(format!("{key}-wire"))
-                .context_window_tokens(200_000)
-                .build()
-                .expect("valid test model"),
+            builder.build().expect("valid test model"),
         ))
     }
 
@@ -617,6 +643,49 @@ mod tests {
                 .resolve_against(&base, &models),
             Err(SpecResolveError::ReasoningWithoutModel)
         ));
+    }
+
+    /// FIG-4531: the pair a spec records is judged where it is stated. An
+    /// effort its key's capability does not advertise, and a base's effort
+    /// inherited onto a key with no reasoning controls, are refused typed; a
+    /// spec that changes neither keeps the base as recorded, unjudged.
+    #[test]
+    fn a_spec_whose_reasoning_the_model_refuses_is_refused_typed() {
+        let base = SessionPolicy {
+            model: Some(
+                recorded("parent-model")
+                    .with_reasoning(ReasoningSelection::Effort("high".to_string())),
+            ),
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+        };
+        let models = CountingModels::serving(&["parent-model", "plain-model"]);
+        match SessionSpec::inherit()
+            .reasoning(ReasoningSelection::Effort("extreme".to_string()))
+            .resolve_against(&base, &models)
+        {
+            Err(SpecResolveError::Reasoning(refused)) => {
+                assert_eq!(refused.key, ModelKey::new("parent-model"));
+                assert_eq!(
+                    refused.reasoning,
+                    ReasoningSelection::Effort("extreme".to_string())
+                );
+            }
+            other => panic!("an unadvertised effort is refused, got {other:?}"),
+        }
+        match SessionSpec::inherit()
+            .model("plain-model")
+            .resolve_against(&base, &models)
+        {
+            Err(SpecResolveError::Reasoning(refused)) => {
+                assert_eq!(refused.key, ModelKey::new("plain-model"));
+            }
+            other => panic!("an inherited effort the key cannot take is refused, got {other:?}"),
+        }
+        SessionSpec::inherit()
+            .model("plain-model")
+            .reasoning(ReasoningSelection::ProviderDefault)
+            .resolve_against(&base, &models)
+            .expect("the provider's default reasoning fits a model with no controls");
     }
 
     #[test]

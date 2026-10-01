@@ -79,6 +79,24 @@ async fn worker_for(
     provider: lash_core::facade_support::ProviderHandle,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
+    worker_with_models(
+        engine_backend,
+        registry,
+        session_factory,
+        lash_core::testing::standard_test_models(provider),
+        extra_plugins,
+    )
+    .await
+}
+
+/// A SessionTurn worker whose deployment installs `models`.
+async fn worker_with_models(
+    engine_backend: lash_core::Backend,
+    registry: Arc<dyn ProcessRegistry>,
+    session_factory: Arc<dyn lash_core::DeploymentStore>,
+    models: Arc<dyn lash_core::RuntimeModels>,
+    extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+) -> DurableProcessWorker {
     let mut plugins = vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
             as Arc<dyn lash_core::facade_support::PluginFactory>,
@@ -98,7 +116,7 @@ async fn worker_for(
         lash_core::facade_support::LeaseTimings::from_ttl(Duration::from_millis(120))
             .expect("short child lease timings"),
     );
-    runtime_host.providers.models = lash_core::testing::standard_test_models(provider);
+    runtime_host.providers.models = models;
     DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(plugin_host),
         runtime_host,
@@ -132,6 +150,20 @@ fn answering_provider(text: &str) -> lash_core::facade_support::ProviderHandle {
 async fn parent_runtime(
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn lash_core::DeploymentStore>,
+) -> lash_core::facade_support::LashRuntime {
+    parent_runtime_with_models(
+        registry,
+        factory,
+        lash_core::testing::standard_test_models(answering_provider("parent lives")),
+    )
+    .await
+}
+
+/// The parent session's runtime on a deployment that installs `models`.
+async fn parent_runtime_with_models(
+    registry: Arc<dyn ProcessRegistry>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
+    models: Arc<dyn lash_core::RuntimeModels>,
 ) -> lash_core::facade_support::LashRuntime {
     let parent = SessionId::from("test-parent");
     let policy = lash_core::SessionPolicy {
@@ -168,8 +200,7 @@ async fn parent_runtime(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models =
-        lash_core::testing::standard_test_models(answering_provider("parent lives"));
+    host.providers.models = models;
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,
@@ -623,6 +654,257 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
     .await
     .expect("redelivery reopens committed child");
     assert_completed(&outcome);
+}
+
+/// The key a subagent tier names for its child.
+const FAST: &str = "fast";
+
+/// A host session-turn start of `child` that names the model key [`FAST`].
+async fn keyed_registration_for(child: &SessionId) -> ProcessRegistration {
+    ProcessRegistration::new(
+        ProcessInput::SessionTurn {
+            definition_key: "test-session-turn:v1".to_string(),
+            create_request: Box::new(
+                lash_core::SessionCreateRequest::child_session(
+                    "test-parent",
+                    lash_core::SessionStartPoint::Empty,
+                    lash_core::PluginOptions::default(),
+                )
+                .with_session_id(child)
+                .with_model(lash_core::ModelKey::new(FAST)),
+            ),
+            turn_input: Box::new(lash_core::TurnInput::text("run the child turn")),
+            result: lash_core::SessionTurnOutcome::Turn,
+        },
+        lash_core::ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_execution_env_ref(Some(
+        persist_session_turn_env_ref(RECOVERY_PROCESS_ENV_STORE.as_ref()).await,
+    ))
+}
+
+/// A deployment that serves the standard test model and [`FAST`].
+fn models_serving_fast(
+    provider: lash_core::facade_support::ProviderHandle,
+) -> Arc<dyn lash_core::RuntimeModels> {
+    Arc::new(
+        lash_core::ModelRegistry::new()
+            .register(
+                "mock-model",
+                lash_core::RegisteredModel::new(
+                    lash_core::testing::test_model_metadata("mock-model"),
+                    provider.clone(),
+                ),
+            )
+            .and_then(|registry| {
+                registry.register(
+                    FAST,
+                    lash_core::RegisteredModel::new(
+                        lash_core::testing::test_model_metadata("fast-wire"),
+                        provider,
+                    ),
+                )
+            })
+            .expect("two distinct keys register"),
+    )
+}
+
+/// A deployment that binds any recorded binding to its transport and mints
+/// nothing: every catalog read for a key is counted and refused.
+struct BindOnlyModels {
+    provider: lash_core::facade_support::ProviderHandle,
+    mints: std::sync::atomic::AtomicUsize,
+}
+
+impl lash_core::RuntimeModels for BindOnlyModels {
+    fn snapshot(
+        &self,
+        key: &lash_core::ModelKey,
+    ) -> Result<lash_core::RecordedModel, lash_core::ModelUnavailable> {
+        self.mints.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(lash_core::ModelUnavailable::new(
+            key.clone(),
+            lash_core::ModelUnavailableReason::UnknownKey,
+        ))
+    }
+
+    fn bind(
+        &self,
+        _recorded: &lash_core::RecordedModel,
+    ) -> Result<lash_core::facade_support::ProviderHandle, lash_core::ModelUnavailable> {
+        Ok(self.provider.clone())
+    }
+}
+
+/// Commit `registration`'s child on a deployment that serves [`FAST`],
+/// without accepting its turn input: the state a worker crash leaves after
+/// the child's create commit.
+async fn commit_keyed_child(
+    registry: &Arc<dyn ProcessRegistry>,
+    factory: &Arc<dyn lash_core::DeploymentStore>,
+    registration: &ProcessRegistration,
+    process_id: &ProcessId,
+) {
+    let parent = parent_runtime_with_models(
+        Arc::clone(registry),
+        Arc::clone(factory),
+        models_serving_fast(answering_provider("parent lives")),
+    )
+    .await;
+    let ProcessInput::SessionTurn { create_request, .. } = registration.input.as_ref() else {
+        unreachable!("SessionTurn registration");
+    };
+    parent
+        .session_lifecycle_service()
+        .expect("parent lifecycle service")
+        .create_session(create_request.as_ref().clone().with_caused_by(
+            lash_core::CausalRef::Process {
+                process_id: process_id.clone(),
+            },
+        ))
+        .await
+        .expect("commit the keyed child");
+}
+
+/// FIG-4531: a redelivered session-turn child that is already committed
+/// reopens from its durable row before anything is read from the
+/// deployment's catalog. The child recorded the binding its key minted; the
+/// next deployment no longer mints the key, and the redelivery runs the
+/// recorded binding to completion without one catalog read.
+#[tokio::test]
+async fn redelivery_of_a_committed_keyed_child_reopens_without_reading_the_catalog() {
+    let registry = process_registry();
+    let child = SessionId::from("committed-keyed-worker-child");
+    let registration = keyed_registration_for(&child).await;
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .expect("register SessionTurn")
+        .id;
+    let factory = memory_session_store_factory().await;
+    commit_keyed_child(&registry, &factory, &registration, &process_id).await;
+
+    let models = Arc::new(BindOnlyModels {
+        provider: answering_provider("redelivered child answered"),
+        mints: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let worker = worker_with_models(
+        memory_engine_backend().await,
+        Arc::clone(&registry),
+        factory,
+        Arc::clone(&models) as Arc<dyn lash_core::RuntimeModels>,
+        Vec::new(),
+    )
+    .await;
+    let outcome = run(
+        &worker,
+        &registry,
+        &process_id,
+        &registration,
+        Arc::new(ReplayableRecordingContext::default()),
+        test_restate_authority_id(),
+        RestateNamespace::default(),
+    )
+    .await
+    .expect("the redelivery reopens the committed child from its durable row");
+    assert_completed(&outcome);
+    assert_eq!(
+        models.mints.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the committed child's redelivery read the catalog for its key"
+    );
+}
+
+/// FIG-4531: a model key this worker does not serve ends a session-turn
+/// attempt with the typed, retryable `ModelUnavailable`, whether the child
+/// is still to be created (the key cannot be minted) or already committed
+/// (its recorded binding cannot be bound). Neither is the generic
+/// plugin-session failure, and neither is the process's outcome.
+#[tokio::test]
+async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
+    fn assert_model_unavailable(result: Result<lash_core::ProcessRunOutcome, PluginError>) {
+        let error = match result {
+            Err(error) => error,
+            Ok(outcome) => panic!("an unserved key ends the attempt, got: {outcome:#?}"),
+        };
+        let code = match &error {
+            PluginError::Runtime(runtime) => Some(runtime.code.clone()),
+            PluginError::RuntimeEffectController(controller) => Some(controller.code.clone()),
+            _ => None,
+        };
+        assert_eq!(
+            code,
+            Some(lash_core::RuntimeErrorCode::ModelUnavailable),
+            "the refusal is typed model_unavailable: {error:?}"
+        );
+        assert!(
+            error.is_retryable() && !error.is_terminal(),
+            "a deployment that serves the key repairs it: {error:?}"
+        );
+    }
+
+    // The child is still to be created: its key cannot be minted here.
+    let registry = process_registry();
+    let child = SessionId::from("unserved-key-fresh-child");
+    let registration = keyed_registration_for(&child).await;
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .expect("register SessionTurn")
+        .id;
+    let worker = worker_for(
+        memory_engine_backend().await,
+        Arc::clone(&registry),
+        memory_session_store_factory().await,
+        answering_provider("never asked"),
+        Vec::new(),
+    )
+    .await;
+    assert_model_unavailable(
+        run(
+            &worker,
+            &registry,
+            &process_id,
+            &registration,
+            Arc::new(ReplayableRecordingContext::default()),
+            test_restate_authority_id(),
+            RestateNamespace::default(),
+        )
+        .await,
+    );
+
+    // The child is committed: its recorded binding cannot be bound here.
+    let registry = process_registry();
+    let child = SessionId::from("unserved-key-committed-child");
+    let registration = keyed_registration_for(&child).await;
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .expect("register SessionTurn")
+        .id;
+    let factory = memory_session_store_factory().await;
+    commit_keyed_child(&registry, &factory, &registration, &process_id).await;
+    let worker = worker_for(
+        memory_engine_backend().await,
+        Arc::clone(&registry),
+        factory,
+        answering_provider("never asked"),
+        Vec::new(),
+    )
+    .await;
+    assert_model_unavailable(
+        run(
+            &worker,
+            &registry,
+            &process_id,
+            &registration,
+            Arc::new(ReplayableRecordingContext::default()),
+            test_restate_authority_id(),
+            RestateNamespace::default(),
+        )
+        .await,
+    );
 }
 
 #[tokio::test]

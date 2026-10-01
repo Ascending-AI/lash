@@ -264,12 +264,26 @@ impl From<TierPluginSource> for SessionPluginSource {
 }
 
 /// `spec` over `base` with its model key left out: the key is minted when
-/// the child is created, so nothing here consults a catalog.
+/// the child is created, so nothing here consults a catalog. A reasoning
+/// selection stated beside a key belongs to that key's model: it is carried
+/// on the policy unjudged, and judged against the minted capability when the
+/// child is created. Without a key it is judged here, against the model the
+/// child copies.
 fn resolve_recorded(spec: &SessionSpec, base: &SessionPolicy) -> Result<SessionPolicy, String> {
     let mut spec = spec.clone();
-    spec.model = None;
-    spec.resolve_against(base, &lash_core::EmptyModels)
-        .map_err(|error| format!("subagent session spec does not resolve: {error}"))
+    let keyed_reasoning = match spec.model.take() {
+        Some(_) => spec.reasoning.take(),
+        None => None,
+    };
+    let mut policy = spec
+        .resolve_against(base, &lash_core::EmptyModels)
+        .map_err(|error| format!("subagent session spec does not resolve: {error}"))?;
+    if let Some(reasoning) = keyed_reasoning
+        && let Some(model) = policy.model.as_mut()
+    {
+        model.reasoning = reasoning;
+    }
+    Ok(policy)
 }
 
 /// Registry of named capabilities. Order is preserved so that the JSON

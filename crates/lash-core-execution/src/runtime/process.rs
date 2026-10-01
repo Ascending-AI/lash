@@ -126,8 +126,8 @@ pub use registry::{
 pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 pub use start_staging::{
-    ArtifactReferrerPorts, ProcessStartStores, ReferrerAcquisition, RegisteredProcessStart,
-    register_process_start,
+    ArtifactReferrerPorts, HostStartAdmission, ProcessStartStores, ReferrerAcquisition,
+    RegisteredProcessStart, SessionTurnDefaultMint, register_process_start,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;

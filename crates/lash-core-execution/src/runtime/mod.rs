@@ -153,8 +153,8 @@ pub use process::{
     watch_process_registry_with_sink,
 };
 pub use process::{
-    ArtifactReferrerPorts, ProcessStartStores, ReferrerAcquisition, RegisteredProcessStart,
-    register_process_start,
+    ArtifactReferrerPorts, HostStartAdmission, ProcessStartStores, ReferrerAcquisition,
+    RegisteredProcessStart, SessionTurnDefaultMint, register_process_start,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{

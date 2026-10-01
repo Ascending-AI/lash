@@ -120,6 +120,9 @@ impl DefaultSelection {
                 lash_core::facade_support::SpecResolveError::ReasoningWithoutModel => {
                     EmbedError::MissingModel
                 }
+                lash_core::facade_support::SpecResolveError::Reasoning(error) => {
+                    EmbedError::ReasoningRefused(error)
+                }
             })
     }
 }

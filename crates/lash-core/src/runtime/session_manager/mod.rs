@@ -366,15 +366,12 @@ impl CurrentOwnerCapability {
         }
     }
 
-    // The session's model is the binding it recorded; no open- or
-    // child-create-time selection can arrive here (ADR 0066), so the
-    // remaining resolution failures — a recorded key the registry does not
-    // serve or a changed wire model — are host wiring faults and stay as
-    // plugin errors.
+    /// This runtime's recorded policy bound to the transport that executes
+    /// it. A recorded model this worker cannot bind is the typed, retryable
+    /// `ModelUnavailable`.
     fn resolve_policy(&self) -> Result<RuntimeSessionPolicy, crate::PluginError> {
         self.host
             .resolve_owner_policy(&self.runtime_owner(), self.policy.clone())
-            .map_err(|err| crate::PluginError::Session(err.to_string()))
     }
 }
 

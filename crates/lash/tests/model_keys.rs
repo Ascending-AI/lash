@@ -694,6 +694,315 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
     assert_eq!(glm.calls(), 0, "no refused request ran");
 }
 
+/// A host session-turn start that names no model, under host key `key`.
+fn session_turn_start(key: &str, text: &str) -> lash_core::ProcessStartRequest {
+    lash_core::ProcessStartRequest::new(
+        lash_core::ProcessInput::SessionTurn {
+            definition_key: "keys-session-turn-start".into(),
+            create_request: Box::new(
+                lash_core::SessionCreateRequest::root(
+                    lash_core::SessionStartPoint::Empty,
+                    lash_core::PluginOptions::default(),
+                )
+                .with_session_id(format!("{key}-child")),
+            ),
+            turn_input: Box::new(TurnInput::text(text)),
+            result: lash_core::SessionTurnOutcome::Turn,
+        },
+        lash_core::ProcessOriginator::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_host_start_key(key)
+}
+
+/// Issue `request` on `core` from a host handler named `operation`.
+async fn start_on(
+    double: &Double,
+    core: &LashCore,
+    operation: &str,
+    request: lash_core::ProcessStartRequest,
+) -> Result<lash_core::ProcessStartReceipt, lash::EmbedError> {
+    let result = Arc::new(Mutex::new(None));
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let core = core.clone();
+        let result = Arc::clone(&result);
+        Arc::new(move |scoped| {
+            let core = core.clone();
+            let request = request.clone();
+            let result = Arc::clone(&result);
+            Box::pin(async move {
+                let started = core.processes().start(request, scoped).await;
+                *result.lock().expect("start result") = Some(started);
+            })
+        })
+    };
+    double
+        .double
+        .run_in_handler(
+            lash_core::AdmittedScope::runtime_operation(operation),
+            attempt,
+        )
+        .await
+        .expect("the host handler runs");
+    result
+        .lock()
+        .expect("start result")
+        .take()
+        .expect("the handler issued the start")
+}
+
+/// The default binding the start retained under `process_id` recorded.
+async fn recorded_default(double: &Double, process_id: &lash::ProcessId) -> lash::ModelConfig {
+    let record = double
+        .double
+        .lash_backend()
+        .process_registry()
+        .get_process(process_id)
+        .await
+        .expect("read the process")
+        .expect("the process is retained");
+    let lash_core::ProcessInput::SessionTurn { create_request, .. } = record.input.as_ref() else {
+        panic!("the retained start is a session turn: {record:?}");
+    };
+    create_request
+        .default_model()
+        .expect("the start recorded the default binding")
+        .clone()
+}
+
+/// A host session-turn start that names no model records the core's default
+/// binding once, when it first registers. The same start retried under its
+/// host key after the catalog entry was edited, and again after the default
+/// moved to another key, is returned the retained process with the binding it
+/// recorded; neither retry is a `StartKeyConflict`. A start that states
+/// another request under the key still is.
+async fn a_session_turn_start_retried_after_a_catalog_edit_keeps_its_retained_start(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+) {
+    let Some(double) = double(tier, replay, seed).await else {
+        return;
+    };
+    let key = "keys-start-retry";
+    let glm = Route::new("glm answers");
+    let kimi = Route::new("kimi answers");
+    let first = core(
+        &double,
+        &[Entry {
+            key: GLM,
+            wire_model: "glm-5.3-flash",
+            revision: "r1",
+            route: &glm,
+        }],
+        "keys-boot-1",
+    );
+    let started = start_on(
+        &double,
+        &first,
+        "keys-start-first",
+        session_turn_start(key, "run the child"),
+    )
+    .await
+    .expect("the first start registers");
+    assert_eq!(
+        started.disposition,
+        lash_core::ProcessRegistrationOutcome::Created
+    );
+    let recorded = recorded_default(&double, &started.process_id).await;
+    assert_eq!(recorded.key().as_str(), GLM);
+    drop(first);
+
+    let edited = core(
+        &double,
+        &[Entry {
+            key: GLM,
+            wire_model: "glm-5.3-flash",
+            revision: "r2",
+            route: &glm,
+        }],
+        "keys-boot-2",
+    );
+    let after_edit = start_on(
+        &double,
+        &edited,
+        "keys-start-after-edit",
+        session_turn_start(key, "run the child"),
+    )
+    .await
+    .expect("the retry after a catalog edit presents the same start");
+    assert_eq!(after_edit.process_id, started.process_id);
+    assert_eq!(
+        after_edit.disposition,
+        lash_core::ProcessRegistrationOutcome::Existing
+    );
+    drop(edited);
+
+    let moved = core(
+        &double,
+        &[Entry {
+            key: KIMI,
+            wire_model: "kimi-k3",
+            revision: "r1",
+            route: &kimi,
+        }],
+        "keys-boot-3",
+    );
+    let after_move = start_on(
+        &double,
+        &moved,
+        "keys-start-after-move",
+        session_turn_start(key, "run the child"),
+    )
+    .await
+    .expect("the retry after a change of default presents the same start");
+    assert_eq!(after_move.process_id, started.process_id);
+    assert_eq!(
+        after_move.disposition,
+        lash_core::ProcessRegistrationOutcome::Existing
+    );
+    assert_eq!(
+        recorded_default(&double, &started.process_id).await,
+        recorded,
+        "no retry re-minted the binding the start recorded"
+    );
+
+    let other = start_on(
+        &double,
+        &moved,
+        "keys-start-other-request",
+        session_turn_start(key, "run another child"),
+    )
+    .await;
+    match &other {
+        Err(lash::EmbedError::Plugin(lash_core::PluginError::StartKeyConflict { .. })) => {}
+        other => panic!("another request under the key conflicts, got: {other:?}"),
+    }
+}
+
+/// An unsupported reasoning selection is refused typed where it is stated,
+/// and nothing is written: at creation no session exists afterwards, and at
+/// send the input is not accepted and no transport is called. The same key
+/// with a selection its capability accepts runs.
+async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+) {
+    const THINKER: &str = "thinker@tensorx";
+    let Some(double) = double(tier, replay, seed).await else {
+        return;
+    };
+    let thinker = Route::new("thinker answers");
+    let glm = Route::new("glm answers");
+    let high = lash::provider::ReasoningSelection::Effort("high".to_string());
+    let thinking = ModelMetadata::builder("thinker-1")
+        .context_window_tokens(64_000)
+        .capability(lash::provider::ModelCapability {
+            reasoning: Some(lash::provider::ReasoningCapability {
+                efforts: vec!["high".to_string()],
+                encoding: lash::provider::ReasoningEncoding::Effort,
+                disable: false,
+                mandatory: false,
+            }),
+            ..lash::provider::ModelCapability::default()
+        })
+        .build()
+        .expect("model metadata");
+    let registry = ModelRegistry::new()
+        .register(THINKER, RegisteredModel::new(thinking, thinker.handle()))
+        .and_then(|registry| {
+            registry.register(
+                GLM,
+                RegisteredModel::new(metadata("glm-5.3-flash", "r1"), glm.handle()),
+            )
+        })
+        .expect("the catalog names each key once");
+    let core =
+        LashCore::standard_builder(double.double.lash_backend(), lash::TurnBudget::Unbounded)
+            .models(Arc::new(registry))
+            .model(THINKER)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "model-keys-worker",
+                "keys-reasoning",
+            ))
+            .expect("the host core builds");
+
+    // Creation: a key with no reasoning controls cannot record an effort.
+    let created = core
+        .session("keys-reasoning-refused")
+        .create(lash::SessionCreation {
+            spec: lash::SessionSpec::new().model(GLM).reasoning(high.clone()),
+            ..lash::SessionCreation::default()
+        })
+        .await;
+    match &created {
+        Err(lash::EmbedError::ReasoningRefused(refused)) => {
+            assert_eq!(refused.key.as_str(), GLM);
+            assert_eq!(refused.reasoning, high);
+        }
+        other => panic!(
+            "creation refuses the selection typed, got: {:?}",
+            other.as_ref().err()
+        ),
+    }
+    let reopened = core.session("keys-reasoning-refused").open().await;
+    assert!(
+        matches!(&reopened, Err(lash::EmbedError::UnknownSession { .. })),
+        "the refused creation created nothing: {:?}",
+        reopened.as_ref().err()
+    );
+
+    // Send: the session records `high` on the thinking model.
+    core.session("keys-reasoning")
+        .create(lash::SessionCreation {
+            spec: lash::SessionSpec::new()
+                .model(THINKER)
+                .reasoning(high.clone()),
+            ..lash::SessionCreation::default()
+        })
+        .await
+        .expect("the advertised effort is recorded");
+    let session = core
+        .session("keys-reasoning")
+        .open()
+        .await
+        .expect("open the session");
+    let refused_code = |sent: Result<lash::SendHandle, lash::EmbedError>| match sent {
+        Err(lash::EmbedError::Runtime(error)) => error.code,
+        other => panic!("the send is refused typed, got: {:?}", other.err()),
+    };
+    // A per-run key keeps the session's reasoning, which this key refuses.
+    assert_eq!(
+        refused_code(session.send(TurnInput::text("ask glm")).model(GLM).await),
+        lash::runtime::RuntimeErrorCode::ReasoningRefused
+    );
+    // A per-run effort the session's model does not advertise.
+    assert_eq!(
+        refused_code(
+            session
+                .send(TurnInput::text("think harder"))
+                .reasoning(lash::provider::ReasoningSelection::Effort(
+                    "turbo".to_string()
+                ))
+                .await
+        ),
+        lash::runtime::RuntimeErrorCode::ReasoningRefused
+    );
+    assert_eq!(glm.calls() + thinker.calls(), 0, "no refused request ran");
+
+    let on_glm = session
+        .send(TurnInput::text("ask glm plainly"))
+        .model(GLM)
+        .reasoning(lash::provider::ReasoningSelection::ProviderDefault)
+        .await
+        .expect("the provider's default reasoning fits the key");
+    assert_eq!(answer_of(on_glm).await, "glm answers");
+    assert_eq!(thinker.calls(), 0);
+}
+
 // ---- registration -----------------------------------------------------------
 
 #[test]
@@ -788,4 +1097,12 @@ tiered!(
 tiered!(
     an_unknown_key_is_refused_before_anything_changes,
     0x4374_1500
+);
+tiered!(
+    a_session_turn_start_retried_after_a_catalog_edit_keeps_its_retained_start,
+    0x4531_1100
+);
+tiered!(
+    an_unsupported_reasoning_selection_is_refused_where_it_is_stated,
+    0x4531_1200
 );

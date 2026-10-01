@@ -163,24 +163,25 @@ impl LashRuntime {
             .plugins
             .require_runtime_owner()
             .map_err(SessionError::Plugin)?;
-        // Defaulted state (e.g. `RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))` used
-        // by fresh-session constructors) selects no model.
-        // Fill it in from the caller's policy so tests and hosts that
-        // pass a real policy alongside default state don't trip the explicit
-        // model guard below.
-        let state_policy_was_unconfigured = state.policy.model.is_none();
-        if state_policy_was_unconfigured {
-            state.policy = policy.clone();
-        }
-        if state.checkpoint_ref.is_none() && state.head_revision == 0 {
+        // A state no commit has recorded is a new session's: its creator's
+        // policy is the one it will record, so a defaulted state (e.g.
+        // `RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))`)
+        // takes it. A recorded policy is never filled or replaced from the
+        // opener's (FIG-4531): a head that records no model is refused
+        // below, whatever the opener selects.
+        let unrecorded = state.checkpoint_ref.is_none() && state.head_revision == 0;
+        if unrecorded {
+            if state.policy.model.is_none() {
+                state.policy = policy.clone();
+            }
             state.authority.tool_access = services.plugins.tool_access();
             state.authority.subagent = services.plugins.subagent_context();
         }
         state.ensure_agent_frame_initialized();
         if state.effective_policy().model.is_none() {
-            return Err(SessionError::Protocol(
-                "session policy selects no model; hosts must select a registered model".to_string(),
-            ));
+            return Err(SessionError::ModelUnconfigured {
+                session_id: state.session_id.clone(),
+            });
         }
         let mut host = host;
 
@@ -741,6 +742,76 @@ mod tests {
             )]),
             origin: None,
         }
+    }
+
+    /// An embedded runtime over `state`, opened with a policy that selects a
+    /// model.
+    async fn opened_with_a_model(
+        state: crate::RuntimeSessionState,
+    ) -> Result<crate::runtime::LashRuntime, SessionError> {
+        let plugins = crate::testing::test_plugin_host(Vec::new())
+            .build_session(crate::plugin::PluginSessionRequest::creation(
+                state.session_id.as_str(),
+                Default::default(),
+            ))
+            .expect("plugin session");
+        let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+            crate::testing::sqlite_memory_store_backend().await,
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ));
+        let services = crate::RuntimeServices::new(
+            plugins,
+            std::sync::Arc::clone(&host.core.durability.attachment_store),
+            std::sync::Arc::clone(&host.core.durability.process_env_store),
+        );
+        crate::runtime::LashRuntime::from_embedded_state(
+            crate::testing::standard_test_policy(),
+            host,
+            services,
+            state,
+            crate::testing::runtime_lease_owner(),
+        )
+        .await
+    }
+
+    /// FIG-4531: a recorded policy is never filled from the opener's. A head
+    /// that records no model is refused typed, whatever model the opener
+    /// selects; only a state no commit has recorded takes its creator's
+    /// policy.
+    #[tokio::test]
+    async fn a_recorded_head_with_no_model_is_refused_and_never_filled_from_the_opener() {
+        let mut recorded = crate::RuntimeSessionState {
+            session_id: SessionId::from("recorded-without-model"),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        recorded.head_revision = 3;
+        match opened_with_a_model(recorded).await {
+            Err(SessionError::ModelUnconfigured { session_id }) => {
+                assert_eq!(session_id, SessionId::from("recorded-without-model"));
+            }
+            Ok(runtime) => panic!(
+                "the opener's policy filled a recorded head: {:?}",
+                runtime.state.policy
+            ),
+            Err(other) => panic!("the refusal is typed, got: {other:?}"),
+        }
+
+        let unrecorded = crate::RuntimeSessionState {
+            session_id: SessionId::from("never-committed"),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        let created = opened_with_a_model(unrecorded)
+            .await
+            .expect("a state no commit recorded takes its creator's policy");
+        assert_eq!(
+            created.state.policy.model,
+            crate::testing::standard_test_policy().model
+        );
     }
 
     #[test]

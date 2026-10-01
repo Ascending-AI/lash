@@ -420,7 +420,7 @@ where
     let registry = execution.registry;
     let process_env_store = execution.process_env_store;
     let process_engines = execution.process_engines;
-    let session_catalog = execution.session_catalog;
+    let host_start = execution.host_start;
     let turn_cancellation = execution.turn_cancellation;
     let attachments = execution.attachments;
     let trigger_route = execution.trigger_route;
@@ -497,7 +497,12 @@ where
                         engines_required: true,
                         executor: "Restate process start",
                         starter: &starter,
-                        session_catalog: session_catalog.as_deref(),
+                        session_catalog: lash_core::runtime::HostStartAdmission::catalog(
+                            host_start.as_deref(),
+                        ),
+                        session_turn_default: lash_core::runtime::HostStartAdmission::default_mint(
+                            host_start.as_deref(),
+                        ),
                         trigger_route: trigger_route.as_ref(),
                     };
                     match lash_core::runtime::register_process_start(

@@ -362,19 +362,12 @@ pub(super) fn validate_candidate(
         return Ok(());
     };
     model
-        .metadata()
-        .capability
-        .reasoning_intent(
-            model.model.wire_model(),
-            &format!("key `{}`", model.key()),
-            &model.reasoning,
-        )
-        .map(drop)
-        .map_err(|error| CoreConfigRefusal::ReasoningRefused {
-            key: model.key().clone(),
-            reasoning: model.reasoning.clone(),
-            category: error.category,
-            message: error.message,
+        .validate_reasoning()
+        .map_err(|refused| CoreConfigRefusal::ReasoningRefused {
+            key: refused.key,
+            reasoning: refused.reasoning,
+            category: refused.category,
+            message: refused.message,
         })
 }
 

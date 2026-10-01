@@ -188,6 +188,35 @@ impl PartialEq for ProcessInput {
 }
 
 impl ProcessInput {
+    /// Whether `self` and `other` state the same start. A `SessionTurn`
+    /// start's default binding is what the registering core derived when no
+    /// model was named, not what its author stated, so it is left out
+    /// (FIG-4531): a retry after a catalog edit or a change of default
+    /// presents the same start.
+    pub fn states_same_start_as(&self, other: &Self) -> bool {
+        self.stated() == other.stated()
+    }
+
+    /// This input as its author stated it.
+    fn stated(&self) -> std::borrow::Cow<'_, Self> {
+        match self {
+            Self::SessionTurn {
+                definition_key,
+                create_request,
+                turn_input,
+                result,
+            } if create_request.default_model().is_some() => {
+                std::borrow::Cow::Owned(Self::SessionTurn {
+                    definition_key: definition_key.clone(),
+                    create_request: Box::new(create_request.stated()),
+                    turn_input: turn_input.clone(),
+                    result: result.clone(),
+                })
+            }
+            _ => std::borrow::Cow::Borrowed(self),
+        }
+    }
+
     /// Stored attachments this input carries, sorted and deduplicated: a
     /// `SessionTurn`'s turn input. Engine payloads are opaque JSON and carry
     /// no typed attachments (ADR 0124).

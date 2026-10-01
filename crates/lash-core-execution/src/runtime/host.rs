@@ -637,27 +637,29 @@ impl RuntimeHost {
             })
     }
 
-    /// Bind `policy`'s recorded model for `owner`: a session's through
-    /// [`Self::resolve_session_policy`], a process runtime's directly, with
-    /// its failures named by the process.
+    /// Bind `policy`'s recorded model for `owner`, with its failures named
+    /// by the owner. A recorded model this worker cannot bind is the typed,
+    /// retryable [`RuntimeErrorCode::ModelUnavailable`](crate::RuntimeErrorCode::ModelUnavailable),
+    /// as it is on the turn path: the deployment is at fault, and a
+    /// deployment that serves the key repairs it (FIG-4531).
     pub fn resolve_owner_policy(
         &self,
         owner: &crate::RuntimeOwner,
         policy: crate::SessionPolicy,
     ) -> Result<crate::RuntimeSessionPolicy, crate::PluginError> {
-        match owner {
-            crate::RuntimeOwner::Session(session_id) => self
-                .resolve_session_policy(session_id, policy)
-                .map_err(|err| crate::PluginError::Session(err.to_string())),
-            crate::RuntimeOwner::Process(process_id) => {
-                self.resolve_policy_binding(policy).map_err(|err| {
-                    crate::PluginError::Session(match err {
-                        None => format!("process `{process_id}` has selected no model"),
-                        Some(err) => format!("process `{process_id}` cannot run its model: {err}"),
-                    })
-                })
+        self.resolve_policy_binding(policy).map_err(|err| {
+            let owner = match owner {
+                crate::RuntimeOwner::Session(session_id) => format!("session `{session_id}`"),
+                crate::RuntimeOwner::Process(process_id) => format!("process `{process_id}`"),
+            };
+            match err {
+                None => crate::PluginError::Session(format!("{owner} has selected no model")),
+                Some(source) => crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::ModelUnavailable,
+                    format!("{owner} cannot run its model: {source}"),
+                )),
             }
-        }
+        })
     }
 
     /// `None` is a policy with no model selected.

@@ -209,7 +209,9 @@ impl RunOverrides {
 
     /// Apply these overrides to `config`, the root's snapshot. An override
     /// key is resolved through `models` here, once; a reasoning override
-    /// applies to whichever model the root ends up with.
+    /// applies to whichever model the root ends up with. An override of
+    /// either has the pair the root would record judged against the recorded
+    /// capability.
     fn apply(
         &self,
         config: &mut PersistedSessionConfig,
@@ -239,6 +241,13 @@ impl RunOverrides {
                 .ok_or(RunResolveError::ReasoningWithoutModel)?;
             model.reasoning = reasoning.clone();
         }
+        if (self.model.is_some() || self.reasoning.is_some())
+            && let Some(model) = config.model.as_ref()
+        {
+            model
+                .validate_reasoning()
+                .map_err(RunResolveError::Reasoning)?;
+        }
         if let Some(generation) = &self.generation {
             config.generation = generation.clone();
         }
@@ -262,6 +271,10 @@ pub enum RunResolveError {
     /// The spec sets a reasoning selection for a session with no model.
     #[error("a reasoning override needs a model, and the session has selected none")]
     ReasoningWithoutModel,
+    /// The reasoning the root would run is one its model's recorded
+    /// capability refuses.
+    #[error(transparent)]
+    Reasoning(lash_core_llm::model::ReasoningRefused),
     /// The spec states protocol turn options for a session that records no
     /// protocol plugin.
     #[error(

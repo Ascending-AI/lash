@@ -361,6 +361,7 @@ impl Processes {
                         &self.core.env.core.durability.process_env_store,
                     ))
                     .with_process_session_catalog(Arc::clone(&self.core.store_factory) as _)
+                    .with_session_turn_default(self.session_turn_default())
                     .with_process_engines(self.core.host_process_engines.clone()),
             )
             .await?;
@@ -397,35 +398,44 @@ impl Processes {
         Ok(lash_core::ScopeRef::host_session_lookup(session_id.clone()))
     }
 
+    /// The mint of a session-turn start's default binding: the core's
+    /// default selection, resolved by its models when the start's recorded
+    /// admission asks for it.
+    ///
     /// A session-turn start whose create request names no model runs the
-    /// core's default selection. The start records that minted binding in
-    /// its create request, so the worker that later creates the child copies
-    /// it and never falls back to a policy that selects no model.
-    fn record_default_session_turn_model(
-        &self,
-        request: &mut lash_core::ProcessStartRequest,
-    ) -> Result<()> {
-        let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut request.input else {
-            return Ok(());
-        };
-        if create_request.model.is_some()
-            || create_request
-                .policy
-                .as_ref()
-                .is_some_and(|policy| policy.model.is_some())
-        {
-            return Ok(());
-        }
-        let minted = self.core.default_selection.mint(
-            lash_core::facade_support::SessionSpec::new(),
-            &self.core.policy,
-            self.core.env.core.providers.models.as_ref(),
-        )?;
-        match create_request.policy.as_mut() {
-            Some(policy) => policy.model = minted.model,
-            None => create_request.policy = Some(minted),
-        }
-        Ok(())
+    /// core's default selection. The first registration under the start's
+    /// key records that binding beside the request, so the worker that later
+    /// creates the child copies it and never falls back to a policy that
+    /// selects no model. The binding is what lash derived, not what the host
+    /// stated: it is minted inside the start's recorded step, the command
+    /// carries the request without it, and the start-key fence compares the
+    /// request without it. While a start is retained under the key nothing
+    /// is minted, so a retry after a catalog edit or a change of default
+    /// presents the request the host stated and is returned the retained
+    /// process with the binding it recorded (FIG-4531).
+    fn session_turn_default(&self) -> lash_core::runtime::SessionTurnDefaultMint {
+        let core = self.core.clone();
+        Arc::new(move || {
+            core.default_selection
+                .mint(
+                    lash_core::facade_support::SessionSpec::new(),
+                    &core.policy,
+                    core.env.core.providers.models.as_ref(),
+                )
+                .map_err(|error| {
+                    lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::ModelUnknown,
+                        format!("the core's default model selection does not resolve: {error}"),
+                    )
+                })?
+                .model
+                .ok_or_else(|| {
+                    lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::ModelUnknown,
+                        "the core's default model selection names no model",
+                    )
+                })
+        })
     }
 
     async fn require_live_session(&self, session_id: &SessionId) -> Result<()> {
@@ -477,10 +487,20 @@ impl Processes {
 
     pub async fn start(
         &self,
-        mut request: lash_core::ProcessStartRequest,
+        request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessStartReceipt> {
-        self.record_default_session_turn_model(&mut request)?;
+        // The registrar mints the id; the key only makes the start idempotent.
+        // A host mints only host keys: a key of a family lash derives for its
+        // own start paths is refused, never adopted (ADR 0107).
+        let mut request = request
+            .keyed_in(&scoped_effect_controller)
+            .map_err(EmbedError::Plugin)?;
+        // A default binding is lash's to derive, inside the start's recorded
+        // admission; a host states a model by its key or its policy.
+        if let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut request.input {
+            create_request.record_default_model(None);
+        }
         // A root start's session grant is the host's lookup, whether it came
         // from `session_scope` or from a remote start's `until_session` data
         // (FIG-3607 R3). The start's recorded admission checks the session is
@@ -494,13 +514,7 @@ impl Processes {
             _ => None,
         };
         let observers = request.observers.clone();
-        // The registrar mints the id; the key only makes the start idempotent.
-        // A host mints only host keys: a key of a family lash derives for its
-        // own start paths is refused, never adopted (ADR 0107).
-        let mut registration = request
-            .keyed_in(&scoped_effect_controller)
-            .map_err(EmbedError::Plugin)?
-            .into_registration();
+        let mut registration = request.into_registration();
         let host_session_turn_environment = match registration.input.as_ref() {
             lash_core::ProcessInput::SessionTurn { create_request, .. }
                 if registration.env_ref.is_none() =>

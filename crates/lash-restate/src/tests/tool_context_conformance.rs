@@ -139,8 +139,7 @@ impl ProductionToolCell {
         let session_id = SessionId::from(format!("tool-context-{context_name}-{tool_name}"));
         let turn_id = TurnId::from(format!("{session_id}-turn"));
         let dir = tempfile::tempdir().expect("tool-context tempdir");
-        let first_party: Arc<dyn ToolProvider> =
-            Arc::new(lash_llm_tools::llm_query_provider(None, None, None));
+        let first_party: Arc<dyn ToolProvider> = Arc::new(lash_llm_tools::llm_query_provider());
         let tool_executions = Arc::new(AtomicUsize::new(0));
         let counting_provider: Arc<dyn ToolProvider> = Arc::new(CountingFirstPartyProvider {
             inner: first_party,
@@ -310,8 +309,7 @@ impl ProductionToolCell {
 
 #[tokio::test]
 async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context() {
-    let provider: Arc<dyn ToolProvider> =
-        Arc::new(lash_llm_tools::llm_query_provider(None, None, None));
+    let provider: Arc<dyn ToolProvider> = Arc::new(lash_llm_tools::llm_query_provider());
     let manifests = provider.tool_manifests();
     assert!(
         !manifests.is_empty(),

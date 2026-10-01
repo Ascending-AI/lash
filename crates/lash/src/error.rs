@@ -38,6 +38,10 @@ pub enum EmbedError {
     /// models: at build for the core's default key, at creation for the
     /// session's key. Nothing is created.
     ModelUnknown(lash_core::ModelUnavailable),
+    #[error(transparent)]
+    /// Returned when a creation spec records reasoning its model's recorded
+    /// capability refuses. Nothing is created.
+    ReasoningRefused(lash_core::ReasoningRefused),
     #[error(
         "turn budget is required; SessionSpec must carry TurnBudget::Bounded(...) or TurnBudget::Unbounded"
     )]
@@ -308,7 +312,10 @@ impl EmbedError {
             | Self::Session(SessionError::Store {
                 source: lash_core::StoreError::Contended,
                 ..
-            }) => true,
+            })
+            // The runtime's `model_unavailable`, as a session error: a
+            // deployment that serves the recorded key repairs it.
+            | Self::Session(SessionError::ModelUnavailable { .. }) => true,
             Self::MissingProtocolPlugin
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
@@ -317,6 +324,7 @@ impl EmbedError {
             | Self::SessionAlreadyExists { .. }
             | Self::MissingModel
             | Self::ModelUnknown(_)
+            | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
@@ -351,9 +359,10 @@ impl EmbedError {
     ///   identically until the host changes its wiring;
     /// - typed runtime wiring, caller-invariant, unsupported-operation,
     ///   deterministic codec, and corrupt durable-state codes;
-    /// - session model errors (`ModelUnconfigured`, `ModelUnavailable`,
-    ///   `ModelUnknown`,
-    ///   `CodeExecutionUnavailable`);
+    /// - session model errors (`ModelUnconfigured`, `ModelUnknown`,
+    ///   `CodeExecutionUnavailable`); a recorded model this deployment
+    ///   cannot bind (`ModelUnavailable`) is retryable instead, as the
+    ///   runtime's `model_unavailable` is;
     /// - direct or session-wrapped
     ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
     ///   tombstones and
@@ -373,6 +382,7 @@ impl EmbedError {
             | Self::ObligationRelayUnavailable(_)
             | Self::MissingModel
             | Self::ModelUnknown(_)
+            | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
@@ -395,8 +405,8 @@ impl EmbedError {
                 lash_core::facade_support::ReconfigureError::GenerationMismatch { .. },
             ) => false,
             Self::Reconfigure(_) => false,
+            Self::Session(SessionError::ModelUnavailable { .. }) => false,
             Self::Session(SessionError::ModelUnconfigured { .. })
-            | Self::Session(SessionError::ModelUnavailable { .. })
             | Self::Session(SessionError::ModelUnknown { .. })
             | Self::Session(SessionError::CodeExecutionUnavailable) => true,
             Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
@@ -477,6 +487,35 @@ mod tests {
                 ));
             }
         }
+    }
+
+    /// FIG-4531: a recorded model this deployment cannot bind is classified
+    /// at the facade as the runtime classifies `model_unavailable`:
+    /// retryable, never terminal. A key that was never registered stays
+    /// terminal.
+    #[test]
+    fn an_unbindable_recorded_model_is_retryable_as_the_runtime_code_is() {
+        let unavailable = || {
+            lash_core::ModelUnavailable::new(
+                lash_core::ModelKey::new("recorded-key"),
+                lash_core::ModelUnavailableReason::UnknownKey,
+            )
+        };
+        let session_id = SessionId::from("unbindable");
+        let session = EmbedError::Session(SessionError::ModelUnavailable {
+            session_id: session_id.clone(),
+            source: unavailable(),
+        });
+        let runtime = runtime_error(RuntimeErrorCode::ModelUnavailable);
+        for error in [session, runtime] {
+            assert!(error.is_retryable(), "{error}");
+            assert!(!error.is_terminal(), "{error}");
+        }
+        let unknown = EmbedError::Session(SessionError::ModelUnknown {
+            session_id,
+            source: unavailable(),
+        });
+        assert!(unknown.is_terminal() && !unknown.is_retryable());
     }
 
     #[test]

@@ -63,6 +63,19 @@ pub trait RuntimeModels: Send + Sync {
     /// The transport that executes `recorded`. It must serve the recorded
     /// wire model and contract, never a newer descriptor; a transport that
     /// cannot refuses typed.
+    ///
+    /// The handle is this worker's capability, not a recorded fact
+    /// (FIG-4531). A binding records its key and metadata: the wire model,
+    /// limits, capability and request defaults every request of the session
+    /// is built from. It records nothing about the transport, so `bind`
+    /// answers whichever transport the key is registered with on this
+    /// worker, of whatever provider kind, and a session that is mid-root
+    /// continues on it. Registering a recorded key with a transport is the
+    /// host's statement that the transport serves the recorded contract
+    /// (instruction role, cache-control dialect, reasoning encoding): lash
+    /// checks the wire model and nothing else. A host that moves a key to a
+    /// transport of a kind that cannot honour bindings minted on the old one
+    /// registers the new transport under a new key instead.
     fn bind(&self, recorded: &RecordedModel) -> Result<ProviderHandle, ModelUnavailable>;
 }
 
@@ -168,6 +181,9 @@ impl RuntimeModels for ModelRegistry {
         Ok(RecordedModel::mint(key.clone(), entry.metadata.clone()))
     }
 
+    /// Refuses a key that is not registered and a key whose registration
+    /// names another wire model. The transport's kind is not compared: see
+    /// [`RuntimeModels::bind`].
     fn bind(&self, recorded: &RecordedModel) -> Result<ProviderHandle, ModelUnavailable> {
         let entry = self.registered(recorded.key())?;
         if entry.metadata.wire_model != recorded.wire_model() {

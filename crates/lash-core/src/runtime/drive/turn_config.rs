@@ -241,6 +241,10 @@ impl RootSpec {
                         self.hash
                     ),
                 ),
+                crate::RunResolveError::Reasoning(error) => RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::ReasoningRefused,
+                    format!("run spec `{}` is refused: {error}", self.hash),
+                ),
                 error => RuntimeEffectControllerError::new(
                     RuntimeErrorCode::RunShapeRefused,
                     format!("run spec `{}` could not be resolved: {error}", self.hash),

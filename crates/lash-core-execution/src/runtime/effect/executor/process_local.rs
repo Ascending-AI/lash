@@ -94,6 +94,26 @@ impl RuntimeEffectLocalExecutor<'_> {
         }
         self
     }
+
+    /// Binds the mint of a host session-turn start's default binding: the
+    /// start's recorded admission calls it only when the start names no
+    /// model and no start is retained under its key, so the command carries
+    /// the request as the host stated it and a replay mints nothing
+    /// (FIG-4531).
+    pub fn with_session_turn_default(
+        mut self,
+        mint: crate::runtime::SessionTurnDefaultMint,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution
+                .host_start
+                .get_or_insert_default()
+                .session_turn_default = Some(mint);
+        }
+        self
+    }
 }
 
 impl ProcessLocalExecution {
@@ -110,7 +130,7 @@ impl ProcessLocalExecution {
             process_starts,
             process_env_store,
             process_engines,
-            session_catalog,
+            host_start,
             turn_cancellation,
             effect_controller,
             attachments,
@@ -135,7 +155,12 @@ impl ProcessLocalExecution {
                         env_store: process_env_store.as_ref(),
                         engines: process_engines.as_ref(),
                         engines_required: false,
-                        session_catalog: session_catalog.as_deref(),
+                        session_catalog: crate::runtime::HostStartAdmission::catalog(
+                            host_start.as_deref(),
+                        ),
+                        session_turn_default: crate::runtime::HostStartAdmission::default_mint(
+                            host_start.as_deref(),
+                        ),
                         executor: "process start on the local executor",
                         starter: &starter,
                         trigger_route: trigger_route.as_ref(),

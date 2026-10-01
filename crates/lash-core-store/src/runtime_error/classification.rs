@@ -199,6 +199,8 @@ impl RuntimeErrorCode {
             Self::LlmProvider => Terminal,
             // a refusal of the command that named the key; the same key is refused again.
             Self::ModelUnknown => Terminal,
+            // the same selection over the same recorded capability is refused again.
+            Self::ReasoningRefused => Terminal,
             // the model was adopted when it was set; this worker's deployment cannot bind it now.
             Self::ModelUnavailable => Retryable,
             // the spec names an exact revision this worker's deployment does not register yet.

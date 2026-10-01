@@ -216,11 +216,17 @@ pub enum RuntimeErrorCode {
     InvalidTurnCancelRequest,
     LiveReplay,
     LlmProvider,
-    /// A send or a config command named a model key the host's registry does
-    /// not register: a send is refused typed before anything is enqueued, a
-    /// config command is refused when its transaction resolves. Nothing
-    /// changes either way.
+    /// A send, a create request or a config command named a model key the
+    /// host's registry does not register: a send and a create request are
+    /// refused typed before anything is accepted, a config command is
+    /// refused when its transaction resolves. Nothing changes either way.
     ModelUnknown,
+    /// A send, a root's run spec or a child's create request selects
+    /// reasoning the capability of the model it would run refuses
+    /// (FIG-4531). It is refused where it is stated, before anything runs:
+    /// the same selection over the same recorded capability is refused
+    /// again.
+    ReasoningRefused,
     /// A model a root recorded, or an admitted root's per-run key, has no
     /// binding on this worker. The model was adopted when it was set, so this
     /// is the worker's deployment, not the session's intent: the engine
@@ -738,6 +744,7 @@ impl RuntimeErrorCode {
             Self::LiveReplay => "live_replay",
             Self::LlmProvider => "llm_provider",
             Self::ModelUnknown => "model_unknown",
+            Self::ReasoningRefused => "reasoning_refused",
             Self::ModelUnavailable => "model_unavailable",
             Self::RunDefinitionUnavailable => "run_definition_unavailable",
             Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
@@ -1013,6 +1020,7 @@ impl RuntimeErrorCode {
             "live_replay" => Self::LiveReplay,
             "llm_provider" => Self::LlmProvider,
             "model_unknown" => Self::ModelUnknown,
+            "reasoning_refused" => Self::ReasoningRefused,
             "model_unavailable" => Self::ModelUnavailable,
             "run_definition_unavailable" => Self::RunDefinitionUnavailable,
             "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,

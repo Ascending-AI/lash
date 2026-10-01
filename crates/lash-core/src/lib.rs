@@ -628,7 +628,7 @@ pub use lash_trace::{
 pub use llm::transport::ProviderFailureKind;
 pub use model::{
     ModelConfig, ModelKey, ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder,
-    RecordedModel,
+    ReasoningRefused, RecordedModel,
 };
 pub(crate) use plugin::PluginRuntimeDirective;
 pub use plugin::{

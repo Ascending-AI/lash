@@ -973,7 +973,7 @@ impl TriggerRouter {
             process_env_store: self.process_env_store.clone(),
             process_engines: self.process_engines.clone(),
             // A trigger delivery's start is never a host-granted root.
-            session_catalog: None,
+            host_start: None,
             turn_cancellation: None,
             effect_controller: None,
             attachments: None,

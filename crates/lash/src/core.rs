@@ -1069,6 +1069,9 @@ impl LashCoreBuilder {
                 lash_core::facade_support::SpecResolveError::ReasoningWithoutModel => {
                     EmbedError::MissingModel
                 }
+                lash_core::facade_support::SpecResolveError::Reasoning(error) => {
+                    EmbedError::ReasoningRefused(error)
+                }
             })?;
         // The core's prompt layer is a creation default like the rest of the
         // spec (FIG-4397): every session this core creates records it.

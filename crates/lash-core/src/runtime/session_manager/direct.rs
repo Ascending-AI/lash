@@ -470,6 +470,29 @@ mod tests {
         )
     }
 
+    /// FIG-4531: off the turn path, a recorded model this worker cannot bind
+    /// is the same typed, retryable `ModelUnavailable` the turn path answers.
+    /// A direct completion and a process owner resolve their policy here;
+    /// this deployment registers no models, so the recorded binding has no
+    /// transport.
+    #[tokio::test]
+    async fn an_unbindable_model_off_the_turn_path_is_typed_model_unavailable() {
+        let (services, _) = session_services().await;
+        let error = services
+            .current
+            .resolve_policy()
+            .expect_err("a deployment with no models cannot bind the recorded model");
+        assert!(
+            matches!(
+                &error,
+                crate::PluginError::Runtime(runtime)
+                    if runtime.code == crate::RuntimeErrorCode::ModelUnavailable
+            ),
+            "the refusal is typed model_unavailable: {error:?}"
+        );
+        assert!(error.is_retryable() && !error.is_terminal());
+    }
+
     /// ADR 0099 §3: a managed-LLM service lent to a tool child is rebound to
     /// the child's *recorded* environment — provider and policy resolution
     /// answer under the facts the child was admitted with, not whatever the

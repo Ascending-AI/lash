@@ -56,6 +56,13 @@ session capability, identity, event types, provenance, wake target and
 environment must match the retained registration. A mismatch returns
 `PluginError::StartKeyConflict { start_key }`, whose error names only the key.
 
+The input is compared as the host stated it. A session-turn start that names
+no model records the default binding its core minted when it first
+registered; that binding is derived, not stated, so the fence leaves it out,
+and a core mints none while a start is retained under the key. A retry after
+a catalog edit or a change of default is the same start and is returned the
+retained process with the binding it recorded (FIG-4531).
+
 The request's key is private. Host entry points accept only the host family
 and refuse another family as `start_key_family_refused`. Derivation and
 parsing of internal families require `StartKeyDerivation`, which the facade
