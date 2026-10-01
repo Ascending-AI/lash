@@ -373,6 +373,9 @@ fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen
                     .recorded_behaviour(false),
             )
             .expect("behaviour JSON");
+            created_options.payload["prompt"] =
+                serde_json::to_value(lash_rlm_types::RlmPrompt::default())
+                    .expect("recorded prompt");
             let mut runtime = open_runtime(
                 &backend,
                 base.clone(),

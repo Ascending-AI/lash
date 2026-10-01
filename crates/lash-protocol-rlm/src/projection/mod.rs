@@ -9,6 +9,7 @@ pub use context::{
 pub use transport::{RlmSeed, rlm_seed_initial_nodes};
 
 pub(crate) use bindings::RlmProjectionExtension;
+pub(crate) use bindings::{READ_ONLY_VARIABLES_TITLE, read_only_variables_prompt};
 pub(crate) use context::projected_bindings;
 #[cfg(test)]
 pub(crate) use context::projected_index;

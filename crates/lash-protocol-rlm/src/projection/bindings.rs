@@ -142,15 +142,24 @@ impl RlmProjectionExtension {
         bindings: &RlmProjectedBindings,
         vocabulary: crate::dialect::DialectPromptVocabulary,
     ) -> Vec<PromptContribution> {
-        let docs = bindings.prompt_docs();
-        if docs.is_empty() {
-            return Vec::new();
-        }
-        vec![PromptContribution::environment(
-            "Read-Only Variables",
-            crate::rlm_support::render_read_only_variables(docs, vocabulary),
-        )]
+        read_only_variables_prompt(bindings, vocabulary)
+            .map(|content| PromptContribution::environment(READ_ONLY_VARIABLES_TITLE, content))
+            .into_iter()
+            .collect()
     }
+}
+
+/// The heading the read-only variables render under.
+pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
+
+/// The declaration of the session's read-only variables, or `None` when it
+/// binds none.
+pub(crate) fn read_only_variables_prompt(
+    bindings: &RlmProjectedBindings,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> Option<String> {
+    let docs = bindings.prompt_docs();
+    (!docs.is_empty()).then(|| crate::rlm_support::render_read_only_variables(docs, vocabulary))
 }
 
 impl ProtocolSessionExtension for RlmProjectionExtension {

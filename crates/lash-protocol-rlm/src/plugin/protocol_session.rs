@@ -28,6 +28,54 @@ impl RlmProtocolSession {
         }
     }
 
+    /// The session's system prompt (FIG-4588), rendered from recorded data:
+    /// the prompt config the RLM namespace of `plugin_config` recorded, the
+    /// recorded `tool_catalog`, the session's bindings and its subagent
+    /// authority. `plugin_config` is the admitted root's, so a prompt
+    /// command applied while a root runs reaches the next root.
+    ///
+    /// SEAM(FIG-4589): nothing in the core calls this yet. The integrator
+    /// calls it from the execution-environment sync and from compaction, and
+    /// journals the text it answers.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "SEAM(FIG-4589): the core calls this once it stops assembling the prompt itself"
+        )
+    )]
+    pub(crate) async fn system_prompt(
+        &self,
+        plugin_config: &lash_core::AdmittedPluginConfig,
+        tool_catalog: &lash_core::ToolCatalog,
+        subagent: Option<&lash_core::SubagentSessionContext>,
+    ) -> Result<Arc<str>, SessionError> {
+        let recorded = plugin_config
+            .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
+            .map_err(|error| {
+                SessionError::Protocol(format!("invalid recorded RLM session config: {error}"))
+            })?
+            .ok_or_else(|| {
+                SessionError::Plugin(PluginError::MissingRecordedSessionConfig {
+                    plugin_id: RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                    field: "prompt".to_string(),
+                })
+            })?;
+        Ok(self
+            .runtime_state
+            .system_prompt(
+                &crate::system_prompt::RlmSystemPromptBehaviour {
+                    channel: self.config.channel,
+                    prompt_features: self.config.prompt_features,
+                    discovery: self.config.discovery.as_ref(),
+                },
+                &recorded.prompt,
+                tool_catalog,
+                subagent,
+            )
+            .await)
+    }
+
     pub(crate) async fn projected_binding_prompt_contributions(
         &self,
     ) -> Vec<lash_core::PromptContribution> {
@@ -285,6 +333,109 @@ mod tests {
         );
     }
 
+    /// FIG-4588: the session's system prompt renders from the prompt config
+    /// the given plugin config recorded, over the session's bindings and the
+    /// given catalog and subagent authority. A root admitted before a prompt
+    /// command renders the prompt it was admitted under and the next root
+    /// the new one; a plugin config with no RLM namespace is refused typed.
+    #[tokio::test]
+    async fn the_system_prompt_renders_from_the_admitted_roots_recorded_config() {
+        let deployment = RlmProtocolPluginConfig::builder()
+            .channel(crate::RlmChannel::Cell)
+            .instruction_limit(crate::plugin::InstructionBound::unbounded())
+            .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+            .build();
+        let admitted = |prompt: lash_rlm_types::RlmPrompt, revision: u64| {
+            let mut config = lash_core::PluginConfig::for_protocol(Some(
+                crate::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            ));
+            config.insert(
+                crate::RLM_PROTOCOL_PLUGIN_ID,
+                serde_json::to_value(crate::RlmRecordedConfig {
+                    render: None,
+                    termination: None,
+                    final_answer_format: None,
+                    channel: Some(crate::RlmChannel::Cell),
+                    dialect: Some("typescript".to_string()),
+                    behaviour: deployment.recorded_behaviour(false),
+                    prompt,
+                })
+                .expect("recorded namespace"),
+            );
+            lash_core::AdmittedPluginConfig::new(config, revision)
+        };
+        let session = test_session(deployment.clone());
+        session
+            .apply_session_extension(crate::rlm_session_projection_extension(
+                RlmProjectedBindings::new()
+                    .bind_json("current_query", serde_json::json!("open issues"))
+                    .expect("bind"),
+            ))
+            .await
+            .expect("bind the session's read-only variable");
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(Vec::new());
+        let subagent = lash_core::SubagentSessionContext {
+            parent_session_id: "parent".into(),
+            capability: "research".to_string(),
+            depth: 1,
+            max_depth: 3,
+        };
+
+        let running = admitted(lash_rlm_types::RlmPrompt::default(), 0);
+        let next = admitted(
+            lash_rlm_types::RlmPrompt {
+                intro: lash_rlm_types::RlmPromptIntro::Host {
+                    text: "You are the release assistant.".to_string(),
+                },
+                context: vec!["Release 4.2 freezes on Friday.".to_string()],
+                ..lash_rlm_types::RlmPrompt::default()
+            },
+            1,
+        );
+        let running_prompt = session
+            .system_prompt(&running, &catalog, Some(&subagent))
+            .await
+            .expect("the running root's prompt");
+        assert!(running_prompt.starts_with(crate::RLM_BUILTIN_INTRO));
+        assert!(!running_prompt.contains("## Context"));
+        let next_prompt = session
+            .system_prompt(&next, &catalog, Some(&subagent))
+            .await
+            .expect("the next root's prompt");
+        assert!(next_prompt.starts_with("You are the release assistant.\n\n"));
+        assert!(next_prompt.ends_with("## Context\n\nRelease 4.2 freezes on Friday."));
+        for prompt in [&running_prompt, &next_prompt] {
+            assert!(prompt.contains("### Read-Only Variables"));
+            assert!(prompt.contains("- `current_query`: `string`, read-only"));
+            assert!(prompt.contains("Subagent capability: research. Depth: 1/3."));
+        }
+        assert_eq!(
+            session
+                .system_prompt(&running, &catalog, Some(&subagent))
+                .await
+                .expect("a second render"),
+            running_prompt,
+            "a render is a function of its recorded inputs"
+        );
+
+        let unrecorded = lash_core::AdmittedPluginConfig::new(
+            lash_core::PluginConfig::for_protocol(Some(crate::RLM_PROTOCOL_PLUGIN_ID.to_string())),
+            0,
+        );
+        let error = session
+            .system_prompt(&unrecorded, &catalog, None)
+            .await
+            .expect_err("a session with no recorded RLM namespace has no prompt");
+        assert!(
+            matches!(
+                &error,
+                SessionError::Plugin(PluginError::MissingRecordedSessionConfig { plugin_id, field })
+                    if plugin_id == crate::RLM_PROTOCOL_PLUGIN_ID && field == "prompt"
+            ),
+            "{error:?}"
+        );
+    }
+
     #[test]
     fn soft_budget_warning_emits_plugin_event_not_user_message() {
         let session = test_session(RlmProtocolPluginConfig {
@@ -518,6 +669,7 @@ mod tests {
                 channel: Some(crate::RlmChannel::Cell),
                 dialect: Some("typescript".to_string()),
                 behaviour: creating.recorded_behaviour(false),
+                prompt: Default::default(),
             })
             .expect("recorded namespace"),
         );

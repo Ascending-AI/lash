@@ -563,13 +563,18 @@ async fn the_typed_read_reports_what_the_session_recorded_and_only_the_render_ch
     );
 
     let catalog = session.admin().config().commands().await?;
-    let rlm_commands = catalog
+    let mut rlm_commands = catalog
         .commands
         .iter()
         .filter(|command| command.owner == crate::rlm::RLM_PROTOCOL_PLUGIN_ID)
         .map(|command| command.command.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(rlm_commands, vec!["set_render"]);
+    rlm_commands.sort_unstable();
+    assert_eq!(
+        rlm_commands,
+        vec!["set_prompt", "set_prompt_context", "set_render"],
+        "the RLM owner changes its render and its prompt, and nothing else"
+    );
     let revision = catalog.revision;
     let error = session
         .admin()
@@ -793,6 +798,117 @@ async fn a_reopen_keeps_the_recorded_rlm_facts_and_writes_nothing() -> Result<()
 // `a_post_open_dialect_is_compared_against_the_running_default_never_written`
 // was deleted with the session language pin (ADR 0096): there is no dialect to
 // default, compare, or drift away from the running plugin.
+
+/// FIG-4588: the prompt is recorded RLM config. A session records the prompt
+/// its creator states; the owner's context command changes the context and
+/// nothing else, as one config revision; and the change is still recorded
+/// when the session is closed and reopened cold.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn the_prompt_is_recorded_config_its_owners_commands_change() -> Result<()> {
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
+
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let stated = crate::rlm::RlmPrompt {
+        intro: crate::rlm::RlmPromptIntro::Host {
+            text: "You are the release assistant.".to_string(),
+        },
+        omit_builtin_guidance: true,
+        instructions: vec!["Answer in British English.".to_string()],
+        context: vec!["Release 4.2 freezes on Friday.".to_string()],
+        ..crate::rlm::RlmPrompt::default()
+    };
+    core.session("rlm-prompt-config")
+        .create(crate::SessionCreation {
+            plugin_options: lash_core::PluginOptions::typed(
+                crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                crate::rlm::RlmCreateExtras {
+                    prompt: Some(stated.clone()),
+                    ..crate::rlm::RlmCreateExtras::default()
+                },
+            )
+            .expect("the typed RLM session options must serialize"),
+            ..Default::default()
+        })
+        .await?;
+    let session = core.session("rlm-prompt-config").open().await?;
+    let created = recorded_rlm(&session);
+    assert_eq!(created.prompt, stated, "creation records the stated prompt");
+
+    let defaulted = core
+        .session("rlm-prompt-default")
+        .created()
+        .await
+        .open()
+        .await?;
+    assert_eq!(
+        recorded_rlm(&defaulted).prompt,
+        crate::rlm::RlmPrompt::default(),
+        "a creator that states no prompt records the built-in one"
+    );
+
+    let revision = session.admin().config().revision().await?;
+    let context = vec!["Release 4.2 shipped.".to_string()];
+    let outcome = session
+        .admin()
+        .config()
+        .apply(
+            crate::config::ConfigWrite::new("rlm-prompt-context", revision),
+            crate::config::ConfigTransaction::of(crate::rlm::SetRlmPromptContext {
+                context: context.clone(),
+            }),
+        )
+        .await?;
+    assert!(
+        matches!(
+            outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
+    assert_eq!(session.admin().config().revision().await?, revision + 1);
+    let expected = crate::rlm::RlmRecordedConfig {
+        prompt: crate::rlm::RlmPrompt {
+            context,
+            ..stated.clone()
+        },
+        ..created
+    };
+    assert_eq!(recorded_rlm(&session), expected);
+    Box::pin(session.close()).await?;
+
+    let reopened = core.session("rlm-prompt-config").open().await?;
+    assert_eq!(
+        recorded_rlm(&reopened),
+        expected,
+        "the prompt is still recorded after a cold reopen"
+    );
+
+    let outcome = reopened
+        .admin()
+        .config()
+        .apply(
+            crate::config::ConfigWrite::new("rlm-prompt-reset", revision + 1),
+            crate::config::ConfigTransaction::of(crate::rlm::SetRlmPrompt::default()),
+        )
+        .await?;
+    assert!(
+        matches!(
+            outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        recorded_rlm(&reopened).prompt,
+        crate::rlm::RlmPrompt::default(),
+        "the whole-replace command restores the built-in prompt"
+    );
+    Ok(())
+}
 
 /// A render change is durable: it is still recorded when the session is
 /// closed and reopened cold.

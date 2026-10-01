@@ -696,6 +696,7 @@ mod discovery_tests {
                             &visible,
                             discovery.as_ref(),
                         )
+                        .joined()
                     } else {
                         dialect
                             .render_execution_section(

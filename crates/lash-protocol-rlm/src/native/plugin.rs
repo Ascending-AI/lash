@@ -106,6 +106,7 @@ pub(super) fn register_native_plugin(
     Ok(())
 }
 
+/// SEAM(FIG-4589): see the cell channel's registration of the same hook.
 fn register_projected_bindings_prompt_contributor(
     reg: &mut PluginRegistrar,
     protocol_session: Arc<RlmProtocolSession>,

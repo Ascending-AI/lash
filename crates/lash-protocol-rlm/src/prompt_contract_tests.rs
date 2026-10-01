@@ -86,7 +86,7 @@ fn system_with(
         decomposition: enabled,
     };
     let execution = if native {
-        execution_section(dialect, features, &catalog, None)
+        execution_section(dialect, features, &catalog, None).joined()
     } else {
         dialect
             .render_execution_section(features, &catalog, crate::plugin::RlmChannel::Cell, None)
@@ -431,7 +431,7 @@ fn each_host_capability_gates_its_own_vocabulary() {
                     surface,
                 );
                 let text = if native {
-                    execution_section(&dialect, features, &catalog, None)
+                    execution_section(&dialect, features, &catalog, None).joined()
                 } else {
                     dialect
                         .render_execution_section(

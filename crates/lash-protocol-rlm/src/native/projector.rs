@@ -17,22 +17,21 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
     let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
-    let mut prompt_contributions = Vec::new();
-    let visible_catalog;
-    let tool_catalog = if config.discovery.is_some() {
-        visible_catalog = tool_catalog.inline_tools();
-        &visible_catalog
-    } else {
-        tool_catalog
-    };
-
-    prompt_contributions.extend(input.extra_prompt_contributions);
-    let execution = super::prompt::execution_section(
+    // SEAM(FIG-4589): the core still assembles the system prompt from this
+    // preamble's execution title, execution prompt and contributions. The
+    // integrator replaces them with the text of
+    // `RlmProtocolSession::system_prompt` and deletes these three fields.
+    let execution = crate::system_prompt::execution_section(
         dialect.as_ref(),
-        config.prompt_features,
+        &crate::system_prompt::RlmSystemPromptBehaviour {
+            channel: crate::plugin::RlmChannel::NativeTool,
+            prompt_features: config.prompt_features,
+            discovery: config.discovery.as_ref(),
+        },
         tool_catalog,
-        config.discovery.as_ref(),
-    );
+    )
+    .joined();
+    let prompt_contributions = input.extra_prompt_contributions;
     TurnDriverPreamble {
         config: TurnDriverConfig {
             protocol: Arc::new(super::driver::NativeDriver::with_dialect(Arc::clone(

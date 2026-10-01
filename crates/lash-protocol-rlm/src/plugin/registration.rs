@@ -85,6 +85,9 @@ pub(super) fn register_rlm_protocol_plugin(
     Ok(())
 }
 
+/// SEAM(FIG-4589): the read-only variables reach the core's prompt assembly
+/// as a hook contribution. `RlmProtocolSession::system_prompt` renders them
+/// itself; the integrator deletes this hook with the core's prompt hooks.
 fn register_projected_bindings_prompt_contributor(
     reg: &mut PluginRegistrar,
     protocol_session: Arc<RlmProtocolSession>,

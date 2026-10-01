@@ -55,6 +55,34 @@ impl RlmRuntimeState {
         )))
     }
 
+    /// The system prompt over the session's current bindings.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "SEAM(FIG-4589): the core calls this once it stops assembling the prompt itself"
+        )
+    )]
+    pub(crate) async fn system_prompt(
+        &self,
+        behaviour: &crate::system_prompt::RlmSystemPromptBehaviour<'_>,
+        prompt: &lash_rlm_types::RlmPrompt,
+        tool_catalog: &lash_core::ToolCatalog,
+        subagent: Option<&lash_core::SubagentSessionContext>,
+    ) -> Arc<str> {
+        let bindings = self.session_projected_bindings.lock().await;
+        Arc::from(crate::system_prompt::render_system_prompt(
+            &self.dialect,
+            behaviour,
+            crate::system_prompt::RlmSystemPromptInput {
+                prompt,
+                tool_catalog,
+                bindings: &bindings,
+                subagent,
+            },
+        ))
+    }
+
     pub(crate) async fn projected_binding_prompt_contributions(
         &self,
     ) -> Vec<lash_core::PromptContribution> {

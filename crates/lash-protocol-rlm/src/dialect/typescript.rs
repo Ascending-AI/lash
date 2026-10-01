@@ -1,6 +1,6 @@
 use super::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSectionRequest, ShapeNotation,
+    ExecutionSection, ExecutionSectionRequest, ShapeNotation,
 };
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
@@ -86,7 +86,7 @@ impl Dialect for TypescriptDialect {
         lines
     }
 
-    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> String {
+    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
         render_execution_section(request)
     }
 }
@@ -436,7 +436,7 @@ fn render_tool_example(example: &str) -> String {
         .join("\n")
 }
 
-fn render_execution_section(request: ExecutionSectionRequest<'_>) -> String {
+fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSection {
     let ExecutionSectionRequest {
         channel,
         tools,
@@ -444,10 +444,20 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> String {
         host_environment: environment,
         discovery_operation,
     } = request;
+    // A host with a discovery tool says so where the model reads which
+    // tools it may call: under **Tools**, which renders whether or not the
+    // session keeps the built-in prose.
+    let discovery = discovery_operation.map(|operation| {
+        format!("Other tools exist; find them with `await {operation}({{ ... }})`.")
+    });
+    let tools = [discovery.as_deref(), (!tools.is_empty()).then_some(tools)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     let tools = if tools.is_empty() {
         String::new()
     } else {
-        format!("\n\n### Tools\n\n{tools}")
+        format!("### Tools\n\n{}", tools.join("\n\n"))
     };
     let host_surface = render_host_surface_section(tool_catalog, environment);
     let allowed_sections = if host_surface.is_empty() {
@@ -505,19 +515,15 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> String {
             serde_json::json!({"code": example_program})
         ),
     };
-    // `tools` and `host_surface` either carry their own leading `\n\n` or
-    // are empty, so they append directly — an unconditional separator here
-    // leaves stray blank lines where a skipped block would have gone.
-    // A host with a discovery tool says so at the end of the first
-    // paragraph, where the model reads which tools it may call.
-    let discovery = discovery_operation
-        .map(|operation| {
-            format!(" Other tools exist; find them with `await {operation}({{ ... }})`.")
-        })
-        .unwrap_or_default();
-    format!(
-        "Use prose for conversation; use {action} for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.{discovery}\n\n{response_shape}\n{example}\n\n{host_api}{tools}{host_surface}"
-    )
+    // `host_surface` either carries its own leading `\n\n` or is empty, so
+    // it appends directly to a tools block; alone, it is the declarations.
+    let declarations = format!("{tools}{host_surface}").trim().to_string();
+    ExecutionSection {
+        prose: format!(
+            "Use prose for conversation; use {action} for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}"
+        ),
+        declarations,
+    }
 }
 
 #[cfg(test)]

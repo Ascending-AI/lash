@@ -12,8 +12,8 @@
 
 use lash::rlm::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSectionRequest, ResolvedToolBinding, RlmChannel, SchemaShape, ShapeKind,
-    ShapeNotation,
+    ExecutionSection, ExecutionSectionRequest, ResolvedToolBinding, RlmChannel, SchemaShape,
+    ShapeKind, ShapeNotation,
 };
 
 pub const LANGUAGE_ID: &str = "seam-proof";
@@ -96,17 +96,19 @@ impl Dialect for SeamProofDialect {
         vec!["shape Log is seq of Rec".to_string()]
     }
 
-    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> String {
+    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
         let transport = match request.channel {
             RlmChannel::Cell => {
                 "Write the program between standalone `<seam>` and `</seam>` lines."
             }
             RlmChannel::NativeTool => "Send the program as the `code` of one `execute_code` call.",
         };
-        format!(
-            "{transport} One statement per line. `take NAME from MODULE.OPERATION WITH {{json}}` calls a tool and names its result; `give VALUE` ends the turn with VALUE, a name, `name.field` or a JSON literal.\n\n### Tools\n\n{}",
-            request.tools
-        )
+        ExecutionSection {
+            prose: format!(
+                "{transport} One statement per line. `take NAME from MODULE.OPERATION WITH {{json}}` calls a tool and names its result; `give VALUE` ends the turn with VALUE, a name, `name.field` or a JSON literal."
+            ),
+            declarations: format!("### Tools\n\n{}", request.tools),
+        }
     }
 }
 

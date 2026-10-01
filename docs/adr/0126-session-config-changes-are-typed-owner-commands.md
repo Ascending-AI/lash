@@ -42,7 +42,8 @@ by the reserved `core` owner, whose commands include `SetModel`,
 `SetNoProgressBudget` and `SetChargeSafety`. `SetChargeSafety` refuses a
 policy accepting more unsafe retries than the provider handle ever buys. The
 RLM and standard protocols register one render command each
-(`SetRlmRender`, `SetStandardRender`).
+(`SetRlmRender`, `SetStandardRender`); the RLM protocol also registers its
+prompt commands (`SetRlmPrompt`, `SetRlmPromptContext`, FIG-4588).
 
 `SetModel` carries an opaque `ModelKey` (FIG-4374). Its reducer is the one
 core reducer that reads more than the recorded namespace: it asks the host's

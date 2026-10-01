@@ -110,6 +110,9 @@ impl SubagentSpawnContext<'_> {
                     termination: Some(termination),
                     final_answer_format: Some(self.final_answer_format.clone()),
                     render: None,
+                    // Stating nothing: the child copies its parent's recorded
+                    // prompt (FIG-4588).
+                    prompt: None,
                 },
             )
             .map_err(|err| format!("failed to encode rlm plugin options: {err}"))?

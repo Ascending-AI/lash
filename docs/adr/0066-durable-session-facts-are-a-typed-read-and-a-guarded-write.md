@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted. The only RLM write after creation is the typed `SetRlmRender`
-command of [ADR 0126](0126-session-config-changes-are-typed-owner-commands.md).
+Accepted. The only RLM writes after creation are the typed render and prompt
+commands of [ADR 0126](0126-session-config-changes-are-typed-owner-commands.md):
+`SetRlmRender`, `SetRlmPrompt` and `SetRlmPromptContext`.
 
 ## Context
 
@@ -57,8 +58,10 @@ that commit leaves a session that opens with what its creation recorded.
 
 ### No write after creation
 
-The RLM owner registers one config command, `SetRlmRender`, which replaces the
-recorded print and preview render and clears it when empty. Termination, the
+The RLM owner registers `SetRlmRender`, which replaces the recorded print and
+preview render and clears it when empty, and two prompt commands (FIG-4588):
+`SetRlmPrompt` replaces the recorded prompt config whole, and
+`SetRlmPromptContext` replaces its context. Termination, the
 final-answer format, the channel and the dialect have no command, so a
 transaction cannot name them: a host that states one is refused
 `UnknownCommand` at submission. The owner's validation refuses a candidate
@@ -94,10 +97,11 @@ Hosts that need a particular presentation format state it at creation.
 
 ## Executable evidence
 
-- [Recorded facts](../../crates/lash-rlm-types/src/lib.rs#L911) define the two
+- [Recorded facts](../../crates/lash-rlm-types/src/lib.rs#L960) define the two
   fields.
 - [The RLM owner](../../crates/lash-protocol-rlm/src/plugin/config_owner.rs)
-  creates, validates and registers `SetRlmRender`.
+  creates, validates and registers `SetRlmRender`, `SetRlmPrompt` and
+  `SetRlmPromptContext`.
 - [Facade creation](../../crates/lash/src/session.rs#L257) records the config head;
   [opening](../../crates/lash/src/session.rs#L167) reads an existing session.
 - [Session-fact laws](../../crates/lash/src/tests/core_session_builder/rlm_session_facts.rs#L1)

@@ -852,6 +852,54 @@ pub struct RlmCreateExtras {
     pub termination: Option<RlmTermination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_answer_format: Option<RlmFinalAnswerFormat>,
+    /// The session's system-prompt config. Absence leaves the choice to the
+    /// session's lineage: a child copies its parent's recorded prompt, and a
+    /// session with no parent records the built-in default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<RlmPrompt>,
+}
+
+/// The host's share of a code-mode session's system prompt (FIG-4588): what
+/// the RLM protocol renders around the declarations it generates from the
+/// session's tools and bindings.
+///
+/// It is ordinary recorded config of the RLM namespace: stated at creation,
+/// copied by a child from its parent, and replaced by the RLM owner's prompt
+/// commands. The default is the protocol's built-in prompt, with nothing of
+/// the host's in it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RlmPrompt {
+    /// The identity statement the prompt opens with.
+    pub intro: RlmPromptIntro,
+    /// Leave out the protocol's built-in guidance bullets.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub omit_builtin_guidance: bool,
+    /// Leave out the protocol's built-in prose on how to write and run code.
+    /// The generated declarations (tools, host surface, bindings) render
+    /// either way.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub omit_builtin_execution: bool,
+    /// The host's standing instructions, one paragraph each, in order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub instructions: Vec<String>,
+    /// The host's changing context, one paragraph each, in order. It renders
+    /// last, after everything stable.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<String>,
+}
+
+/// The opening identity statement of a code-mode system prompt.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RlmPromptIntro {
+    /// The protocol's built-in statement.
+    #[default]
+    Builtin,
+    /// The host's statement, in place of the built-in one.
+    Host { text: String },
+    /// No identity statement.
+    Omitted,
 }
 
 /// The RLM options a *single turn* may restate (FIG-1979).
@@ -950,6 +998,7 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
             render: None,
             termination: config.termination.clone(),
             final_answer_format: config.final_answer_format.clone(),
+            prompt: None,
         }
     }
 }
