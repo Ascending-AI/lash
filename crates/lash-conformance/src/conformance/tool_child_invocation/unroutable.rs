@@ -300,7 +300,13 @@ pub async fn a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_re
 /// the child's invocation lands on. Until the law routes the child here,
 /// every attempt is that worker's alone, and each one it could not serve is
 /// counted; afterwards an attempt is served by this worker.
+///
+/// It answers for its own law's group only. A real server is shared and never
+/// reset, and each law's process binds the same endpoint, so a child an
+/// earlier law left retrying is delivered here too: it is missed uncounted,
+/// or the count would say the law's own child was attempted (FIG-4623).
 struct OpenerWorker {
+    group_key: String,
     worker: Arc<crate::runtime::effect::ToolChildHost>,
     routed_here: AtomicBool,
     misses_elsewhere: AtomicUsize,
@@ -315,6 +321,9 @@ impl crate::GroupExecutors for OpenerWorker {
             envelope.command,
             crate::RuntimeEffectCommand::ToolInvocation { .. }
         ) {
+            return None;
+        }
+        if (envelope.group.as_deref()).is_none_or(|group| group.group_key != self.group_key) {
             return None;
         }
         if !self.routed_here.load(Ordering::SeqCst) {
@@ -383,6 +392,7 @@ pub async fn a_child_whose_opener_is_live_on_another_worker_retries_until_routed
     // Worker B: the endpoint's installed host, where the child's invocation
     // lands. The opener never registers on it.
     let placement = Arc::new(OpenerWorker {
+        group_key: group_key.clone(),
         worker: Arc::clone(&worker_a),
         routed_here: AtomicBool::new(false),
         misses_elsewhere: AtomicUsize::new(0),
@@ -515,6 +525,7 @@ pub async fn a_lent_child_is_cancelled_by_its_openers_durable_end(
         opener_context,
     );
     let placement = Arc::new(OpenerWorker {
+        group_key: group_key.clone(),
         worker: lender,
         routed_here: AtomicBool::new(false),
         misses_elsewhere: AtomicUsize::new(0),
