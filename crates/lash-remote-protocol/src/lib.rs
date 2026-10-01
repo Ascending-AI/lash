@@ -535,6 +535,9 @@ mod attachment_capability_tests;
 #[cfg(test)]
 mod decode_budget_tests;
 
+#[cfg(test)]
+mod fuzz_corpus_tests;
+
 fn omit_schema_integer_maximum(schema: &mut schemars::Schema) {
     schema.remove("maximum");
 }
