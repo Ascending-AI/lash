@@ -54,11 +54,11 @@ fn terminal_error(err: impl Display) -> TerminalError {
 /// turn: neither is an answer this workflow can report, so each ends the
 /// invocation terminally with the status it answered.
 fn settled_output(outcome: lash::SendOutcome) -> HandlerResult<lash::TurnOutput> {
-    match outcome.output {
-        Some(output) => Ok(output),
-        None => Err(terminal_error(format!(
+    match outcome {
+        lash::SendOutcome::Settled { output, .. } => Ok(*output),
+        outcome => Err(terminal_error(format!(
             "the turn answered {:?} without a settled turn",
-            outcome.status
+            outcome.status()
         ))
         .into()),
     }
@@ -625,7 +625,7 @@ impl AppState {
         .await?;
         let cancel_count = usize::from(matches!(receipt, lash::CancelReceipt::Requested { .. }));
         let cancelled = original.outcome_restate(ctx, RestateWait::new()).await?;
-        let terminal_cancelled = matches!(cancelled.status, lash::TurnStatus::Cancelled);
+        let terminal_cancelled = matches!(cancelled.status(), lash::TurnStatus::Cancelled);
         let claims_settled = session
             .queued_work()
             .await

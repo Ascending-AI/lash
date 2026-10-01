@@ -311,9 +311,9 @@ impl World {
             })
             .expect("the outcome");
         assert!(
-            matches!(outcome.status, lash::TurnStatus::Answered),
+            matches!(outcome.status(), lash::TurnStatus::Answered),
             "{:?}",
-            outcome.status
+            outcome.status()
         );
     }
 

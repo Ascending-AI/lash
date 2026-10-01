@@ -225,19 +225,19 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
     )
     .await
     .expect("the root handle observes the same park")?;
-    let park_id = match &first.status {
+    let park_id = match &first.status() {
         crate::TurnStatus::Parked(parked) => parked.park_id,
         other => panic!("expected the first send to park: {other:?}"),
     };
     for outcome in [first, reobserved] {
         assert!(matches!(
-            outcome.status,
+            outcome.status(),
             crate::TurnStatus::Parked(crate::ParkedTurn {
                 reason: lash_core::store::ParkReason::ReplayDivergence { ref message },
                 ..
             }) if message.contains("diverged from its journal")
         ));
-        assert!(outcome.output.is_none(), "a park has no terminal report");
+        assert!(outcome.output().is_none(), "a park has no terminal report");
         let status = core.drain_status(false).await?;
         assert_eq!(
             (status.parked_turns, status.in_flight_turns),
@@ -336,8 +336,8 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
         "the input is withdrawable by its receipt: {cancelled:?}"
     );
     let outcome = handle.outcome().await?;
-    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
-    assert!(outcome.output.is_none());
+    assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
+    assert!(outcome.output().is_none());
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     drop(hold);
 

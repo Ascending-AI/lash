@@ -2390,7 +2390,9 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
         let before = double.artifacts.counts().await;
         let refused = start_on(&double, &host, &key, request).await;
         match refused {
-            Err(lash::EmbedError::Plugin(lash_core::PluginError::Runtime(error))) => {
+            Err(lash::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(
+                error,
+            ))) => {
                 assert_eq!(
                     error.code,
                     lash::runtime::RuntimeErrorCode::ReasoningRefused

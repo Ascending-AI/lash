@@ -834,13 +834,12 @@ async fn turn(args: TurnArgs) -> Result<TurnReport> {
                 args.timeout_secs
             )
         })??;
-    let status = format!("{:?}", outcome.status);
+    let status = format!("{:?}", outcome.status());
     let reply = outcome
-        .output
-        .as_ref()
+        .output()
         .and_then(|output| output.assistant_message())
         .map(str::to_string);
-    if !matches!(outcome.status, lash::TurnStatus::Answered) {
+    if !matches!(outcome.status(), lash::TurnStatus::Answered) {
         bail!(
             "the turn on {} settled {status}, not Answered (reply {reply:?})",
             args.session

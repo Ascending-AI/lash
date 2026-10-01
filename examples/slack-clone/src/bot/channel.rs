@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use lash::messages::{MessageOrigin, MessageRole};
 use lash::persistence::ChronologicalPayload;
-use lash::{LashCore, LashSession, SendHandle, TurnInput, TurnOutcome, TurnStatus, TurnStop};
+use lash::{LashCore, LashSession, SendHandle, TurnInput, TurnOutcome, TurnStop};
 use tokio::sync::RwLock;
 
 use super::ledger::{
@@ -818,11 +818,13 @@ impl ChannelBot {
             handle.outcome().await
         }
         .context("run channel mention turn")?;
-        let output = match (outcome.status, outcome.output) {
-            (TurnStatus::Parked(_), _) | (_, None) => {
+        let output = match outcome {
+            lash::SendOutcome::Settled { output, .. } => *output,
+            lash::SendOutcome::Parked { .. }
+            | lash::SendOutcome::Stalled { .. }
+            | lash::SendOutcome::Withdrawn { .. } => {
                 return Ok(Self::defer_unsettled_turn(record));
             }
-            (_, Some(output)) => output,
         };
 
         if record.thread_ts.is_none() {

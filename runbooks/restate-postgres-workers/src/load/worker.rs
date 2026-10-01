@@ -738,7 +738,7 @@ fn cancel_outcome(receipt: lash::CancelReceipt) -> CancelOutcome {
 }
 
 fn input_outcome(outcome: lash::SendOutcome) -> InputOutcome {
-    let (final_value, settled) = match &outcome.output {
+    let (final_value, settled) = match outcome.output() {
         Some(output) => (
             output.result.final_value().cloned().unwrap_or(Value::Null),
             serde_json::to_value(&output.result.outcome)
@@ -747,8 +747,8 @@ fn input_outcome(outcome: lash::SendOutcome) -> InputOutcome {
         None => (Value::Null, Value::Null),
     };
     InputOutcome {
-        status: (&outcome.status).into(),
-        root: outcome.root.as_ref().map(ToString::to_string),
+        status: (&outcome.status()).into(),
+        root: outcome.root().map(ToString::to_string),
         final_value,
         outcome: settled,
     }

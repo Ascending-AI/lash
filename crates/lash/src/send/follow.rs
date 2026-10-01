@@ -31,7 +31,7 @@ use lash_core::{
 use tokio::sync::mpsc;
 
 use super::resolve::{self, Resolution};
-use super::{SendContext, SendOutcome, TurnStatus, mailbox, status_of_outcome};
+use super::{SendContext, SendOutcome, mailbox};
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::TurnActivitySink;
 use crate::turn::{ReportSource, TurnOutput, TurnReport};
@@ -623,10 +623,8 @@ pub(super) async fn follow(
                     // run is doing: a run that still waits on the stopped
                     // work that parked it holds the resident runtime.
                     ctx.refresh_unless_held_by_run_of(&parked.root).await?;
-                    return Ok(Followed::Answered(Box::new(SendOutcome {
-                        root: Some(parked.root.clone()),
-                        status: TurnStatus::Parked(parked),
-                        output: None,
+                    return Ok(Followed::Answered(Box::new(SendOutcome::Parked {
+                        parked,
                         gaps: observation.gaps,
                     })));
                 }
@@ -637,10 +635,8 @@ pub(super) async fn follow(
                 }
                 Resolution::Stalled(stalled) => {
                     drain(ctx, &mut adoption, &mut observation, tap).await;
-                    return Ok(Followed::Answered(Box::new(SendOutcome {
-                        root: None,
-                        status: TurnStatus::Stalled(stalled),
-                        output: None,
+                    return Ok(Followed::Answered(Box::new(SendOutcome::Stalled {
+                        stalled,
                         gaps: observation.gaps,
                     })));
                 }
@@ -651,10 +647,7 @@ pub(super) async fn follow(
                         return Err(EmbedError::Runtime(error));
                     }
                     ctx.refresh().await?;
-                    return Ok(Followed::Answered(Box::new(SendOutcome {
-                        status: TurnStatus::Cancelled,
-                        root: None,
-                        output: None,
+                    return Ok(Followed::Answered(Box::new(SendOutcome::Withdrawn {
                         gaps: observation.gaps,
                     })));
                 }
@@ -949,7 +942,6 @@ async fn finish_settled(
         );
         observation.report(gap, tap).await;
     }
-    let status = status_of_outcome(&outcome);
     let acceptance = match subject {
         Subject::Input(receipt) => Some(receipt.clone()),
         Subject::Root(_) => None,
@@ -964,10 +956,9 @@ async fn finish_settled(
         }
         None => durable_report(ctx, outcome, acceptance).await?,
     };
-    Ok(SendOutcome {
-        status,
-        root: Some(root),
-        output: Some(TurnOutput { result, activities }),
+    Ok(SendOutcome::Settled {
+        root,
+        output: Box::new(TurnOutput { result, activities }),
         gaps: observation.gaps,
     })
 }

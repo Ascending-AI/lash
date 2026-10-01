@@ -841,7 +841,7 @@ finish(await handle);
         }]
     ));
     assert!(
-        matches!(turn.status, lash::TurnStatus::Cancelled),
+        matches!(turn.status(), lash::TurnStatus::Cancelled),
         "{turn:?}"
     );
     // The cancelled turn's process settles through the engine's parent-end

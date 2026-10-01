@@ -638,7 +638,7 @@ async fn measure_send(
     ));
     let sink = TimingSink::new(t_request);
     let (status, outcome_error) = match handle.outcome_into(&sink).await {
-        Ok(outcome) => (status_name(&outcome.status), None),
+        Ok(outcome) => (status_name(&outcome.status()), None),
         Err(error) => ("error".to_string(), Some(format!("{error:#}"))),
     };
     let send_to_completion_ms = elapsed_ms(t_request);

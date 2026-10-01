@@ -351,7 +351,7 @@ where
                         Followed::Answered(mut outcome) => {
                             // The journal keeps the report, never the
                             // activity list: it grows with the turn.
-                            if let Some(output) = outcome.output.as_mut() {
+                            if let SendOutcome::Settled { output, .. } = outcome.as_mut() {
                                 output.activities.clear();
                             }
                             Probe::Answered(outcome)
@@ -363,8 +363,8 @@ where
             .await?;
             match probe {
                 Probe::Answered(mut outcome) => {
-                    gaps.append(&mut outcome.gaps);
-                    outcome.gaps = gaps;
+                    gaps.append(outcome.gaps_mut());
+                    *outcome.gaps_mut() = gaps;
                     return Ok(*outcome);
                 }
                 Probe::Pending {

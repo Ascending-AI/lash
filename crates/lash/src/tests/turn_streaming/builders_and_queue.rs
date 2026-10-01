@@ -248,7 +248,8 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         .attach(admission.input_id.clone())
         .outcome()
         .await?
-        .root
+        .root()
+        .cloned()
         .expect("queued input should run");
 
     let crate::observe::RemoteSessionObservationSubscription::Subscribed(mut subscription) =
@@ -336,7 +337,8 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         .attach(admission.input_id.clone())
         .outcome()
         .await?
-        .root
+        .root()
+        .cloned()
         .expect("queued input should run");
 
     let mut recovery = session.observe().subscribe_and_recover_remote(

@@ -1112,11 +1112,11 @@ pub mod remote {
     /// issues, and causal references.
     pub mod turn_result {
         pub use lash_remote_protocol::turn_result::{
-            RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef, RemoteSendOutcome,
-            RemoteToolCallOutcome, RemoteToolCallRecord, RemoteTurnExecutionMetrics,
-            RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity, RemoteTurnOutcome,
-            RemoteTurnParkReason, RemoteTurnReport, RemoteTurnStatus, RemoteTurnStop,
-            RemoteTurnUsageReport,
+            RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef, RemoteParkedTurn,
+            RemoteSendOutcome, RemoteStalledDelivery, RemoteToolCallOutcome, RemoteToolCallRecord,
+            RemoteTurnExecutionMetrics, RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity,
+            RemoteTurnOutcome, RemoteTurnParkReason, RemoteTurnReport, RemoteTurnStatus,
+            RemoteTurnStop, RemoteTurnUsageReport,
         };
     }
 

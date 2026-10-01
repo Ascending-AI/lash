@@ -158,20 +158,23 @@ pub(crate) fn answered_output(outcome: lash::SendOutcome) -> Result<TurnOutput, 
         message,
         retryable: false,
     };
-    match outcome.status {
-        lash::TurnStatus::Answered => outcome
-            .output
-            .ok_or_else(|| refusal("the answered turn has no report".to_string())),
-        lash::TurnStatus::Failed => Err(refusal(match outcome.output {
-            Some(output) => format!("the turn failed: {:?}", output.result.outcome),
-            None => "the turn failed".to_string(),
-        })),
-        lash::TurnStatus::Cancelled => Err(refusal("the turn was cancelled".to_string())),
-        lash::TurnStatus::Parked(parked) => Err(refusal(format!(
+    match outcome {
+        lash::SendOutcome::Settled { output, .. } => match output.status() {
+            lash::TurnStatus::Answered => Ok(*output),
+            status => Err(refusal(format!(
+                "the turn ended as {status:?}: {:?}",
+                output.result.outcome
+            ))),
+        },
+        lash::SendOutcome::Withdrawn { .. } => Err(refusal("the input was withdrawn".to_string())),
+        lash::SendOutcome::Parked { parked, .. } => Err(refusal(format!(
             "the turn is parked ({:?}); it resumes once an operator resolves the park",
             parked.reason
         ))),
-        status => Err(refusal(format!("the turn ended as {status:?}"))),
+        lash::SendOutcome::Stalled { stalled, .. } => Err(refusal(format!(
+            "the input delivery stalled: {:?}",
+            stalled.reason
+        ))),
     }
 }
 

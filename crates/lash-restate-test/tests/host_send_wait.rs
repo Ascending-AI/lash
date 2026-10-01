@@ -138,13 +138,12 @@ struct Answer {
 
 fn answer(input_id: &lash::InputId, outcome: &lash::SendOutcome) -> Answer {
     Answer {
-        answered: outcome.status == lash::TurnStatus::Answered,
+        answered: outcome.status() == lash::TurnStatus::Answered,
         reply: outcome
-            .output
-            .as_ref()
+            .output()
             .and_then(|output| output.assistant_message().map(str::to_owned)),
         input_id: input_id.to_string(),
-        root: outcome.root.as_ref().map(ToString::to_string),
+        root: outcome.root().map(ToString::to_string),
     }
 }
 

@@ -316,52 +316,90 @@ fn answered_report() -> RemoteTurnReport {
     }
 }
 
-fn parked_status() -> RemoteTurnStatus {
-    RemoteTurnStatus::Parked {
-        root: TurnId::from("root"),
-        park_id: 7,
-        reason: RemoteTurnParkReason {
-            code: "binding_drift".to_string(),
-            message: "tool `search` changed".to_string(),
-            model_key: None,
-        },
-        since_ms: 1_000,
-        attempts: 2,
-    }
-}
-
-fn send_outcome(
-    status: RemoteTurnStatus,
-    root_id: Option<&str>,
-    report: Option<RemoteTurnReport>,
-) -> RemoteSendOutcome {
-    RemoteSendOutcome {
-        session_id: SessionId::from("session"),
-        input_id: "ti:input".to_string(),
-        root_id: root_id.map(TurnId::from),
-        status,
-        report,
-        gaps: Vec::new(),
-    }
-}
-
-/// FIG-3837: the remote send outcome carries all four answers, and its
-/// status, root and report must agree: a transport never fabricates a failed
-/// turn for a parked root, nor a report for one.
 #[test]
-fn a_remote_send_outcome_carries_four_statuses_and_refuses_inconsistent_ones() {
-    let consistent = [
-        send_outcome(
-            RemoteTurnStatus::Answered,
-            Some("root"),
-            Some(answered_report()),
-        ),
-        send_outcome(parked_status(), Some("root"), None),
-        // An input withdrawn before any root took it.
-        send_outcome(RemoteTurnStatus::Cancelled, None, None),
-    ];
-    for outcome in consistent {
-        outcome.validate().expect("a consistent outcome");
+fn a_remote_send_outcome_carries_only_its_variants_data() {
+    let session_id = SessionId::from("session");
+    let input_id = "ti:input".to_string();
+    let settled = RemoteSendOutcome::Settled {
+        session_id: session_id.clone(),
+        input_id: input_id.clone(),
+        report: Box::new(answered_report()),
+        gaps: Vec::new(),
+    };
+    let mut failed_report = answered_report();
+    failed_report.outcome = RemoteTurnOutcome::Stopped {
+        stop: RemoteTurnStop::Incomplete,
+    };
+    let failed = RemoteSendOutcome::Settled {
+        session_id: session_id.clone(),
+        input_id: input_id.clone(),
+        report: Box::new(failed_report),
+        gaps: Vec::new(),
+    };
+    let mut cancelled_report = answered_report();
+    cancelled_report.outcome = RemoteTurnOutcome::Stopped {
+        stop: RemoteTurnStop::Cancelled {
+            evidence: RemoteTurnCancellationEvidence {
+                request_id: "cancel-fixture".into(),
+                origin: Some("fixture".into()),
+                reason: None,
+                undelivered: crate::RemoteTurnCancelUndeliveredInputPolicy::Defer,
+                mode: crate::RemoteTurnCancelMode::Immediate,
+                honoured_after_step: None,
+            },
+        },
+    };
+    let cancelled = RemoteSendOutcome::Settled {
+        session_id: session_id.clone(),
+        input_id: input_id.clone(),
+        report: Box::new(cancelled_report),
+        gaps: Vec::new(),
+    };
+    let parked = RemoteSendOutcome::Parked {
+        session_id: session_id.clone(),
+        input_id: input_id.clone(),
+        parked: RemoteParkedTurn {
+            root: "root".into(),
+            park_id: 7,
+            reason: RemoteTurnParkReason {
+                code: "binding_drift".into(),
+                message: "tool changed".into(),
+                model_key: None,
+            },
+            since_ms: 1000,
+            attempts: 2,
+        },
+        gaps: Vec::new(),
+    };
+    let stalled = RemoteSendOutcome::Stalled {
+        session_id: session_id.clone(),
+        input_id: input_id.clone(),
+        stalled: RemoteStalledDelivery {
+            reason: "attempts_exhausted".into(),
+            attempts: 3,
+            last_error: Some("delivery failed".into()),
+            stalled_at_ms: 1000,
+        },
+        gaps: Vec::new(),
+    };
+    let withdrawn = RemoteSendOutcome::Withdrawn {
+        session_id,
+        input_id,
+        gaps: Vec::new(),
+    };
+    assert_eq!(settled.status(), RemoteTurnStatus::Answered);
+    assert_eq!(settled.root(), Some(&TurnId::from("root")));
+    assert!(matches!(parked.status(), RemoteTurnStatus::Parked { .. }));
+    assert!(matches!(stalled.status(), RemoteTurnStatus::Stalled { .. }));
+    assert_eq!(withdrawn.status(), RemoteTurnStatus::Cancelled);
+    let schema = serde_json::to_value(schemars::schema_for!(RemoteSendOutcome)).expect("schema");
+    let validator = jsonschema::validator_for(&schema).expect("validator");
+    for outcome in [settled, failed, cancelled, parked, stalled, withdrawn] {
+        outcome.validate().expect("variant validates");
+        let value = serde_json::to_value(&outcome).expect("serialize");
+        assert!(validator.is_valid(&value), "{value}");
+        assert!(value.get("status").is_none());
+        assert!(value.get("root_id").is_none());
         let wire = outcome
             .encode_json(&crate::negotiation::test_negotiated())
             .expect("encode");
@@ -369,31 +407,32 @@ fn a_remote_send_outcome_carries_four_statuses_and_refuses_inconsistent_ones() {
             RemoteSendOutcome::decode_json(&wire).expect("decode"),
             outcome
         );
+        if let Some(field) = match &outcome {
+            RemoteSendOutcome::Settled { .. } => Some("report"),
+            RemoteSendOutcome::Parked { .. } => Some("parked"),
+            RemoteSendOutcome::Stalled { .. } => Some("stalled"),
+            RemoteSendOutcome::Withdrawn { .. } => None,
+        } {
+            let mut missing = value.clone();
+            missing.as_object_mut().expect("object").remove(field);
+            assert!(!validator.is_valid(&missing));
+            assert!(serde_json::from_value::<RemoteSendOutcome>(missing).is_err());
+        }
+        let mut wrong = value;
+        wrong["status"] = serde_json::json!({"type": "failed"});
+        assert!(!validator.is_valid(&wrong));
+        assert!(serde_json::from_value::<RemoteSendOutcome>(wrong).is_err());
     }
+}
 
-    let inconsistent = [
-        // An answered root without its report.
-        send_outcome(RemoteTurnStatus::Answered, Some("root"), None),
-        // A failed status over an answered report.
-        send_outcome(
-            RemoteTurnStatus::Failed,
-            Some("root"),
-            Some(answered_report()),
-        ),
-        // A parked root with a report.
-        send_outcome(parked_status(), Some("root"), Some(answered_report())),
-        // A parked root that names another root.
-        send_outcome(parked_status(), Some("other"), None),
-        // A settled report with no root.
-        send_outcome(RemoteTurnStatus::Answered, None, Some(answered_report())),
-    ];
-    for outcome in inconsistent {
-        outcome
-            .validate()
-            .expect_err("an inconsistent outcome is refused");
-        let wire = outcome
-            .encode_json(&crate::negotiation::test_negotiated())
-            .expect("encode");
-        RemoteSendOutcome::decode_json(&wire).expect_err("decode refuses it too");
-    }
+#[test]
+fn a_remote_send_outcome_requires_the_data_owned_by_its_variant() {
+    let invalid = serde_json::json!({
+        "session_id": "session", "input_id": "ti:input",
+        "status": {"type": "answered"}, "root_id": null, "report": null, "gaps": []
+    });
+    assert!(
+        serde_json::from_value::<RemoteSendOutcome>(invalid).is_err(),
+        "the wire type cannot construct an answered send without its report"
+    );
 }

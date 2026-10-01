@@ -351,10 +351,13 @@ impl Harness {
         let outcome = tokio::time::timeout(WAIT, handle.outcome())
             .await
             .context("park deadline")??;
-        let TurnStatus::Parked(park) = outcome.status else {
-            anyhow::bail!("expected park, got {:?}", outcome.status);
+        let TurnStatus::Parked(park) = outcome.status() else {
+            anyhow::bail!("expected park, got {:?}", outcome.status());
         };
-        ensure!(outcome.output.is_none(), "park cannot fabricate an answer");
+        ensure!(
+            outcome.output().is_none(),
+            "park cannot fabricate an answer"
+        );
         let root = TurnId::from(tag);
         let child = self
             .child(&SessionId::from(format!("operator:{tag}")), &root)
@@ -491,7 +494,7 @@ async fn main() -> Result<()> {
         session.cancel(CancelTarget::Input(input.clone())).await?,
         lash::CancelReceipt::Withdrawn(_)
     ));
-    ensure!(sent.outcome().await?.status == TurnStatus::Cancelled);
+    ensure!(sent.outcome().await?.status() == TurnStatus::Cancelled);
     let terminal: bool = sqlx::query_scalar("SELECT state = 'cancelled' AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL FROM lash_pending_turn_inputs WHERE input_id = $1")
         .bind(input.as_str()).fetch_one(&h.pool).await?;
     ensure!(terminal && h.calls("withdraw").await? == 0);
@@ -518,7 +521,7 @@ async fn main() -> Result<()> {
         .request_id("running-cancel")
         .await?;
     ensure!(matches!(request, lash::CancelReceipt::Requested { .. }));
-    ensure!(tokio::time::timeout(WAIT, sent.outcome()).await??.status == TurnStatus::Cancelled);
+    ensure!(tokio::time::timeout(WAIT, sent.outcome()).await??.status() == TurnStatus::Cancelled);
     let before = h.terminal(&sid, &root, "cancelled", &child, false).await?;
     let reopened = h.core.session(sid.clone()).open().await?;
     for _ in 0..3 {
@@ -563,14 +566,16 @@ async fn main() -> Result<()> {
                 .root(root.clone())
                 .outcome()
                 .await?;
-            if !matches!(output.status, TurnStatus::Parked(_)) {
+            if !matches!(output.status(), TurnStatus::Parked(_)) {
                 return Ok::<_, anyhow::Error>(output);
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     })
     .await??;
-    let answer = output.output.context("redrive returns real output")?;
+    let answer = output
+        .into_output()
+        .context("redrive returns real output")?;
     ensure!(answer.is_success() && answer.final_value() == Some(&json!("real answer")));
     let after: String = sqlx::query_scalar(
         "SELECT admission_json FROM lash_session_roots WHERE session_id = $1 AND root = $2",
@@ -665,7 +670,7 @@ async fn main() -> Result<()> {
     )
     .await??;
     ensure!(
-        matches!(successor_outcome.status, TurnStatus::Parked(_)),
+        matches!(successor_outcome.status(), TurnStatus::Parked(_)),
         "fork successor is addressable"
     );
     let successor_child = h.child(&fork_sid, &successor).await?;

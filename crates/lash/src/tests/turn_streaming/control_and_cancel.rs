@@ -221,9 +221,9 @@ pub(super) async fn cancel_before_drive_yields_cancelled_outcome() -> Result<()>
     let receipt = handle.cancel().await?;
     assert!(matches!(receipt, crate::CancelReceipt::Withdrawn(_)));
     let outcome = handle.outcome().await?;
-    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert!(
-        outcome.output.is_none(),
+        outcome.output().is_none(),
         "no root ran for a withdrawn input"
     );
     Ok(())
@@ -261,8 +261,8 @@ pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
         .await?;
     assert!(matches!(receipt, crate::CancelReceipt::Requested { .. }));
     let outcome = outcome.await.expect("send task")?;
-    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
-    let output = outcome.output.expect("running root has a report");
+    assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
+    let output = outcome.output().expect("running root has a report");
     let evidence = output.result.cancellation().expect("cancellation evidence");
     assert_eq!(evidence.request_id, "origin-stop");
     assert_eq!(evidence.origin.as_deref(), Some("shutdown"));
@@ -514,10 +514,13 @@ pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_t
 
     let first = first_outcome.await.expect("first send task")?;
     let second = second.outcome().await?;
-    assert_eq!(first.status, crate::TurnStatus::Cancelled);
-    assert!(first.output.is_some(), "the running root commits its stop");
-    assert_eq!(second.status, crate::TurnStatus::Cancelled);
-    assert!(second.output.is_none(), "the queued input is withdrawn");
+    assert_eq!(first.status(), crate::TurnStatus::Cancelled);
+    assert!(
+        first.output().is_some(),
+        "the running root commits its stop"
+    );
+    assert_eq!(second.status(), crate::TurnStatus::Cancelled);
+    assert!(second.output().is_none(), "the queued input is withdrawn");
     assert!(matches!(
         session.cancel(crate::CancelTarget::Input(first_id)).await?,
         crate::CancelReceipt::AlreadySettled { .. }
@@ -610,9 +613,9 @@ pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Re
     ));
 
     let result = outcome.await.expect("send task")?;
-    assert_eq!(result.status, crate::TurnStatus::Cancelled);
+    assert_eq!(result.status(), crate::TurnStatus::Cancelled);
     let output = result
-        .output
+        .output()
         .expect("the running root commits a cancelled turn");
     let evidence = output
         .result
@@ -763,10 +766,10 @@ pub(super) async fn assert_session_turn_cancel_disposition(
         }
         lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer => {
             let outcome = undelivered.outcome().await?;
-            assert_eq!(outcome.status, crate::TurnStatus::Answered);
+            assert_eq!(outcome.status(), crate::TurnStatus::Answered);
             assert_eq!(
                 outcome
-                    .output
+                    .output()
                     .expect("deferred input ran")
                     .assistant_message(),
                 Some("echo: undelivered active-turn input")
@@ -898,8 +901,11 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .await
         .expect("cancelled root settles")
         .expect("turn task")?;
-    assert_eq!(interrupted.status, crate::TurnStatus::Cancelled);
-    assert_eq!(queued.outcome().await?.status, crate::TurnStatus::Cancelled);
+    assert_eq!(interrupted.status(), crate::TurnStatus::Cancelled);
+    assert_eq!(
+        queued.outcome().await?.status(),
+        crate::TurnStatus::Cancelled
+    );
 
     let drained = tokio::time::timeout(std::time::Duration::from_secs(10), active.output())
         .await
@@ -1042,12 +1048,15 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .await
         .expect("first root settles")
         .expect("turn task")?;
-    assert_eq!(interrupted.status, crate::TurnStatus::Cancelled);
+    assert_eq!(interrupted.status(), crate::TurnStatus::Cancelled);
     assert!(
-        interrupted.output.is_some(),
+        interrupted.output().is_some(),
         "the interrupted root commits its cancelled turn"
     );
-    assert_eq!(active.outcome().await?.status, crate::TurnStatus::Cancelled);
+    assert_eq!(
+        active.outcome().await?.status(),
+        crate::TurnStatus::Cancelled
+    );
     assert!(
         session.durable().pending_turn_inputs().await?.is_empty(),
         "accepted active steer `{}` must be completed, not deferred after interrupt",
@@ -1182,8 +1191,11 @@ pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_root() -> Resul
         .await
         .expect("the cancelled root settles")
         .expect("turn task")?;
-    assert_eq!(interrupted.status, crate::TurnStatus::Cancelled);
-    assert_eq!(active.outcome().await?.status, crate::TurnStatus::Cancelled);
+    assert_eq!(interrupted.status(), crate::TurnStatus::Cancelled);
+    assert_eq!(
+        active.outcome().await?.status(),
+        crate::TurnStatus::Cancelled
+    );
     Ok(())
 }
 
@@ -1508,7 +1520,7 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
         .send(TurnInput::text("use tool"))
         .outcome_into(live.as_ref())
         .await?
-        .output
+        .into_output()
         .expect("an answered send has its output");
 
     assert!(matches!(

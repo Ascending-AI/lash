@@ -1281,9 +1281,9 @@ async fn queued_input_outlives_its_upload_expiry() {
     hold.release();
     let outcome = accepted.outcome().await.expect("the queued turn");
     assert!(
-        matches!(outcome.status, lash::TurnStatus::Answered),
+        matches!(outcome.status(), lash::TurnStatus::Answered),
         "the queued turn resolves its input: {:?}",
-        outcome.status
+        outcome.status()
     );
     assert!(blob_present(&fixture, &queued.id).await);
 }

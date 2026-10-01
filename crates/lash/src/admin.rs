@@ -576,25 +576,14 @@ impl SessionAdmin {
             .start_from_request(&session_id, request, scope)
             .await
             .map_err(|error| {
-                let code = match &error {
-                    lash_core::PluginError::Runtime(runtime) => Some(runtime.code.clone()),
-                    lash_core::PluginError::RuntimeEffectController(controller) => {
-                        Some(controller.code.clone())
+                EmbedError::Plugin(match error {
+                    lash_core::PluginError::RuntimeEffectController(error) => {
+                        crate::process_admin::host_start_refusal(start_key.as_ref(), error)
                     }
-                    _ => None,
-                };
-                EmbedError::Plugin(match code {
-                    Some(code) if start_key.is_some() => {
-                        match crate::process_admin::host_start_refusal(
-                            start_key.as_ref(),
-                            code,
-                            error.to_string(),
-                        ) {
-                            conflict @ lash_core::PluginError::StartKeyConflict { .. } => conflict,
-                            _ => error,
-                        }
+                    lash_core::PluginError::Runtime(error) => {
+                        crate::process_admin::host_start_refusal(start_key.as_ref(), error.into())
                     }
-                    _ => error,
+                    error => error,
                 })
             })?;
         Ok(summary)

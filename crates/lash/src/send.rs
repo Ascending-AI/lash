@@ -429,23 +429,26 @@ impl std::future::IntoFuture for SendBuilder {
 // Outcomes
 // ---------------------------------------------------------------------------
 
-/// What an input's root answered: the four-way status, the settled turn when
-/// there is one, and the gaps in the live activity the follower observed.
+/// The recorded answer to a send. Each variant carries only its own data.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SendOutcome {
-    pub status: TurnStatus,
-    /// The root that took the input: the one that answered it, or holds it
-    /// parked. `None` only for an input withdrawn before any root took it.
-    pub root: Option<TurnId>,
-    /// `Some` for Answered, Failed, and Cancelled after the root ran; `None`
-    /// for Parked and for an input withdrawn before it ran.
-    pub output: Option<TurnOutput>,
-    /// Where the follower's live activity is incomplete: the replay lost
-    /// events, or the root ran where this process could not observe it (in
-    /// another process, or before the handle's cursor). The collected
-    /// [`TurnOutput::activities`] are then not the root's whole history; the
-    /// report is still read from the store.
-    pub gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SendOutcome {
+    Settled {
+        root: TurnId,
+        output: Box<TurnOutput>,
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
+    Parked {
+        parked: ParkedTurn,
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
+    Stalled {
+        stalled: StalledDelivery,
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
+    Withdrawn {
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
 }
 
 /// How an input's root stands once it stopped moving.
@@ -494,48 +497,107 @@ pub struct ParkedTurn {
 }
 
 impl SendOutcome {
-    /// This outcome for a transport: the four-way status, the report (with
-    /// its collected activity) when the root ran, and the ids to re-attach
-    /// by.
+    pub fn status(&self) -> TurnStatus {
+        match self {
+            Self::Settled { output, .. } => output.status(),
+            Self::Parked { parked, .. } => TurnStatus::Parked(parked.clone()),
+            Self::Stalled { stalled, .. } => TurnStatus::Stalled(stalled.clone()),
+            Self::Withdrawn { .. } => TurnStatus::Cancelled,
+        }
+    }
+
+    pub fn root(&self) -> Option<&TurnId> {
+        match self {
+            Self::Settled { root, .. } => Some(root),
+            Self::Parked { parked, .. } => Some(&parked.root),
+            Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+        }
+    }
+
+    pub fn output(&self) -> Option<&TurnOutput> {
+        match self {
+            Self::Settled { output, .. } => Some(output),
+            Self::Parked { .. } | Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+        }
+    }
+
+    pub fn into_output(self) -> Option<TurnOutput> {
+        match self {
+            Self::Settled { output, .. } => Some(*output),
+            Self::Parked { .. } | Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+        }
+    }
+
+    /// Gaps in the follower's live activity. The settled report remains
+    /// authoritative even when the follower missed activities.
+    pub fn gaps(&self) -> &[lash_core::facade_support::LiveReplayGap] {
+        match self {
+            Self::Settled { gaps, .. }
+            | Self::Parked { gaps, .. }
+            | Self::Stalled { gaps, .. }
+            | Self::Withdrawn { gaps } => gaps,
+        }
+    }
+
+    pub(crate) fn gaps_mut(&mut self) -> &mut Vec<lash_core::facade_support::LiveReplayGap> {
+        match self {
+            Self::Settled { gaps, .. }
+            | Self::Parked { gaps, .. }
+            | Self::Stalled { gaps, .. }
+            | Self::Withdrawn { gaps } => gaps,
+        }
+    }
+
+    /// Converts the variant to its transport shape. A settled report names
+    /// the actual root that answered the input.
     pub fn to_remote(
         &self,
         session_id: &SessionId,
         input_id: &InputId,
     ) -> lash_remote_protocol::RemoteSendOutcome {
-        let root_id = self.root.clone();
-        let report = self.output.as_ref().map(|output| {
-            let turn_id = root_id
-                .clone()
-                .unwrap_or_else(|| TurnId::from(input_id.as_str()));
-            output
-                .result
-                .to_remote(session_id, &turn_id, &output.activities)
-        });
-        let status = match &self.status {
-            TurnStatus::Answered => lash_remote_protocol::RemoteTurnStatus::Answered,
-            TurnStatus::Failed => lash_remote_protocol::RemoteTurnStatus::Failed,
-            TurnStatus::Cancelled => lash_remote_protocol::RemoteTurnStatus::Cancelled,
-            TurnStatus::Parked(parked) => lash_remote_protocol::RemoteTurnStatus::Parked {
-                root: parked.root.clone(),
-                park_id: parked.park_id.feed_sequence(),
-                reason: lash_remote_protocol::RemoteTurnParkReason::from(&parked.reason),
-                since_ms: parked.since_ms,
-                attempts: parked.attempts,
+        use lash_remote_protocol::{RemoteParkedTurn, RemoteSendOutcome, RemoteStalledDelivery};
+        let session_id = session_id.clone();
+        let input_id = input_id.to_string();
+        let gaps = self.gaps().iter().cloned().map(Into::into).collect();
+        match self {
+            Self::Settled { root, output, .. } => RemoteSendOutcome::Settled {
+                report: Box::new(
+                    output
+                        .result
+                        .to_remote(&session_id, root, &output.activities),
+                ),
+                session_id,
+                input_id,
+                gaps,
             },
-            TurnStatus::Stalled(stalled) => lash_remote_protocol::RemoteTurnStatus::Stalled {
-                reason: stalled.reason.as_str().to_owned(),
-                attempts: stalled.attempts,
-                last_error: stalled.last_error.clone(),
-                stalled_at_ms: stalled.stalled_at_ms,
+            Self::Parked { parked, .. } => RemoteSendOutcome::Parked {
+                session_id,
+                input_id,
+                parked: RemoteParkedTurn {
+                    root: parked.root.clone(),
+                    park_id: parked.park_id.feed_sequence(),
+                    reason: lash_remote_protocol::RemoteTurnParkReason::from(&parked.reason),
+                    since_ms: parked.since_ms,
+                    attempts: parked.attempts,
+                },
+                gaps,
             },
-        };
-        lash_remote_protocol::RemoteSendOutcome {
-            session_id: session_id.clone(),
-            input_id: input_id.to_string(),
-            root_id,
-            status,
-            report,
-            gaps: self.gaps.iter().cloned().map(Into::into).collect(),
+            Self::Stalled { stalled, .. } => RemoteSendOutcome::Stalled {
+                session_id,
+                input_id,
+                stalled: RemoteStalledDelivery {
+                    reason: stalled.reason.as_str().to_owned(),
+                    attempts: stalled.attempts,
+                    last_error: stalled.last_error.clone(),
+                    stalled_at_ms: stalled.stalled_at_ms,
+                },
+                gaps,
+            },
+            Self::Withdrawn { .. } => RemoteSendOutcome::Withdrawn {
+                session_id,
+                input_id,
+                gaps,
+            },
         }
     }
 }
@@ -589,7 +651,7 @@ async fn settle(
     mut tap: Tap<'_>,
 ) -> Result<SendOutcome> {
     if let Some(outcome) = shared.answer() {
-        if let Some(output) = &outcome.output {
+        if let Some(output) = outcome.output() {
             for activity in &output.activities {
                 tap.activity(activity).await;
             }
@@ -604,8 +666,8 @@ async fn settle(
     let outcome = loop {
         match Box::pin(follow::follow(&context, subject, from, &mut tap, None)).await? {
             follow::Followed::Answered(mut outcome) => {
-                gaps.append(&mut outcome.gaps);
-                outcome.gaps = gaps;
+                gaps.append(outcome.gaps_mut());
+                *outcome.gaps_mut() = gaps;
                 break *outcome;
             }
             follow::Followed::Pending {
@@ -824,11 +886,11 @@ pub(crate) fn root(target: SendTarget, root: TurnId) -> RootHandle {
 }
 
 pub(crate) fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutput> {
-    match outcome.output {
-        Some(output) => Ok(output),
-        None => Err(EmbedError::from(SendError::NotSettled {
+    match outcome {
+        SendOutcome::Settled { output, .. } => Ok(*output),
+        outcome => Err(EmbedError::from(SendError::NotSettled {
             input_id,
-            status: outcome.status,
+            status: outcome.status(),
         })),
     }
 }

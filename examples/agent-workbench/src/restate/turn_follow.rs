@@ -380,9 +380,9 @@ async fn follow_once(
     // Answered, Failed and Cancelled roots ran and settled: each has a report
     // the page shows. A parked root, or an input withdrawn before it ran, has
     // none.
-    let output = match outcome.output {
-        Some(output) if !matches!(outcome.status, lash::TurnStatus::Parked(_)) => output.result,
-        _ => return Err(unsettled_turn(&outcome.status)),
+    let output = match outcome {
+        lash::SendOutcome::Settled { output, .. } => output.result,
+        outcome => return Err(unsettled_turn(&outcome.status())),
     };
     let selected_model;
     let model = match model {

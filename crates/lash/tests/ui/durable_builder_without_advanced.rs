@@ -50,3 +50,21 @@ async fn durable_core_without_advanced(
 fn main() {
     let _ = durable_core_without_advanced;
 }
+
+fn inspect_send(outcome: lash::SendOutcome) {
+    let _ = outcome.status();
+    match outcome {
+        lash::SendOutcome::Settled { root, output, gaps } => {
+            let _ = (root, output, gaps);
+        }
+        lash::SendOutcome::Parked { parked, gaps } => {
+            let _ = (parked, gaps);
+        }
+        lash::SendOutcome::Stalled { stalled, gaps } => {
+            let _ = (stalled, gaps);
+        }
+        lash::SendOutcome::Withdrawn { gaps } => {
+            let _ = gaps;
+        }
+    }
+}

@@ -486,11 +486,10 @@ pub(super) fn client(args: RemoteClientArgs) -> Result<ClientReport> {
                     .validate()
                     .map_err(|error| anyhow!("the reply is inconsistent: {error}"))?;
                 let reply = outcome
-                    .report
-                    .as_ref()
+                    .report()
                     .map(|report| report.assistant_output.safe_text.clone())
                     .filter(|text| !text.is_empty());
-                break (Some(format!("{:?}", outcome.status)), reply);
+                break (Some(format!("{:?}", outcome.status())), reply);
             }
             Frame::Negotiation(refusal) => {
                 received.push(Received {

@@ -91,7 +91,7 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), handle.outcome())
         .await
         .expect("the redriven root commits its cancellation")?;
-    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,

@@ -254,10 +254,10 @@ pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec
         world.tick().await?;
     }
     match tokio::time::timeout(std::time::Duration::from_secs(30), waiter).await {
-        Ok(Ok(Ok(outcome))) if matches!(outcome.status, lash::TurnStatus::Answered) => {}
+        Ok(Ok(Ok(outcome))) if matches!(outcome.status(), lash::TurnStatus::Answered) => {}
         Ok(Ok(Ok(outcome))) => violations.push(format!(
             "the waiter answered {:?}, not Answered",
-            outcome.status
+            outcome.status()
         )),
         Ok(Ok(Err(error))) => violations.push(format!("the waiter failed: {error}")),
         Ok(Err(error)) => violations.push(format!("the waiter's task died: {error}")),

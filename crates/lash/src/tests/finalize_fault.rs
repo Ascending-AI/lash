@@ -209,7 +209,7 @@ async fn retried_to_one_committed_root(
         .await?
         .outcome()
         .await?;
-    assert_eq!(settled.status, crate::TurnStatus::Answered);
+    assert_eq!(settled.status(), crate::TurnStatus::Answered);
     assert_eq!(finalize_calls.load(Ordering::SeqCst), 2);
     assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
     Ok(())
@@ -431,7 +431,8 @@ async fn a_journaled_failure_settles_the_root_failed_after_a_live_finalize_fault
         .await?;
     assert_journaled_failure(&redriven, false);
     assert_eq!(
-        redriven.root, settled.root,
+        redriven.root().cloned(),
+        settled.root().cloned(),
         "the redrive answers the same root"
     );
     assert_eq!(
@@ -451,13 +452,12 @@ async fn a_journaled_failure_settles_the_root_failed_after_a_live_finalize_fault
 #[track_caller]
 fn assert_journaled_failure(settled: &crate::SendOutcome, live: bool) {
     assert_eq!(
-        settled.status,
+        settled.status(),
         crate::TurnStatus::Failed,
         "the journaled checkpoint failure settles the root failed: {settled:?}"
     );
     let report = &settled
-        .output
-        .as_ref()
+        .output()
         .expect("a failed root carries its settled turn")
         .result;
     assert!(

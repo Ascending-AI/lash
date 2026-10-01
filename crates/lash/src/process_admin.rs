@@ -605,13 +605,6 @@ impl Processes {
         // (FIG-3607 R3). The start's recorded admission checks the session is
         // live, so a replay after the session was deleted answers the start
         // its first run made (ADR 0105 §1).
-        let host_session = match &request.lifetime {
-            lash_core::LifetimeDecision::Until {
-                scope: lash_core::ScopeId::Session(session_id),
-                grant: lash_core::ScopeGrant::HostSessionLookup,
-            } => Some(session_id.clone()),
-            _ => None,
-        };
         let observers = request.observers.clone();
         let mut registration = request.into_registration();
         let host_session_turn_environment = match registration.input.as_ref() {
@@ -675,18 +668,7 @@ impl Processes {
                 session_turn_admission,
             )
             .await
-            .map_err(|error| match host_session {
-                Some(session_id)
-                    if error.code == lash_core::RuntimeErrorCode::HostSessionNotLive =>
-                {
-                    EmbedError::UnknownSession { session_id }
-                }
-                _ => EmbedError::Plugin(host_start_refusal(
-                    start_key.as_ref(),
-                    error.code.clone(),
-                    error.to_string(),
-                )),
-            })?;
+            .map_err(|error| EmbedError::Plugin(host_start_refusal(start_key.as_ref(), error)))?;
         let lash_core::ProcessEffectOutcome::Start {
             record,
             disposition,
@@ -1267,37 +1249,21 @@ impl Processes {
         ports.queued.drive_wake().await.map_err(Into::into)
     }
 }
-/// A host start's refusal as a host rail answers it (ADR 0107): a start under
-/// a host key that meets another start under it — retained in the registry, or
-/// issued earlier in the same scope, whose journal then holds a different
-/// envelope at the key's effect — is the typed [`StartKeyConflict`], naming
-/// the key and nothing else. Every other refusal keeps its message.
-///
-/// [`StartKeyConflict`]: lash_core::PluginError::StartKeyConflict
+/// A conflicting host start names only its key (ADR 0107). Every other
+/// refusal retains the controller error, including its cause and evidence.
 pub(crate) fn host_start_refusal(
     start_key: Option<&lash_core::StartKey>,
-    code: lash_core::RuntimeErrorCode,
-    message: String,
+    error: lash_core::RuntimeEffectControllerError,
 ) -> lash_core::PluginError {
-    match start_key {
-        Some(start_key)
-            if code == lash_core::RuntimeErrorCode::ProcessStartKeyConflict
-                || (start_key.is_host_supplied() && code.is_replay_mismatch()) =>
-        {
-            lash_core::PluginError::StartKeyConflict {
-                start_key: start_key.clone(),
-            }
-        }
-        _ if matches!(
-            code,
-            lash_core::RuntimeErrorCode::ReasoningRefused
-                | lash_core::RuntimeErrorCode::ModelUnknown
-        ) =>
-        {
-            lash_core::PluginError::Runtime(lash_core::RuntimeError::new(code, message))
-        }
-        _ => lash_core::PluginError::Session(message),
+    if let Some(start_key) = start_key
+        && (error.code == lash_core::RuntimeErrorCode::ProcessStartKeyConflict
+            || (start_key.is_host_supplied() && error.code.is_replay_mismatch()))
+    {
+        return lash_core::PluginError::StartKeyConflict {
+            start_key: start_key.clone(),
+        };
     }
+    lash_core::PluginError::RuntimeEffectController(error)
 }
 
 #[cfg(test)]
@@ -1375,5 +1341,60 @@ mod terminal_wait_tests {
 
         assert_eq!(output, terminal);
         assert_eq!(port.waits.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[cfg(test)]
+mod host_start_refusal_tests {
+    use super::host_start_refusal;
+    use lash_core::{PluginError, RuntimeEffectControllerError, RuntimeErrorCode};
+
+    #[test]
+    fn a_host_start_preserves_the_controller_refusal_and_its_class() {
+        let mut errors = vec![
+            lash_core::StoreError::WriterFenced {
+                recorded: 101,
+                writable: lash_core::compat::VersionRange::exactly(100),
+            }
+            .into(),
+        ];
+        for code in [
+            RuntimeErrorCode::ProcessParentEnded,
+            RuntimeErrorCode::TriggerDeliveryBound,
+            RuntimeErrorCode::TriggerDeliveryRetired,
+            RuntimeErrorCode::SessionHeadOwned,
+            RuntimeErrorCode::RuntimeStore,
+            RuntimeErrorCode::ReasoningRefused,
+            RuntimeErrorCode::ModelUnknown,
+        ] {
+            errors.push(RuntimeEffectControllerError::new(code, "start refused"));
+        }
+        for mut error in errors {
+            error.summary = Some(Box::new(lash_core::RuntimeEffectReplayMismatchReport {
+                divergent_path_count: 1,
+                first_divergent_paths: vec!["command.registration".into()],
+                effect_kind: Some("process".into()),
+            }));
+            error.journaled = true;
+            let expected = serde_json::to_value(&error).expect("controller error serializes");
+            let start_key = lash_core::StartKey::for_host("refused-host-start");
+            for key in [None, Some(&start_key)] {
+                let mapped = host_start_refusal(key, error.clone());
+                let PluginError::RuntimeEffectController(actual) = mapped else {
+                    panic!("the host must retain the controller refusal: {mapped:?}");
+                };
+                assert_eq!(
+                    serde_json::to_value(&actual).expect("mapped error serializes"),
+                    expected
+                );
+                assert!(actual.journaled);
+                let host = crate::EmbedError::Plugin(PluginError::RuntimeEffectController(actual));
+                assert_eq!(
+                    host.is_retryable(),
+                    PluginError::RuntimeEffectController(error.clone()).is_retryable()
+                );
+                assert_eq!(host.is_terminal(), error.is_terminal());
+            }
+        }
     }
 }

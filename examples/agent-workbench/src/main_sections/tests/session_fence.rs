@@ -372,7 +372,7 @@ finish(await handle);
         .expect("the cancelled turn joins")
         .expect("the cancelled turn commits its terminal");
     assert!(
-        matches!(turn.status, lash::TurnStatus::Cancelled),
+        matches!(turn.status(), lash::TurnStatus::Cancelled),
         "the delete must settle the running turn as cancelled, got {turn:?}"
     );
     assert_ne!(snapshot.settings.session_id, old_session_id);

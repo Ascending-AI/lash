@@ -117,7 +117,7 @@ impl OneDriverHost for Host {
                 RestateWait::new().probe_window(Duration::from_millis(20)),
             )
             .await?;
-        Ok(outcome.status == lash::TurnStatus::Answered)
+        Ok(outcome.status() == lash::TurnStatus::Answered)
     }
 }
 

@@ -137,3 +137,27 @@ fn main() {
         lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested
     );
 }
+
+fn inspect_send(outcome: lash::remote::turn_result::RemoteSendOutcome) {
+    use lash::remote::turn_result::{RemoteParkedTurn, RemoteSendOutcome, RemoteStalledDelivery};
+    match outcome {
+        RemoteSendOutcome::Settled { report, .. } => {
+            let _ = report;
+        }
+        RemoteSendOutcome::Parked {
+            parked: RemoteParkedTurn { root, .. },
+            ..
+        } => {
+            let _ = root;
+        }
+        RemoteSendOutcome::Stalled {
+            stalled: RemoteStalledDelivery { reason, .. },
+            ..
+        } => {
+            let _ = reason;
+        }
+        RemoteSendOutcome::Withdrawn { gaps, .. } => {
+            let _ = gaps;
+        }
+    }
+}

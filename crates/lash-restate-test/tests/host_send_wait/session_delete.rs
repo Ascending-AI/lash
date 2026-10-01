@@ -232,8 +232,8 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
     }
     world.barrier.release.notify_one();
     let answer = handle.outcome().await.expect("answer");
-    assert_eq!(answer.status, lash::TurnStatus::Answered);
-    let root = answer.root.expect("answered root");
+    assert_eq!(answer.status(), lash::TurnStatus::Answered);
+    let root = answer.root().cloned().expect("answered root");
     let scope_close = lash_core::store::scope_close_obligation_id(&SESSION.into(), &root);
     if pinned {
         // The previous answer is durable. A subsequent turn's exact closure
@@ -431,7 +431,7 @@ async fn live_delete_after_answer(pinned: bool) {
     }
     world.barrier.release.notify_one();
     assert_eq!(
-        handle.outcome().await.expect("answer").status,
+        handle.outcome().await.expect("answer").status(),
         lash::TurnStatus::Answered
     );
     if pinned {
@@ -574,7 +574,13 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
     })
     .await;
     world.barrier.release.notify_one();
-    let root = handle.outcome().await.expect("answer").root.expect("root");
+    let root = handle
+        .outcome()
+        .await
+        .expect("answer")
+        .root()
+        .cloned()
+        .expect("root");
     root_run_completed(&world, &root).await;
     until("the root close is owed", || {
         gate.close_reached.load(Ordering::SeqCst)

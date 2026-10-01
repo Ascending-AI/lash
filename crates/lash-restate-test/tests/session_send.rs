@@ -309,9 +309,9 @@ async fn back_to_back_sends_queue_at_most_one_drive() {
             .expect("the input is answered")
             .expect("the outcome");
         assert!(
-            matches!(outcome.status, lash::TurnStatus::Answered),
+            matches!(outcome.status(), lash::TurnStatus::Answered),
             "{:?}",
-            outcome.status
+            outcome.status()
         );
     }
     assert!(
@@ -376,9 +376,9 @@ async fn a_held_drive_admits_nothing_until_released() {
         .expect("the first root answers under the hold")
         .expect("the first outcome");
     assert!(
-        matches!(first.status, lash::TurnStatus::Answered),
+        matches!(first.status(), lash::TurnStatus::Answered),
         "the admitted root runs on: {:?}",
-        first.status
+        first.status()
     );
     world.backend.server().settle().await;
     let pending = session
@@ -401,9 +401,9 @@ async fn a_held_drive_admits_nothing_until_released() {
         .expect("the released drive answers the held input")
         .expect("the held outcome");
     assert!(
-        matches!(second.status, lash::TurnStatus::Answered),
+        matches!(second.status(), lash::TurnStatus::Answered),
         "{:?}",
-        second.status
+        second.status()
     );
     assert_eq!(world.calls.load(Ordering::SeqCst), 2);
     assert!(

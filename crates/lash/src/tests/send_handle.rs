@@ -362,12 +362,12 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
     let polls = reads.polls.load(Ordering::SeqCst);
 
     fixture.release.notify_one();
-    assert_eq!(held.outcome().await?.status, crate::TurnStatus::Answered);
+    assert_eq!(held.outcome().await?.status(), crate::TurnStatus::Answered);
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), following)
         .await
         .expect("the queued input's follower answers once its root runs")
         .expect("the follower task completes")?;
-    assert_eq!(outcome.status, crate::TurnStatus::Answered);
+    assert_eq!(outcome.status(), crate::TurnStatus::Answered);
 
     // Each poll of an unbound input reads the binding twice; every other
     // keyed read is the probe's. The poll backs off 25 ms, 50 ms, .. to a
@@ -572,8 +572,8 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
         "a retry answers the original acceptance, which its id alone addresses"
     );
     let outcome = again.outcome().await?;
-    assert_eq!(outcome.status, crate::TurnStatus::Answered);
-    let output = outcome.output.expect("a settled root has a report");
+    assert_eq!(outcome.status(), crate::TurnStatus::Answered);
+    let output = outcome.output().expect("a settled root has a report");
     assert_eq!(output.assistant_message(), Some("echo: only once"));
 
     let conflicting = session
@@ -622,12 +622,16 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     );
 
     let outcome = waiting.outcome().await?;
-    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert!(
-        outcome.output.is_none(),
+        outcome.output().is_none(),
         "no turn applied a withdrawn input"
     );
-    assert_eq!(outcome.root, None, "no root took a withdrawn input");
+    assert_eq!(
+        outcome.root().cloned(),
+        None,
+        "no root took a withdrawn input"
+    );
     outcome
         .to_remote(&session.session_id(), &input_id)
         .validate()
@@ -686,16 +690,19 @@ async fn an_input_answered_inside_another_root_resolves_answered_with_that_root(
 
     let second = second.output().await?;
     let third = third.outcome().await?;
-    assert_eq!(third.status, crate::TurnStatus::Answered);
-    assert_eq!(third.root, Some(lash_core::TurnId::from("second-root")));
+    assert_eq!(third.status(), crate::TurnStatus::Answered);
+    assert_eq!(
+        third.root().cloned(),
+        Some(lash_core::TurnId::from("second-root"))
+    );
     let remote = third.to_remote(&session.session_id(), &third_input);
     remote.validate().expect("the remote outcome is consistent");
     assert_eq!(
-        remote.root_id,
+        remote.root().cloned(),
         Some(lash_core::TurnId::from("second-root")),
         "a transport re-attaches through the root that answered"
     );
-    let third = third.output.expect("an answered input has a report");
+    let third = third.output().expect("an answered input has a report");
     // One turn applied both inputs, so both handles answer its reply.
     assert!(
         third
@@ -921,7 +928,7 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), handle.outcome())
         .await
         .expect("the cancelled root answers")?;
-    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     Ok(())
 }
 
@@ -972,8 +979,11 @@ async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), second.outcome())
         .await
         .expect("the consuming root settles")?;
-    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
-    assert_eq!(third.outcome().await?.status, crate::TurnStatus::Cancelled);
+    assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
+    assert_eq!(
+        third.outcome().await?.status(),
+        crate::TurnStatus::Cancelled
+    );
     first.outcome().await?;
     Ok(())
 }
@@ -1033,11 +1043,11 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
     }
     assert!(after_gap > 0, "the stream observes on past its gap");
     let (sunk, sink) = followed.await.expect("the sink follower")?;
-    assert_eq!(sunk.status, crate::TurnStatus::Answered);
+    assert_eq!(sunk.status(), crate::TurnStatus::Answered);
     assert!(
-        !sunk.gaps.is_empty(),
+        !sunk.gaps().is_empty(),
         "a sink cannot take a gap in-stream, so its answer reports it: {:?}",
-        sunk.gaps
+        sunk.gaps()
     );
     assert!(
         !sink.snapshot().await.is_empty(),
@@ -1079,8 +1089,8 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     second.outcome().await?;
 
     let outcome = attached.outcome().await?;
-    assert_eq!(outcome.status, crate::TurnStatus::Answered);
-    let output = outcome.output.expect("an answered input has a report");
+    assert_eq!(outcome.status(), crate::TurnStatus::Answered);
+    let output = outcome.output().expect("an answered input has a report");
     assert!(
         output
             .assistant_message()
@@ -1088,13 +1098,13 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
         "{output:?}"
     );
     assert_eq!(
-        session.attach_id("third-root").outcome().await?.status,
+        session.attach_id("third-root").outcome().await?.status(),
         crate::TurnStatus::Answered
     );
     // An id nothing was accepted under answers like a withdrawn input.
     let never = durable.attach_id("never-sent").outcome().await?;
-    assert_eq!(never.status, crate::TurnStatus::Cancelled);
-    assert!(never.output.is_none());
+    assert_eq!(never.status(), crate::TurnStatus::Cancelled);
+    assert!(never.output().is_none());
     Ok(())
 }
 
@@ -1117,28 +1127,27 @@ async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
         .await?;
     let input_id = handle.input_id().clone();
     let watched = handle.outcome().await?;
-    assert_eq!(watched.status, crate::TurnStatus::Answered);
-    assert!(watched.gaps.is_empty(), "{:?}", watched.gaps);
+    assert_eq!(watched.status(), crate::TurnStatus::Answered);
+    assert!(watched.gaps().is_empty(), "{:?}", watched.gaps());
     assert!(
         !watched
-            .output
-            .as_ref()
+            .output()
             .expect("an answered root has a report")
             .activities
             .is_empty()
     );
 
     let unobserved = session.attach(input_id).outcome().await?;
-    assert_eq!(unobserved.status, crate::TurnStatus::Answered);
-    let output = unobserved.output.expect("an answered root has a report");
+    assert_eq!(unobserved.status(), crate::TurnStatus::Answered);
+    let output = unobserved.output().expect("an answered root has a report");
     assert!(output.activities.is_empty());
     assert!(
         matches!(
-            unobserved.gaps.as_slice(),
+            unobserved.gaps(),
             [gap] if gap.reason == lash_core::LiveReplayGapReason::Unavailable
         ),
         "{:?}",
-        unobserved.gaps
+        unobserved.gaps()
     );
     Ok(())
 }
@@ -1237,9 +1246,9 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
         .collect::<Vec<_>>();
     for handle in handles {
         let outcome = handle.outcome().await?;
-        assert_eq!(outcome.status, crate::TurnStatus::Answered);
+        assert_eq!(outcome.status(), crate::TurnStatus::Answered);
         assert!(
-            outcome.root.is_some() && outcome.output.is_some(),
+            outcome.root().is_some() && outcome.output().is_some(),
             "{outcome:?}"
         );
     }
@@ -1259,7 +1268,10 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
         "a resent batch answers the inputs it accepted"
     );
     for handle in resent {
-        assert_eq!(handle.outcome().await?.status, crate::TurnStatus::Answered);
+        assert_eq!(
+            handle.outcome().await?.status(),
+            crate::TurnStatus::Answered
+        );
     }
     assert_eq!(
         fixture.calls.load(Ordering::SeqCst),
@@ -1286,7 +1298,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     for never in ["batch-d", "batch-e"] {
         let outcome = session.attach_id(never).outcome().await?;
         assert_eq!(
-            outcome.status,
+            outcome.status(),
             crate::TurnStatus::Cancelled,
             "`{never}` of a refused batch was never accepted"
         );
@@ -1330,7 +1342,10 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
             handle.cancel().await?,
             crate::CancelReceipt::Withdrawn(_)
         ));
-        assert_eq!(handle.outcome().await?.status, crate::TurnStatus::Cancelled);
+        assert_eq!(
+            handle.outcome().await?.status(),
+            crate::TurnStatus::Cancelled
+        );
     }
     let pending = durable.pending_turn_inputs().await?;
     assert_eq!(
@@ -1352,10 +1367,10 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
         assert_eq!(row.input.source_key, snapshot.source_key);
     }
     fixture.release.notify_one();
-    assert_eq!(held.outcome().await?.status, crate::TurnStatus::Answered);
+    assert_eq!(held.outcome().await?.status(), crate::TurnStatus::Answered);
     for (entry, snapshot) in entries.into_iter().zip(&snapshots) {
         let id = entry.id().expect("host id").clone();
-        assert_eq!(entry.outcome().await?.status, crate::TurnStatus::Answered);
+        assert_eq!(entry.outcome().await?.status(), crate::TurnStatus::Answered);
         let retry = durable
             .send(TurnInput::text(match id.as_str() {
                 "entry-live" => "resident input",
@@ -1421,21 +1436,21 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let input = TurnInput::text("only once");
     let first = session.send(input.clone()).id(host_id).await?;
     let input_id = first.input_id().clone();
-    assert_eq!(first.outcome().await?.root, Some(host_id.into()));
+    assert_eq!(first.outcome().await?.root().cloned(), Some(host_id.into()));
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         session.root(host_id).outcome(),
     )
     .await
     .expect("the exact host root settles")?;
-    assert_eq!(durable.root, Some(host_id.into()));
-    assert_eq!(durable.status, crate::TurnStatus::Answered);
+    assert_eq!(durable.root().cloned(), Some(host_id.into()));
+    assert_eq!(durable.status(), crate::TurnStatus::Answered);
     let retry = session.send(input).id(host_id).await?;
     assert_eq!(retry.input_id(), &input_id);
     let retried = tokio::time::timeout(std::time::Duration::from_secs(2), retry.outcome())
         .await
         .expect("the settled host id answers its retry")?;
-    assert_eq!(retried.root, Some(host_id.into()));
+    assert_eq!(retried.root().cloned(), Some(host_id.into()));
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
     assert!(
         matches!(session.attach_id(host_id).cancel().await?, crate::CancelReceipt::AlreadySettled { root } if root.as_str() == host_id)
@@ -1575,8 +1590,8 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(3), handle.outcome())
         .await
         .expect("the exact root answers across the frame switch")?;
-    assert_eq!(outcome.root, Some(root.clone()));
-    assert_eq!(outcome.status, expected_status);
+    assert_eq!(outcome.root().cloned(), Some(root.clone()));
+    assert_eq!(outcome.status(), expected_status);
     for stream in [input_stream, root_stream] {
         let events = tokio::time::timeout(std::time::Duration::from_secs(3), stream)
             .await
@@ -1609,8 +1624,8 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
     )
     .await
     .expect("durable resolution follows the exact root's follow-on")?;
-    assert_eq!(durable.root, Some(root));
-    assert_eq!(durable.status, expected_status);
+    assert_eq!(durable.root().cloned(), Some(root));
+    assert_eq!(durable.status(), expected_status);
     Ok(())
 }
 
@@ -1723,3 +1738,14 @@ macro_rules! send_handle_laws {
 }
 
 send_handle_laws!(restate);
+
+#[test]
+fn a_journaled_send_outcome_requires_the_data_owned_by_its_variant() {
+    let invalid = serde_json::json!({
+        "status": "Answered", "root": null, "output": null, "gaps": []
+    });
+    assert!(
+        serde_json::from_value::<crate::SendOutcome>(invalid).is_err(),
+        "a journaled answered send cannot exist without its root and output"
+    );
+}

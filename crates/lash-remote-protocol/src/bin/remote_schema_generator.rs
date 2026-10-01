@@ -2,7 +2,7 @@ use lash_remote_protocol::{
     REMOTE_PROTOCOL_VERSION, RemoteConfigCommandCatalog, RemoteConfigTransactionOutcome,
     RemoteConfigTransactionRequest, RemotePersistProcessEnvRequest, RemoteProcessEventsRequest,
     RemoteProcessEventsResponse, RemoteProcessObservationItem, RemoteProcessObservationRequest,
-    RemoteProcessRecord, RemoteSessionObservationEvent,
+    RemoteProcessRecord, RemoteSendOutcome, RemoteSessionObservationEvent,
 };
 use lash_trace::TRACE_SCHEMA_VERSION;
 use schemars::JsonSchema;
@@ -61,7 +61,7 @@ fn document<T: JsonSchema>(shape: &'static str) -> Result<Document, String> {
     })
 }
 
-fn documents() -> Result<[Document; 10], String> {
+fn documents() -> Result<[Document; 11], String> {
     Ok([
         document::<RemotePersistProcessEnvRequest>("remote-persist-process-env-request")?,
         document::<RemoteConfigTransactionRequest>("remote-config-transaction-request")?,
@@ -73,6 +73,7 @@ fn documents() -> Result<[Document; 10], String> {
         document::<RemoteProcessObservationRequest>("remote-process-observation-request")?,
         document::<RemoteProcessObservationItem>("remote-process-observation-item")?,
         document::<RemoteSessionObservationEvent>("remote-session-observation-event")?,
+        document::<RemoteSendOutcome>("remote-send-outcome")?,
     ])
 }
 

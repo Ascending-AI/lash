@@ -246,34 +246,123 @@ pub enum RemoteTurnStatus {
     },
 }
 
-/// What a sent input's root answered, for a transport: the four-way status,
-/// the settled report when the root ran, and the ids a peer re-attaches by.
-///
-/// A settled turn is only one of the four answers: a parked root holds its
-/// work and has no report yet, and an input withdrawn before any root took it
-/// has neither report nor root. A peer resumes a parked or unfinished send by
-/// `input_id`, never by fabricating a failed turn.
+/// The recorded answer to a sent input. Status and root are derived from
+/// the variant's report or park, never stored beside them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteSendOutcome {
-    pub session_id: SessionId,
-    /// The accepted input's id.
-    pub input_id: String,
-    /// The root that took the input; `None` only for an input withdrawn
-    /// before any root took it.
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteSendOutcome {
+    Settled {
+        session_id: SessionId,
+        input_id: String,
+        report: Box<RemoteTurnReport>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    },
+    Parked {
+        session_id: SessionId,
+        input_id: String,
+        parked: RemoteParkedTurn,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    },
+    Stalled {
+        session_id: SessionId,
+        input_id: String,
+        stalled: RemoteStalledDelivery,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    },
+    Withdrawn {
+        session_id: SessionId,
+        input_id: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteParkedTurn {
+    pub root: TurnId,
+    pub park_id: u64,
+    pub reason: RemoteTurnParkReason,
+    pub since_ms: u64,
+    pub attempts: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteStalledDelivery {
+    pub reason: String,
+    pub attempts: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root_id: Option<TurnId>,
-    pub status: RemoteTurnStatus,
-    /// The settled turn: present for Answered and Failed, for a Cancelled
-    /// root that ran, and never for Parked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub report: Option<RemoteTurnReport>,
-    /// Where the report's activity list is incomplete: the follower lost
-    /// replay events, or the root ran where it could not be observed.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub gaps: Vec<crate::observations::RemoteLiveReplayGap>,
+    pub last_error: Option<String>,
+    pub stalled_at_ms: u64,
 }
 
 impl RemoteSendOutcome {
+    pub fn session_id(&self) -> &SessionId {
+        match self {
+            Self::Settled { session_id, .. }
+            | Self::Parked { session_id, .. }
+            | Self::Stalled { session_id, .. }
+            | Self::Withdrawn { session_id, .. } => session_id,
+        }
+    }
+
+    pub fn input_id(&self) -> &str {
+        match self {
+            Self::Settled { input_id, .. }
+            | Self::Parked { input_id, .. }
+            | Self::Stalled { input_id, .. }
+            | Self::Withdrawn { input_id, .. } => input_id,
+        }
+    }
+
+    pub fn root(&self) -> Option<&TurnId> {
+        match self {
+            Self::Settled { report, .. } => Some(&report.turn_id),
+            Self::Parked { parked, .. } => Some(&parked.root),
+            Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+        }
+    }
+
+    pub fn report(&self) -> Option<&RemoteTurnReport> {
+        match self {
+            Self::Settled { report, .. } => Some(report),
+            Self::Parked { .. } | Self::Stalled { .. } | Self::Withdrawn { .. } => None,
+        }
+    }
+
+    pub fn gaps(&self) -> &[crate::observations::RemoteLiveReplayGap] {
+        match self {
+            Self::Settled { gaps, .. }
+            | Self::Parked { gaps, .. }
+            | Self::Stalled { gaps, .. }
+            | Self::Withdrawn { gaps, .. } => gaps,
+        }
+    }
+
+    pub fn status(&self) -> RemoteTurnStatus {
+        match self {
+            Self::Settled { report, .. } => report.status(),
+            Self::Parked { parked, .. } => RemoteTurnStatus::Parked {
+                root: parked.root.clone(),
+                park_id: parked.park_id,
+                reason: parked.reason.clone(),
+                since_ms: parked.since_ms,
+                attempts: parked.attempts,
+            },
+            Self::Stalled { stalled, .. } => RemoteTurnStatus::Stalled {
+                reason: stalled.reason.clone(),
+                attempts: stalled.attempts,
+                last_error: stalled.last_error.clone(),
+                stalled_at_ms: stalled.stalled_at_ms,
+            },
+            Self::Withdrawn { .. } => RemoteTurnStatus::Cancelled,
+        }
+    }
+
     pub fn encode_json(
         &self,
         negotiated: &crate::Negotiated,
@@ -281,8 +370,6 @@ impl RemoteSendOutcome {
         crate::Envelope::at(negotiated, self).encode_json()
     }
 
-    /// Decodes one JSON outcome after refusing a mismatched protocol
-    /// version, then refuses an inconsistent one.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
         let outcome =
             crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
@@ -290,56 +377,33 @@ impl RemoteSendOutcome {
         Ok(outcome)
     }
 
-    /// The status, root and report agree: a report's own status is the
-    /// outcome's; Answered and Failed carry one; Parked carries none and names
-    /// its root; Stalled carries neither; only an input no root took lacks a root.
+    /// Validates identities and payload contents. The enum owns the
+    /// relationship between a send's state and its data.
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         const TYPE: &str = "RemoteSendOutcome";
-        require_non_empty(TYPE, "session_id", &self.session_id)?;
-        require_non_empty(TYPE, "input_id", &self.input_id)?;
-        let invalid = |message: &str| RemoteProtocolError::InvalidEnvelope {
-            type_name: TYPE,
-            message: message.to_string(),
-        };
-        if let Some(root) = &self.root_id {
-            require_non_empty(TYPE, "root_id", root)?;
-        }
-        if let Some(report) = &self.report {
-            report.validate()?;
-            if report.status() != self.status {
-                return Err(invalid("the report's status is not the outcome's"));
-            }
-            if report.session_id != self.session_id {
-                return Err(invalid("the report belongs to another session"));
-            }
-            if self.root_id.is_none() {
-                return Err(invalid("a settled report names the root that ran it"));
-            }
-        }
-        for gap in &self.gaps {
+        require_non_empty(TYPE, "session_id", self.session_id())?;
+        require_non_empty(TYPE, "input_id", self.input_id())?;
+        for gap in self.gaps() {
             gap.validate()?;
         }
-        match &self.status {
-            RemoteTurnStatus::Answered | RemoteTurnStatus::Failed if self.report.is_none() => {
-                Err(invalid("an Answered or Failed outcome carries its report"))
-            }
-            RemoteTurnStatus::Parked { root, .. } => {
-                if self.report.is_some() {
-                    return Err(invalid("a parked root has no settled report"));
-                }
-                require_non_empty(TYPE, "status.root", root)?;
-                if self.root_id.as_ref() != Some(root) {
-                    return Err(invalid("a parked outcome's root is its park's root"));
+        match self {
+            Self::Settled {
+                session_id, report, ..
+            } => {
+                report.validate()?;
+                if report.session_id != session_id {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name: TYPE,
+                        message: "the report belongs to another session".to_string(),
+                    });
                 }
                 Ok(())
             }
-            RemoteTurnStatus::Stalled { reason, .. } => {
-                if self.report.is_some() || self.root_id.is_some() {
-                    return Err(invalid("a stalled input has no root and no report"));
-                }
-                require_non_empty(TYPE, "status.reason", reason)
+            Self::Parked { parked, .. } => require_non_empty(TYPE, "parked.root", &parked.root),
+            Self::Stalled { stalled, .. } => {
+                require_non_empty(TYPE, "stalled.reason", &stalled.reason)
             }
-            _ => Ok(()),
+            Self::Withdrawn { .. } => Ok(()),
         }
     }
 }

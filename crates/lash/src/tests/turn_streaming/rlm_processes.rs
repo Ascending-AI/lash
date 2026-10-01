@@ -294,7 +294,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     )
     .await
     .expect("the redriven root settles")?;
-    assert_eq!(redriven.status, crate::TurnStatus::Answered);
+    assert_eq!(redriven.status(), crate::TurnStatus::Answered);
 
     let resident_execution_state = first_session
         .admin()
@@ -330,7 +330,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         ))
     );
     let settled_again = reopened_session.root(root_id).outcome().await?;
-    assert_eq!(settled_again.status, crate::TurnStatus::Answered);
+    assert_eq!(settled_again.status(), crate::TurnStatus::Answered);
     let follow_on_requests = follow_on_requests.lock_recover();
     assert_eq!(follow_on_requests.len(), 1);
     let follow_on_json = serde_json::to_string(&follow_on_requests[0])?;
