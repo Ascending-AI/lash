@@ -543,6 +543,20 @@ impl SoakReport {
     }
 }
 
+fn epoch_limit(config: &SoakConfig, index: usize, elapsed: Duration) -> Option<Duration> {
+    let remaining = config.duration.saturating_sub(elapsed);
+    if config.max_epochs.is_some_and(|max| index >= max)
+        || (index > 0
+            && (remaining.is_zero()
+                || (config.max_epochs.is_none() && remaining < EPOCH_WALL_LIMIT)))
+    {
+        // Open-ended runs reserve a complete epoch instead of timing out
+        // a healthy last epoch with the remaining fraction of the budget.
+        return None;
+    }
+    Some(EPOCH_WALL_LIMIT.min(remaining))
+}
+
 /// Run epochs until `config`'s duration or epoch count is spent, printing
 /// each epoch's summary as it ends and each failed epoch's evidence.
 pub async fn run(config: SoakConfig) -> SoakReport {
@@ -563,22 +577,15 @@ pub async fn run(config: SoakConfig) -> SoakReport {
     let trace = std::env::var("LASH_CHAOS_SOAK_TRACE").is_ok_and(|value| value == "1");
     let mut epochs = Vec::new();
     for index in 0.. {
-        let remaining = config.duration.saturating_sub(started.elapsed());
-        if config.max_epochs.is_some_and(|max| index >= max)
-            || (index > 0
-                && (remaining.is_zero()
-                    || (config.max_epochs.is_none() && remaining < EPOCH_WALL_LIMIT)))
-        {
-            // Open-ended runs reserve a complete epoch instead of timing out
-            // a healthy last epoch with the remaining fraction of the budget.
+        let Some(limit) = epoch_limit(&config, index, started.elapsed()) else {
             break;
-        }
+        };
         let epoch = Box::pin(run_epoch_with_limit(
             index,
             epoch_seed(config.seed, index),
             config.steps,
             &config.without,
-            EPOCH_WALL_LIMIT.min(remaining),
+            limit,
         ))
         .await;
         println!("{}", epoch.summary());
@@ -608,22 +615,60 @@ mod lost_root_tests;
 mod tests {
     use super::*;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn an_open_ended_soak_reserves_a_complete_epoch() {
-        let report = Box::pin(run(SoakConfig {
+    #[test]
+    fn an_open_ended_soak_reserves_a_complete_epoch() {
+        let config = SoakConfig {
             seed: 0x4402,
-            duration: Duration::from_secs(2),
+            duration: EPOCH_WALL_LIMIT + Duration::from_secs(2),
             max_epochs: None,
             steps: 0,
             without: Vec::new(),
-        }))
-        .await;
+        };
         assert_eq!(
-            report.epochs.len(),
-            1,
-            "do not admit a shortened last epoch"
+            epoch_limit(&config, 0, Duration::ZERO),
+            Some(EPOCH_WALL_LIMIT)
         );
-        assert!(report.failed().is_empty(), "{report:?}");
+        for index in [1, 2] {
+            assert_eq!(
+                epoch_limit(&config, index, Duration::from_secs(2)),
+                Some(EPOCH_WALL_LIMIT),
+                "admit an epoch with exactly its complete budget remaining"
+            );
+            for elapsed in [
+                Duration::from_secs(2) + Duration::from_nanos(1),
+                config.duration,
+                config.duration + Duration::from_nanos(1),
+            ] {
+                assert_eq!(
+                    epoch_limit(&config, index, elapsed),
+                    None,
+                    "do not admit a shortened last epoch at {elapsed:?}"
+                );
+            }
+        }
+
+        let short = SoakConfig {
+            duration: Duration::from_secs(2),
+            ..config
+        };
+        assert_eq!(
+            epoch_limit(&short, 0, Duration::ZERO),
+            Some(short.duration),
+            "allow the first epoch of a short soak"
+        );
+        assert_eq!(epoch_limit(&short, 1, Duration::ZERO), None);
+
+        let counted = SoakConfig {
+            max_epochs: Some(2),
+            ..short
+        };
+        assert_eq!(
+            epoch_limit(&counted, 1, Duration::from_secs(1)),
+            Some(Duration::from_secs(1)),
+            "a counted soak may spend the remaining fraction"
+        );
+        assert_eq!(epoch_limit(&counted, 1, counted.duration), None);
+        assert_eq!(epoch_limit(&counted, 2, Duration::ZERO), None);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
