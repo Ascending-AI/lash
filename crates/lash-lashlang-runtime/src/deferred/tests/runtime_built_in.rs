@@ -35,7 +35,7 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
         abilities: lashlang::LashlangAbilities::default(),
         ..LashlangSurface::default()
     };
-    let mut first_record = DeferredResolutionRecord::default();
+    let mut first_record = deferred_link();
     let first_ctx = link_context_with_host(
         &mut first_record,
         "exec-code:built-in-and-deferred",
@@ -76,7 +76,7 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
 
     let changed_surface = surface_with_shared_fetch_modules(&["web"]);
     let catalog = incompatible_shared_fetch_catalog();
-    let mut replayed_record = DeferredResolutionRecord::default();
+    let mut replayed_record = deferred_link();
     let replay_ctx = link_context_with_host(
         &mut replayed_record,
         "exec-code:built-in-and-deferred",
@@ -135,14 +135,14 @@ async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validat
         .with_tool_binding(ToolBinding::new(["web"], "fetch")),
     ]);
 
-    let mut retained = DeferredResolutionRecord::default();
+    let mut retained = deferred_link();
     let retained_ctx = link_context_with_host(
         &mut retained,
         "exec-code:retained-negative",
         fault_journal_host(JournalFault::None).await,
     );
     retained
-        .resolutions
+        .outcomes
         .insert("web.fetch".to_string(), Resolution::NotAvailable);
     let effective = resolve_and_build_deferred_environment(
         &program,
@@ -165,7 +165,7 @@ async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validat
         Some(Resolution::NotAvailable)
     ));
 
-    let mut fresh = DeferredResolutionRecord::default();
+    let mut fresh = deferred_link();
     let fresh_ctx = link_context_with_host(
         &mut fresh,
         "exec-code:fresh-duplicate",

@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
 
+mod journal_ownership;
 mod process_handle_containers;
 
 const SEED: u64 = 0x5_2c0a;
@@ -450,7 +451,7 @@ pub(super) fn deferred_matrix_request() -> ExecRequest {
 }
 
 #[test]
-pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
+pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
     block_on(async {
         let calls = Arc::new(AtomicUsize::new(0));
         let batches = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -509,11 +510,19 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         assert_eq!(calls.load(Ordering::SeqCst), 1, "one batch per link");
         assert_eq!(installed.load(Ordering::SeqCst), 1);
         assert!(matches!(
-            state.deferred_resolutions.get("web.fetch"),
+            state
+                .deferred_link
+                .as_ref()
+                .expect("active link")
+                .get("web.fetch"),
             Some(lash_lashlang_runtime::Resolution::Resolved(_))
         ));
         assert!(matches!(
-            state.deferred_resolutions.get("mystery.x"),
+            state
+                .deferred_link
+                .as_ref()
+                .expect("active link")
+                .get("mystery.x"),
             Some(lash_lashlang_runtime::Resolution::NotAvailable)
         ));
         assert!(first_ctx.tool_catalog().tools.is_empty());
@@ -528,22 +537,13 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
             .expect("restore");
 
-        // Same stable link: both positive and negative outcomes survive the
-        // snapshot and win without another authorization decision.
-        let replay = execute_code_unbounded_with_test_render(
-            &mut restored,
-            first_ctx.clone(),
-            deferred_matrix_request(),
-            crate::testing::sqlite_memory_artifact_store().await,
-            LashlangSurface::default(),
-            Some(resolver.clone()),
-            RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
-        )
-        .await;
-        assert!(replay.error.is_some());
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "same link must replay");
-        assert_eq!(installed.load(Ordering::SeqCst), 2);
+        assert!(
+            restored.deferred_link.is_none(),
+            "restore carries no tool outcomes"
+        );
+        let root: BTreeMap<String, serde::de::IgnoredAny> =
+            rmp_serde::from_slice(&snapshot.root).expect("root");
+        assert!(!root.contains_key("deferred_resolutions"));
 
         // A second code effect in the same logical turn is a different link
         // and must resolve the same paths against current authority.
@@ -571,7 +571,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         .await;
         assert!(second_link.error.is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(installed.load(Ordering::SeqCst), 3);
+        assert_eq!(installed.load(Ordering::SeqCst), 2);
         assert!(second_ctx.tool_catalog().tools.is_empty());
 
         // A new logical turn also selects a fresh record, even when the
@@ -600,9 +600,17 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         .await;
         assert!(next_turn.error.is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 3);
-        assert_eq!(installed.load(Ordering::SeqCst), 4);
+        assert_eq!(installed.load(Ordering::SeqCst), 3);
         assert!(next_turn_ctx.tool_catalog().tools.is_empty());
-        assert_eq!(restored.deferred_resolutions.resolutions.len(), 2);
+        assert_eq!(
+            restored
+                .deferred_link
+                .as_ref()
+                .expect("active link")
+                .outcomes
+                .len(),
+            2
+        );
         assert_eq!(
             *batches.lock_recover(),
             vec![
@@ -698,7 +706,11 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
         );
         assert!(ctx.tool_catalog().tools.is_empty());
         assert!(matches!(
-            state.deferred_resolutions.get("web.fetch"),
+            state
+                .deferred_link
+                .as_ref()
+                .expect("active link")
+                .get("web.fetch"),
             Some(lash_lashlang_runtime::Resolution::Resolved(_))
         ));
         assert!(
@@ -987,7 +999,7 @@ pub(super) fn replay_serves_an_ambient_failure_as_ambient() {
                 let catalog = catalog.clone();
                 let messages = Arc::clone(&messages);
                 Box::pin(async move {
-                    let mut record = lash_lashlang_runtime::DeferredResolutionRecord::default();
+                    let mut record = crate::testing::deferred_link();
                     record.select_link(
                         lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
                             ctx.parent_invocation().expect("parent invocation"),
@@ -1319,7 +1331,11 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
         );
         assert!(ctx.tool_catalog().tools.is_empty());
         assert!(matches!(
-            state.deferred_resolutions.get("web.fetch"),
+            state
+                .deferred_link
+                .as_ref()
+                .expect("active link")
+                .get("web.fetch"),
             Some(lash_lashlang_runtime::Resolution::Resolved(_))
         ));
         assert!(

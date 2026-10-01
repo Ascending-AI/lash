@@ -233,7 +233,14 @@ fn deferred_trigger_constructor_and_event_schema_link() {
                 "trigger_handle"
             );
             assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-            assert!(state.deferred_resolutions.resolutions.is_empty());
+            assert!(
+                state
+                    .deferred_link
+                    .as_ref()
+                    .expect("active link")
+                    .outcomes
+                    .is_empty()
+            );
             assert!(matches!(
                 state.deferred_trigger_resolutions.resolutions["calendar.Changed"],
                 lash_lashlang_runtime::TriggerResolution::Resolved(ref grant)
@@ -284,7 +291,7 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
                 if grant.provider_id == "calendar-provider"
                     && grant.route == serde_json::json!({"route": "snapshot-route"})
         ));
-        assert!(restored.deferred_resolutions.resolutions.is_empty());
+        assert!(restored.deferred_link.is_none());
     });
 }
 
@@ -432,13 +439,15 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             lash_lashlang_runtime::TriggerResolution::NotAvailable
         ));
         assert!(matches!(
-            state.deferred_resolutions.resolutions["web.fetch"],
+            state.deferred_link.as_ref().expect("active link").outcomes["web.fetch"],
             lash_lashlang_runtime::Resolution::Resolved(_)
         ));
         assert!(
             !state
-                .deferred_resolutions
-                .resolutions
+                .deferred_link
+                .as_ref()
+                .expect("active link")
+                .outcomes
                 .contains_key("calendar.Changed")
         );
     });

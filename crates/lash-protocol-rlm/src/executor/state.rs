@@ -25,7 +25,6 @@ pub(super) struct RlmSnapshotRoot {
     /// One Lashlang durable fragment per binding: the binding's value and the
     /// heap objects it carries (`lashlang::DurableParts`).
     globals: BTreeMap<String, PersistedValue>,
-    deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
 }
 
@@ -55,9 +54,6 @@ include!(concat!(env!("OUT_DIR"), "/rlm_snapshot_fields.rs"));
 // field added, removed or reordered upstream still fails the suite rather than
 // silently moving the canonical envelope.
 
-/// `lash_lashlang_runtime::DeferredResolutionRecord`.
-const DEFERRED_RESOLUTION_FIELDS: &[&str] = &["link_key", "resolutions"];
-
 /// `lash_lashlang_runtime::DeferredResolutionLinkKey`.
 const DEFERRED_LINK_KEY_FIELDS: &[&str] = &["address"];
 
@@ -74,62 +70,6 @@ const TRIGGER_RESOLUTION_FIELDS: &[&str] = &[
     "route",
     "provider_ids",
 ];
-
-/// `lash_lashlang_runtime::Resolution`.
-const RESOLUTION_FIELDS: &[&str] = &["kind", "definition", "source_id", "execution_binding"];
-
-/// `lash_sansio::ToolDefinition`.
-const TOOL_DEFINITION_FIELDS: &[&str] = &["manifest", "contract"];
-
-/// `lash_sansio::ToolManifest`.
-const TOOL_MANIFEST_FIELDS: &[&str] = &[
-    "inline",
-    "id",
-    "name",
-    "description",
-    "compact_contract",
-    "bindings",
-    "argument_projection",
-    "retry_policy",
-];
-
-/// `lash_sansio::ToolContract`. The skipped `identity` and `compact_cache`
-/// fields never serialize, so they do not appear here.
-const TOOL_CONTRACT_FIELDS: &[&str] = &[
-    "input_schema",
-    "output_schema",
-    "output_contract",
-    "examples",
-];
-
-/// `lash_sansio::SchemaContract`.
-const SCHEMA_CONTRACT_FIELDS: &[&str] = &["canonical", "projection"];
-
-/// `lash_sansio::SchemaProjectionPolicy`.
-const SCHEMA_PROJECTION_FIELDS: &[&str] = &["mode", "overrides"];
-
-/// `lash_sansio::SchemaProjectionOverride`.
-const SCHEMA_OVERRIDE_FIELDS: &[&str] = &["dialect", "schema"];
-
-/// `lash_sansio::CompactToolContract`.
-const COMPACT_CONTRACT_FIELDS: &[&str] = &[
-    "name",
-    "signature",
-    "returns",
-    "parameters",
-    "return_fields",
-    "description",
-    "examples",
-];
-
-/// `lash_sansio::ToolRetryPolicy`.
-const RETRY_POLICY_FIELDS: &[&str] = &["type", "max_attempts", "base_delay_ms", "max_delay_ms"];
-
-/// `lash_sansio::ToolOutputContract`.
-const OUTPUT_CONTRACT_FIELDS: &[&str] = &["kind", "input_field", "default_schema"];
-
-/// `lash_sansio::ToolArgumentProjectionPolicy`.
-const ARGUMENT_PROJECTION_FIELDS: &[&str] = &["kind", "field"];
 
 fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
     if matches!(
@@ -247,7 +187,6 @@ enum RootNode {
     Root,
     Globals,
     Global,
-    Deferred,
     DeferredTrigger,
     LinkKey,
     Resolutions,
@@ -260,17 +199,6 @@ enum RootNode {
     TriggerProcess,
     TriggerProcessParams,
     TriggerProcessParam,
-    Definition,
-    Manifest,
-    Contract,
-    SchemaContract,
-    Projection,
-    Overrides,
-    Override,
-    CompactContract,
-    RetryPolicy,
-    OutputContract,
-    ArgumentProjection,
     Json,
     Other,
 }
@@ -280,11 +208,8 @@ impl RootNode {
         use RootNode::*;
         match (self, segment.key()) {
             (Root, Some("globals")) => Globals,
-            (Root, Some("deferred_resolutions")) => Deferred,
             (Root, Some("deferred_trigger_resolutions")) => DeferredTrigger,
             (Globals, Some(_)) => Global,
-            (Deferred, Some("link_key")) => LinkKey,
-            (Deferred, Some("resolutions")) => Resolutions,
             (DeferredTrigger, Some("link_key")) => LinkKey,
             (DeferredTrigger, Some("resolutions")) => Resolutions,
             (Resolutions, Some(_)) => Resolution,
@@ -303,23 +228,6 @@ impl RootNode {
             (TriggerProcess, Some("output")) => TriggerTypeExpr,
             (TriggerProcessParams, None) => TriggerProcessParam,
             (TriggerProcessParam, Some("ty")) => TriggerTypeExpr,
-            (Resolution, Some("definition")) => Definition,
-            (Resolution, Some("execution_binding")) => Json,
-            (Definition, Some("manifest")) => Manifest,
-            (Definition, Some("contract")) => Contract,
-            (Manifest, Some("bindings")) => Json,
-            (Manifest, Some("compact_contract")) => CompactContract,
-            (Manifest, Some("retry_policy")) => RetryPolicy,
-            (Manifest, Some("argument_projection")) => ArgumentProjection,
-            (Contract, Some("input_schema" | "output_schema")) => SchemaContract,
-            (Contract, Some("output_contract")) => OutputContract,
-            (SchemaContract, Some("canonical")) => Json,
-            (SchemaContract, Some("projection")) => Projection,
-            (Projection, Some("overrides")) => Overrides,
-            (Overrides, None) => Override,
-            (Override, Some("schema")) => Json,
-            (CompactContract, Some("parameters" | "return_fields")) => Json,
-            (OutputContract, Some("default_schema")) => Json,
             (Json, _) => Json,
             _ => Other,
         }
@@ -336,18 +244,9 @@ fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
         Root => CanonicalMapOrder::Declared(ROOT_FIELDS),
         Globals | Resolutions | Json => CanonicalMapOrder::Sorted,
         Global => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
-        Deferred => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
         DeferredTrigger => CanonicalMapOrder::Declared(DEFERRED_TRIGGER_RESOLUTION_FIELDS),
         LinkKey => CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS),
-        Resolution => {
-            let path_is_trigger = path.first().and_then(CanonicalPathSegment::key)
-                == Some("deferred_trigger_resolutions");
-            if path_is_trigger {
-                CanonicalMapOrder::Declared(TRIGGER_RESOLUTION_FIELDS)
-            } else {
-                CanonicalMapOrder::Declared(RESOLUTION_FIELDS)
-            }
-        }
+        Resolution => CanonicalMapOrder::Declared(TRIGGER_RESOLUTION_FIELDS),
         TriggerEventType => CanonicalMapOrder::Declared(&["name", "ty"]),
         TriggerTypeExpr => CanonicalMapOrder::Sorted,
         TriggerTypeField => CanonicalMapOrder::Declared(&["name", "ty", "optional"]),
@@ -355,25 +254,14 @@ fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
         TriggerProcess => CanonicalMapOrder::Declared(&["kind", "params", "output"]),
         TriggerProcessParam => CanonicalMapOrder::Declared(&["name", "ty"]),
         TriggerProcessParams => CanonicalMapOrder::Sorted,
-        Definition => CanonicalMapOrder::Declared(TOOL_DEFINITION_FIELDS),
-        Manifest => CanonicalMapOrder::Declared(TOOL_MANIFEST_FIELDS),
-        Contract => CanonicalMapOrder::Declared(TOOL_CONTRACT_FIELDS),
-        SchemaContract => CanonicalMapOrder::Declared(SCHEMA_CONTRACT_FIELDS),
-        Projection => CanonicalMapOrder::Declared(SCHEMA_PROJECTION_FIELDS),
-        Override => CanonicalMapOrder::Declared(SCHEMA_OVERRIDE_FIELDS),
-        CompactContract => CanonicalMapOrder::Declared(COMPACT_CONTRACT_FIELDS),
-        RetryPolicy => CanonicalMapOrder::Declared(RETRY_POLICY_FIELDS),
-        OutputContract => CanonicalMapOrder::Declared(OUTPUT_CONTRACT_FIELDS),
-        ArgumentProjection => CanonicalMapOrder::Declared(ARGUMENT_PROJECTION_FIELDS),
-        Overrides | Other => CanonicalMapOrder::Unordered,
+        Other => CanonicalMapOrder::Unordered,
     }
 }
 
 fn root_map_required(path: &[CanonicalPathSegment]) -> bool {
     !matches!(
         root_node(path),
-        RootNode::Overrides
-            | RootNode::Json
+        RootNode::Json
             | RootNode::Other
             | RootNode::TriggerTypeExpr
             | RootNode::TriggerObjectFields
@@ -548,7 +436,6 @@ struct CaptureRollback {
 /// from the next cold snapshot.
 pub(super) struct RlmExecutionCheckpoint {
     vm_state: lash_vm_client::RemoteState,
-    deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_baseline: BTreeMap<String, String>,
@@ -574,11 +461,9 @@ pub struct RlmExecutionState {
     /// cache for one frame: a module first bound in a new frame acquires
     /// that frame's edge, and a cold restore starts it empty and re-acquires.
     frame_held_modules: Option<(lash_core::FrameEnvironmentId, BTreeSet<lashlang::ModuleRef>)>,
-    /// Active-link record of deferred tool resolutions, keyed by Lashlang
-    /// call-path. Snapshotted/restored with the rest of the execution state so
-    /// a re-driven or recovered link replays the recorded grants and
-    /// `NotAvailable` results without leaking them into a later code effect.
-    pub(super) deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+    /// A transient projection of the active link's journaled tool outcomes.
+    /// A cold restore clears it; re-execution reads the journaled effect.
+    pub(super) deferred_link: Option<lash_lashlang_runtime::DeferredLink>,
     /// Trigger-definition outcomes remain separate from tool grants so a
     /// mixed link cannot execute one provider family through the other.
     pub(super) deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
@@ -618,7 +503,7 @@ impl RlmExecutionState {
             engine_id: engine_id.into(),
             vm: lash_vm_client::RemoteVm::pristine(workers),
             frame_held_modules: None,
-            deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
+            deferred_link: None,
             deferred_trigger_resolutions:
                 lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
             persisted_globals: BTreeMap::new(),
@@ -686,7 +571,6 @@ impl RlmExecutionState {
     pub(super) fn execution_checkpoint(&self) -> RlmExecutionCheckpoint {
         RlmExecutionCheckpoint {
             vm_state: self.vm.state().clone(),
-            deferred_resolutions: self.deferred_resolutions.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
             persisted_globals: self.persisted_globals.clone(),
             persisted_baseline: self.persisted_baseline.clone(),
@@ -701,7 +585,7 @@ impl RlmExecutionState {
 
     fn restore_execution_checkpoint(&mut self, checkpoint: RlmExecutionCheckpoint) {
         self.vm.replace_state(checkpoint.vm_state);
-        self.deferred_resolutions = checkpoint.deferred_resolutions;
+        self.deferred_link = None;
         self.deferred_trigger_resolutions = checkpoint.deferred_trigger_resolutions;
         self.persisted_globals = checkpoint.persisted_globals;
         self.persisted_baseline = checkpoint.persisted_baseline;
@@ -911,7 +795,6 @@ impl RlmExecutionState {
             engine: self.engine_id.to_string(),
             state_header: capture.state_header.into_vec(),
             globals: next_globals.clone(),
-            deferred_resolutions: self.deferred_resolutions.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
         };
         let encoded = rmp_serde::to_vec_named(&root).map_err(|error| {
@@ -1084,7 +967,7 @@ impl RlmExecutionState {
             .map(str::to_string)
             .collect::<BTreeSet<_>>();
         let pruned_reserved = parsed.globals.len() != next_live_names.len();
-        self.deferred_resolutions = parsed.deferred_resolutions;
+        self.deferred_link = None;
         self.deferred_trigger_resolutions = parsed.deferred_trigger_resolutions;
         self.persisted_globals = parsed.globals;
         self.persisted_baseline = baseline;

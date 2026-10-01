@@ -36,14 +36,34 @@ fn session_with_sentinel_grant() -> RlmExecutionState {
         .state_mut()
         .insert_global("greeting", FlowValue::String("hello".into()))
         .expect("seed a guest binding");
-    state
-        .deferred_resolutions
-        .record("vault.read", sentinel_grant());
+    let mut link = crate::testing::deferred_link();
+    link.record("vault.read", sentinel_grant());
+    state.deferred_link = Some(link);
     state
 }
 
 fn parse_root(bytes: &[u8]) -> RlmSnapshotRoot {
     rmp_serde::from_slice(bytes).expect("decode the RLM root")
+}
+
+#[test]
+fn deferred_tool_outcomes_are_absent_from_durable_root() {
+    let session = session_with_sentinel_grant();
+    let hydrated = session
+        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .expect("capture the session");
+    assert!(
+        !contains(&hydrated.root, SENTINEL_SECRET),
+        "the journal owns the grant; the durable root must carry no copy"
+    );
+    let root: BTreeMap<String, serde::de::IgnoredAny> =
+        rmp_serde::from_slice(&hydrated.root).expect("decode root");
+    assert!(!root.contains_key("deferred_resolutions"));
+    let mut restored = RlmExecutionState::new();
+    restored
+        .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        .expect("restore the guest state");
+    assert!(restored.deferred_link.is_none());
 }
 
 #[test]
@@ -54,10 +74,9 @@ fn rlm_worker_envelope_carries_no_grant_or_binding() {
         .hydrated_execution_state(fleet_format)
         .expect("capture the session");
 
-    // The parent's durable root keeps the grant, binding and all.
     assert!(
-        contains(&hydrated.root, SENTINEL_SECRET),
-        "the parent-side root must carry the grant's execution binding"
+        !contains(&hydrated.root, SENTINEL_SECRET),
+        "the journal owns the grant's execution binding"
     );
 
     // The worker-bound envelope carries the guest state and nothing else.
@@ -95,8 +114,8 @@ fn rlm_worker_envelope_carries_no_grant_or_binding() {
         "a grant's execution binding appeared in the worker's capture"
     );
 
-    // A restore installs the guest state from the envelope and keeps the
-    // grant parent-side.
+    // A restore installs guest state. Re-execution recovers grants from
+    // the journal on the parent side.
     let mut restored = RlmExecutionState::new();
     restored
         .restore_execution_state(&hydrated, fleet_format)
@@ -109,10 +128,9 @@ fn rlm_worker_envelope_carries_no_grant_or_binding() {
             .any(|name| name == "greeting"),
         "the guest binding must be restored on the worker side"
     );
-    assert_eq!(
-        serde_json::to_value(&restored.deferred_resolutions).expect("encode restored grants"),
-        serde_json::to_value(&session.deferred_resolutions).expect("encode original grants"),
-        "the parent must keep its grants across a restore"
+    assert!(
+        restored.deferred_link.is_none(),
+        "restore clears the transient link"
     );
 }
 
@@ -123,22 +141,28 @@ struct ForgedCapture {
     state_header: ByteBuf,
     changed: BTreeMap<String, ByteBuf>,
     unchanged: BTreeSet<String>,
-    deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+    deferred_resolutions: BTreeMap<String, lash_lashlang_runtime::Resolution>,
 }
 
 #[test]
 fn worker_returned_state_cannot_replace_parent_authority() {
     let fleet_format = lash_core::FleetFormat::current();
     let session = session_with_sentinel_grant();
-    let parent_grants =
-        serde_json::to_value(&session.deferred_resolutions).expect("encode the parent's grants");
+    let parent_grants = serde_json::to_value(
+        &session
+            .deferred_link
+            .as_ref()
+            .expect("active link")
+            .outcomes,
+    )
+    .expect("encode the parent's grants");
 
     let (honest, _) =
         worker_capture(&session, fleet_format).expect("the worker captures its guest state");
     let honest = RlmWorkerCapture::accept(&honest).expect("an honest capture is accepted");
 
     // A returned capture naming a grant is refused outright.
-    let mut forged_grants = lash_lashlang_runtime::DeferredResolutionRecord::default();
+    let mut forged_grants = crate::testing::deferred_link();
     forged_grants.record(
         "vault.read",
         lash_lashlang_runtime::Resolution::Resolved(Box::new(
@@ -156,7 +180,7 @@ fn worker_returned_state_cannot_replace_parent_authority() {
         state_header: honest.state_header.clone(),
         changed: honest.changed.clone(),
         unchanged: honest.unchanged.clone(),
-        deferred_resolutions: forged_grants,
+        deferred_resolutions: forged_grants.outcomes,
     })
     .expect("encode the forged capture");
     let refusal =
@@ -167,7 +191,7 @@ fn worker_returned_state_cannot_replace_parent_authority() {
     );
 
     // Guest code can name a binding after the parent's authority; it stays a
-    // guest binding, and the root's grants still come from the parent alone.
+    // guest binding and cannot replace the transient grants.
     let mut session = session;
     session
         .vm
@@ -183,9 +207,16 @@ fn worker_returned_state_cannot_replace_parent_authority() {
     let root = parse_root(&hydrated.root);
     assert!(root.globals.contains_key("deferred_resolutions"));
     assert_eq!(
-        serde_json::to_value(&root.deferred_resolutions).expect("encode the root's grants"),
+        serde_json::to_value(
+            &session
+                .deferred_link
+                .as_ref()
+                .expect("active link")
+                .outcomes
+        )
+        .expect("encode live grants"),
         parent_grants,
-        "the root's grants must be the parent's, not the worker's"
+        "the live grants must remain the parent's"
     );
     assert!(!contains(&hydrated.root, "forged-by-the-worker"));
 }

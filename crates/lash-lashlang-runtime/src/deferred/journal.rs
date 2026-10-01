@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::LashlangHostEnvironment;
 use crate::deferred::{
-    DeferredResolutionError, DeferredResolutionRecord, Resolution, SharedDeferredToolResolver,
+    DeferredLink, DeferredResolutionError, Resolution, SharedDeferredToolResolver,
     ToolBindingError, fold_grant,
 };
 
@@ -20,16 +20,13 @@ pub(super) async fn journal_deferred_outcomes<F>(
     referenced: BTreeSet<String>,
     ambient_paths: F,
     resolver: Option<&SharedDeferredToolResolver>,
-    record: &DeferredResolutionRecord,
+    record: &DeferredLink,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<BTreeMap<String, Resolution>, DeferredResolutionError>
 where
     F: FnOnce() -> Result<BTreeSet<String>, ToolBindingError> + Send,
 {
-    let link_key = record
-        .link_key
-        .as_ref()
-        .ok_or(DeferredResolutionError::MissingLinkIdentity)?;
+    let link_key = &record.key;
     let admitted_address = ctx
         .parent_invocation()
         .and_then(lash_core::RuntimeInvocation::effect_address)
@@ -43,7 +40,7 @@ where
         serde_json::to_string(&referenced)
             .expect("deferred call-path strings encode as canonical JSON")
     );
-    let recorded = record.resolutions.clone();
+    let recorded = record.outcomes.clone();
     let phase_context = ctx.clone();
     let resolver_for_resolution = resolver.cloned();
     let referenced_for_resolution = referenced.clone();

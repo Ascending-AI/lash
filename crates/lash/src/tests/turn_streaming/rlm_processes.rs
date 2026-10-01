@@ -91,7 +91,6 @@ pub(super) struct RlmExecutionSnapshotProbe {
     #[serde(with = "serde_bytes")]
     state_header: Vec<u8>,
     globals: std::collections::BTreeMap<String, RlmPersistedValueProbe>,
-    deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
 }
 
 #[cfg(feature = "rlm")]
@@ -392,11 +391,6 @@ pub(super) fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> 
                 execution_state.global(state, "frame_seed"),
                 Some(lashlang::Value::String(value)) if value.as_str() == "seed:survives"
             ));
-
-            assert!(
-                execution_state.deferred_resolutions.is_empty(),
-                "the old frame's deferred resolutions must not survive in the {geometry} executor"
-            );
         }
 
         let checkpoint_growth = large

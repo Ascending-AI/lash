@@ -1537,11 +1537,10 @@ pub use catalogue_preview::{
     catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
 };
 pub use deferred::{
-    DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
-    DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError, Resolution,
-    SharedDeferredToolResolver, ToolGrant, compile_with_deferred_resolution,
-    resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
-    resolve_and_fold_deferred,
+    DeferredLink, DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
+    DeferredToolResolver, RecordedGrantInstallError, Resolution, SharedDeferredToolResolver,
+    ToolGrant, compile_with_deferred_resolution, resolve_and_build_deferred_environment,
+    resolve_and_build_deferred_environment_from_references, resolve_and_fold_deferred,
 };
 pub use deferred_triggers::{
     DeferredTriggerProvider, DeferredTriggerProviderRegistry, DeferredTriggerResolutionError,

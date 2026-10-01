@@ -4,6 +4,15 @@ fn namespace() -> LashlangReplayNamespace {
     LashlangReplayNamespace::cell("session:turn:0:1:exec_code:e3")
 }
 
+fn tool_sub(suffix: &str) -> String {
+    let call_id = lash_core::ToolCallId::fixture("frontier");
+    if let Some((child, attempt)) = suffix.split_once(":attempt:") {
+        format!("{child}:{call_id}:attempt:{attempt}")
+    } else {
+        format!("{call_id}:{suffix}")
+    }
+}
+
 fn key(ordinal: u64, sub: &str) -> String {
     let command = namespace().command(ordinal);
     if sub.is_empty() {
@@ -35,6 +44,29 @@ fn issue_to(run: &LashlangReplayRun, ordinal: u64) -> IssuedCommand {
     }
 }
 
+#[test]
+fn core_tool_keys_replay_at_the_recorded_frontier() {
+    let call_id = lash_core::ToolCallId::fixture("frontier");
+    let rows = vec![
+        key(0, &format!("{call_id}:attempt:1")),
+        key(0, &format!("{call_id}:attempt:1:sleep")),
+        key(0, &format!("{call_id}:attempt:2")),
+        key(0, &format!("{call_id}:await")),
+        key(1, ""),
+    ];
+    let run = run_over(rows.clone(), Vec::new());
+    let command = issue_to(&run, 0);
+    let Ok(CommandAdmission::ReplayRecordedKeys { keys, .. }) =
+        run.enter(&command, CommandShape::ToolCall)
+    else {
+        panic!("core's tool keys must admit the recorded tool command");
+    };
+    for row in &rows {
+        assert!(keys.contains(row), "the frontier must retain `{row}`");
+    }
+    run.finish(&command, true).expect("recorded call closes");
+}
+
 /// The grammar's spelling is byte-ordered: every ordinal key of a namespace
 /// sorts inside its range, before the seal, in ordinal order — so one range
 /// read answers every frontier question on SQLite and on a `COLLATE "C"`
@@ -45,9 +77,9 @@ fn ordinal_keys_sort_by_ordinal_and_before_the_seal() {
     let range = namespace.range();
     let mut keys = vec![
         key(10, ""),
-        key(2, "attempt:1"),
-        key(2, "attempt:1:sleep"),
-        key(9_999_999_999, "child:3:attempt:2"),
+        key(2, &tool_sub("attempt:1")),
+        key(2, &tool_sub("attempt:1:sleep")),
+        key(9_999_999_999, &tool_sub("child:3:attempt:2")),
         key(0, "sleep"),
         namespace.seal(),
     ];
@@ -89,18 +121,18 @@ fn a_frontier_read_tells_command_shapes_apart() {
         &namespace(),
         RecordedKeys {
             replay_keys: vec![
-                key(0, "attempt:1"),
-                key(0, "attempt:1:sleep"),
-                key(0, "attempt:2"),
+                key(0, &tool_sub("attempt:1")),
+                key(0, &tool_sub("attempt:1:sleep")),
+                key(0, &tool_sub("attempt:2")),
                 key(1, ""),
                 key(2, "sleep"),
                 key(3, "child:0"),
-                key(3, "child:0:attempt:1"),
+                key(3, &tool_sub("child:0:attempt:1")),
                 key(3, "timers-admitted"),
                 key(4, "process:await:process:subagent:x"),
                 key(5, "signal"),
                 key(6, ""),
-                key(6, "attempt:1"),
+                key(6, &tool_sub("attempt:1")),
                 key(7, "nonsense"),
                 namespace().seal(),
             ],
@@ -148,7 +180,7 @@ fn a_frontier_read_tells_command_shapes_apart() {
 /// before anything reaches the host.
 #[test]
 fn a_command_recorded_as_another_shape_refuses_at_its_ordinal() {
-    let run = run_over(vec![key(0, "attempt:1")], Vec::new());
+    let run = run_over(vec![key(0, &tool_sub("attempt:1"))], Vec::new());
     let command = issue_to(&run, 0);
     let divergence = run
         .enter(&command, CommandShape::Value)
@@ -166,24 +198,27 @@ fn a_command_recorded_as_another_shape_refuses_at_its_ordinal() {
 /// T4: a recorded scalar call replayed as an aggregate.
 #[test]
 fn a_kind_change_at_the_ordinal_refuses() {
-    let run = run_over(vec![key(0, "attempt:1")], Vec::new());
+    let run = run_over(vec![key(0, &tool_sub("attempt:1"))], Vec::new());
     let command = issue_to(&run, 0);
     assert!(run.enter(&command, CommandShape::Aggregate).is_err());
 
-    let run = run_over(vec![key(0, "child:0:attempt:1")], vec![key(0, "")]);
+    let run = run_over(
+        vec![key(0, &tool_sub("child:0:attempt:1"))],
+        vec![key(0, "")],
+    );
     let command = issue_to(&run, 0);
     assert!(run.enter(&command, CommandShape::ToolCall).is_err());
 }
 
 #[test]
 fn a_recorded_command_replays_and_the_frontier_goes_live() {
-    let run = run_over(vec![key(0, "attempt:1"), key(1, "")], Vec::new());
+    let run = run_over(vec![key(0, &tool_sub("attempt:1")), key(1, "")], Vec::new());
     let first = issue_to(&run, 0);
     assert!(
         matches!(
             run.enter(&first, CommandShape::ToolCall),
             Ok(CommandAdmission::ReplayRecordedKeys { ref keys, .. })
-                if keys.contains(&key(0, "attempt:1"))
+                if keys.contains(&key(0, &tool_sub("attempt:1")))
         ),
         "a replayed command with entries beyond it is fenced to the recorded keys"
     );
@@ -206,7 +241,7 @@ fn a_recorded_command_replays_and_the_frontier_goes_live() {
 /// command may run but its first write is refused.
 #[test]
 fn an_unrecorded_command_inside_the_recorded_run_refuses_its_writes() {
-    let run = run_over(vec![key(0, "attempt:1"), key(2, "")], Vec::new());
+    let run = run_over(vec![key(0, &tool_sub("attempt:1")), key(2, "")], Vec::new());
     let command = issue_to(&run, 1);
     match run.enter(&command, CommandShape::ToolCall) {
         Ok(CommandAdmission::RefuseWrites(divergence)) => {
@@ -255,7 +290,7 @@ fn a_run_that_ends_early_refuses_at_its_seal() {
 /// refuses at its ordinal.
 #[test]
 fn a_recorded_command_that_is_no_longer_dispatched_refuses() {
-    let run = run_over(vec![key(0, "attempt:1")], Vec::new());
+    let run = run_over(vec![key(0, &tool_sub("attempt:1"))], Vec::new());
     let command = issue_to(&run, 0);
     run.enter(&command, CommandShape::ToolCall)
         .expect("replays");
@@ -369,7 +404,7 @@ fn a_key_fence_leaves_keys_outside_the_namespace_to_the_host() {
 /// settled in preparation — to the host.
 #[test]
 fn a_refusing_guard_judges_only_the_run_namespace() {
-    let run = run_over(vec![key(1, "attempt:1")], Vec::new());
+    let run = run_over(vec![key(1, &tool_sub("attempt:1"))], Vec::new());
     let command = issue_to(&run, 0);
     let Ok(CommandAdmission::RefuseWrites(divergence)) =
         run.enter(&command, CommandShape::ToolCall)
@@ -396,7 +431,7 @@ fn a_refusing_guard_judges_only_the_run_namespace() {
 
     let dispatching = refusing();
     let refusal = dispatching
-        .admit(Some(&key(0, "attempt:1")))
+        .admit(Some(&key(0, &tool_sub("attempt:1"))))
         .expect_err("a write under the namespace refuses");
     assert_eq!(refusal.code, RuntimeErrorCode::LashlangCellReplayDivergence);
     assert!(

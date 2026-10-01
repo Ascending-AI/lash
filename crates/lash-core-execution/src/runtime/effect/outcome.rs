@@ -533,17 +533,18 @@ mod tests {
             None,
         );
 
+        let call_id = crate::ToolCallId::fixture("probe");
         let sleep = crate::runtime::causal::tool_retry_sleep_invocation(
             &crate::ExecutionScope::turn("s", "turn"),
             &parent.into_runtime_invocation(),
-            "probe",
+            &call_id,
             2,
         );
 
         assert!(
             sleep
                 .effect_replay_key()
-                .ends_with(":probe:attempt:2:sleep")
+                .ends_with(&format!(":{call_id}:attempt:2:sleep"))
         );
     }
 }

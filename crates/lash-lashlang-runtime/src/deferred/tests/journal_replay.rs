@@ -24,7 +24,7 @@ async fn recorded_unavailable_masks_incompatible_surface_before_environment_vali
         resources,
         ..LashlangSurface::default()
     };
-    let mut record = DeferredResolutionRecord::default();
+    let mut record = deferred_link();
     record.record("web.now", Resolution::NotAvailable);
     let ctx = link_context(&mut record).await;
 

@@ -45,7 +45,14 @@ impl ToolAttemptLineage {
         call: &PreparedToolCall,
         attempt: u32,
     ) -> RuntimeEffectInvocation {
-        self.invocation(context, format!("{}:attempt:{attempt}", call.call_id))
+        self.invocation(
+            context,
+            crate::runtime::causal::CommandSubKey::ToolAttempt {
+                call_id: call.call_id.clone(),
+                attempt,
+            }
+            .to_string(),
+        )
     }
 
     fn retry_sleep_invocation(
@@ -54,7 +61,14 @@ impl ToolAttemptLineage {
         call: &PreparedToolCall,
         attempt: u32,
     ) -> RuntimeEffectInvocation {
-        self.invocation(context, format!("{}:attempt:{attempt}:sleep", call.call_id))
+        self.invocation(
+            context,
+            crate::runtime::causal::CommandSubKey::ToolRetrySleep {
+                call_id: call.call_id.clone(),
+                attempt,
+            }
+            .to_string(),
+        )
     }
 
     #[expect(

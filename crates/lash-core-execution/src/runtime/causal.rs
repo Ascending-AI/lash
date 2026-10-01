@@ -241,6 +241,122 @@ pub fn child_effect_invocation_from_effect(
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CommandReplayKey(String);
 
+/// A command's journal suffix. Core renders these keys and language replay
+/// parses the same grammar before admitting a recorded command.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommandSubKey<'a> {
+    Value,
+    Sleep,
+    SignalWait,
+    TimersAdmitted,
+    AggregateRequests,
+    ToolAttempt {
+        call_id: crate::ToolCallId,
+        attempt: u32,
+    },
+    ToolRetrySleep {
+        call_id: crate::ToolCallId,
+        attempt: u32,
+    },
+    ToolAwait {
+        call_id: crate::ToolCallId,
+    },
+    ToolCancelWork {
+        call_id: crate::ToolCallId,
+    },
+    ProcessStart(&'a str),
+    ProcessAttachTerminal(&'a str),
+    ProcessAwait(&'a str),
+    AggregateChild(&'a str),
+}
+
+impl<'a> CommandSubKey<'a> {
+    const SLEEP: &'static str = "sleep";
+    const SIGNAL: &'static str = "signal";
+    const TIMERS_ADMITTED: &'static str = "timers-admitted";
+    const REQUESTS: &'static str = "requests";
+    const ATTEMPT: &'static str = "attempt:";
+    const AWAIT: &'static str = "await";
+    const CANCEL_WORK: &'static str = "cancel-work";
+    const PROCESS_START: &'static str = "process:start:";
+    const PROCESS_ATTACH_TERMINAL: &'static str = "process:attach-terminal:";
+    const PROCESS_AWAIT: &'static str = "process:await:";
+    const CHILD: &'static str = "child:";
+
+    pub fn parse(sub: &'a str) -> Option<Self> {
+        match sub {
+            "" => return Some(Self::Value),
+            Self::SLEEP => return Some(Self::Sleep),
+            Self::SIGNAL => return Some(Self::SignalWait),
+            Self::TIMERS_ADMITTED => return Some(Self::TimersAdmitted),
+            Self::REQUESTS => return Some(Self::AggregateRequests),
+            _ => {}
+        }
+        for (prefix, constructor) in [
+            (
+                Self::PROCESS_START,
+                Self::ProcessStart as fn(&'a str) -> Self,
+            ),
+            (Self::PROCESS_ATTACH_TERMINAL, Self::ProcessAttachTerminal),
+            (Self::PROCESS_AWAIT, Self::ProcessAwait),
+            (Self::CHILD, Self::AggregateChild),
+        ] {
+            if let Some(payload) = sub.strip_prefix(prefix).filter(|s| !s.is_empty()) {
+                return Some(constructor(payload));
+            }
+        }
+        let (id, operation) = sub.split_once(':')?;
+        let call_id = crate::ToolCallId::parse(id).ok()?;
+        match operation {
+            Self::AWAIT => Some(Self::ToolAwait { call_id }),
+            Self::CANCEL_WORK => Some(Self::ToolCancelWork { call_id }),
+            _ => {
+                let numbered = operation.strip_prefix(Self::ATTEMPT)?;
+                let (number, tail) = numbered
+                    .find(':')
+                    .map_or((numbered, ""), |at| (&numbered[..at], &numbered[at..]));
+                let attempt: u32 = number.parse().ok()?;
+                if number != attempt.to_string() {
+                    return None;
+                }
+                match tail {
+                    "" => Some(Self::ToolAttempt { call_id, attempt }),
+                    sleep if sleep.strip_prefix(':') == Some(Self::SLEEP) => {
+                        Some(Self::ToolRetrySleep { call_id, attempt })
+                    }
+                    _ => None,
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for CommandSubKey<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Value => Ok(()),
+            Self::Sleep => f.write_str(Self::SLEEP),
+            Self::SignalWait => f.write_str(Self::SIGNAL),
+            Self::TimersAdmitted => f.write_str(Self::TIMERS_ADMITTED),
+            Self::AggregateRequests => f.write_str(Self::REQUESTS),
+            Self::ToolAttempt { call_id, attempt } => {
+                write!(f, "{call_id}:{}{attempt}", Self::ATTEMPT)
+            }
+            Self::ToolRetrySleep { call_id, attempt } => {
+                write!(f, "{call_id}:{}{attempt}:{}", Self::ATTEMPT, Self::SLEEP)
+            }
+            Self::ToolAwait { call_id } => write!(f, "{call_id}:{}", Self::AWAIT),
+            Self::ToolCancelWork { call_id } => write!(f, "{call_id}:{}", Self::CANCEL_WORK),
+            Self::ProcessStart(payload) => write!(f, "{}{payload}", Self::PROCESS_START),
+            Self::ProcessAttachTerminal(payload) => {
+                write!(f, "{}{payload}", Self::PROCESS_ATTACH_TERMINAL)
+            }
+            Self::ProcessAwait(payload) => write!(f, "{}{payload}", Self::PROCESS_AWAIT),
+            Self::AggregateChild(payload) => write!(f, "{}{payload}", Self::CHILD),
+        }
+    }
+}
+
 impl CommandReplayKey {
     /// Wraps a key a language runtime minted.
     pub fn new(key: impl Into<String>) -> Self {
@@ -255,24 +371,24 @@ impl CommandReplayKey {
 
     /// The row a foreground or process sleep journals its intent under.
     pub fn sleep(&self) -> String {
-        format!("{}:sleep", self.0)
+        format!("{}:{}", self.0, CommandSubKey::Sleep)
     }
 
     /// The row an aggregate's timers record their shared admission instant
     /// under (ADR 0099 §11 clause 4).
     pub fn timers_admitted(&self) -> String {
-        format!("{}:timers-admitted", self.0)
+        format!("{}:{}", self.0, CommandSubKey::TimersAdmitted)
     }
 
     /// The replay suffix of an aggregate's tool leaf at `leaf` — its index in
     /// first-appearance order — under the group's invocation.
     pub fn child_suffix(leaf: usize) -> String {
-        format!("child:{leaf}")
+        CommandSubKey::AggregateChild(&leaf.to_string()).to_string()
     }
 
     /// The row a process-signal wait journals its await under.
     pub fn signal(&self) -> String {
-        format!("{}:signal", self.0)
+        format!("{}:{}", self.0, CommandSubKey::SignalWait)
     }
 
     /// Unwraps the key.
@@ -316,15 +432,20 @@ pub fn command_invocation(
 pub fn tool_retry_sleep_invocation(
     execution_scope: &ExecutionScope,
     parent: &RuntimeInvocation,
-    tool_name: &str,
+    call_id: &crate::ToolCallId,
     attempt: u32,
 ) -> RuntimeEffectInvocation {
     let parent_effect_id = parent.effect_id().unwrap_or("effect");
+    let suffix = CommandSubKey::ToolRetrySleep {
+        call_id: call_id.clone(),
+        attempt,
+    }
+    .to_string();
     child_effect_invocation(
         execution_scope,
         parent,
-        format!("{parent_effect_id}:{tool_name}:attempt:{attempt}:sleep"),
-        format!("{tool_name}:attempt:{attempt}:sleep"),
+        format!("{parent_effect_id}:{suffix}"),
+        suffix,
     )
 }
 
@@ -678,6 +799,67 @@ pub fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_sub_keys_round_trip_without_changing_journal_spellings() {
+        let call_id = crate::ToolCallId::fixture("sub-key");
+        let keys = [
+            CommandSubKey::Value,
+            CommandSubKey::Sleep,
+            CommandSubKey::SignalWait,
+            CommandSubKey::TimersAdmitted,
+            CommandSubKey::AggregateRequests,
+            CommandSubKey::ToolAttempt {
+                call_id: call_id.clone(),
+                attempt: 1,
+            },
+            CommandSubKey::ToolRetrySleep {
+                call_id: call_id.clone(),
+                attempt: u32::MAX,
+            },
+            CommandSubKey::ToolAwait {
+                call_id: call_id.clone(),
+            },
+            CommandSubKey::ToolCancelWork {
+                call_id: call_id.clone(),
+            },
+            CommandSubKey::ProcessStart("start:key"),
+            CommandSubKey::ProcessAttachTerminal("process:id:wait:key"),
+            CommandSubKey::ProcessAwait("process:id"),
+            CommandSubKey::AggregateChild("0"),
+            CommandSubKey::AggregateChild("0:nested:row"),
+        ];
+        for key in keys {
+            let spelling = key.to_string();
+            assert_eq!(CommandSubKey::parse(&spelling), Some(key));
+        }
+        let attempt = CommandSubKey::ToolAttempt {
+            call_id: call_id.clone(),
+            attempt: 2,
+        };
+        assert_eq!(attempt.to_string(), format!("{call_id}:attempt:2"));
+        assert_eq!(
+            CommandSubKey::ToolAwait {
+                call_id: call_id.clone()
+            }
+            .to_string(),
+            format!("{call_id}:await")
+        );
+        for invalid in ["attempt:1", "await", "process:await:", "child:", "nonsense"] {
+            assert!(CommandSubKey::parse(invalid).is_none(), "{invalid}");
+        }
+        for tail in [
+            "attempt:01",
+            "attempt:-1",
+            "attempt:4294967296",
+            "await:extra",
+        ] {
+            assert!(
+                CommandSubKey::parse(&format!("{call_id}:{tail}")).is_none(),
+                "{tail}"
+            );
+        }
+    }
 
     #[test]
     fn turn_invocations_use_admitted_scope_without_losing_turn_attribution() {

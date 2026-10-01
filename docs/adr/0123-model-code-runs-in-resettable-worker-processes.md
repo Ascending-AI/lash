@@ -119,9 +119,10 @@ policy.
   `RlmWorkerEnvelope` (the durable header and one fragment per binding) and
   reads back an `RlmWorkerCapture` (the header and the changed and
   unchanged fragments). Both deny unknown fields, so a capture that names a
-  grant is refused. The root the parent persists takes
-  `deferred_resolutions` and `deferred_trigger_resolutions` from the
-  parent's own state only.
+  grant is refused. Deferred tool outcomes have one durable home in the
+  journaled resolution effect. The parent keeps an in-memory `DeferredLink`
+  while executing the cell; the snapshot carries no copy. The root takes
+  `deferred_trigger_resolutions` from the parent's own state.
 - A process segment's worker returns the VM bytes of its continuation only;
   the segment's ledgers and route stay in the parent's envelope.
 - Laws: `rlm_worker_envelope_carries_no_grant_or_binding` (a sentinel in an

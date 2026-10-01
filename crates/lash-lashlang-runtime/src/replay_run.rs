@@ -207,8 +207,8 @@ impl LashlangReplayNamespace {
 /// apart: the shape of the rows at its ordinal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandShape {
-    /// A tool call: `{command}:attempt:{n}` and its sub-rows, its deferred
-    /// `{command}:await`, and a declared start's rows — the start
+    /// A tool call: `{command}:{call_id}:attempt:{n}` and its sub-rows, its deferred
+    /// `{command}:{call_id}:await`, and a declared start's rows — the start
     /// (`{command}:process:start:{key}`) and its armed terminal
     /// (`{command}:process:attach-terminal:{id}:{key}`).
     ToolCall,
@@ -231,19 +231,22 @@ pub enum CommandShape {
 
 impl CommandShape {
     fn of_sub_key(sub: &str) -> Option<Self> {
-        match sub {
-            "" => Some(Self::Value),
-            "sleep" => Some(Self::Sleep),
-            "signal" => Some(Self::SignalWait),
-            "await" => Some(Self::ToolCall),
-            "timers-admitted" => Some(Self::Aggregate),
-            _ if sub.starts_with("attempt:") => Some(Self::ToolCall),
-            _ if sub.starts_with("process:attach-terminal:") => Some(Self::ToolCall),
-            _ if sub.starts_with("process:start:") => Some(Self::ToolCall),
-            _ if sub.starts_with("child:") => Some(Self::Aggregate),
-            _ if sub.starts_with("process:await:") => Some(Self::AwaitHandle),
-            _ => None,
-        }
+        use lash_core::runtime::causal::CommandSubKey;
+        Some(match CommandSubKey::parse(sub)? {
+            CommandSubKey::Value => Self::Value,
+            CommandSubKey::Sleep => Self::Sleep,
+            CommandSubKey::SignalWait => Self::SignalWait,
+            CommandSubKey::TimersAdmitted
+            | CommandSubKey::AggregateRequests
+            | CommandSubKey::AggregateChild(_) => Self::Aggregate,
+            CommandSubKey::ToolAttempt { .. }
+            | CommandSubKey::ToolRetrySleep { .. }
+            | CommandSubKey::ToolAwait { .. }
+            | CommandSubKey::ToolCancelWork { .. }
+            | CommandSubKey::ProcessStart(_)
+            | CommandSubKey::ProcessAttachTerminal(_) => Self::ToolCall,
+            CommandSubKey::ProcessAwait(_) => Self::AwaitHandle,
+        })
     }
 
     fn label(self) -> &'static str {

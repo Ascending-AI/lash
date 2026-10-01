@@ -646,24 +646,18 @@ async fn execute_code_in_worker_scope(
     // (FIG-3587): a tool removed or changed since keeps its recorded binding,
     // and calls on it are served only from their recorded results.
     let cell_bindings = match state
-        .deferred_resolutions
-        .link_key
-        .clone()
+        .deferred_link
+        .as_ref()
         .filter(|_| !referenced.is_empty())
     {
-        Some(link_key) => {
+        Some(link) => {
             let _phase = ctx.named_phase("rlm_lashlang.cell_tool_bindings");
-            let excluded = state
-                .deferred_resolutions
-                .resolutions
-                .keys()
-                .cloned()
-                .collect::<BTreeSet<_>>();
+            let excluded = link.outcomes.keys().cloned().collect::<BTreeSet<_>>();
             match lash_lashlang_runtime::journal_cell_tool_bindings(
                 &referenced,
                 ctx.tool_catalog().as_ref(),
                 &excluded,
-                &link_key.address.replay_key,
+                &link.key.address.replay_key,
                 &ctx,
             )
             .await
@@ -688,14 +682,14 @@ async fn execute_code_in_worker_scope(
     let live_catalog = ctx.tool_catalog();
     let link_catalog = cell_bindings.link_catalog(&live_catalog);
 
-    let mut host_environment = if parsed && state.deferred_resolutions.link_key.is_some() {
+    let mut host_environment = if let Some(link) = state.deferred_link.as_mut().filter(|_| parsed) {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
         match lash_lashlang_runtime::resolve_and_build_deferred_environment_from_references(
             &referenced,
             &effective_surface,
             &link_catalog,
             deferred_tool_resolver.as_ref(),
-            &mut state.deferred_resolutions,
+            link,
             &ctx,
         )
         .await
@@ -858,7 +852,11 @@ async fn execute_code_in_worker_scope(
     if let Err(error) = workers.checkpoint().await {
         return worker_setup_failure(state, &ctx, error);
     }
-    let deferred_execution_grants = deferred_execution_grants(&state.deferred_resolutions);
+    let deferred_execution_grants = state
+        .deferred_link
+        .as_ref()
+        .map(deferred_execution_grants)
+        .unwrap_or_default();
     let lashlang_execution_trace = foreground_lashlang_execution_trace(
         &ctx,
         &linked_module.artifact,
@@ -1424,27 +1422,32 @@ fn select_deferred_resolution_link(
     ctx: &RuntimeExecutionContext<'_>,
 ) {
     let Some(invocation) = ctx.parent_invocation() else {
-        state.deferred_resolutions.clear_link();
+        state.deferred_link = None;
         state.deferred_trigger_resolutions.clear_link();
         return;
     };
     let Some(link_key) =
         lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
     else {
-        state.deferred_resolutions.clear_link();
+        state.deferred_link = None;
         state.deferred_trigger_resolutions.clear_link();
         return;
     };
 
-    state.deferred_resolutions.select_link(link_key.clone());
+    match state.deferred_link.as_mut() {
+        Some(link) => link.select_link(link_key.clone()),
+        None => {
+            state.deferred_link = Some(lash_lashlang_runtime::DeferredLink::new(link_key.clone()));
+        }
+    }
     state.deferred_trigger_resolutions.select_link(link_key);
 }
 
 fn deferred_execution_grants(
-    record: &lash_lashlang_runtime::DeferredResolutionRecord,
+    record: &lash_lashlang_runtime::DeferredLink,
 ) -> BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant> {
     record
-        .resolutions
+        .outcomes
         .values()
         .filter_map(|resolution| {
             let lash_lashlang_runtime::Resolution::Resolved(grant) = resolution else {

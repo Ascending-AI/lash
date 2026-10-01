@@ -670,21 +670,13 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
 
         let initial_budget = state::measure_snapshot(&initial);
         let changed_budget = state::measure_snapshot(&changed);
-        // Snapshot v19 adds the empty, separate deferred-trigger record to
-        // every root; it contributes the same fixed 43-byte cost to both.
-        // The pinned sizes gained two bytes with the single-language cutover:
-        // the checkpoint carries the engine id, and `typescript` is two bytes
-        // longer than the retired `lashlang`. FIG-3394 added 278 bytes to both:
-        // the fixture now carries a production effect address, so the root
-        // persists the two deferred-resolution link identities it always
-        // persisted in production — once per checkpoint, not per component.
-        // Snapshot v23 (FIG-3605) carries each binding as a durable fragment of
-        // the heap — its root value and the objects it carries — instead of a
-        // one-binding snapshot of its host view, and the root gains the heap
-        // header: a large list costs fewer wrapper bytes per binding. FIG-4379
-        // drops the 48 bytes of the turn state's protocol turn options.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_174);
-        assert_eq!(changed_budget.checkpoint_bytes, 13_604);
+        println!(
+            "RLM_SNAPSHOT_BUDGET initial={} changed={}",
+            initial_budget.checkpoint_bytes, changed_budget.checkpoint_bytes
+        );
+        // Pin the captured root and changed leaves; tool outcomes stay in the journal.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_000);
+        assert_eq!(changed_budget.checkpoint_bytes, 13_430);
     });
 }
 
@@ -917,15 +909,9 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             measured.len()
         );
         assert_eq!(full_state_bytes, 136_711);
-        // FIG-3394: the per-commit floor grew by exactly the 278 bytes of the
-        // two deferred-resolution link identities the root now persists; the
-        // flat state, which carries no root, is unchanged. Snapshot v23
-        // (FIG-3605) writes the changed binding as a durable heap fragment
-        // rather than a one-binding host-view snapshot, which sheds wrapper
-        // bytes, and adds the heap header to the root. FIG-4379 drops the 48
-        // bytes of the turn state's protocol turn options.
-        assert_eq!(minimum, 19_771);
-        assert_eq!(maximum, 19_773);
+        // Pin the measured root and changed leaves; tool outcomes stay in the journal.
+        assert_eq!(minimum, 19_597);
+        assert_eq!(maximum, 19_599);
     });
 }
 
@@ -1064,13 +1050,9 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
             measured.len()
         );
-        // FIG-3394: same +278 as the single-binding case — the two
-        // deferred-resolution link identities ride in the root once, not per
-        // binding. Snapshot v23 (FIG-3605) adds the heap header to the root and
-        // writes each binding as a durable heap fragment. FIG-4379 drops the 48
-        // bytes of the turn state's protocol turn options.
-        assert_eq!(minimum, 94_706);
-        assert_eq!(maximum, 94_708);
+        // Pin the measured root and changed leaves; tool outcomes stay in the journal.
+        assert_eq!(minimum, 94_532);
+        assert_eq!(maximum, 94_534);
     });
 }
 

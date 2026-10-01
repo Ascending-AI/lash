@@ -490,7 +490,10 @@ impl RuntimeExecutionContext<'_> {
         );
         let recorded = self
             .journaled_language_value_with(
-                format!("{group_key}:requests"),
+                format!(
+                    "{group_key}:{}",
+                    crate::runtime::causal::CommandSubKey::AggregateRequests
+                ),
                 RETAINED_REQUEST_OPERATION.to_string(),
                 move || async move { Ok(live) },
             )
@@ -1250,7 +1253,10 @@ impl RuntimeExecutionContext<'_> {
 /// effect address formation mints for it, and the `child_replay_key` its
 /// durable final names.
 fn group_child_replay_key(group_key: &str, position: usize) -> String {
-    format!("{group_key}:child:{position}")
+    format!(
+        "{group_key}:{}",
+        crate::runtime::causal::CommandReplayKey::child_suffix(position)
+    )
 }
 
 /// The presentation of a tool child whose durable final is the cancel

@@ -65,8 +65,8 @@ pub use lash_core::testing::{
 /// deferred link admits for an [`exec_code_invocation`]-built invocation —
 /// the infallible counterpart of
 /// [`DeferredResolutionLinkKey::from_exec_code_invocation`](crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation)
-/// for a fixture known to carry an admitted `ExecCode` effect address. Seed a
-/// [`DeferredResolutionRecord`](crate::tools::DeferredResolutionRecord) with it
+/// for a fixture known to carry an admitted `ExecCode` effect address. Construct a
+/// [`DeferredLink`](crate::tools::DeferredLink) with it
 /// when a host test drives
 /// [`compile_with_deferred_resolution`](crate::tools::compile_with_deferred_resolution).
 #[cfg(feature = "rlm")]

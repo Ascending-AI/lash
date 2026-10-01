@@ -942,7 +942,10 @@ pub struct CheckpointAdmittedSet {
 /// beneath `{call id}:cancel-work` under the call's lineage, so every redrive
 /// re-issues the same command.
 pub fn tool_cancel_work_replay_suffix(call_id: &crate::ToolCallId) -> String {
-    format!("{call_id}:cancel-work")
+    crate::runtime::causal::CommandSubKey::ToolCancelWork {
+        call_id: call_id.clone(),
+    }
+    .to_string()
 }
 
 impl ProcessCommand {
@@ -951,8 +954,10 @@ impl ProcessCommand {
     /// exists only so the executor can refuse the shape by name.
     pub fn start_effect_id(start_key: Option<&crate::StartKey>) -> String {
         match start_key {
-            Some(start_key) => format!("process:start:{start_key}"),
-            None => "process:start:unkeyed".to_string(),
+            Some(start_key) => {
+                crate::runtime::causal::CommandSubKey::ProcessStart(start_key.as_str()).to_string()
+            }
+            None => crate::runtime::causal::CommandSubKey::ProcessStart("unkeyed").to_string(),
         }
     }
 
@@ -997,13 +1002,19 @@ impl ProcessCommand {
                 )
             }
             Self::DeleteSession { session_id } => format!("process:delete-session:{session_id}"),
-            Self::Await { process_id } => format!("process:await:{process_id}"),
+            Self::Await { process_id } => {
+                crate::runtime::causal::CommandSubKey::ProcessAwait(process_id.as_ref()).to_string()
+            }
             // One arming per (process, wait): a turn may park several
             // waits on the same process, and each redrive re-issues the
             // same id so the arming replays against its own journal entry
             // instead of colliding with the terminal wait above.
             Self::AttachTerminal { process_id, key } => {
-                format!("process:attach-terminal:{process_id}:{}", key.key_id)
+                crate::runtime::causal::CommandSubKey::ProcessAttachTerminal(&format!(
+                    "{process_id}:{}",
+                    key.key_id
+                ))
+                .to_string()
             }
             Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
             Self::Signal { signal } => format!(

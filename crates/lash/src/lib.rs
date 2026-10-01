@@ -471,10 +471,10 @@ pub mod tools {
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
-        DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
-        DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError,
-        Resolution as DeferredToolResolution, SharedDeferredToolResolver,
-        ToolGrant as DeferredToolGrant, compile_with_deferred_resolution,
+        DeferredLink, DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
+        DeferredToolResolver, RecordedGrantInstallError, Resolution as DeferredToolResolution,
+        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant,
+        compile_with_deferred_resolution,
     };
     /// The whole tool-authoring support surface: [`StaticToolProvider`] /
     /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers

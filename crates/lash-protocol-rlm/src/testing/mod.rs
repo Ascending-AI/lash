@@ -502,3 +502,14 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     )
     .await
 }
+
+#[cfg(test)]
+pub(crate) fn deferred_link() -> lash_lashlang_runtime::DeferredLink {
+    lash_lashlang_runtime::DeferredLink::new(lash_lashlang_runtime::DeferredResolutionLinkKey {
+        address: lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::turn("test-session", "turn-1"),
+            "replay:effect-1",
+        )
+        .expect("valid fixture link"),
+    })
+}

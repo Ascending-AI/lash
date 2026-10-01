@@ -233,46 +233,39 @@ impl DeferredResolutionLinkKey {
     }
 }
 
-/// A per-link record of every deferred resolution, keyed by call-path within
-/// the execution scope. Replay/recovery applies the record so the resolver is
-/// never called twice for the same link. Captures both `Resolved` grants (with
-/// their Tool Execution Binding) and negative `NotAvailable` results.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct DeferredResolutionRecord {
-    /// The code link whose outcomes are stored in `resolutions`. `None` is the
-    /// inactive state before an executor selects its first link.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub link_key: Option<DeferredResolutionLinkKey>,
-    pub resolutions: BTreeMap<String, Resolution>,
+/// The in-memory projection of one journaled deferred resolution effect.
+/// An active link always has its admitted identity. The journal owns its
+/// outcomes; this projection is never serialized into execution state.
+#[derive(Clone, Debug)]
+pub struct DeferredLink {
+    pub key: DeferredResolutionLinkKey,
+    pub outcomes: BTreeMap<String, Resolution>,
 }
 
-impl DeferredResolutionRecord {
-    /// Select the active code link, retaining outcomes only when the stable
-    /// identity matches. A new link replaces the entire record so authority and
-    /// negative availability results cannot leak across code effects.
-    pub fn select_link(&mut self, link_key: DeferredResolutionLinkKey) {
-        if self.link_key.as_ref() != Some(&link_key) {
-            self.link_key = Some(link_key);
-            self.resolutions.clear();
+impl DeferredLink {
+    pub fn new(key: DeferredResolutionLinkKey) -> Self {
+        Self {
+            key,
+            outcomes: BTreeMap::new(),
         }
     }
 
-    /// Such an invocation cannot safely reuse durable resolution outcomes.
-    pub fn clear_link(&mut self) {
-        self.link_key = None;
-        self.resolutions.clear();
+    pub fn select_link(&mut self, key: DeferredResolutionLinkKey) {
+        if self.key != key {
+            *self = Self::new(key);
+        }
     }
 
     pub fn get(&self, path: &str) -> Option<&Resolution> {
-        self.resolutions.get(path)
+        self.outcomes.get(path)
     }
 
     pub fn record(&mut self, path: impl Into<String>, resolution: Resolution) {
-        self.resolutions.insert(path.into(), resolution);
+        self.outcomes.insert(path.into(), resolution);
     }
 
     pub fn is_empty(&self) -> bool {
-        self.resolutions.is_empty()
+        self.outcomes.is_empty()
     }
 }
 
@@ -318,13 +311,13 @@ fn already_provided(host_environment: &LashlangHostEnvironment, call_path: &str)
 /// compiles via a cache) against it.
 ///
 /// The effect journal commits before route registration or language execution;
-/// `record` remains the checkpointed in-memory projection. The flat Tool
+/// `record` remains an in-memory projection of that effect. The flat Tool
 /// Catalog is never mutated — resolution is link-scoped only.
 pub async fn resolve_and_fold_deferred(
     program: &lashlang::Program,
     mut host_environment: LashlangHostEnvironment,
     resolver: Option<&SharedDeferredToolResolver>,
-    record: &mut DeferredResolutionRecord,
+    record: &mut DeferredLink,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<LashlangHostEnvironment, DeferredResolutionError> {
     let referenced = lashlang::referenced_module_call_paths(program);
@@ -337,7 +330,7 @@ pub async fn resolve_and_fold_deferred(
         journal_deferred_outcomes(referenced, move || Ok(ambient_paths), resolver, record, ctx)
             .await?;
     apply_deferred_outcomes(&mut host_environment, &outcomes, resolver, ctx)?;
-    record.resolutions = outcomes;
+    record.outcomes = outcomes;
 
     Ok(host_environment)
 }
@@ -352,7 +345,7 @@ pub async fn resolve_and_build_deferred_environment(
     surface: &LashlangSurface,
     catalog: &lash_core::ToolCatalog,
     resolver: Option<&SharedDeferredToolResolver>,
-    record: &mut DeferredResolutionRecord,
+    record: &mut DeferredLink,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<LashlangHostEnvironment, DeferredResolutionError> {
     let referenced = lashlang::referenced_module_call_paths(program);
@@ -374,7 +367,7 @@ pub async fn resolve_and_build_deferred_environment_from_references(
     surface: &LashlangSurface,
     catalog: &lash_core::ToolCatalog,
     resolver: Option<&SharedDeferredToolResolver>,
-    record: &mut DeferredResolutionRecord,
+    record: &mut DeferredLink,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<LashlangHostEnvironment, DeferredResolutionError> {
     if referenced.is_empty() {
@@ -383,7 +376,7 @@ pub async fn resolve_and_build_deferred_environment_from_references(
             .map_err(|source| DeferredResolutionError::Ambient(Box::new(source)));
     }
     let recorded_paths = record
-        .resolutions
+        .outcomes
         .keys()
         .filter(|path| referenced.contains(*path))
         .cloned()
@@ -423,7 +416,7 @@ pub async fn resolve_and_build_deferred_environment_from_references(
             .map_err(|source| DeferredResolutionError::Ambient(Box::new(source)))?,
     };
     apply_deferred_outcomes(&mut host_environment, &outcomes, resolver, ctx)?;
-    record.resolutions = outcomes;
+    record.outcomes = outcomes;
 
     Ok(host_environment)
 }
@@ -437,7 +430,7 @@ pub async fn compile_with_deferred_resolution(
     program: lashlang::Program,
     host_environment: LashlangHostEnvironment,
     resolver: Option<&SharedDeferredToolResolver>,
-    record: &mut DeferredResolutionRecord,
+    record: &mut DeferredLink,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<lash_vm_client::service::CompiledModule, DeferredLinkError> {
     let host_environment =
@@ -778,8 +771,18 @@ mod tests {
         ])
     }
 
+    fn deferred_link() -> DeferredLink {
+        DeferredLink::new(DeferredResolutionLinkKey {
+            address: lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn("session", "turn"),
+                "exec-code:0",
+            )
+            .expect("valid test link"),
+        })
+    }
+
     async fn link_context(
-        record: &mut DeferredResolutionRecord,
+        record: &mut DeferredLink,
     ) -> lash_core::RuntimeExecutionContext<'static> {
         link_context_with_host(
             record,
@@ -789,7 +792,7 @@ mod tests {
     }
 
     fn link_context_with_host(
-        record: &mut DeferredResolutionRecord,
+        record: &mut DeferredLink,
         replay_key: &str,
         effect_host: Arc<dyn lash_core::EffectHost>,
     ) -> lash_core::RuntimeExecutionContext<'static> {
@@ -803,11 +806,7 @@ mod tests {
         );
         let link_key = DeferredResolutionLinkKey::from_exec_code_invocation(&invocation)
             .expect("effect invocation has a link identity");
-        if record.link_key.is_none() {
-            record.link_key = Some(link_key);
-        } else {
-            record.select_link(link_key);
-        }
+        record.select_link(link_key);
         // A deferred-resolution context journals through `effect_host` and
         // never publishes an execution environment.
         lash_core::testing::code_execution_context_with_invocation(
@@ -858,7 +857,7 @@ mod tests {
     async fn resolves_deferred_call_path_and_records_grant() {
         let harness = resolver_harness();
         let program = web_fetch_url_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx = link_context(&mut record).await;
 
         compile_with_deferred_resolution(
@@ -889,7 +888,7 @@ mod tests {
         let harness = resolver_harness();
         let program = web_fetch_url_program();
 
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx = link_context(&mut record).await;
         compile_with_deferred_resolution(
             &lash_vm_client::service::Service::default(),
@@ -934,7 +933,7 @@ mod tests {
     async fn not_available_surfaces_clean_link_error_and_is_recorded() {
         let harness = resolver_harness();
         let program = mystery_run_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx = link_context(&mut record).await;
 
         let err = compile_with_deferred_resolution(
@@ -973,7 +972,7 @@ mod tests {
     async fn resolves_unknown_paths_in_one_record_filtered_batch() {
         let harness = resolver_harness();
         let program = web_mystery_web_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx = link_context(&mut record).await;
 
         let host = resolve_and_fold_deferred(
@@ -1019,7 +1018,7 @@ mod tests {
     async fn excludes_recorded_paths_from_a_non_empty_batch() {
         let harness = resolver_harness();
         let program = web_then_mystery_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         record.record(
             "web.fetch",
             Resolution::Resolved(Box::new(grant("fetch_url", "web", "fetch"))),
@@ -1055,7 +1054,7 @@ mod tests {
         let mut ambient = empty_host_environment();
         fold_grant(&mut ambient, &grant("ambient_fetch", "web", "fetch"))
             .expect("ambient grant folds");
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         record.record("web.fetch", Resolution::NotAvailable);
         let ctx = link_context(&mut record).await;
 
@@ -1089,7 +1088,7 @@ mod tests {
             .with_tool_binding(ToolBinding::new(["web"], "fetch")),
         );
         let captured_id = captured.definition.manifest.id.to_string();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         record.record("web.fetch", Resolution::Resolved(Box::new(captured)));
         let ctx = link_context(&mut record).await;
 
@@ -1147,7 +1146,7 @@ mod tests {
                 ToolBinding::new(["web"], "fetch").with_authority_type("CapturedWeb"),
             ),
         );
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         record.record("web.fetch", Resolution::Resolved(Box::new(captured)));
         let ctx = link_context(&mut record).await;
 
@@ -1169,7 +1168,7 @@ mod tests {
         let harness = resolver_harness();
         let effect_host = fault_journal_host(JournalFault::AfterResolverReturn).await;
         let program = web_fetch_url_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx =
             link_context_with_host(&mut record, "exec-code:fault-before", effect_host.clone());
 
@@ -1182,10 +1181,10 @@ mod tests {
         )
         .await;
         assert!(matches!(first, Err(DeferredResolutionError::Journal(_))));
-        assert!(record.resolutions.is_empty());
+        assert!(record.outcomes.is_empty());
         assert!(harness.installed.lock_recover().is_empty());
 
-        let mut restarted_record = DeferredResolutionRecord::default();
+        let mut restarted_record = deferred_link();
         let restarted_ctx =
             link_context_with_host(&mut restarted_record, "exec-code:fault-before", effect_host);
         resolve_and_fold_deferred(
@@ -1206,7 +1205,7 @@ mod tests {
         let harness = resolver_harness();
         let effect_host = fault_journal_host(JournalFault::AfterDurableRecord).await;
         let program = web_fetch_url_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx = link_context_with_host(&mut record, "exec-code:fault-after", effect_host.clone());
 
         let first = resolve_and_fold_deferred(
@@ -1218,9 +1217,9 @@ mod tests {
         )
         .await;
         assert!(matches!(first, Err(DeferredResolutionError::Journal(_))));
-        assert!(record.resolutions.is_empty());
+        assert!(record.outcomes.is_empty());
 
-        let mut restarted_record = DeferredResolutionRecord::default();
+        let mut restarted_record = deferred_link();
         let restarted_ctx =
             link_context_with_host(&mut restarted_record, "exec-code:fault-after", effect_host);
         resolve_and_fold_deferred(
@@ -1241,7 +1240,7 @@ mod tests {
         let harness = resolver_harness();
         let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
-        let mut first_record = DeferredResolutionRecord::default();
+        let mut first_record = deferred_link();
         let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:journal-replay",
@@ -1263,7 +1262,7 @@ mod tests {
             &grant("ambient_replacement", "web", "fetch"),
         )
         .expect("replacement folds into ambient environment");
-        let mut replayed_record = DeferredResolutionRecord::default();
+        let mut replayed_record = deferred_link();
         let replay_ctx = link_context_with_host(
             &mut replayed_record,
             "exec-code:journal-replay",
@@ -1296,7 +1295,7 @@ mod tests {
         let harness = resolver_harness();
         let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
-        let mut first_record = DeferredResolutionRecord::default();
+        let mut first_record = deferred_link();
         let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:surface-journal-replay",
@@ -1315,7 +1314,7 @@ mod tests {
 
         let surface = surface_with_shared_fetch_modules(&["web"]);
         let catalog = incompatible_shared_fetch_catalog();
-        let mut replayed_record = DeferredResolutionRecord::default();
+        let mut replayed_record = deferred_link();
         let replay_ctx = link_context_with_host(
             &mut replayed_record,
             "exec-code:surface-journal-replay",
@@ -1360,7 +1359,7 @@ mod tests {
         let harness = resolver_harness();
         let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
-        let mut first_record = DeferredResolutionRecord::default();
+        let mut first_record = deferred_link();
         let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:surface-unrelated-collision",
@@ -1379,7 +1378,7 @@ mod tests {
 
         let surface = surface_with_shared_fetch_modules(&["web", "unrelated"]);
         let catalog = incompatible_shared_fetch_catalog();
-        let mut replayed_record = DeferredResolutionRecord::default();
+        let mut replayed_record = deferred_link();
         let replay_ctx = link_context_with_host(
             &mut replayed_record,
             "exec-code:surface-unrelated-collision",
@@ -1421,7 +1420,7 @@ mod tests {
         let shared: SharedDeferredToolResolver = resolver.clone();
         let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx = link_context_with_host(&mut record, "exec-code:route", effect_host.clone());
 
         let first = resolve_and_fold_deferred(
@@ -1440,9 +1439,9 @@ mod tests {
                 ..
             }
         ));
-        assert!(record.resolutions.is_empty());
+        assert!(record.outcomes.is_empty());
 
-        let mut restarted_record = DeferredResolutionRecord::default();
+        let mut restarted_record = deferred_link();
         let restarted_ctx =
             link_context_with_host(&mut restarted_record, "exec-code:route", effect_host);
         let effective = resolve_and_fold_deferred(
@@ -1473,7 +1472,7 @@ mod tests {
         let shared: SharedDeferredToolResolver = resolver.clone();
         let effect_host = fault_journal_host(JournalFault::None).await;
         let program = web_fetch_url_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let ctx = link_context_with_host(&mut record, "exec-code:revoked", effect_host);
 
         for replacement in ["replacement_fetch", "another_fetch"] {
@@ -1507,7 +1506,7 @@ mod tests {
     async fn independent_link_can_accept_a_new_ambient_binding() {
         let harness = resolver_harness();
         let program = mystery_run_program();
-        let mut first_record = DeferredResolutionRecord::default();
+        let mut first_record = deferred_link();
         let first_ctx = link_context_with_host(
             &mut first_record,
             "exec-code:first",
@@ -1527,7 +1526,7 @@ mod tests {
         let mut ambient = empty_host_environment();
         fold_grant(&mut ambient, &grant("ambient_run", "mystery", "run"))
             .expect("new ambient definition folds");
-        let mut second_record = DeferredResolutionRecord::default();
+        let mut second_record = deferred_link();
         let second_ctx = link_context_with_host(
             &mut second_record,
             "exec-code:second",
@@ -1549,7 +1548,7 @@ mod tests {
     #[tokio::test]
     async fn deferred_record_refuses_a_different_admitted_link_address() {
         let program = web_fetch_program();
-        let mut record = DeferredResolutionRecord::default();
+        let mut record = deferred_link();
         let _record_context = link_context_with_host(
             &mut record,
             "exec-code:record",

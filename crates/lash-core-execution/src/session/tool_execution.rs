@@ -1043,6 +1043,10 @@ impl RuntimeExecutionContext<'_> {
             provider_call_id: pending.provider_call_id.clone(),
         };
         let call_id = &ids.call_id;
+        let replay_suffix = crate::runtime::causal::CommandSubKey::ToolAwait {
+            call_id: call_id.clone(),
+        }
+        .to_string();
         let fallback;
         let parent = if let Some(parent) = parent_invocation.as_ref() {
             parent
@@ -1050,16 +1054,15 @@ impl RuntimeExecutionContext<'_> {
             fallback = crate::RuntimeInvocation::effect(
                 crate::EffectAddress::new(
                     self.dispatch.effect_controller.execution_scope().clone(),
-                    format!("tool:{call_id}:await"),
+                    format!("tool:{replay_suffix}"),
                 )
                 .expect("tool await carries an admitted effect scope"),
                 self.dispatch.parentless_attribution(),
-                format!("tool:{call_id}:await"),
+                format!("tool:{replay_suffix}"),
             );
             &fallback
         };
         let parent_effect_id = parent.effect_id().unwrap_or("tool");
-        let replay_suffix = format!("{call_id}:await");
         let invocation = crate::runtime::causal::child_effect_invocation(
             self.dispatch.effect_controller.execution_scope(),
             parent,

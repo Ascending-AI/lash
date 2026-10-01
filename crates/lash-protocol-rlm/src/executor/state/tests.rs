@@ -13,82 +13,14 @@ use serde_json::json;
 #[test]
 fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     use lash_lashlang_runtime::{
-        DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredTriggerResolutionRecord,
-        Resolution, ToolGrant, TriggerGrant, TriggerResolution,
+        DeferredResolutionLinkKey, DeferredTriggerResolutionRecord, TriggerGrant, TriggerResolution,
     };
-    use lash_sansio::{
-        CompactToolContract, ProjectionMode, SchemaContract, SchemaProjectionOverride,
-        SchemaProjectionPolicy, ToolArgumentProjectionPolicy, ToolDefinition, ToolOutputContract,
-        ToolRetryPolicy,
-    };
-
-    let compact_contract = CompactToolContract {
-        name: "lookup".to_string(),
-        signature: "lookup(query: string)".to_string(),
-        returns: "object".to_string(),
-        parameters: vec![json!({"name": "query"})],
-        return_fields: vec![json!({"name": "answer"})],
-        description: "Look up an answer".to_string(),
-        examples: vec!["lookup(\"weather\")".to_string()],
-    };
-    let schema_override = SchemaProjectionOverride {
-        dialect: "test".to_string(),
-        schema: json!({"type": "string"}),
-    };
-    let schema_projection = SchemaProjectionPolicy {
-        mode: ProjectionMode::Exact,
-        overrides: vec![schema_override.clone()],
-    };
-    let schema_contract = SchemaContract {
-        canonical: json!({"type": "object"}),
-        projection: schema_projection.clone(),
-    };
-    let retry_policy = ToolRetryPolicy::Safe {
-        max_attempts: 3,
-        base_delay_ms: 10,
-        max_delay_ms: 100,
-    };
-    let output_contract = ToolOutputContract::FromInputSchema {
-        input_field: "schema".to_string(),
-        default_schema: Some(json!({"type": "object"})),
-    };
-    let argument_projection = ToolArgumentProjectionPolicy::PreserveProjectedRefsInField {
-        field: "payload".to_string(),
-    };
-    let mut definition = ToolDefinition::raw(
-        "tool.lookup",
-        "lookup",
-        "Look up an answer",
-        json!({"type": "object"}),
-        json!({"type": "object"}),
-    );
-    definition.manifest.inline = false;
-    definition.manifest.compact_contract = Some(std::sync::Arc::new(compact_contract.clone()));
-    definition
-        .manifest
-        .bindings
-        .insert("service".to_string(), json!({"account": "primary"}));
-    definition.manifest.argument_projection = argument_projection.clone();
-    definition.manifest.retry_policy = retry_policy;
-    definition.contract.input_schema = schema_contract.clone();
-    definition.contract.output_schema = schema_contract.clone();
-    definition.contract.output_contract = output_contract.clone();
-    definition.contract.examples = vec!["lookup weather".to_string()];
-
-    let grant = ToolGrant::new(definition.clone())
-        .with_source_id("registry")
-        .with_execution_binding(json!({"route": "primary"}));
-    let resolution = Resolution::Resolved(Box::new(grant));
     let link_key = DeferredResolutionLinkKey {
         address: lash_core::EffectAddress::new(
             lash_core::ExecutionScope::turn("session", "turn"),
             "replay",
         )
         .expect("valid snapshot test address"),
-    };
-    let deferred_resolutions = DeferredResolutionRecord {
-        link_key: Some(link_key.clone()),
-        resolutions: BTreeMap::from([("lookup".to_string(), resolution.clone())]),
     };
     let trigger_grant: TriggerGrant = serde_json::from_value(json!({
         "provider_id": "calendar",
@@ -125,7 +57,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
                 },
             ),
         ]),
-        deferred_resolutions: deferred_resolutions.clone(),
         deferred_trigger_resolutions: deferred_trigger_resolutions.clone(),
     };
 
@@ -136,7 +67,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             "engine",
             "state_header",
             "globals",
-            "deferred_resolutions",
             "deferred_trigger_resolutions",
         ],
         &[serialized_fields(&root)],
@@ -150,11 +80,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
                 component: "sha256:test".to_string(),
             }),
         ],
-    );
-    assert_field_schema(
-        DEFERRED_RESOLUTION_FIELDS,
-        &["link_key", "resolutions"],
-        &[serialized_fields(&deferred_resolutions)],
     );
     assert_field_schema(
         DEFERRED_LINK_KEY_FIELDS,
@@ -185,88 +110,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             }),
         ],
     );
-    assert_field_schema(
-        RESOLUTION_FIELDS,
-        &["kind", "definition", "source_id", "execution_binding"],
-        &[
-            serialized_fields(&resolution),
-            serialized_fields(&Resolution::NotAvailable),
-        ],
-    );
-    assert_field_schema(
-        TOOL_DEFINITION_FIELDS,
-        &["manifest", "contract"],
-        &[serialized_fields(&definition)],
-    );
-    assert_field_schema(
-        TOOL_MANIFEST_FIELDS,
-        &[
-            "inline",
-            "id",
-            "name",
-            "description",
-            "compact_contract",
-            "bindings",
-            "argument_projection",
-            "retry_policy",
-        ],
-        &[serialized_fields(&definition.manifest)],
-    );
-    assert_field_schema(
-        TOOL_CONTRACT_FIELDS,
-        &[
-            "input_schema",
-            "output_schema",
-            "output_contract",
-            "examples",
-        ],
-        &[serialized_fields(&definition.contract)],
-    );
-    assert_field_schema(
-        SCHEMA_CONTRACT_FIELDS,
-        &["canonical", "projection"],
-        &[serialized_fields(&schema_contract)],
-    );
-    assert_field_schema(
-        SCHEMA_PROJECTION_FIELDS,
-        &["mode", "overrides"],
-        &[serialized_fields(&schema_projection)],
-    );
-    assert_field_schema(
-        SCHEMA_OVERRIDE_FIELDS,
-        &["dialect", "schema"],
-        &[serialized_fields(&schema_override)],
-    );
-    assert_field_schema(
-        COMPACT_CONTRACT_FIELDS,
-        &[
-            "name",
-            "signature",
-            "returns",
-            "parameters",
-            "return_fields",
-            "description",
-            "examples",
-        ],
-        &[serialized_fields(&compact_contract)],
-    );
-    assert_field_schema(
-        RETRY_POLICY_FIELDS,
-        &["type", "max_attempts", "base_delay_ms", "max_delay_ms"],
-        &[serialized_fields(&retry_policy)],
-    );
-    assert_field_schema(
-        OUTPUT_CONTRACT_FIELDS,
-        &["kind", "input_field", "default_schema"],
-        &[serialized_fields(&output_contract)],
-    );
-    assert_field_schema(
-        ARGUMENT_PROJECTION_FIELDS,
-        &["kind", "field"],
-        &[serialized_fields(&argument_projection)],
-    );
-    let encoded = rmp_serde::to_vec_named(&root).expect("encode trigger-bearing root");
-    validate_canonical_root(&encoded).expect("trigger-bearing root is canonical");
 }
 
 fn assert_field_schema(generated: &[&str], expected: &[&str], serialized: &[Vec<String>]) {
@@ -438,15 +281,8 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     // The seeded state is heap-backed from its first host write (FIG-3605),
     // so the retained snapshot carries the heap form's counters and roots.
     assert_eq!(retained_bytes, 5_122_708);
-    // Snapshot v19's separate empty trigger-resolution record adds 43 fixed
-    // root bytes without retaining any additional session payload. The single-language cutover
-    // added the last two: the checkpoint carries the engine id, and
-    // `typescript` is two bytes longer than the retired `lashlang`. Snapshot
-    // v23 (FIG-3605) adds the durable heap header, with the heap's counters,
-    // to the root and writes the changed binding as a durable fragment instead
-    // of a one-binding snapshot. FIG-4379 drops the 48 bytes of the turn
-    // state's protocol turn options: the head's plugin config is their record.
-    assert_eq!(changed_bytes, 118_012);
+    // The encoded root includes trigger metadata; tool outcomes stay in the journal.
+    assert_eq!(changed_bytes, 117_977);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }
@@ -563,18 +399,18 @@ fn canonical_root_recognizes_global_keys_by_position() {
 fn root_classifier_prefers_envelope_entries_over_json_field_names() {
     assert_eq!(
         root_map_order(&canonical_path(&[
-            "deferred_resolutions",
+            "deferred_trigger_resolutions",
             "resolutions",
             "schema"
         ])),
-        CanonicalMapOrder::Declared(RESOLUTION_FIELDS)
+        CanonicalMapOrder::Declared(TRIGGER_RESOLUTION_FIELDS)
     );
     assert_eq!(
         root_map_order(&canonical_path(&[
-            "deferred_resolutions",
+            "deferred_trigger_resolutions",
             "resolutions",
-            "tool",
-            "execution_binding",
+            "trigger",
+            "route",
             "account"
         ])),
         CanonicalMapOrder::Sorted
@@ -592,16 +428,16 @@ fn canonical_resolution_field_order_is_independent_of_key_shape() {
     for key in ["module.operation", "bare", "x].y", "schema"] {
         for reversed in [false, true] {
             let mut bytes = vec![0x81];
-            string(&mut bytes, "deferred_resolutions");
+            string(&mut bytes, "deferred_trigger_resolutions");
             bytes.push(0x81);
             string(&mut bytes, "resolutions");
             bytes.push(0x81);
             string(&mut bytes, key);
             bytes.push(0x82);
             let fields = if reversed {
-                ["source_id", "kind"]
+                ["provider_id", "kind"]
             } else {
-                ["kind", "source_id"]
+                ["kind", "provider_id"]
             };
             for field in fields {
                 string(&mut bytes, field);
@@ -618,73 +454,6 @@ fn canonical_resolution_field_order_is_independent_of_key_shape() {
             }
         }
     }
-}
-
-#[test]
-fn reordered_tool_definition_subtree_is_rejected_not_renormalized() {
-    // Hand-written MessagePack pins ordering independently of serde's encoder.
-    fn string(value: &str) -> Vec<u8> {
-        assert!(value.len() < 32);
-        let mut bytes = vec![0xa0 | u8::try_from(value.len()).expect("fixstr length")];
-        bytes.extend_from_slice(value.as_bytes());
-        bytes
-    }
-    fn map(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
-        assert!(entries.len() < 16);
-        let mut bytes = vec![0x80 | u8::try_from(entries.len()).expect("fixmap length")];
-        for (key, value) in entries {
-            bytes.extend_from_slice(&string(key));
-            bytes.extend_from_slice(&value);
-        }
-        bytes
-    }
-    fn envelope(definition: Vec<u8>) -> Vec<u8> {
-        let resolution = map(vec![
-            ("kind", string("resolved")),
-            ("definition", definition),
-        ]);
-        let resolutions = map(vec![("tool", resolution)]);
-        let deferred = map(vec![("resolutions", resolutions)]);
-        map(vec![("deferred_resolutions", deferred)])
-    }
-
-    let manifest = map(vec![("id", string("tool.t")), ("name", string("t"))]);
-    let schema = map(vec![("canonical", string("schema"))]);
-    let contract = map(vec![("input_schema", schema)]);
-    let definition = map(vec![
-        ("manifest", manifest.clone()),
-        ("contract", contract.clone()),
-    ]);
-    validate_canonical_root(&envelope(definition))
-        .expect("declared definition order must be accepted");
-
-    // Reordering the definition's own fields is a declaration-order violation.
-    let swapped = map(vec![("contract", contract.clone()), ("manifest", manifest)]);
-    let result = validate_canonical_root(&envelope(swapped));
-    assert!(
-        matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("canonical declaration order")),
-        "reordered definition: {result:?}"
-    );
-
-    // Reordering inside the formerly flattened manifest is rejected the same
-    // way; the pre-pass can now declare the order it could not express under
-    // `serde(flatten)`.
-    let manifest_swapped = map(vec![("name", string("t")), ("id", string("tool.t"))]);
-    let definition = map(vec![("manifest", manifest_swapped), ("contract", contract)]);
-    let result = validate_canonical_root(&envelope(definition));
-    assert!(
-        matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("canonical declaration order")),
-        "reordered manifest: {result:?}"
-    );
-
-    // A pre-cutover flat definition body is foreign wire data, not a legacy
-    // shape to normalize: its fields are unknown at the definition map.
-    let flat = map(vec![("id", string("tool.t")), ("name", string("t"))]);
-    let result = validate_canonical_root(&envelope(flat));
-    assert!(
-        matches!(result, Err(RlmSnapshotError::NonCanonicalEnvelope { ref reason, .. }) if reason.contains("unknown field")),
-        "flat definition: {result:?}"
-    );
 }
 
 #[test]
@@ -718,7 +487,7 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
         #[serde(with = "serde_bytes")]
         vars: Vec<u8>,
         files: BTreeMap<String, String>,
-        deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+        deferred_resolutions: serde_json::Value,
     }
     let hydration = lash_core::plugin::HydratedExecutionState {
         root: rmp_serde::to_vec_named(&PreviousEnvelope {
@@ -728,7 +497,7 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
                 .to_canonical_bytes()
                 .expect("previous vars"),
             files: BTreeMap::new(),
-            deferred_resolutions: Default::default(),
+            deferred_resolutions: json!({"resolutions": {}}),
         })
         .expect("previous envelope")
         .into(),
@@ -763,7 +532,7 @@ fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
         engine: &'static str,
         globals: BTreeMap<String, PersistedValue>,
         files: BTreeMap<String, PersistedValue>,
-        deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+        deferred_resolutions: serde_json::Value,
     }
 
     let global_body = canonical_string_global_body(512);
@@ -800,7 +569,7 @@ fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
                 .into_iter()
                 .collect(),
                 files,
-                deferred_resolutions: Default::default(),
+                deferred_resolutions: json!({"resolutions": {}}),
             })
             .expect("encode previous root")
             .into(),
@@ -833,7 +602,7 @@ fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
         engine: &'static str,
         globals: BTreeMap<String, PersistedValue>,
         files: BTreeMap<String, PersistedValue>,
-        deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+        deferred_resolutions: serde_json::Value,
     }
 
     let hydration = lash_core::plugin::HydratedExecutionState {
@@ -842,7 +611,7 @@ fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
             engine: "lashlang",
             globals: BTreeMap::new(),
             files: BTreeMap::new(),
-            deferred_resolutions: Default::default(),
+            deferred_resolutions: json!({"resolutions": {}}),
         })
         .expect("encode v14 root with unexpected files field")
         .into(),
@@ -889,50 +658,23 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// moves both sides together, and the root validator deliberately accepts
 /// any declared-field order, so the same logical state could silently
 /// acquire different bytes — and therefore a different component identity —
-/// without a version bump. These bytes are that pin. If this test fails, the
-/// persisted shape changed: decide on a version bump, then update the
-/// golden, never the reverse.
+/// without detection. These bytes pin the current shape. Under the pre-1.0
+/// version freeze, regenerate this witness from the encoder after an intended
+/// shape change; the version stays fixed.
 // The golden pins N's encoding; the synthetic N+1 moves the root's stamps.
 #[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn version_26_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "86a776657273696f6e1aa6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "85a776657273696f6e1aa6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
         "0ea7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
         "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
         "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
         "3737383234633263313231663030663133626563343139626164306464663766653930646639313730653732303139643938",
-        "633732356164653966363561b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657981a76164647265",
-        "737382af657865637574696f6e5f73636f706583a474797065a47475726eaa73657373696f6e5f6964ae73657373696f6e2d",
-        "676f6c64656ea77475726e5f6964a67475726e2d37aa7265706c61795f6b6579a87265706c61792d31ab7265736f6c757469",
-        "6f6e7382a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f6e82a86d616e6966657374",
-        "83a26964aa746f6f6c3a6665746368a46e616d65a56665746368ab6465736372697074696f6eae4665746368206f6e652055",
-        "524c2ea8636f6e747261637482ac696e7075745f736368656d6181a963616e6f6e6963616c82aa70726f7065727469657381",
-        "a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e",
-        "6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e",
-        "5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61",
-        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380",
+        "633732356164653966363561bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574",
+        "696f6e7380",
     );
 
-    let mut resolutions = BTreeMap::new();
-    resolutions.insert(
-        "web.fetch".to_string(),
-        lash_lashlang_runtime::Resolution::Resolved(Box::new(
-            lash_lashlang_runtime::ToolGrant::new(lash_core::ToolDefinition::raw(
-                "tool:fetch",
-                "fetch",
-                "Fetch one URL.",
-                serde_json::json!({"type": "object", "properties": {"url": {"type": "string"}}}),
-                serde_json::json!({"type": "string"}),
-            ))
-            .with_source_id("registry:web")
-            .with_execution_binding(serde_json::json!({"account": "acct-1"})),
-        )),
-    );
-    resolutions.insert(
-        "z.absent".to_string(),
-        lash_lashlang_runtime::Resolution::NotAvailable,
-    );
     let prior_leaf_keys = BTreeSet::new();
     let mut changed_leaves = BTreeMap::new();
     let inline_global = persist_value_body(
@@ -962,16 +704,6 @@ fn version_26_root_encodes_to_golden_bytes() {
             .expect("encode the plain state's header")
             .header,
         globals,
-        deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord {
-            link_key: Some(lash_lashlang_runtime::DeferredResolutionLinkKey {
-                address: lash_core::EffectAddress::new(
-                    lash_core::ExecutionScope::turn("session-golden", "turn-7"),
-                    "replay-1",
-                )
-                .expect("valid snapshot golden address"),
-            }),
-            resolutions,
-        },
         deferred_trigger_resolutions:
             lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
     };
@@ -982,9 +714,10 @@ fn version_26_root_encodes_to_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
+    println!("RLM_ROOT_GOLDEN_HEX={hex}");
     assert_eq!(
         hex, GOLDEN,
-        "the version-26 root encoding changed; decide on a version bump before updating the golden"
+        "the version-26 root encoding changed; regenerate the golden for an intended shape change"
     );
 
     let decoded: RlmSnapshotRoot =
@@ -1434,7 +1167,6 @@ fn persisted_root_fields_and_encoder_floor_are_pinned() {
             "engine",
             "state_header",
             "globals",
-            "deferred_resolutions",
             "deferred_trigger_resolutions"
         ]
     );
@@ -1443,17 +1175,15 @@ fn persisted_root_fields_and_encoder_floor_are_pinned() {
         engine: "lashlang".into(),
         state_header: vec![0, 255],
         globals: BTreeMap::new(),
-        deferred_resolutions: Default::default(),
         deferred_trigger_resolutions: Default::default(),
     };
     let encoded = rmp_serde::to_vec_named(&root).expect("encode root");
-    assert_eq!(encoded[0], 0x86, "the root is a named six-field map");
+    assert_eq!(encoded[0], 0x85, "the root is a named five-field map");
     let decoded: BTreeMap<String, serde::de::IgnoredAny> =
         rmp_serde::from_slice(&encoded).expect("read named map");
     assert_eq!(
         decoded.keys().map(String::as_str).collect::<Vec<_>>(),
         vec![
-            "deferred_resolutions",
             "deferred_trigger_resolutions",
             "engine",
             "globals",

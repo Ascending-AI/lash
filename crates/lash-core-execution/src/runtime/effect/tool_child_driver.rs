@@ -1607,7 +1607,10 @@ fn journaled_await_invocation(
     parent: &crate::RuntimeInvocation,
     call_id: &crate::ToolCallId,
 ) -> crate::RuntimeEffectInvocation {
-    let suffix = format!("{call_id}:await");
+    let suffix = crate::runtime::causal::CommandSubKey::ToolAwait {
+        call_id: call_id.clone(),
+    }
+    .to_string();
     let parent_effect_id = parent.effect_id().unwrap_or("tool").to_string();
     crate::runtime::causal::child_effect_invocation(
         dispatch.effect_controller.execution_scope(),
