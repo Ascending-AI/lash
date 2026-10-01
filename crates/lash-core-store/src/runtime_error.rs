@@ -1506,6 +1506,7 @@ impl RuntimeError {
             | RuntimeErrorCause::AttachmentRetention { .. }
             | RuntimeErrorCause::MaxToolCallsExceeded { .. }
             | RuntimeErrorCause::StoredDataCorrupt { .. }
+            | RuntimeErrorCause::ModuleArtifactRefused { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }

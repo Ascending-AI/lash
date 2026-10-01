@@ -324,6 +324,344 @@
         }
       ]
     },
+    "ModuleArtifactAstRefusal": {
+      "description": "Owned validation evidence suitable for a worker response or a durable journal.",
+      "oneOf": [
+        {
+          "enum": [
+            "return_outside_function",
+            "unknown_process_signature"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "nesting_too_deep": {
+              "additionalProperties": false,
+              "properties": {
+                "limit": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "limit"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "nesting_too_deep"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "loop_control_outside_loop": {
+              "additionalProperties": false,
+              "properties": {
+                "keyword": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "keyword"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "loop_control_outside_loop"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "invalid_parameter_name": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "invalid_parameter_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "duplicate_parameter": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "duplicate_parameter"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "malformed_role": {
+              "additionalProperties": false,
+              "properties": {
+                "reason": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "malformed_role"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "duplicate_declaration": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "duplicate_declaration"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "invalid_process_origin": {
+              "additionalProperties": false,
+              "properties": {
+                "process": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "process",
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "invalid_process_origin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ModuleArtifactCorruption": {
+      "oneOf": [
+        {
+          "enum": [
+            "durable_spans",
+            "unlifted_process_literal"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "invalid_ast": {
+              "$ref": "#/$defs/ModuleArtifactAstRefusal"
+            }
+          },
+          "required": [
+            "invalid_ast"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "incomplete_process_signature": {
+              "additionalProperties": false,
+              "properties": {
+                "process": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "process"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "incomplete_process_signature"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "codec": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "codec"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "hash_mismatch": {
+              "additionalProperties": false,
+              "properties": {
+                "actual": {
+                  "type": "string"
+                },
+                "expected": {
+                  "type": "string"
+                },
+                "field": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "expected",
+                "actual"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "hash_mismatch"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "storage_key_mismatch": {
+              "additionalProperties": false,
+              "properties": {
+                "actual": {
+                  "type": "string"
+                },
+                "expected": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "expected",
+                "actual"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "storage_key_mismatch"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "invalid_reference": {
+              "additionalProperties": false,
+              "properties": {
+                "record_kind": {
+                  "type": "string"
+                },
+                "reference": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "record_kind",
+                "reference"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "invalid_reference"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "storage": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "record_kind": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "record_kind",
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "storage"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ProviderFileScope": {
       "additionalProperties": false,
       "description": "Provider/account boundary for a provider-owned file id.",
@@ -1388,6 +1726,30 @@
             "substrate_lost"
           ],
           "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "stored_artifact_corrupt": {
+              "properties": {
+                "artifact_ref": {
+                  "type": "string"
+                },
+                "source": {
+                  "$ref": "#/$defs/ModuleArtifactCorruption"
+                }
+              },
+              "required": [
+                "artifact_ref",
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "stored_artifact_corrupt"
+          ],
+          "type": "object"
         },
         {
           "additionalProperties": false,

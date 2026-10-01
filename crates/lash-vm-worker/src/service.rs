@@ -16,24 +16,9 @@ pub(crate) fn perform(
     let response = match request {
         Request::VerifyArtifact { bytes } => {
             use lash_vm_client::service::ArtifactVerification;
-            let verification = if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes)
-                && (raw.get("family").is_none() || raw.get("encoding").is_none())
-            {
-                ArtifactVerification::Undecodable {
-                    reason: "module artifact carries no family and encoding envelope".into(),
-                }
-            } else {
-                match lashlang::ModuleArtifact::from_store_bytes(&bytes) {
-                    Ok(_) => ArtifactVerification::Match,
-                    Err(lashlang::ModuleArtifactError::Codec(reason)) => {
-                        ArtifactVerification::Undecodable {
-                            reason: format!("module artifact is not readable JSON: {reason}"),
-                        }
-                    }
-                    Err(error) => ArtifactVerification::IdentityMismatch {
-                        detail: error.to_string(),
-                    },
-                }
+            let verification = match lashlang::ModuleArtifact::from_store_bytes(&bytes) {
+                Ok(_) => ArtifactVerification::Match,
+                Err(error) => ArtifactVerification::Refused(error.into()),
             };
             Response::ArtifactVerification(verification)
         }
@@ -42,12 +27,15 @@ pub(crate) fn perform(
                 Ok(artifact) if artifact.module_ref() == &module_ref => {
                     Response::Artifact(inspect(&artifact)?)
                 }
-                Ok(_) => Response::ArtifactRefused {
-                    message: "artifact does not match its storage key".into(),
-                },
-                Err(error) => Response::ArtifactRefused {
-                    message: error.to_string(),
-                },
+                Ok(artifact) => {
+                    Response::ArtifactRefused(lashlang::ModuleArtifactRefusal::Corrupt(
+                        lashlang::ModuleArtifactCorruption::StorageKeyMismatch {
+                            expected: module_ref.to_string(),
+                            actual: artifact.module_ref().to_string(),
+                        },
+                    ))
+                }
+                Err(error) => Response::ArtifactRefused(error.into()),
             }
         }
         Request::TriggerCompatibility {

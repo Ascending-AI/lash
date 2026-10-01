@@ -39,6 +39,8 @@ Source linking infers and materializes omitted process output annotations.
 `ModuleArtifact::from_program` accepts complete IR and refuses a process without
 an explicit output; it does not invent `any`. Parameter names, order, types,
 and outputs participate in executable module and process-reference identity.
+Artifact construction and store decoding refuse an unlifted process literal
+at any expression root. Only linked, lifted process declarations are admitted.
 The definition id excludes the signature claim because the engine derives it,
 as specified by
 [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md).

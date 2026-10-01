@@ -48,6 +48,10 @@ pub use lash_core_store::surface_format;
 mod backend;
 pub use backend::{Backend, EffectEngine, StoreBindingId, StoreSet};
 mod module_artifacts;
+pub use lash_sansio::module_artifact_refusal::{
+    ModuleArtifactAstRefusal, ModuleArtifactCorruption, ModuleArtifactGeneration,
+    ModuleArtifactRefusal,
+};
 pub use module_artifacts::{
     ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
 };

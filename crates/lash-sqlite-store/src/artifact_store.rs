@@ -653,9 +653,12 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
         module_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(module_ref) {
-            return Err(ArtifactStoreError::Decode(
-                "invalid module reference".into(),
-            ));
+            return Err(ArtifactStoreError::StoredDataCorrupt {
+                source: lash_core_execution::ModuleArtifactCorruption::InvalidReference {
+                    record_kind: "module".into(),
+                    reference: module_ref.into(),
+                },
+            });
         }
         self.get_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
@@ -726,9 +729,12 @@ impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
         env_ref: &lash_core_execution::ProcessExecutionEnvRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(ArtifactStoreError::Decode(
-                "invalid process execution environment reference".into(),
-            ));
+            return Err(ArtifactStoreError::StoredDataCorrupt {
+                source: lash_core_execution::ModuleArtifactCorruption::InvalidReference {
+                    record_kind: "process execution environment".into(),
+                    reference: env_ref.as_str().into(),
+                },
+            });
         }
         self.get_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
@@ -1155,9 +1161,8 @@ mod tests {
         assert!(matches!(
             &error,
             ArtifactStoreError::StoredDataCorrupt {
-                record_kind: "artifact referrer edge",
-                ..
-            }
+                source: lash_core_execution::ModuleArtifactCorruption::Storage { record_kind, .. },
+            } if record_kind == "artifact referrer edge"
         ));
         let plugin_error: lash_core_execution::PluginError = error.into();
         assert!(matches!(

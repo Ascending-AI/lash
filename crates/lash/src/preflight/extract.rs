@@ -156,12 +156,22 @@ fn module_artifact(
             Ok(Response::ArtifactVerification(ArtifactVerification::Match)) => {
                 vec![Extraction::IdentityMatch { format }]
             }
-            Ok(Response::ArtifactVerification(ArtifactVerification::Undecodable { reason })) => {
-                vec![Extraction::Undecodable { format, reason }]
+            Ok(Response::ArtifactVerification(ArtifactVerification::Refused(refusal))) => {
+                match refusal {
+                    lashlang::ModuleArtifactRefusal::Generation(source) => {
+                        vec![Extraction::IdentityMismatch {
+                            format,
+                            detail: format!("{source}; recompile and republish the module"),
+                        }]
+                    }
+                    lashlang::ModuleArtifactRefusal::Corrupt(source) => {
+                        vec![Extraction::Undecodable {
+                            format,
+                            reason: source.to_string(),
+                        }]
+                    }
+                }
             }
-            Ok(Response::ArtifactVerification(ArtifactVerification::IdentityMismatch {
-                detail,
-            })) => vec![Extraction::IdentityMismatch { format, detail }],
             Ok(_) => vec![Extraction::Undecodable {
                 format,
                 reason: "unexpected worker artifact verification response".into(),
@@ -677,17 +687,14 @@ mod tests {
 
     #[test]
     #[cfg(feature = "rlm")]
-    fn a_frozen_predecessor_module_artifact_is_undecodable() {
-        // A pre-1.0 artifact has no family or encoding envelope. Its old
-        // `canonical_ir` shape cannot establish a stored identity family.
+    fn a_frozen_predecessor_module_artifact_retains_its_generation_refusal() {
         let mut raw: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
         .expect("frozen fixture should be JSON");
         let object = raw.as_object_mut().expect("artifact should be an object");
+        // Reach the predecessor carrier after its explicit retired fields.
         object.remove("trigger_key_manifest");
-        // The retired `compilation_dialect` field is refused ahead of the
-        // shape (ADR 0096); drop it so this test reaches the carrier refusal.
         object.remove("compilation_dialect");
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
@@ -695,12 +702,20 @@ mod tests {
                 serde_json::to_string(&raw).expect("legacy artifact should encode"),
             ),
         ));
-        let reasons = undecodable(&extractions, DurableFormat::ModuleArtifact);
-        assert_eq!(reasons.len(), 1, "{reasons:?}");
+        let [
+            Extraction::IdentityMismatch {
+                format: DurableFormat::ModuleArtifact,
+                detail,
+            },
+        ] = extractions.as_slice()
+        else {
+            panic!("predecessor carrier must retain its generation refusal");
+        };
         assert!(
-            reasons[0].contains("no family and encoding envelope"),
-            "{reasons:?}"
+            detail.contains("unsupported artifact shape artifact shape: unknown field"),
+            "{detail}"
         );
+        assert!(detail.contains("recompile and republish"), "{detail}");
     }
 
     #[test]

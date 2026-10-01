@@ -2,6 +2,110 @@ use super::*;
 use crate::ast::TypeExpr;
 use crate::testing::ast_builders as b;
 
+#[test]
+fn unlifted_process_literals_are_refused_at_every_artifact_root() {
+    let literal = || b::process_literal(Vec::new(), b::finish(b::null()));
+    let programs = [
+        b::module(Vec::new(), vec![b::list(vec![literal()])]),
+        b::module(
+            vec![b::process_returning(
+                "outer",
+                Vec::new(),
+                TypeExpr::Null,
+                b::block(vec![literal(), b::finish(b::null())]),
+            )],
+            Vec::new(),
+        ),
+        b::module(
+            vec![b::function_decl(
+                "outer",
+                Vec::new(),
+                TypeExpr::Null,
+                b::block(vec![literal(), b::null()]),
+            )],
+            Vec::new(),
+        ),
+    ];
+    for program in programs {
+        let result = ModuleArtifact::from_program(program.clone());
+        assert!(
+            matches!(result, Err(ModuleArtifactError::UnliftedProcessLiteral)),
+            "builder must refuse a process literal: {result:?}"
+        );
+        let mut stored = stored_artifact_value(&process_typed_artifact("event"));
+        stored["artifact"]["ir"] = serde_json::to_value(program).unwrap();
+        let result = ModuleArtifact::from_store_bytes(&serde_json::to_vec(&stored).unwrap());
+        assert!(
+            matches!(result, Err(ModuleArtifactError::UnliftedProcessLiteral)),
+            "decoder must refuse a process literal before checking hashes: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn artifact_refusals_keep_their_typed_cause_through_the_plugin_boundary() {
+    let cases = [
+        (ModuleArtifactError::DurableSpans, false),
+        (ModuleArtifactError::ObsoleteProcessTypeShape, true),
+        (
+            ModuleArtifactError::IncompleteProcessSignature {
+                process: "missing".into(),
+            },
+            false,
+        ),
+        (ModuleArtifactError::Codec("bad JSON".into()), false),
+        (ModuleArtifactError::RetiredCompilationDialect, true),
+        (
+            ModuleArtifactError::FutureShape {
+                field: "artifact shape",
+                value: "new".into(),
+            },
+            true,
+        ),
+        (
+            ModuleArtifactError::UnsupportedFamily {
+                family: "next".into(),
+                encoding: "2".into(),
+            },
+            true,
+        ),
+        (
+            ModuleArtifactError::HashMismatch {
+                field: "module_ref",
+                expected: "a".into(),
+                actual: "b".into(),
+            },
+            false,
+        ),
+        (
+            ModuleArtifactError::InvalidAst(crate::InvalidAst::ReturnOutsideFunction),
+            false,
+        ),
+    ];
+    for (cause, generation) in cases {
+        let expected = serde_json::to_value(ModuleArtifactRefusal::from(cause.clone())).unwrap();
+        let plugin: lash_core_execution::PluginError = ArtifactStoreError::from(cause).into();
+        assert!(
+            plugin.is_terminal(),
+            "artifact refusals are terminal: {plugin:?}"
+        );
+        let serialized = serde_json::to_value(&plugin).unwrap();
+        assert_eq!(serialized["message"]["cause"]["refusal"], expected);
+        let replay: lash_core_execution::PluginError =
+            serde_json::from_value(serialized.clone()).unwrap();
+        let runtime = replay.into_turn_failure(lash_core_execution::RuntimeErrorCode::Plugin);
+        assert_eq!(
+            serde_json::to_value(runtime.cause).unwrap()["refusal"],
+            expected
+        );
+        let serialized = serialized.to_string();
+        assert!(
+            serialized.contains(if generation { "generation" } else { "corrupt" }),
+            "the plugin must retain a typed cause: {serialized}"
+        );
+    }
+}
+
 fn process_typed_artifact(param_name: &str) -> ModuleArtifact {
     // `process target(<param_name>: str) -> bool { finish true }`
     // `process install(handler: Process<(<param_name>: str), bool>) -> bool { finish true }`

@@ -587,7 +587,8 @@ pub use lash_core_execution::{
 };
 pub use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, Backend, DurabilityTier, EffectEngine,
-    ModuleArtifactStore, StoreBindingId, StoreSet,
+    ModuleArtifactAstRefusal, ModuleArtifactCorruption, ModuleArtifactGeneration,
+    ModuleArtifactRefusal, ModuleArtifactStore, StoreBindingId, StoreSet,
 };
 pub use lash_core_execution::{
     DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,

@@ -29,7 +29,9 @@ A started process resumes through its engine's recorded journal. A fresh
 admission that finds execution already started without that journal ends
 `Abandoned` with `ResumeRefused { SubstrateLost }`, before executing the
 process body. Generation refusal uses the same terminal vocabulary with
-`RetiredGeneration`.
+`RetiredGeneration`. Executable artifact corruption ends with
+`StoredArtifactCorrupt`, carrying the artifact reference and typed validation
+cause. Corruption never contributes a refused generation to a drain.
 
 Restate journals the admission verdict and nonce. The root's execution-start
 write binds attempt 1. Successor segments use their retained handover and

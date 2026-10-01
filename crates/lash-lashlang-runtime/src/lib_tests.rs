@@ -2183,8 +2183,10 @@ impl lash_core::ModuleArtifactStore for RebuildArtifactStore {
             RebuildArtifactFault::CorruptBytes => Ok(Some(b"not an artifact".to_vec())),
             RebuildArtifactFault::CorruptStore => {
                 Err(lash_core::ArtifactStoreError::StoredDataCorrupt {
-                    record_kind: "module artifact",
-                    message: "corrupt store row".into(),
+                    source: lashlang::ModuleArtifactCorruption::Storage {
+                        record_kind: "module artifact".into(),
+                        message: "corrupt store row".into(),
+                    },
                 })
             }
             RebuildArtifactFault::MissingStore => {
@@ -2329,7 +2331,11 @@ async fn process_rebuild_failure_is_terminal_but_artifact_io_failure_retries() {
                     panic!("corrupt artifact refuses resume")
                 };
                 assert!(
-                    matches!(&evidence.writer, lash_core::AbandonWriter::ResumeRefused { reason: lash_core::ProcessResumeRefusal::RetiredGeneration { found } } if found == input.module_ref.as_str())
+                    matches!(&evidence.writer, lash_core::AbandonWriter::ResumeRefused {
+                        reason: lash_core::ProcessResumeRefusal::StoredArtifactCorrupt { artifact_ref, .. }
+                    } if artifact_ref == input.module_ref.as_str()),
+                    "corruption must never be recorded as a retired generation: {:?}",
+                    evidence.writer
                 );
             }
         }

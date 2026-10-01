@@ -12,9 +12,9 @@ testing true
 
 # [serde (deny_unknown_fields)] struct CellCompletion { outcome : lashlang :: ExecutionOutcome , state : EncodedPayload , }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { References (BTreeSet < String >) , ArtifactVerification (ArtifactVerification) , Module (Box < CompiledModule >) , Definition (CreatedDefinition) , Artifact (crate :: InspectedArtifact) , ArtifactRefused { message : String , } , TriggerCompatibility (lashlang :: TriggerCompatibility) , CompileRefused { error : lashlang :: ModuleCompileError , policy : bool , } , ContinuationInfo { iterator_count : usize , } , ContinuationProbe { bytes : Vec < u8 > , closure_root : bool , } , State (StateView) , Captured (Capture) , Restored { view : StateView , baseline : BTreeMap < String , String > , } , Refused { message : String , policy : bool , } , SnapshotRefused (lashlang :: SnapshotDecodeError) }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { References (BTreeSet < String >) , ArtifactVerification (ArtifactVerification) , Module (Box < CompiledModule >) , Definition (CreatedDefinition) , Artifact (crate :: InspectedArtifact) , ArtifactRefused (lashlang :: ModuleArtifactRefusal) , TriggerCompatibility (lashlang :: TriggerCompatibility) , CompileRefused { error : lashlang :: ModuleCompileError , policy : bool , } , ContinuationInfo { iterator_count : usize , } , ContinuationProbe { bytes : Vec < u8 > , closure_root : bool , } , State (StateView) , Captured (Capture) , Restored { view : StateView , baseline : BTreeMap < String , String > , } , Refused { message : String , policy : bool , } , SnapshotRefused (lashlang :: SnapshotDecodeError) }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum ArtifactVerification { Match , Undecodable { reason : String } , IdentityMismatch { detail : String } }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum ArtifactVerification { Match , Refused (lashlang :: ModuleArtifactRefusal) }
 
 struct Capture { definition_ids : BTreeSet < lash_core_execution :: ProcessDefinitionId > , # [serde (with = "serde_bytes")] header : Vec < u8 > , fragments : BTreeMap < String , lashlang :: DurableFragment > , baseline : BTreeMap < String , String > , }
 

@@ -818,11 +818,10 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         .expect_err("dangling artifact reference must fail");
     assert!(
         matches!(
-            artifact_error,
+            &artifact_error,
             lash_core::ArtifactStoreError::StoredDataCorrupt {
-                record_kind: "artifact reference",
-                ..
-            }
+                source: lash_core::ModuleArtifactCorruption::Storage { record_kind, .. },
+            } if record_kind == "artifact reference"
         ),
         "expected typed StoredDataCorrupt for dangling artifact reference, got {artifact_error:?}"
     );

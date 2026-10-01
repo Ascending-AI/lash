@@ -851,16 +851,16 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let invalid = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            Err(crate::ArtifactStoreError::Decode(
-                "invalid process execution environment reference".into(),
-            ))
+            Err(crate::ArtifactStoreError::StoredDataCorrupt {
+                source: crate::ModuleArtifactCorruption::InvalidReference {
+                    record_kind: "process execution environment".into(),
+                    reference: "invalid".into(),
+                },
+            })
         })),
     )
     .await;
-    assert_eq!(
-        invalid.code,
-        crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion
-    );
+    assert_eq!(invalid.code, crate::RuntimeErrorCode::RuntimeStoreCorrupt);
     assert_eq!(
         invalid.turn_failure_cause(),
         crate::TurnFailureCause::Outcome

@@ -7,6 +7,10 @@ use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
     ReferrerClaim,
 };
+pub use lash_core_execution::{
+    ModuleArtifactAstRefusal, ModuleArtifactCorruption, ModuleArtifactGeneration,
+    ModuleArtifactRefusal,
+};
 #[cfg(test)]
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
@@ -284,6 +288,19 @@ impl ModuleArtifact {
         }
         crate::ast::validate_ast(ir)?;
         crate::ast::check_unique_declarations(ir)?;
+        let mut pending = vec![&ir.main];
+        for declaration in &ir.declarations {
+            pending.push(match declaration {
+                Declaration::Process(process) => &process.body,
+                Declaration::Function(function) => &function.body,
+            });
+        }
+        while let Some(expr) = pending.pop() {
+            if matches!(expr, Expr::ProcessLiteral(_)) {
+                return Err(ModuleArtifactError::UnliftedProcessLiteral);
+            }
+            pending.extend(expr.children());
+        }
         if let Some(process) = ir.declarations.iter().find_map(|declaration| {
             let Declaration::Process(process) = declaration else {
                 return None;
@@ -585,6 +602,8 @@ pub enum ModuleArtifactError {
     InvalidAst(#[from] crate::InvalidAst),
     #[error("a module artifact carries no source spans; spans stay with the linked module")]
     DurableSpans,
+    #[error("module artifact contains an unlifted process literal; link the program first")]
+    UnliftedProcessLiteral,
     #[error(
         "module artifact uses the obsolete anonymous process type shape; recompile and republish the module"
     )]
@@ -619,21 +638,83 @@ pub enum ModuleArtifactError {
 
 impl From<ModuleArtifactError> for ArtifactStoreError {
     fn from(value: ModuleArtifactError) -> Self {
+        ModuleArtifactRefusal::from(value).into()
+    }
+}
+
+impl From<ModuleArtifactError> for ModuleArtifactRefusal {
+    fn from(value: ModuleArtifactError) -> Self {
+        use ModuleArtifactCorruption as Corrupt;
+        use ModuleArtifactGeneration as Generation;
         match value {
-            ModuleArtifactError::InvalidAst(source) => Self::Decode(source.to_string()),
-            ModuleArtifactError::DurableSpans => Self::Decode(value.to_string()),
-            ModuleArtifactError::ObsoleteProcessTypeShape => Self::Decode(
-                "module artifact uses the obsolete anonymous process type shape; recompile and republish the module"
-                    .to_string(),
-            ),
-            ModuleArtifactError::IncompleteProcessSignature { .. } => {
-                Self::Decode(value.to_string())
+            ModuleArtifactError::InvalidAst(source) => {
+                Self::Corrupt(Corrupt::InvalidAst(source.into()))
             }
-            ModuleArtifactError::Codec(message) => Self::Decode(message),
-            ModuleArtifactError::FutureShape { .. } => Self::Decode(value.to_string()),
-            ModuleArtifactError::UnsupportedFamily { .. } => Self::Decode(value.to_string()),
-            ModuleArtifactError::RetiredCompilationDialect => Self::Decode(value.to_string()),
-            ModuleArtifactError::HashMismatch { .. } => Self::Decode(value.to_string()),
+            ModuleArtifactError::DurableSpans => Self::Corrupt(Corrupt::DurableSpans),
+            ModuleArtifactError::UnliftedProcessLiteral => {
+                Self::Corrupt(Corrupt::UnliftedProcessLiteral)
+            }
+            ModuleArtifactError::IncompleteProcessSignature { process } => {
+                Self::Corrupt(Corrupt::IncompleteProcessSignature { process })
+            }
+            ModuleArtifactError::Codec(message) => Self::Corrupt(Corrupt::Codec { message }),
+            ModuleArtifactError::HashMismatch {
+                field,
+                expected,
+                actual,
+            } => Self::Corrupt(Corrupt::HashMismatch {
+                field: field.into(),
+                expected,
+                actual,
+            }),
+            ModuleArtifactError::ObsoleteProcessTypeShape => {
+                Self::Generation(Generation::ObsoleteProcessTypeShape)
+            }
+            ModuleArtifactError::RetiredCompilationDialect => {
+                Self::Generation(Generation::RetiredCompilationDialect)
+            }
+            ModuleArtifactError::FutureShape { field, value } => {
+                Self::Generation(Generation::FutureShape {
+                    field: field.into(),
+                    value,
+                })
+            }
+            ModuleArtifactError::UnsupportedFamily { family, encoding } => {
+                Self::Generation(Generation::UnsupportedFamily { family, encoding })
+            }
+        }
+    }
+}
+
+impl From<crate::InvalidAst> for ModuleArtifactAstRefusal {
+    fn from(error: crate::InvalidAst) -> Self {
+        use crate::{InvalidAst, ProcessSignatureError};
+        match error {
+            InvalidAst::NestingTooDeep { source } => Self::NestingTooDeep {
+                limit: source.limit,
+            },
+            InvalidAst::LoopControlOutsideLoop { keyword } => Self::LoopControlOutsideLoop {
+                keyword: keyword.into(),
+            },
+            InvalidAst::ReturnOutsideFunction => Self::ReturnOutsideFunction,
+            InvalidAst::InvalidProcessSignature { source } => match source {
+                ProcessSignatureError::InvalidParameterName { name } => {
+                    Self::InvalidParameterName { name }
+                }
+                ProcessSignatureError::DuplicateParameter { name } => {
+                    Self::DuplicateParameter { name }
+                }
+            },
+            InvalidAst::UnknownProcessSignature => Self::UnknownProcessSignature,
+            InvalidAst::MalformedRole { role, reason } => Self::MalformedRole {
+                role: role.into(),
+                reason: reason.into(),
+            },
+            InvalidAst::DuplicateDeclaration { name } => Self::DuplicateDeclaration { name },
+            InvalidAst::InvalidProcessOrigin { process, reason } => Self::InvalidProcessOrigin {
+                process,
+                reason: reason.into(),
+            },
         }
     }
 }
@@ -649,8 +730,7 @@ impl ModuleArtifactBytes for ModuleArtifact {
         self.module_ref()
     }
     fn encoded_artifact(&self) -> Result<Vec<u8>, ArtifactStoreError> {
-        self.to_store_bytes()
-            .map_err(|error| ArtifactStoreError::Encode(error.to_string()))
+        self.to_store_bytes().map_err(ArtifactStoreError::from)
     }
 }
 
@@ -733,10 +813,13 @@ impl LashlangArtifacts {
         // proves the bytes hash to the reference they carry, and this proves
         // that reference is the one asked for.
         if artifact.module_ref() != module_ref {
-            return Err(ArtifactStoreError::Decode(format!(
-                "module artifact stored under `{module_ref}` is `{}`",
-                artifact.module_ref()
-            )));
+            return Err(ModuleArtifactRefusal::Corrupt(
+                ModuleArtifactCorruption::StorageKeyMismatch {
+                    expected: module_ref.to_string(),
+                    actual: artifact.module_ref().to_string(),
+                },
+            )
+            .into());
         }
         Ok(Some(artifact))
     }

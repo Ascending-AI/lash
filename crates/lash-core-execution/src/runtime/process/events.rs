@@ -114,6 +114,11 @@ pub enum ProcessResumeRefusal {
     /// run refused (a Lashlang process names its module ref), so a later
     /// drain or migration can find what was refused.
     RetiredGeneration { found: String },
+    /// Stored executable bytes failed validation; another generation cannot repair them.
+    StoredArtifactCorrupt {
+        artifact_ref: String,
+        source: crate::ModuleArtifactCorruption,
+    },
     /// The process already started under an execution whose journal this run
     /// cannot read, so resuming would re-run effects that execution recorded
     /// (FIG-3588). Lash never restarts started work from scratch.
@@ -486,6 +491,15 @@ impl ProcessAwaitOutput {
                     } => format!(
                         "process abandoned: its executable `{found}` was written by a retired \
                          generation"
+                    ),
+                    AbandonWriter::ResumeRefused {
+                        reason:
+                            ProcessResumeRefusal::StoredArtifactCorrupt {
+                                artifact_ref,
+                                source,
+                            },
+                    } => format!(
+                        "process abandoned: stored artifact `{artifact_ref}` is corrupt: {source}"
                     ),
                     AbandonWriter::ResumeRefused {
                         reason: ProcessResumeRefusal::SubstrateLost,

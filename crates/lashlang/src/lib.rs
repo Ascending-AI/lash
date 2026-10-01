@@ -38,7 +38,8 @@ pub(crate) use artifact::InMemoryLashlangArtifactStore;
 pub use artifact::{
     ContentHash, HostRequirements, HostRequirementsRef, LASHLANG_COMPILER_VERSION,
     LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, LashlangArtifacts, ModuleArtifact,
-    ModuleArtifactBytes, ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef,
+    ModuleArtifactAstRefusal, ModuleArtifactBytes, ModuleArtifactCorruption, ModuleArtifactError,
+    ModuleArtifactGeneration, ModuleArtifactRefusal, ModuleExports, ModuleRef, ProcessRef,
     host_requirements_for_program,
 };
 pub use ast::{

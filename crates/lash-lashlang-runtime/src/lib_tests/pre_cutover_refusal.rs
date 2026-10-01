@@ -261,7 +261,7 @@ async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect_law()
         .expect_err("the predecessor artifact must not decode under the carrier IR");
     assert!(matches!(
         lash_core::ArtifactStoreError::from(decode),
-        lash_core::ArtifactStoreError::Decode(_)
+        lash_core::ArtifactStoreError::UnsupportedGeneration { .. }
     ));
     let (process_name, process_ref) = stored["exports"]["processes"]
         .as_object()

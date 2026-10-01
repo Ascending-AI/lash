@@ -515,22 +515,26 @@ async fn run_lashlang_process_scoped(
                 )
                 .into());
             }
-            // Stored bytes this build cannot decode — an artifact published by
-            // a retired generation (FIG-3571) or a corrupt blob — fail the same
-            // way on every attempt: the shared resume-refusal terminal, before
-            // any effect, never a retried infrastructure fault. It names the
-            // module ref it refused so a drain can find it.
-            Err(
-                lash_core::ArtifactStoreError::Decode(message)
-                | lash_core::ArtifactStoreError::StoredDataCorrupt { message, .. },
-            ) => {
-                tracing::warn!(
-                    module_ref = %input.module_ref,
-                    error = %message,
-                    "lashlang module artifact was written by a retired artifact generation; \
-                     refusing to resume"
-                );
+            Err(lash_core::ArtifactStoreError::UnsupportedGeneration { refusal }) => {
+                tracing::warn!(module_ref = %input.module_ref, error = %refusal,
+                    "refusing an unsupported module artifact generation");
                 return Ok(retired_generation(input.module_ref.to_string(), resume_owner).into());
+            }
+            Err(lash_core::ArtifactStoreError::StoredDataCorrupt { source, .. }) => {
+                return Ok(lash_core::ProcessAwaitOutput::Abandoned {
+                    evidence: Box::new(lash_core::AbandonEvidence {
+                        writer: lash_core::AbandonWriter::ResumeRefused {
+                            reason: lash_core::ProcessResumeRefusal::StoredArtifactCorrupt {
+                                artifact_ref: input.module_ref.to_string(),
+                                source,
+                            },
+                        },
+                        owner: resume_owner,
+                        epoch_ms: lash_core::facade_support::current_epoch_ms(),
+                    }),
+                    control: None,
+                }
+                .into());
             }
             Err(err) => {
                 return Err(lash_core::ProcessInfraError::new(err.into()));

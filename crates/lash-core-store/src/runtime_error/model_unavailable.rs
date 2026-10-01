@@ -17,6 +17,7 @@ impl RuntimeErrorCause {
             Self::IngressReservedSourceKey { .. }
             | Self::StoreRefusal { .. }
             | Self::StoredDataCorrupt { .. }
+            | Self::ModuleArtifactRefused { .. }
             | Self::SessionDeleted { .. }
             | Self::ArtifactReferrerEnded { .. }
             | Self::EffectGroupChildUnroutable { .. }

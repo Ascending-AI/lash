@@ -162,6 +162,13 @@ impl From<lash_core::ProcessResumeRefusal> for RemoteProcessResumeRefusal {
             lash_core::ProcessResumeRefusal::RetiredGeneration { found } => {
                 Self::RetiredGeneration { found }
             }
+            lash_core::ProcessResumeRefusal::StoredArtifactCorrupt {
+                artifact_ref,
+                source,
+            } => Self::StoredArtifactCorrupt {
+                artifact_ref,
+                source,
+            },
             lash_core::ProcessResumeRefusal::SubstrateLost => Self::SubstrateLost,
         }
     }
@@ -173,6 +180,13 @@ impl From<RemoteProcessResumeRefusal> for lash_core::ProcessResumeRefusal {
             RemoteProcessResumeRefusal::RetiredGeneration { found } => {
                 Self::RetiredGeneration { found }
             }
+            RemoteProcessResumeRefusal::StoredArtifactCorrupt {
+                artifact_ref,
+                source,
+            } => Self::StoredArtifactCorrupt {
+                artifact_ref,
+                source,
+            },
             RemoteProcessResumeRefusal::SubstrateLost => Self::SubstrateLost,
         }
     }

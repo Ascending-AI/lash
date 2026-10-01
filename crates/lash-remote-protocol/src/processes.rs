@@ -1007,7 +1007,13 @@ pub enum RemoteAbandonWriter {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteProcessResumeRefusal {
-    RetiredGeneration { found: String },
+    StoredArtifactCorrupt {
+        artifact_ref: String,
+        source: lash_sansio::module_artifact_refusal::ModuleArtifactCorruption,
+    },
+    RetiredGeneration {
+        found: String,
+    },
     SubstrateLost,
 }
 

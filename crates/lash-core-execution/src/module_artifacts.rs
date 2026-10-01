@@ -15,7 +15,10 @@ use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{ArtifactReferrer, ReferrerClaim, ResolvedArtifactCleanup};
+use crate::{
+    ArtifactReferrer, ModuleArtifactCorruption, ModuleArtifactGeneration, ModuleArtifactRefusal,
+    ReferrerClaim, ResolvedArtifactCleanup,
+};
 
 /// Durability tier established by the execution path's concrete store or host.
 #[derive(
@@ -36,8 +39,8 @@ pub enum ArtifactStoreError {
     ReferrerKindRefused { kind: crate::ArtifactReferrerKind },
     #[error("failed to encode artifact: {0}")]
     Encode(String),
-    #[error("failed to decode artifact: {0}")]
-    Decode(String),
+    #[error("unsupported module artifact generation: {refusal}")]
+    UnsupportedGeneration { refusal: ModuleArtifactGeneration },
     /// Publish or acquire named a referrer that has a fence.
     #[error("artifact referrer `{referrer}` has ended")]
     ReferrerEnded { referrer: ArtifactReferrer },
@@ -54,11 +57,8 @@ pub enum ArtifactStoreError {
     #[error("artifact `{artifact_ref}` is already stored with different bytes")]
     Immutable { artifact_ref: String },
     /// Stored artifact data or a stored referrer pair failed validation.
-    #[error("stored {record_kind} data is corrupt: {message}")]
-    StoredDataCorrupt {
-        record_kind: &'static str,
-        message: String,
-    },
+    #[error("stored artifact data is corrupt: {source}")]
+    StoredDataCorrupt { source: ModuleArtifactCorruption },
     /// A stored vocabulary label written by a newer compatible release.
     #[error("{refusal}")]
     Incompatible {
@@ -93,14 +93,25 @@ impl From<crate::StoreError> for ArtifactStoreError {
                 record_kind,
                 message,
             } => Self::StoredDataCorrupt {
-                record_kind,
-                message,
+                source: ModuleArtifactCorruption::Storage {
+                    record_kind: record_kind.into(),
+                    message,
+                },
             },
             crate::StoreError::Incompatible { refusal } => Self::Incompatible { refusal },
             other => match crate::store::StoreRefusal::of_store_error(&other) {
                 Some(refusal) => Self::StoreRefusal(refusal),
                 None => Self::Backend(other.to_string()),
             },
+        }
+    }
+}
+
+impl From<ModuleArtifactRefusal> for ArtifactStoreError {
+    fn from(refusal: ModuleArtifactRefusal) -> Self {
+        match refusal {
+            ModuleArtifactRefusal::Generation(refusal) => Self::UnsupportedGeneration { refusal },
+            ModuleArtifactRefusal::Corrupt(source) => Self::StoredDataCorrupt { source },
         }
     }
 }
@@ -132,11 +143,11 @@ impl From<ArtifactStoreError> for crate::PluginError {
                     error.to_string(),
                 ))
             }
-            ArtifactStoreError::StoredDataCorrupt { .. } => {
-                crate::PluginError::Runtime(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::RuntimeStoreCorrupt,
-                    error.to_string(),
-                ))
+            ArtifactStoreError::StoredDataCorrupt { source, .. } => {
+                module_artifact_refused(ModuleArtifactRefusal::Corrupt(source))
+            }
+            ArtifactStoreError::UnsupportedGeneration { refusal } => {
+                module_artifact_refused(ModuleArtifactRefusal::Generation(refusal))
             }
             ArtifactStoreError::StoreRefusal(refusal) => crate::PluginError::StoreRefusal(refusal),
             ArtifactStoreError::Incompatible { refusal } => {
@@ -147,13 +158,26 @@ impl From<ArtifactStoreError> for crate::PluginError {
             // What the store holds refuses the write or the read: every retry
             // by this build meets it again.
             ArtifactStoreError::Encode(_)
-            | ArtifactStoreError::Decode(_)
             | ArtifactStoreError::Immutable { .. }
             | ArtifactStoreError::CarryArtifactMissing { .. } => {
                 crate::PluginError::Invoke(error.to_string())
             }
         }
     }
+}
+
+fn module_artifact_refused(refusal: ModuleArtifactRefusal) -> crate::PluginError {
+    let code = match &refusal {
+        ModuleArtifactRefusal::Generation(_) => crate::RuntimeErrorCode::StoreIncompatible,
+        ModuleArtifactRefusal::Corrupt(_) => crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+    };
+    crate::PluginError::Runtime(
+        crate::RuntimeError::new(code, refusal.to_string()).with_cause(
+            crate::RuntimeErrorCause::ModuleArtifactRefused {
+                refusal: Box::new(refusal),
+            },
+        ),
+    )
 }
 
 /// The Lashlang module-artifact store of one store set.

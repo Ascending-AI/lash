@@ -429,6 +429,10 @@ impl PluginError {
             }
             Self::Runtime(error)
                 if error.turn_failure_cause().aborts_invocation()
+                    || matches!(
+                        error.cause.as_ref(),
+                        Some(crate::RuntimeErrorCause::ModuleArtifactRefused { .. })
+                    )
                     || error.is_session_retirement()
                     || error.store_refusal().is_some()
                     || matches!(
@@ -443,6 +447,10 @@ impl PluginError {
             }
             Self::RuntimeEffectController(error)
                 if error.turn_failure_cause().aborts_invocation()
+                    || matches!(
+                        error.cause.as_ref(),
+                        Some(crate::RuntimeErrorCause::ModuleArtifactRefused { .. })
+                    )
                     || error.is_session_retirement()
                     || error.store_refusal().is_some()
                     || matches!(

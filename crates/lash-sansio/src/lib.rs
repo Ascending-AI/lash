@@ -12,6 +12,7 @@ pub mod handle;
 pub mod identity;
 pub mod json_decode;
 pub mod llm;
+pub mod module_artifact_refusal;
 pub mod plugin;
 pub mod process_cursor;
 pub mod profile;

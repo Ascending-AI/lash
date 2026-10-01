@@ -480,7 +480,7 @@ async fn a_module_stored_under_another_reference_is_refused() {
     assert!(
         matches!(
             read,
-            Err(lash_core_execution::ArtifactStoreError::Decode(_))
+            Err(lash_core_execution::ArtifactStoreError::StoredDataCorrupt { .. })
         ),
         "{read:?}"
     );

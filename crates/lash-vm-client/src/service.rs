@@ -128,9 +128,7 @@ pub enum Response {
     Module(Box<CompiledModule>),
     Definition(CreatedDefinition),
     Artifact(crate::InspectedArtifact),
-    ArtifactRefused {
-        message: String,
-    },
+    ArtifactRefused(lashlang::ModuleArtifactRefusal),
     TriggerCompatibility(lashlang::TriggerCompatibility),
     CompileRefused {
         error: lashlang::ModuleCompileError,
@@ -161,8 +159,7 @@ pub enum Response {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ArtifactVerification {
     Match,
-    Undecodable { reason: String },
-    IdentityMismatch { detail: String },
+    Refused(lashlang::ModuleArtifactRefusal),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -542,9 +539,7 @@ pub mod runtime_ops {
                     error => lash_core_execution::ArtifactStoreError::Backend(error.to_string()),
                 })? {
                 Response::Artifact(artifact) => Ok(Some(artifact)),
-                Response::ArtifactRefused { message } => {
-                    Err(lash_core_execution::ArtifactStoreError::Decode(message))
-                }
+                Response::ArtifactRefused(refusal) => Err(refusal.into()),
                 _ => Err(lash_core_execution::ArtifactStoreError::Backend(
                     "unexpected worker artifact inspection response".into(),
                 )),

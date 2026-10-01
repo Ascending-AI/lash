@@ -11,6 +11,10 @@
 // with a hundred throwaway bindings.
 #![allow(unused_imports)]
 
+use lash::persistence::{
+    ModuleArtifactAstRefusal, ModuleArtifactCorruption, ModuleArtifactGeneration,
+    ModuleArtifactRefusal,
+};
 use lash::runtime::{ProcessCommand, ProcessListSelection};
 
 use lash::process::{

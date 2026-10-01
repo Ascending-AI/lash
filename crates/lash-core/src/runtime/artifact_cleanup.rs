@@ -591,7 +591,9 @@ fn store_failure(context: &'static str) -> impl Fn(ArtifactStoreError) -> Delive
         | ArtifactStoreError::ReferrerKindRefused { .. } => {
             DeliveryFailure::Refused(format!("{context}: {error}"))
         }
-        ArtifactStoreError::Incompatible { .. } | ArtifactStoreError::StoredDataCorrupt { .. } => {
+        ArtifactStoreError::Incompatible { .. }
+        | ArtifactStoreError::UnsupportedGeneration { .. }
+        | ArtifactStoreError::StoredDataCorrupt { .. } => {
             DeliveryFailure::Undecodable(format!("{context}: {error}"))
         }
         other => DeliveryFailure::Retryable(format!("{context}: {other}")),

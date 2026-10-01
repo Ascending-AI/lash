@@ -20,6 +20,199 @@ use lash_sansio::sync::MutexExt;
 mod fixture;
 use fixture::Fixture;
 
+#[tokio::test]
+async fn stored_module_refusals_preserve_causes_and_terminal_semantics() {
+    use lash_core::ProcessEngine as _;
+    use lash_lashlang_runtime::{LashlangProcessEngine, LashlangProcessInput, LashlangSurface};
+    use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+    use lashlang::testing::ast_builders as b;
+
+    let artifact = lashlang::ModuleArtifact::from_program(b::module(
+        vec![b::process_returning(
+            "refused",
+            Vec::new(),
+            lashlang::TypeExpr::Null,
+            b::finish(b::null()),
+        )],
+        Vec::new(),
+    ))
+    .expect("valid module");
+    let value: serde_json::Value =
+        serde_json::from_slice(&artifact.to_store_bytes().unwrap()).unwrap();
+    let mut generation = value.clone();
+    generation["family"] = serde_json::json!("unsupported-family");
+    let mut corrupt_hash = value.clone();
+    corrupt_hash["artifact"]["module_ref"] = serde_json::json!("forged-module-ref");
+    let mut unlifted = value;
+    unlifted["artifact"]["ir"]["main"] = serde_json::to_value(b::list(vec![b::process_literal(
+        Vec::new(),
+        b::finish(b::null()),
+    )]))
+    .unwrap();
+    for (index, (bytes, generation)) in [
+        (b"invalid JSON".to_vec(), false),
+        (serde_json::to_vec(&generation).unwrap(), true),
+        (serde_json::to_vec(&corrupt_hash).unwrap(), false),
+        (serde_json::to_vec(&unlifted).unwrap(), false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let fixture = Fixture::new(0x4654_0000 + index as u64).await;
+        let backend = fixture.double.lash_backend();
+        let store = lashlang::LashlangArtifacts::new(backend.module_artifacts());
+        let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .unwrap();
+        store
+            .store()
+            .publish_module_artifact(&claim, artifact.module_ref().as_str(), &bytes)
+            .await
+            .expect("persist immutable refused bytes");
+        let expected: lashlang::ModuleArtifactRefusal =
+            lashlang::ModuleArtifact::from_store_bytes(&bytes)
+                .unwrap_err()
+                .into();
+        assert_eq!(
+            matches!(expected, lashlang::ModuleArtifactRefusal::Generation(_)),
+            generation
+        );
+        let verification = lash_vm_client::service::Service::default()
+            .request(lash_vm_client::service::Request::VerifyArtifact {
+                bytes: bytes.clone(),
+            })
+            .unwrap();
+        let wire = rmp_serde::to_vec_named(&verification).unwrap();
+        let replay: lash_vm_client::service::Response = rmp_serde::from_slice(&wire).unwrap();
+        let lash_vm_client::service::Response::ArtifactVerification(
+            lash_vm_client::service::ArtifactVerification::Refused(refusal),
+        ) = replay
+        else {
+            panic!("worker must refuse the stored bytes: {replay:?}");
+        };
+        assert_eq!(refusal, expected, "worker preserves the complete cause");
+        let refusal = store
+            .get_module_artifact(artifact.module_ref())
+            .await
+            .unwrap_err();
+        let plugin: lash_core::PluginError = refusal.into();
+        assert!(plugin.is_terminal(), "permanent typed refusal: {plugin:?}");
+        assert!(!plugin.is_retryable());
+        let serialized = serde_json::to_value(&plugin).unwrap();
+        assert_eq!(
+            serialized["message"]["cause"]["refusal"],
+            serde_json::to_value(&expected).unwrap(),
+            "store and plugin preserve the complete cause"
+        );
+        let input = LashlangProcessInput {
+            module_ref: artifact.module_ref().clone(),
+            process_ref: artifact.process_ref("refused").unwrap().clone(),
+            host_requirements_ref: artifact.host_requirements_ref().clone(),
+            process_name: "refused".into(),
+            args: serde_json::Map::new(),
+        };
+        let engine = LashlangProcessEngine::new(
+            store,
+            LashlangSurface::default(),
+            backend.worker_recovery(),
+        );
+        let registration = lash_core::ProcessRegistration::new(
+            input.to_process_input().unwrap(),
+            lash_core::ProcessProvenance::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+            input.process_identity(),
+        ))
+        .with_execution_env_ref(Some(
+            lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
+                .await,
+        ));
+        let registry = backend.process_registry();
+        let record = registry
+            .register_process(registration.clone())
+            .await
+            .expect("register the admitted process");
+        let context = lash_core::testing::process_engine_run_context_for_validation(
+            &backend,
+            registration,
+            Arc::new(lash_core::ToolCatalog::default()),
+            false,
+        );
+        let before = fixture.double.server().stats();
+        let outcome = engine
+            .run(context, serde_json::to_value(input).unwrap())
+            .await
+            .unwrap();
+        let terminal = outcome.terminal_output().unwrap();
+        let encoded = serde_json::to_vec(terminal).unwrap();
+        let decoded: lash_core::ProcessAwaitOutput = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(&decoded, terminal, "durable terminal retains all evidence");
+        let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = &decoded else {
+            panic!("artifact refusal must abandon before effects: {decoded:?}");
+        };
+        let lash_core::AbandonWriter::ResumeRefused { reason } = &evidence.writer else {
+            panic!("engine must own the refusal: {evidence:?}");
+        };
+        match expected {
+            lashlang::ModuleArtifactRefusal::Generation(_) => assert_eq!(
+                reason,
+                &lash_core::ProcessResumeRefusal::RetiredGeneration {
+                    found: artifact.module_ref().to_string(),
+                }
+            ),
+            lashlang::ModuleArtifactRefusal::Corrupt(source) => assert_eq!(
+                reason,
+                &lash_core::ProcessResumeRefusal::StoredArtifactCorrupt {
+                    artifact_ref: artifact.module_ref().to_string(),
+                    source,
+                }
+            ),
+        }
+        let remote = lash_remote_protocol::RemoteProcessAwaitOutput::try_from(decoded.clone())
+            .expect("remote terminal");
+        let remote: lash_remote_protocol::RemoteProcessAwaitOutput =
+            serde_json::from_value(serde_json::to_value(remote).unwrap()).unwrap();
+        assert_eq!(
+            lash_core::ProcessAwaitOutput::try_from(remote).unwrap(),
+            decoded,
+            "remote peer retains all terminal evidence"
+        );
+        assert_eq!(
+            fixture.double.server().stats(),
+            before,
+            "refuse before any effect"
+        );
+        for _ in 0..2 {
+            registry
+                .complete_process(
+                    &record.id,
+                    decoded.clone(),
+                    lash_core::ProcessCompletionAuthority::workflow_key(record.id.to_string()),
+                )
+                .await
+                .expect("store or replay the refused terminal");
+        }
+        let retained = registry
+            .get_process(&record.id)
+            .await
+            .expect("read durable terminal")
+            .expect("retained process");
+        assert_eq!(retained.outcome.as_ref(), Some(&decoded));
+        let events = registry
+            .recent_events(&record.id, 4)
+            .await
+            .expect("read durable terminal event");
+        let terminals: Vec<_> = events
+            .iter()
+            .filter_map(|event| event.semantics.terminal.as_ref())
+            .collect();
+        assert_eq!(terminals.len(), 1, "replay writes one terminal event");
+        assert_eq!(terminals[0].outcome, decoded, "event retains the cause");
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Edge {
     artifact_ref: String,

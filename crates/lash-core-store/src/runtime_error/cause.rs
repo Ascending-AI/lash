@@ -16,6 +16,9 @@ pub enum RuntimeErrorCause {
     AttachmentRetention {
         failure: Box<super::AttachmentRetentionFailure>,
     },
+    ModuleArtifactRefused {
+        refusal: Box<lash_sansio::module_artifact_refusal::ModuleArtifactRefusal>,
+    },
     IngressReservedSourceKey {
         #[serde(flatten)]
         refusal: Box<IngressReservedSourceKeyRefusal>,
