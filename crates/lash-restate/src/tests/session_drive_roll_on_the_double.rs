@@ -702,7 +702,8 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         .key(session_crash.as_str())
         .within_attempts(1),
     );
-    roll.send(&session_crash, "r-crash", &gn, &session_lane("N"))
+    let initial = roll
+        .send(&session_crash, "r-crash", &gn, &session_lane("N"))
         .await;
     let outcome = roll
         .attach(&session_crash, "r-crash", &gn, &session_lane("N"))
@@ -717,18 +718,17 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         matches!(outcome.stop, DriveStop::HandedOff { .. }),
         "the replayed drive handed off at its first boundary: {outcome:?}"
     );
-    let continuation = lash_core::engine::drive_continuation_request(&DriveRequest {
-        session: session_crash.clone(),
-        request: DriveRequestId::new("r-crash"),
-        build_generation: gn.clone(),
-    });
+    let continuation = roll
+        .server
+        .journal(initial.as_str())
+        .expect("the drive journal")
+        .into_iter()
+        .filter_map(|entry| entry.one_way_call_command())
+        .find(|send| send.handler_name == "drive")
+        .and_then(|send| send.idempotency_key)
+        .expect("the recorded continuation's request id");
     let rest = roll
-        .attach(
-            &session_crash,
-            continuation.as_str(),
-            &gn,
-            &session_lane("N"),
-        )
+        .attach(&session_crash, &continuation, &gn, &session_lane("N"))
         .await;
     assert_eq!(
         (rest.ran.len(), &rest.stop),

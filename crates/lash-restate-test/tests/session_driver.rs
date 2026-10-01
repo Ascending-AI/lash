@@ -95,6 +95,7 @@ enum RootScript {
 struct ScriptedDriver {
     ledgers: Mutex<BTreeMap<SessionId, Ledger>>,
     gate: Mutex<Option<Arc<AdmissionGate>>>,
+    continuation_gate: Mutex<Option<Arc<AdmissionGate>>>,
     root_hold: Mutex<Option<Arc<RootHold>>>,
     scripts: Mutex<BTreeMap<String, RootScript>>,
     /// The admissions of an item that still fail their attempt, by item.
@@ -184,6 +185,15 @@ impl ScriptedDriver {
             .as_ref()
             .filter(|gate| gate.request == request.request.as_str() && gate.ordinal == ordinal)
             .cloned()
+            .or_else(|| {
+                (ordinal == 0
+                    && request
+                        .request
+                        .as_str()
+                        .starts_with(lash_core::engine::DRIVE_CONTINUATION_PREFIX))
+                .then(|| self.continuation_gate.lock().unwrap().take())
+                .flatten()
+            })
     }
 
     /// Admission's body: the oldest open item is the root, or nothing is.
@@ -581,6 +591,152 @@ async fn a_busy_session_drive_hands_off_before_its_journal_grows_without_bound()
     settle(&backend).await;
     assert_eq!(driver.ledger(&session).consumed.len(), 65);
     no_drive_failed(&backend);
+}
+
+async fn held_generation_continuation() -> (
+    RestateTestBackend,
+    Arc<ScriptedDriver>,
+    Arc<dyn SessionDriver>,
+    SessionId,
+    RestateSessionDriveRequest,
+    Arc<AdmissionGate>,
+) {
+    let backend = lash_restate_test::backend(0x4568, ServerConfig::default().always_replay(true))
+        .await
+        .unwrap();
+    let (driver, installation) = install(&backend);
+    let session = SessionId::from("generation-continuation-attach");
+    driver.accept(&session, "first");
+    driver.accept(&session, "second");
+    let gate = Arc::new(AdmissionGate {
+        request: lash_core::engine::DRIVE_CONTINUATION_PREFIX.to_owned(),
+        ordinal: 0,
+        reached: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    *driver.continuation_gate.lock().unwrap() = Some(Arc::clone(&gate));
+    let generation = backend.restate().build_generation();
+    let initial = backend
+        .restate()
+        .session_work_engine()
+        .send_resume(&session, request("initial"), generation)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), gate.reached.notified())
+        .await
+        .expect("the generation-lane continuation is running inside admission");
+    let send = backend
+        .server()
+        .journal(initial.as_str())
+        .unwrap()
+        .into_iter()
+        .filter_map(|entry| entry.one_way_call_command())
+        .find(|send| send.handler_name == "drive")
+        .expect("the first leg recorded its continuation send");
+    let call: Call<RestateSessionDriveRequest> = serde_json::from_slice(&send.parameter).unwrap();
+    let continuation = call.body;
+    assert_eq!(
+        send.idempotency_key.as_deref(),
+        Some(continuation.request.request.as_str())
+    );
+    assert_eq!(driver.ledger(&session).consumed, ["first"]);
+    (backend, driver, installation, session, continuation, gate)
+}
+
+/// FIG-4568: an attach after a build roll joins the recorded generation
+/// continuation, including its later legs, while its admission is held.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_attach_joins_a_generation_lane_continuation_without_starting_a_stable_drive() {
+    let (backend, driver, _installation, session, continuation, gate) =
+        held_generation_continuation().await;
+    let next_generation = lash_core::engine::BuildGeneration::for_test("attach-next");
+    backend
+        .add_build(next_generation.clone(), "next", DeploymentHooks::default())
+        .await
+        .unwrap();
+    let next = backend.restate().sibling_build(next_generation);
+    let attached = next
+        .session_work_engine()
+        .await_drive(&session, &continuation.request.request);
+    tokio::pin!(attached);
+    let outcome = tokio::time::timeout(Duration::from_secs(20), async {
+        tokio::select! {
+            biased;
+            outcome = &mut attached => outcome,
+            () = async {
+                tokio::task::yield_now().await;
+                gate.release.notify_one();
+            } => attached.await,
+        }
+    })
+    .await
+    .expect("the attached continuation ends")
+    .expect("the attach joins the running continuation");
+    assert_eq!(outcome.ran.len(), 1, "the remaining root was run");
+    assert_eq!(outcome.ran[0].root().as_str(), "second");
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    settle(&backend).await;
+    assert_eq!(driver.ledger(&session).consumed, ["first", "second"]);
+    assert!(
+        session_drives(&backend)
+            .iter()
+            .all(|view| !view.target.starts_with(&format!("LashSession/{session}/"))),
+        "the attach starts no stable-lane drive: {:?}",
+        session_drives(&backend)
+    );
+    no_drive_failed(&backend);
+}
+
+/// FIG-4568: bypassing the attach API cannot run a recorded continuation
+/// on the stable lane. Its typed refusal precedes every journaled command.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_generation_lane_continuation_sent_to_the_stable_lane_is_refused_typed() {
+    let (backend, driver, _installation, session, continuation, gate) =
+        held_generation_continuation().await;
+    let error = backend
+        .ingress()
+        .call_workflow_json::<_, Reply<DriveOutcome>>(
+            SESSION_DRIVER_SERVICE,
+            session.as_str(),
+            "drive",
+            &Call::new(continuation.clone()),
+        )
+        .await
+        .expect_err("a stable-lane call cannot run the generation continuation");
+    let lash_restate::RestateHttpError::Status { body, .. } = error else {
+        panic!("the handler returned no typed refusal: {error}");
+    };
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let message = body["message"].as_str().unwrap();
+    let (_, encoded) = message.split_once("lash-drive-refused:").unwrap();
+    let refusal: RuntimeError = serde_json::from_str(encoded).unwrap();
+    assert_eq!(
+        refusal.code,
+        RuntimeErrorCode::ExecutionScopeAdmissionRefused
+    );
+    let stable = session_drives(&backend)
+        .into_iter()
+        .find(|view| view.target == format!("LashSession/{session}/drive"))
+        .unwrap();
+    assert_eq!(stable.attempts, 1);
+    assert!(
+        backend
+            .server()
+            .journal(&stable.id)
+            .unwrap()
+            .iter()
+            .all(|entry| {
+                !entry.ty.is_command()
+                    || matches!(
+                        entry.ty,
+                        MessageType::InputCommand | MessageType::OutputCommand
+                    )
+            })
+    );
+    assert_eq!(driver.ledger(&session).consumed, ["first"]);
+    gate.release.notify_one();
+    settle(&backend).await;
+    assert_eq!(driver.ledger(&session).consumed, ["first", "second"]);
 }
 
 /// A drive's attempt budget is never spent on the sum of its roots'

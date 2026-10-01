@@ -97,7 +97,7 @@ use std::sync::{Arc, Mutex, Weak};
 use lash_core::engine::{
     AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveLoop, DriveOutcome, DriveRequest,
     DriveRequestId, DriveStop, MAX_ROOTS_PER_DRIVE, RootOutcome, RootRunEnd, drive_admission_scope,
-    drive_continuation_request, drive_root_scope,
+    drive_root_scope,
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
 use restate_sdk::context::{
@@ -117,6 +117,9 @@ use crate::{
 };
 
 mod asks;
+mod continuation;
+
+use continuation::{continuation_generation, session_drive_continuation};
 
 /// The generation of the session driver's journaled command prefix
 /// (ADR 0105 §12): a drain surface, and so an input to the build's drain
@@ -561,35 +564,6 @@ impl RestateSessionWork {
             )
             .await
     }
-
-    /// Attach to `request`'s drive of `session` and return how it ended,
-    /// sending it first if nothing sent it yet: the same idempotency key as
-    /// [`send_drive`](Self::send_drive), so the call and an earlier send name
-    /// one invocation.
-    pub async fn attach_drive(
-        &self,
-        session: &SessionId,
-        request: DriveRequestId,
-    ) -> Result<DriveOutcome, crate::RestateHttpError> {
-        let body = RestateSessionDriveRequest {
-            request: DriveRequest {
-                session: session.clone(),
-                request: request.clone(),
-                build_generation: self.build_generation.clone(),
-            },
-            handed_off: None,
-        };
-        self.ingress
-            .call_object_json_idempotent::<_, Reply<DriveOutcome>>(
-                &self.namespace.stable(LashService::SessionDriver).name(),
-                session.as_str(),
-                DRIVE_HANDLER,
-                &Call::new(body),
-                request.as_str(),
-            )
-            .await
-            .map(Reply::into_body)
-    }
 }
 
 impl RestateSessionWork {
@@ -643,23 +617,6 @@ impl RestateSessionWork {
                 request.as_str()
             ),
         )))
-    }
-
-    /// The leg a drive continues on after `leg` ended with `outcome`, when
-    /// `leg` handed off at a root boundary.
-    fn continuation(
-        &self,
-        session: &SessionId,
-        leg: &DriveRequestId,
-        outcome: &DriveOutcome,
-    ) -> Option<DriveRequestId> {
-        matches!(outcome.stop, DriveStop::HandedOff { .. }).then(|| {
-            drive_continuation_request(&DriveRequest {
-                session: session.clone(),
-                request: leg.clone(),
-                build_generation: self.build_generation.clone(),
-            })
-        })
     }
 }
 
@@ -1087,6 +1044,15 @@ async fn drive_session_journal(
             request.session
         )));
     }
+    if let Some(recorded) = continuation_generation(&request.request)
+        && route.lane() != &crate::services::Lane::Generation(recorded.clone())
+    {
+        return Err(misaddressed(format!(
+            "drive continuation `{}` of session `{}` belongs to generation lane `{recorded}`, not `{route}`",
+            request.request.as_str(),
+            request.session,
+        )));
+    }
     // The generation lane is resume-only (FIG-3795): it serves a drive whose
     // request was stamped for exactly this generation. A request naming
     // another generation, sent there by error, is refused before any command
@@ -1285,7 +1251,7 @@ async fn drive_admissions(
                     // rather than be run there again.
                     let continuation = DriveRequest {
                         session: request.session.clone(),
-                        request: drive_continuation_request(&request),
+                        request: session_drive_continuation(&request, route),
                         build_generation: request.build_generation.clone(),
                     };
                     let continuation_id = continuation.request.as_str().to_owned();
