@@ -10,7 +10,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 
-RUNNER = Path(__file__).resolve().parents[1] / "tools/bazel/test_batch_runner.sh"
+RUNNER = Path(__file__).resolve().parents[1] / "tools/buck2/test_batch_runner.sh"
 
 
 class BatchRunnerTests(unittest.TestCase):
@@ -42,7 +42,8 @@ class BatchRunnerTests(unittest.TestCase):
             manifest.write_text("_main/first\n_main/second\n")
             xml = root / "test.xml"
             result = subprocess.run(
-                ["bash", str(RUNNER), *args], text=True, capture_output=True, timeout=10,
+                ["bash", str(RUNNER), "2", "_main/first", "_main/second", *args],
+                cwd=root, text=True, capture_output=True, timeout=10,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
                          XML_OUTPUT_FILE=str(xml),
@@ -75,6 +76,12 @@ class BatchRunnerTests(unittest.TestCase):
                 result, _ = self.invoke(*args)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("no tests matched", result.stderr)
+
+    def test_ignored_only_selection_requires_an_execution(self):
+        result, observed = self.invoke("--ignored")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(observed, [["--ignored"], ["--ignored"]])
+        self.assertIn("no executable tests matched", result.stderr)
 
     def test_plain_success_stays_compact_and_failure_prints_its_member(self):
         success, observed = self.invoke()
@@ -124,7 +131,9 @@ class BatchRunnerTests(unittest.TestCase):
             manifest = root / "manifest"
             manifest.write_text("".join(f"_main/{name}\n" for name in names))
             result = subprocess.run(
-                ["bash", str(RUNNER)], text=True, capture_output=True, timeout=20,
+                ["bash", str(RUNNER), str(len(names)),
+                 *(f"_main/{name}" for name in names)],
+                cwd=root, text=True, capture_output=True, timeout=20,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
                          LASH_BATCH_JOBS="2", XML_OUTPUT_FILE=str(root / "test.xml")),

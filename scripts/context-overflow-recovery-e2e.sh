@@ -35,8 +35,8 @@ cleanup() {
 trap cleanup EXIT
 
 # The mapping this scenario judges, proved in the kernel before a row is spent.
-if [[ -f .kiln.bazelrc ]]; then
-  kiln test --test_output=all \
+if [[ -f .buckconfig.local ]]; then
+  kiln test \
     --test_arg=context_overflow_response_stops_as_its_own_outcome \
     //crates/lash-sansio:lash-sansio__unit_test \
     2>&1 | tee "$artifact_root/01-contract-tests.log" | tee "$run_log"
@@ -69,12 +69,16 @@ mkdir -p "$staging"
 if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
   companion="$LASH_E2E_PREBUILT_BIN_DIR/lash-e2e-context-overflow-recovery"
   worker="$LASH_E2E_PREBUILT_BIN_DIR/lash-vm-worker"
-elif [[ -f .kiln.bazelrc ]]; then
-  kiln build --remote_download_outputs=toplevel \
+elif [[ -f .buckconfig.local ]]; then
+  mapfile -t built < <(python3 "$repo/scripts/ci/restate_suite.py" build \
     //runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin \
-    //crates/lash-vm-worker:lash-vm-worker__bin
-  companion="$repo/bazel-bin/runbooks/restate-postgres-workers/lash-e2e-context-overflow-recovery__bin"
-  worker="$repo/bazel-bin/crates/lash-vm-worker/lash-vm-worker__bin"
+    //crates/lash-vm-worker:lash-vm-worker__bin)
+  if [ "${#built[@]}" -ne 2 ]; then
+    echo "expected 2 built outputs, got ${#built[@]}" >&2
+    exit 1
+  fi
+  companion="${built[0]}"
+  worker="${built[1]}"
 else
   cargo build --locked \
     -p lash-restate-postgres-workers-e2e -p lash-internal-vm-worker \

@@ -3,7 +3,7 @@
 //! Only the deliberate steps ask Node live: writing `generated/`, the
 //! long generated run and the minimizer. The cacheable test partition reads
 //! the checked-in answers and never starts a process (ADR 0062: no network,
-//! no Node in the Bazel test partition).
+//! no Node in the Buck2 test partition).
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -14,8 +14,7 @@ use serde::Serialize;
 
 use super::Observation;
 
-/// The repository checkout: the workspace `kiln run` (Bazel) names, or the
-/// one Cargo compiled from.
+/// The repository checkout from a Buck2 test workspace or Cargo manifest.
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the live Node oracle is a test host capability.
 pub(super) fn repository_root() -> PathBuf {
     std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
@@ -149,7 +148,7 @@ pub(super) struct NodeOracle {
 impl NodeOracle {
     /// The pinned Node binary: `LASH_NODE` when set, else the mise install
     /// `~/.local/share/mise/installs/node/<pinned>/bin/node` when present
-    /// (FIG-3812: `kiln run`'s Bazel environment has no `node` on `PATH`),
+    /// (FIG-3812: Buck2's test environment has no `node` on `PATH`),
     /// else `node` from `PATH`, which is how CI jobs provision it
     /// (`actions/setup-node`). The oracle refuses any Node other than the
     /// pinned one, so a wrong `PATH` node fails loudly rather than drifting.

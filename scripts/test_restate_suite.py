@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import importlib.util
 import io
+import json
 import itertools
 import os
 import pathlib
@@ -93,13 +94,19 @@ class FakeBinary:
 
 class RegistryTests(unittest.TestCase):
     def test_every_registered_suite_names_a_label_and_a_directory_that_exist(self) -> None:
+        inventory = json.loads(
+            (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
+        )
+        labels = {
+            target["label"]
+            for package in inventory["packages"]
+            for target in package["targets"]
+            if isinstance(target.get("label"), str)
+        }
         for name in MODULE.load_registry():
             with self.subTest(suite=name):
                 suite = MODULE.load_suite(name)
-                package, _, target = suite.label.removeprefix("//").partition(":")
-                build_file = ROOT / package / "BUILD.bazel"
-                self.assertTrue(build_file.is_file(), build_file)
-                self.assertIn(f'name = "{target}"', build_file.read_text(encoding="utf-8"))
+                self.assertIn(suite.label, labels)
                 self.assertTrue((ROOT / suite.cwd).is_dir())
                 self.assertTrue(suite.filters)
                 self.assertGreaterEqual(suite.shards, 1)
@@ -240,9 +247,30 @@ class StageBinariesTests(unittest.TestCase):
 
         manifest = tomllib.loads((ROOT / "runbooks/restate-postgres-workers/Cargo.toml").read_text(encoding="utf-8"))
         cargo_bins = {entry["name"] for entry in manifest["bin"]}
-        labels = MODULE.package_binaries("//runbooks/restate-postgres-workers")
-        staged = {label.rpartition(":")[2].removesuffix("__bin") for label in labels}
-        self.assertEqual(cargo_bins, staged)
+        binaries = MODULE.package_binaries("//runbooks/restate-postgres-workers")
+        self.assertEqual(cargo_bins, set(binaries.values()))
+
+    def test_staging_names_each_binary_by_its_cargo_name_not_its_crate_output(self) -> None:
+        # Buck2 names a binary's output after its crate, with underscores.
+        def build(labels):
+            outputs = []
+            for label in labels:
+                crate = label.rpartition(":")[2].removesuffix("__bin").replace("-", "_")
+                output = pathlib.Path(built_dir, crate)
+                output.write_bytes(b"\x7fELF")
+                outputs.append(output)
+            return outputs
+
+        with tempfile.TemporaryDirectory() as built_dir, tempfile.TemporaryDirectory() as stage:
+            with mock.patch.object(MODULE, "build", side_effect=build), mock.patch.object(MODULE.subprocess, "run"):
+                staged = MODULE.stage_binaries("//runbooks/restate-postgres-workers", pathlib.Path(stage))
+            names = sorted(path.name for path in staged)
+            self.assertEqual(sorted(os.listdir(stage)), names)
+            self.assertIn("lash-e2e-worker", names)
+            self.assertIn("lash-vm-worker", names)
+            self.assertFalse([name for name in names if "_" in name])
+            for path in staged:
+                self.assertTrue(os.access(path, os.X_OK), path)
 
 
 class ReservationTests(unittest.TestCase):

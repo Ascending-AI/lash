@@ -93,7 +93,7 @@ RESTATE_AUTHORITY_ID="attachment-reclamation-$port" \
 `CARGO_TARGET_DIR`, which is why `. ./env.sh` comes first above.)
 
 The launcher builds the binary itself before it takes any lock. This row is the one
-exception to the Bazel path RULES.md describes: `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO`
+exception to the Buck2 path RULES.md describes: `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO`
 turns on the `provider-wire-fixtures` feature, and a workbench built with that feature still
 goes through Cargo with `--profile judged` (RULES.md, "The judged build geometry is the
 shipping one"). Expect a Cargo build here, not `kiln build --config=judged`. An operator rehearsing repeatedly can point

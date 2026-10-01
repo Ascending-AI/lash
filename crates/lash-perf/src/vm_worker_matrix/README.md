@@ -10,9 +10,14 @@ Source the fork environment. Build and run an optimized executable through kiln:
 
 ```sh
 . ./env.sh
-kiln build --compilation_mode=opt --remote_download_outputs=toplevel //crates/lash-perf:vm-worker-matrix__bin
-kiln gate lash FORK -- bazel-bin/crates/lash-perf/vm-worker-matrix__bin --verify
-kiln gate lash FORK -- bazel-bin/crates/lash-perf/vm-worker-matrix__bin --out .benchmarks/vm-worker
+report=$(mktemp)
+kiln build --config=optimized --materializations final --build-report "$report" \
+  //crates/lash-perf:vm-worker-matrix__bin
+binary=$(python3 tools/buck2/outputs.py --report "$report" \
+  --label //crates/lash-perf:vm-worker-matrix__bin --single)
+kiln gate lash FORK -- "$binary" --verify
+kiln gate lash FORK -- "$binary" --out .benchmarks/vm-worker
+rm -f "$report"
 ```
 
 `--verify` drives every workload on both sides and checks the profiler's exact

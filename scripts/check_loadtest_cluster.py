@@ -168,7 +168,7 @@ def build_rules(path):
 
 def resolve(root, label):
     package, name = label.removeprefix('//').split(':')
-    return build_rules(Path(root) / package / 'BUILD.bazel')[name]
+    return build_rules(Path(root) / package / 'BUCK')[name]
 
 
 def vm_helper(root, worker):
@@ -180,14 +180,16 @@ def vm_helper(root, worker):
     features equal that library's, read from the generated feature variants.
     Its `testing` must match the linked lash-vm-client's."""
     deps = resolve(root, worker).get('variant_deps', {})
-    client = deps.get('//crates/lash-vm-client', '//crates/lash-vm-client:lash-vm-client')
-    library = deps.get('//crates/lash-vm-worker', '//crates/lash-vm-worker:lash-vm-worker')
+    client_label = '//crates/lash-vm-client:lash-vm-client'
+    worker_label = '//crates/lash-vm-worker:lash-vm-worker'
+    client = deps.get(client_label, client_label)
+    library = deps.get(worker_label, worker_label)
     testing = 'testing' in resolve(root, client)['crate_features']
     features = set(resolve(root, library)['crate_features'])
     if ('testing' in features) != testing:
         raise ValueError(f'{worker} links {library} and {client}, which do not pair on testing')
     helpers = {}
-    for name, rule in build_rules(Path(root) / 'crates/lash-vm-worker/BUILD.bazel').items():
+    for name, rule in build_rules(Path(root) / 'crates/lash-vm-worker/BUCK').items():
         if rule.get('crate_name') == 'lash_vm_worker' and rule.get('crate_root') == 'src/main.rs':
             helpers[name] = rule['library'] if rule['library'].startswith('//') else '//crates/lash-vm-worker' + rule['library']
     exact = [name for name, own in helpers.items() if own == library]

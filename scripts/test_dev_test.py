@@ -30,7 +30,7 @@ class DevTestTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.env = {
             key: value for key, value in os.environ.items()
-            if not key.startswith(("LASH_", "KILN_", "BAZEL_", "CARGO_", "GIT_"))
+            if not key.startswith(("LASH_", "KILN_", "BUCK2_", "CARGO_", "GIT_"))
         }
         self.env.update({
             "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.test",
@@ -42,40 +42,53 @@ class DevTestTests(unittest.TestCase):
         self.source = self.root / "crates/example/src/lib.rs"
         self.source.parent.mkdir(parents=True)
         self.source.write_text("pub fn example() {}\n")
-        (self.source.parents[1] / "BUILD.bazel").write_text("# fixture\n")
-        inventory = self.root / "tools/bazel/workspace_targets.bzl"
+        (self.source.parents[1] / "BUCK").write_text("# fixture\n")
+        inventory = self.root / "tools/buck2/target-inventory.json"
         inventory.parent.mkdir(parents=True)
-        inventory.write_text(
-            'WORKSPACE_DEV_TEST_TARGETS = ["//crates/example:first", "//crates/example:second"]\n'
-            'WORKSPACE_TEST_BATCHES = {"//crates/example:test_batch": ["//crates/example:first", "//crates/example:second"]}\n'
-        )
-        # The checked-in label inventory `ci_plan.pr_tail_labels` reads.
-        (self.root / "tools/bazel/target-inventory.json").write_text(json.dumps({"packages": [
+        inventory.write_text(json.dumps({
+            "workspace_dev_test_targets": [
+                "//crates/example:first",
+                "//crates/example:second",
+                "//crates/dependent:dependent__test",
+            ],
+            "workspace_test_batches": {"//crates/example:test_batch": ["//crates/example:first", "//crates/example:second"]},
+            "packages": [
             {"manifest": "crates/example/Cargo.toml", "targets": [
-                {"kind": "test", "label": "//crates/example:first", "tags": []},
-                {"kind": "test", "label": "//crates/example:second", "tags": []},
+                {"kind": "test", "label": "//crates/example:first", "build_label": "//crates/example:first", "tags": []},
+                {"kind": "test", "label": "//crates/example:second", "build_label": "//crates/example:second", "tags": []},
+            ]},
+            {"manifest": "crates/dependent/Cargo.toml", "targets": [
+                {"kind": "test", "label": "//crates/dependent:dependent__test", "build_label": "//crates/dependent:dependent__test", "tags": []},
             ]},
             {"manifest": "crates/slow/Cargo.toml", "targets": [
-                {"kind": "test", "label": "//crates/slow:slow__test", "tags": ["dev-deferred"]},
-                {"kind": "test", "label": "//crates/slow:service__test", "tags": ["manual"]},
-                {"kind": "test", "label": "//crates/slow:trunk__test", "tags": ["pr-deferred"]},
+                {"kind": "test", "label": "//crates/slow:slow__test", "build_label": "//crates/slow:slow__test", "tags": ["dev-deferred"]},
+                {"kind": "test", "label": "//crates/slow:service__test", "build_label": "//crates/slow:service__test", "tags": ["manual"]},
+                {"kind": "test", "label": "//crates/slow:trunk__test", "build_label": "//crates/slow:trunk__test", "tags": ["pr-deferred"]},
             ]},
             {"manifest": "examples/sample/Cargo.toml", "targets": [
-                {"kind": "test", "label": "//examples/sample:leaf__test", "tags": ["dev-deferred"]},
+                {"kind": "test", "label": "//examples/sample:leaf__test", "build_label": "//examples/sample:leaf__test", "tags": ["dev-deferred"]},
             ]},
         ]}))
-        # A package whose only Bazel test label is dev-deferred.
+        # A package whose only Buck2 test label is dev-deferred.
         slow = self.root / "crates/slow/src"
         slow.mkdir(parents=True)
         (slow / "lib.rs").write_text("pub fn slow() {}\n")
-        (self.root / "crates/slow/BUILD.bazel").write_text("# fixture\n")
+        (self.root / "crates/slow/BUCK").write_text("# fixture\n")
         workflow = self.root / ".github/workflows/ci.yml"
         workflow.parent.mkdir(parents=True)
         workflow.write_text("bash scripts/ci/run-gate-commands.sh --jobs 4 <<'GATES'\n"
                             "python3 scripts/test_dev_test.py\nGATES\n")
         (self.root / "scripts/test_dev_test.py").write_text("raise SystemExit(0)\n")
-        (self.root / ".gitignore").write_text(".kiln.bazelrc\n")
-        (self.root / ".kiln.bazelrc").touch()
+        (self.root / ".gitignore").write_text(".buckconfig.local\n")
+        (self.root / ".buckconfig.local").write_text(
+            "[buck2_re_client]\n"
+            "engine_address = grpcs://executor.fixture\n"
+            "tls_client_cert = .kiln/client.pem\n"
+        )
+        (self.root / "tools/buck2/bootstrap.py").write_text(
+            "from pathlib import Path\n"
+            "print(Path(__file__).resolve().parents[2] / '.git/bin/buck2')\n"
+        )
         self.git("init", "-q")
         self.git("add", ".")
         self.git("commit", "-qm", "fixture")
@@ -83,6 +96,9 @@ class DevTestTests(unittest.TestCase):
         self.source.write_text("pub fn example() { let _ = 1; }\n")
         self.bin = self.root / ".git/bin"
         self.bin.mkdir()
+        query = self.bin / "buck2"
+        query.write_text("#!/bin/sh\nexit 1\n")
+        query.chmod(0o755)
         executor = self.bin / "kiln"
         executor.write_text(
             '#!/usr/bin/env python3\nimport os,time,sys\nfrom pathlib import Path\n'
@@ -92,8 +108,13 @@ class DevTestTests(unittest.TestCase):
             '(root/"started").touch()\n'
             'canned=os.environ.get("TEST_STDOUT_FILE")\n'
             'if canned: sys.stdout.write(Path(canned).read_text())\n'
+            'if "--test-report" in sys.argv:\n'
+            ' report=Path(sys.argv[sys.argv.index("--test-report")+1])\n'
+            ' fixture=os.environ.get("TEST_REPORT_FILE")\n'
+            ' report.write_text(Path(fixture).read_text() if fixture else \'{"schema":1,"results":{}}\\n\')\n'
             'while (root/"hold").exists(): time.sleep(0.01)\n'
-            'raise SystemExit(int(os.environ.get("TEST_EXIT", "0")))\n'
+            'status=os.environ.get("TEST_EXIT", "0") if len(sys.argv)>1 and sys.argv[1]=="test" else "0"\n'
+            'raise SystemExit(int(status))\n'
         )
         executor.chmod(0o755)
         self.env["PATH"] = str(self.bin) + os.pathsep + self.env["PATH"]
@@ -124,18 +145,25 @@ class DevTestTests(unittest.TestCase):
     def test_worktree_edits_and_shared_manifest_selection(self):
         result = self.invoke("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["commands"], [["kiln", "test", "//crates/example:test_batch", "//:schema_checks"]])
+        self.assertEqual(json.loads(result.stdout)["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//crates/example:test_batch"],
+        ])
         (self.source.parents[1] / "Cargo.toml").write_text("[package]\n")
-        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [["kiln", "test", "//:dev_tests", "//:schema_checks"]])
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//:dev_tests"],
+        ])
 
     def test_a_package_diff_also_selects_its_dev_deferred_labels(self):
         (self.root / "crates/slow/src/lib.rs").write_text("pub fn slow() { let _ = 1; }\n")
         commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
         self.assertEqual(commands, [[
+            "kiln", "build", "//:schema_checks",
+        ], [
             "kiln", "test",
             "//crates/example:test_batch",
             "//crates/slow:slow__test",
-            "//:schema_checks",
         ]])
         # The manual and pr-deferred labels of the same package stay out; so
         # does the dev-deferred examples leaf. A package manifest widens to
@@ -143,26 +171,37 @@ class DevTestTests(unittest.TestCase):
         (self.root / "crates/slow/Cargo.toml").write_text("[package]\n")
         commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
         self.assertEqual(commands, [[
+            "kiln", "build", "//:schema_checks",
+        ], [
             "kiln", "test",
             "//:dev_tests",
             "//crates/slow:slow__test",
-            "//:schema_checks",
         ]])
 
     def test_query_cannot_select_deferred_manual_or_duplicate_batch_members(self):
-        query = self.bin / "bazel"
-        query.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > .git/query-args\nprintf '%s\\n' //crates/example:first //crates/example:second "
-                         "//crates/example:test_batch //crates/example:deferred //crates/example:manual\n")
+        query = self.bin / "buck2"
+        query.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > .git/query-args\nprintf '%s\\n' root//crates/example:first root//crates/example:second "
+                         "root//crates/dependent:dependent__test root//crates/example:test_batch root//crates/example:deferred root//crates/example:manual\n")
         query.chmod(0o755)
         commands = json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"]
-        self.assertEqual(commands, [["kiln", "test", "//crates/example:test_batch", "//:schema_checks"]])
+        self.assertEqual(commands, [
+            ["kiln", "build", "//:schema_checks"],
+            [
+                "kiln",
+                "test",
+                "//crates/dependent:dependent__test",
+                "//crates/example:test_batch",
+            ],
+        ])
         self.assertIn(
             "rdeps(set(//crates/... //examples/... //runbooks/...),",
             (self.root / ".git/query-args").read_text(),
         )
-        query.write_text("#!/bin/sh\necho //crates/example:first\n")
-        self.assertEqual(json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"],
-                         [["kiln", "test", "//crates/example:first", "//:schema_checks"]])
+        query.write_text("#!/bin/sh\necho root//crates/example:first\n")
+        self.assertEqual(json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//crates/example:first"],
+        ])
 
     def test_known_script_edit_runs_its_ci_proof_and_propagates_failure(self):
         self.git("checkout", "--", "crates/example/src/lib.rs")
@@ -178,31 +217,39 @@ class DevTestTests(unittest.TestCase):
         (self.root / "scripts/unknown.py").write_text("# new tooling\n")
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
             ["bash", "scripts/ci/repository-gates.sh"],
-            ["kiln", "test", "//:dev_tests", "//:schema_checks"],
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//:dev_tests"],
         ])
 
     def test_service_only_package_builds_without_running_manual_tests(self):
         self.git("checkout", "--", "crates/example/src/lib.rs")
         package = self.root / "crates/service"
         package.mkdir()
-        (package / "BUILD.bazel").write_text("# fixture\n")
-        self.git("add", "crates/service/BUILD.bazel")
+        (package / "BUCK").write_text("# fixture\n")
+        inventory = json.loads((self.root / "tools/buck2/target-inventory.json").read_text())
+        inventory["packages"].append({
+            "manifest": "crates/service/Cargo.toml",
+            "targets": [{"kind": "lib", "label": "//crates/service:service", "build_label": "//crates/service:service[static]"}],
+        })
+        (self.root / "tools/buck2/target-inventory.json").write_text(json.dumps(inventory))
+        self.git("add", "crates/service/BUCK", "tools/buck2/target-inventory.json")
         self.git("commit", "-qm", "service fixture")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         (package / "service.rs").write_text("// service change\n")
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
-            ["kiln", "build", "//crates/service:all", "//:schema_checks"],
+            ["kiln", "build", "//crates/service:service[static]", "//:schema_checks"],
         ])
         self.source.write_text("pub fn example() { let _ = 2; }\n")
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
-            ["kiln", "build", "//crates/service:all", "//:schema_checks"],
-            ["kiln", "test", "//crates/example:test_batch", "//:schema_checks"],
+            ["kiln", "build", "//crates/service:service[static]", "//:schema_checks"],
+            ["kiln", "test", "//crates/example:test_batch"],
         ])
 
     def test_facade_keeps_explicit_manual_seal(self):
         (self.root / "Cargo.toml").write_text("[workspace]\n")
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
-            ["kiln", "test", "//:dev_tests", "//crates/lash:ui_fixtures", "//:schema_checks"],
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//:dev_tests", "//crates/lash:ui_fixtures"],
         ])
 
     def test_untracked_content_changes_identity(self):
@@ -213,14 +260,17 @@ class DevTestTests(unittest.TestCase):
         self.assertNotEqual(before, json.loads(self.invoke("--dry-run").stdout)["inputs"])
 
     def test_failed_query_widens_selection(self):
-        query = self.bin / "bazel"
+        query = self.bin / "buck2"
         query.write_text("#!/bin/sh\nexit 7\n")
         query.chmod(0o755)
         result = self.invoke("--dependents", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["commands"], [["kiln", "test", "//:dev_tests", "//:schema_checks"]])
+        self.assertEqual(json.loads(result.stdout)["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//:dev_tests"],
+        ])
 
-    def test_waiting_callers_recheck_bazel_inputs_instead_of_reusing_receipts(self):
+    def test_waiting_callers_recheck_buck2_inputs_instead_of_reusing_receipts(self):
         self.env["TEST_EXIT"] = "7"
         hold = self.root / ".git/hold"
         hold.touch()
@@ -232,9 +282,12 @@ class DevTestTests(unittest.TestCase):
         first.communicate(timeout=10)
         second.communicate(timeout=10)
         self.assertEqual((first.returncode, second.returncode), (7, 7))
-        self.assertEqual((self.root / ".git/calls").read_text().splitlines(), ["run", "run"])
+        self.assertEqual(
+            (self.root / ".git/calls").read_text().splitlines(),
+            ["run", "run", "run", "run"],
+        )
         self.assertEqual(self.invoke().returncode, 7)
-        self.assertEqual(len((self.root / ".git/calls").read_text().splitlines()), 3)
+        self.assertEqual(len((self.root / ".git/calls").read_text().splitlines()), 6)
 
     def test_edit_during_validation_cannot_produce_green_receipt(self):
         hold = self.root / ".git/hold"
@@ -248,8 +301,52 @@ class DevTestTests(unittest.TestCase):
         receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
         self.assertFalse(receipt["inputs_unchanged"])
 
+    def test_driver_managed_concurrency_change_does_not_stale_result(self):
+        hold = self.root / ".git/hold"
+        hold.touch()
+        process = self.start()
+        self.wait_started()
+        config = self.root / ".buckconfig.local"
+        config.write_text(
+            config.read_text()
+            + "execution_concurrency_limit = 16\n"
+        )
+        hold.unlink()
+        _stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stderr)
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertTrue(receipt["inputs_unchanged"])
 
-    def test_ignored_input_change_still_requires_each_waiter_to_invoke_bazel(self):
+    def test_snapshot_keeps_executor_identity_and_credentials(self):
+        module = dev_test_module()
+        path = Path(".buckconfig.local")
+        original = (
+            b"[buck2_re_client]\n"
+            b"engine_address = grpcs://one\n"
+            b"tls_client_cert = .kiln/one.pem\n"
+        )
+        with_limit = original + b"execution_concurrency_limit = 32\n"
+        self.assertEqual(
+            module.snapshot_contents(path, original),
+            module.snapshot_contents(path, with_limit),
+        )
+        self.assertNotEqual(
+            module.snapshot_contents(path, original),
+            module.snapshot_contents(
+                path,
+                original.replace(b"grpcs://one", b"grpcs://two"),
+            ),
+        )
+        self.assertNotEqual(
+            module.snapshot_contents(path, original),
+            module.snapshot_contents(
+                path,
+                original.replace(b".kiln/one.pem", b".kiln/two.pem"),
+            ),
+        )
+
+
+    def test_ignored_input_change_still_requires_each_waiter_to_invoke_buck2(self):
         ignore = self.root / ".gitignore"
         ignore.write_text(ignore.read_text() + "generated-input\n")
         ignored = self.root / "generated-input"
@@ -265,7 +362,10 @@ class DevTestTests(unittest.TestCase):
         first.communicate(timeout=10)
         second.communicate(timeout=10)
         self.assertEqual((first.returncode, second.returncode), (0, 0))
-        self.assertEqual((self.root / ".git/calls").read_text().splitlines(), ["run", "run"])
+        self.assertEqual(
+            (self.root / ".git/calls").read_text().splitlines(),
+            ["run", "run", "run", "run"],
+        )
         receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
         self.assertIn("checkout/config snapshot", receipt["plan"]["identity_scope"])
 
@@ -329,7 +429,7 @@ class DevTestTests(unittest.TestCase):
         canned = Path(outside.name) / "canned.txt"
         canned.write_text(
             "INFO: Invocation ID: fixture\n"
-            "BAZEL-NOISE-MARKER-LINE\n"
+            "BUCK2-NOISE-MARKER-LINE\n"
             "==================== Test output for //crates/example:first:\n"
             + "noise padding lines that must never reach stdout\n" * 8
             + "-----------------------------------------------------------------------------\n"
@@ -339,7 +439,28 @@ class DevTestTests(unittest.TestCase):
             f"  {artifacts}/second/test.log\n\n"
             "Executed 2 out of 2 tests: 1 test fails.\n"
         )
+        report = Path(outside.name) / "test-report.json"
+        report.write_text(json.dumps({
+            "schema": 1,
+            "results": {
+                "root//crates/example:first": {
+                    "status": "FAIL",
+                    "exit_code": 101,
+                    "outputs": {
+                        "junit_xml": str(artifacts / "test.xml"),
+                        "log": str(artifacts / "test.log"),
+                        "undeclared": None,
+                    },
+                },
+                "root//crates/example:second": {
+                    "status": "PASS",
+                    "exit_code": 0,
+                    "outputs": {},
+                },
+            },
+        }))
         self.env["TEST_STDOUT_FILE"] = str(canned)
+        self.env["TEST_REPORT_FILE"] = str(report)
         self.env["TEST_EXIT"] = "1"
 
     def test_failure_summary_names_the_target_test_panic_and_log(self):
@@ -353,7 +474,7 @@ class DevTestTests(unittest.TestCase):
         self.assertIn("test.log", out)
         self.assertIn("--verbose", out)
         # The point of the summary: the firehose stays out of the output.
-        self.assertNotIn("BAZEL-NOISE-MARKER-LINE", out)
+        self.assertNotIn("BUCK2-NOISE-MARKER-LINE", out)
         self.assertNotIn("noise padding", out)
         self.assertNotIn("//crates/example:second", out)
         self.assertLess(len(out.splitlines()), 60)
@@ -362,13 +483,13 @@ class DevTestTests(unittest.TestCase):
         self.canned_failure()
         result = self.invoke("--verbose")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("BAZEL-NOISE-MARKER-LINE", result.stdout)
+        self.assertIn("BUCK2-NOISE-MARKER-LINE", result.stdout)
         self.assertNotIn("failing targets:", result.stdout)
 
     def test_quick_mode_forwards_test_env_and_shard_includes(self):
         package = self.root / "crates/lash-typescript"
         package.mkdir()
-        (package / "BUILD.bazel").write_text("# fixture\n")
+        (package / "BUCK").write_text("# fixture\n")
         outcomes = self.root / "crates/lash-typescript/tests/test262/outcomes"
         outcomes.mkdir(parents=True)
         (outcomes / "built-ins.tsv").write_text("# rows\n")
@@ -422,21 +543,19 @@ class FormatterTests(unittest.TestCase):
                       "crates/other/src/lib.rs"]),
             {"*"})
 
-    def test_failed_targets_reads_the_summary_block(self):
-        text = (
-            "INFO: found 2 targets\n"
-            "//pkg:a                                         FAILED in 1.2s\n"
-            "  /execroot/out/testlogs/pkg/a/test.log\n"
-            "  /execroot/out/testlogs/pkg/a/test.xml\n"
-            "//pkg:b                                         PASSED in 0.3s\n"
-            "FAIL: //pkg:c (see /execroot/out/testlogs/pkg/c/test.log)\n"
-            "Executed 3 out of 3 tests: 2 fail.\n"
-        )
-        self.assertEqual(self.module.failed_targets(text), [
-            ("//pkg:a", ["/execroot/out/testlogs/pkg/a/test.log",
-                        "/execroot/out/testlogs/pkg/a/test.xml"]),
-            ("//pkg:c", ["/execroot/out/testlogs/pkg/c/test.log"]),
-        ])
+    def test_failed_targets_reads_the_test_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.json"
+            report.write_text(json.dumps({"results": {
+                "root//pkg:a": {"status": "FAIL", "outputs": {
+                    "log": "/results/pkg/a/test.log",
+                    "junit_xml": "/results/pkg/a/test.xml",
+                }},
+                "root//pkg:b": {"status": "PASS", "outputs": {}},
+            }}))
+            self.assertEqual(self.module.failed_targets(report), [
+                ("//pkg:a", ["/results/pkg/a/test.xml", "/results/pkg/a/test.log"]),
+            ])
 
     def test_panic_line_prefers_the_first_location(self):
         text = (
@@ -462,8 +581,15 @@ class FormatterTests(unittest.TestCase):
                 "//pkg:a                       FAILED in 0.1s\n"
                 f"  {artifacts}/test.log\n"
             )
+            report = Path(tmp) / "report.json"
+            report.write_text(json.dumps({"results": {
+                "root//pkg:a": {"status": "FAIL", "outputs": {
+                    "log": str(artifacts / "test.log"),
+                    "junit_xml": str(artifacts / "test.xml"),
+                }}
+            }}))
             summary = self.module.failure_summary(
-                ["kiln", "test", "//pkg:a"], 1, log)
+                ["kiln", "test", "//pkg:a"], 1, log, report)
             self.assertIn("//pkg:a", summary)
             self.assertIn("a::boom", summary)
             self.assertIn("src/x.rs:3:1: boom", summary)
@@ -474,7 +600,7 @@ class FormatterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "command-0.log"
             log.write_text("line of noise\n" * 100 + "real error at the end\n")
-            summary = self.module.failure_summary(["tool"], 2, log)
+            summary = self.module.failure_summary(["tool"], 2, log, Path(tmp) / "missing.json")
             self.assertIn("real error at the end", summary)
             self.assertNotIn("line of noise\n" * 10, summary)
             self.assertLessEqual(len(summary.splitlines()), self.module.SUMMARY_LINES)

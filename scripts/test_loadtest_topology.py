@@ -163,12 +163,12 @@ lash_rust_feature_binary(name = "lash-vm-worker__bin__fv_alone", crate_name = "l
 '''
     WORKER = '''lash_rust_binary(name = "worker__bin", crate_features = [], library = ":lib")
 lash_rust_feature_binary(name = "worker__bin__fv_plain", crate_features = [],
-    variant_deps = {"//crates/lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain",
-                    "//crates/lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_plain"})
+    variant_deps = {"//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain",
+                    "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_plain"})
 lash_rust_feature_binary(name = "worker__bin__fv_next", crate_features = ["synthetic-next"],
-    variant_deps = {"//crates/lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_next"})
+    variant_deps = {"//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_next"})
 lash_rust_feature_binary(name = "worker__bin__fv_split", crate_features = [],
-    variant_deps = {"//crates/lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain"})
+    variant_deps = {"//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_plain"})
 '''
 
     def workspace(self, client=CLIENT, helper=HELPER):
@@ -178,16 +178,16 @@ lash_rust_feature_binary(name = "worker__bin__fv_split", crate_features = [],
         for package, text in [('crates/lash-vm-client', client), ('crates/lash-vm-worker', helper),
                               ('runbooks/e2e', self.WORKER)]:
             (root / package).mkdir(parents=True)
-            (root / package / 'BUILD.bazel').write_text(text)
+            (root / package / 'BUCK').write_text(text)
         return root
 
     def test_the_repository_worker_generations_pair_their_helper_features(self):
         self.assertEqual(proof.vm_helper(ROOT, '//runbooks/restate-postgres-workers:lash-e2e-worker__bin'),
                          ('//crates/lash-vm-worker:lash-vm-worker__bin', True))
-        rules = proof.build_rules(ROOT / 'runbooks/restate-postgres-workers/BUILD.bazel')
+        rules = proof.build_rules(ROOT / 'runbooks/restate-postgres-workers/BUCK')
         (next_worker,) = [name for name, rule in rules.items() if name.startswith('lash-e2e-worker__bin__fv_')
                           and 'synthetic-next' in rule.get('crate_features', [])]
-        library = proof.resolve(ROOT, rules[next_worker]['variant_deps']['//crates/lash-vm-worker'])
+        library = proof.resolve(ROOT, rules[next_worker]['variant_deps']['//crates/lash-vm-worker:lash-vm-worker'])
         self.assertIn('synthetic-next', library['crate_features'])
         helper, testing = proof.vm_helper(ROOT, f'//runbooks/restate-postgres-workers:{next_worker}')
         self.assertTrue(testing)

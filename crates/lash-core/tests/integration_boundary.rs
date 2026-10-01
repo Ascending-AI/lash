@@ -34,12 +34,12 @@ fn lint_crate_sources_do_not_name_integration_protocols() {
 
 #[test]
 fn workspace_inventory_keeps_protocol_crates_out_of_lash_core_dependencies() {
-    // `tools/bazel/target-inventory.json` is generated from Cargo's locked
-    // workspace metadata by tools/bazel/generate_build_files.py and kept in
+    // `tools/buck2/target-inventory.json` is generated from Cargo's locked
+    // workspace metadata by tools/buck2/sync.py and kept in
     // sync by its `--check` mode (a CI gate). Reading the checked-in fact keeps
     // this dependency-direction proof identical while letting the test run in a
     // hermetic action that has no Cargo.
-    let inventory_path = workspace_root().join("tools/bazel/target-inventory.json");
+    let inventory_path = workspace_root().join("tools/buck2/target-inventory.json");
     let inventory: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(&inventory_path)
             .unwrap_or_else(|err| panic!("read {}: {err}", inventory_path.display())),
@@ -94,7 +94,7 @@ fn workspace_inventory_keeps_protocol_crates_out_of_lash_core_dependencies() {
 }
 
 /// The workspace root, both under Cargo (an absolute path above the crate) and
-/// under Bazel, where `CARGO_MANIFEST_DIR` is the runfiles-relative package
+/// under Buck2, where `CARGO_MANIFEST_DIR` is the runfiles-relative package
 /// directory and the root is the working directory.
 fn workspace_root() -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

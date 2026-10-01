@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Provenance {
     /// `git rev-parse HEAD` of the lash checkout, or "unknown" when no work
-    /// tree is reachable (for example inside a Bazel sandbox).
+    /// tree is reachable (for example inside a remote build sandbox).
     pub lash_revision: String,
     /// Whether the checkout carried uncommitted or untracked changes;
     /// `null` when the tree state cannot be determined. A dirty or unknown
@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn source_dir_uses_bazel_workspace_for_local_run() {
+    fn source_dir_uses_build_workspace_for_local_run() {
         assert_eq!(
             source_dir(Some("/tmp/lash-fork".into())),
             PathBuf::from("/tmp/lash-fork/examples/toolbench")

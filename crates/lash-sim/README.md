@@ -263,12 +263,14 @@ every accepted input driven exactly once, every obligation settled or stalled
 typed, no orphaned child, no wedged session, every terminal root's scope
 closed, within the ADR 0109 §1.8 detection bound. The harness lives in
 `src/crash_matrix/`; its module docs say how an S8 slice activates the cells
-it owns. The binary is `dev-deferred`: the Bazel tail runs it on main's
+it owns. The binary is `dev-deferred`: the Buck2 tail runs it on main's
 full-profile dispatch.
 
 ```sh
-kiln run //crates/lash-sim:crash_point_matrix__test -- --nocapture
-kiln run //crates/lash-sim:crash_point_matrix__test -- --include-ignored parent_end
+kiln test --test_output=all --test_arg=--nocapture \
+  //crates/lash-sim:crash_point_matrix__test
+kiln test --test_output=all --test_arg=--include-ignored \
+  --test_arg=parent_end //crates/lash-sim:crash_point_matrix__test
 ```
 
 The same cells run against a live `restate-server` (FIG-3872):
@@ -310,8 +312,8 @@ is `dev-deferred`.
 `chaos-soak` job run it for 90 minutes. Each epoch writes its case name, seed,
 active step or check phase, elapsed
 wall time and recovery progress directly to stderr, outside libtest capture.
-Bazel also retains a separate progress file per case and epoch in
-`test.outputs`. Steps have a 60-second watchdog; each epoch has a four-minute
+Buck2 also retains a separate progress file per case and epoch in the test
+report's undeclared-output directory. Steps have a 60-second watchdog; each epoch has a four-minute
 watchdog capped by the remaining soak duration. Open-ended runs stop admitting
 new epochs when less than a full epoch budget remains. A timeout records terminal
 and obligation state before bounded shutdown, then fails with its seed,
@@ -339,10 +341,16 @@ the entry to `chaos_soak::findings::FIXED` and makes its regression test
 live, so its replay keeps passing.
 
 ```sh
-kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_smoke --nocapture
+kiln test --test_output=all --test_arg=chaos_soak_smoke \
+  --test_arg=--exact --test_arg=--nocapture //crates/lash-sim:chaos_soak__test
 LASH_CHAOS_SOAK_SEED=0x1001 LASH_CHAOS_SOAK_EPOCHS=1 \
-  kiln run //crates/lash-sim:chaos_soak__test -- chaos_soak_smoke --nocapture
+  kiln test --test_env=LASH_CHAOS_SOAK_SEED \
+    --test_env=LASH_CHAOS_SOAK_EPOCHS --test_output=all \
+    --test_arg=chaos_soak_smoke --test_arg=--exact --test_arg=--nocapture \
+    //crates/lash-sim:chaos_soak__test
 just chaos-soak 30m
+# Admit the full local 90-minute execution through Kiln's gate scheduler.
+kiln gate lash <fork> -- just chaos-soak
 ```
 
 ## Search fleet

@@ -33,7 +33,7 @@ tests are driven. It follows the recipe Restate's own SDK test suites use
   hang is -- no step finishing -- and never how long a starved host takes to
   run a law's whole workload.
 
-The suites themselves -- the Bazel label of the test binary, the filters and
+The suites themselves -- the Buck2 label of the test binary, the filters and
 the endpoints each shard binds -- live in
 `scripts/restate-suites.toml`; the replay leg's known divergences live one
 ticket per file under `scripts/restate-divergences/`.
@@ -47,9 +47,9 @@ Usage:
       A gate that owns a port block passes its base: the server then binds
       ingress, admin and node on P, P+1 and P+2 instead of free ports.
   restate_suite.py build <label>...
-      Build Bazel labels from the shared cache and print each output path.
+      Build Buck2 labels from the shared cache and print each output path.
   restate_suite.py stage-binaries <package> <dir>
-      Build every Rust binary of a Bazel package from the shared cache and
+      Build every Rust binary of a Buck2 package from the shared cache and
       copy each into <dir> under its Cargo name, stripped.
   restate_suite.py server-path
       Print the pinned server binary, fetching and verifying it on first use.
@@ -81,6 +81,8 @@ from pathlib import Path
 from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
+INVENTORY = ROOT / "tools/buck2/target-inventory.json"
+VM_WORKER_LABEL = "//crates/lash-vm-worker:lash-vm-worker__bin"
 REGISTRY = ROOT / "scripts" / "restate-suites.toml"
 # The replay leg's known divergences, sharded one file per ticket that brings
 # its laws back, so two changes never queue on restate-suites.toml.
@@ -362,62 +364,84 @@ class RestateServer:
 def build(labels: Sequence[str]) -> list[Path]:
     """Build labels on the shared pool and return their output files.
 
-    CI names its cache and output base through the bazel-shared-cache action;
-    a Kiln fork builds through `kiln`; anything else uses the checkout's
-    `--config=shared`. Only the top-level outputs are downloaded.
+    The hermetic driver uses the shared pool in a Kiln fork or configured CI
+    checkout. Outputs are resolved from the build report, never from a
+    configuration-hashed buck-out path.
     """
-    worker_label = "//crates/lash-vm-worker:lash-vm-worker__bin"
-    build_labels = list(dict.fromkeys([*labels, worker_label]))
-    flags = ["--remote_download_outputs=toplevel"]
-    if os.environ.get("GITHUB_ACTIONS"):
-        shared = os.environ.get("BAZEL_SHARED_CACHE_FLAGS")
-        root = os.environ.get("BAZEL_OUTPUT_USER_ROOT")
-        if not shared or not root:
-            raise SystemExit("CI must configure the shared build cache before a Restate suite builds")
-        argv = ["bazel", f"--output_user_root={root}", "build", *shared.split(), *flags, *build_labels]
-    elif os.environ.get("KILN_REPO") and shutil.which("kiln"):
-        argv = ["kiln", "build", *flags, *build_labels]
-    else:
-        argv = ["bazel", "build", "--config=shared", *flags, *build_labels]
+    build_labels = list(dict.fromkeys([*labels, VM_WORKER_LABEL]))
+    report_root = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
+    report = report_root / f"restate-build-{os.getpid()}.json"
+    argv = [
+        str(ROOT / "scripts/hermetic-build.sh"),
+        "build",
+        "--jobs",
+        "32" if os.environ.get("GITHUB_ACTIONS") else "16",
+        "--materializations",
+        "final",
+        "--build-report",
+        str(report),
+        *build_labels,
+    ]
     log(f"building {' '.join(labels)}")
     subprocess.run(argv, cwd=ROOT, check=True, stdout=sys.stderr)
-    bazel_bin = (ROOT / "bazel-bin").resolve()
-    worker = bazel_bin / "crates/lash-vm-worker/lash-vm-worker__bin"
-    if not worker.is_file():
-        raise SystemExit(f"{worker_label} built, but its worker executable is missing")
-    os.environ["LASH_VM_WORKER"] = str(worker)
-    outputs = []
-    for label in labels:
-        package, _, name = label.removeprefix("//").partition(":")
-        path = bazel_bin / package / name
+
+    def output(label: str) -> Path:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/buck2/outputs.py",
+                "--report",
+                str(report),
+                "--label",
+                label,
+                "--single",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        path = Path(result.stdout.strip())
         if not path.is_file():
             raise SystemExit(f"{label} built, but {path} is missing")
-        outputs.append(path)
-    return outputs
+        return path
+
+    worker = output(VM_WORKER_LABEL)
+    os.environ["LASH_VM_WORKER"] = str(worker)
+    return [output(label) for label in labels]
 
 
-def package_binaries(package: str) -> list[str]:
-    """The labels of a package's Rust binaries, from its generated BUILD file."""
-    build_file = ROOT / package.removeprefix("//") / "BUILD.bazel"
-    names = re.findall(r'^lash_rust_binary\(\n    name = "([^"]+)",$', build_file.read_text(), flags=re.MULTILINE)
-    if not names:
-        raise SystemExit(f"{build_file.relative_to(ROOT)} declares no lash_rust_binary")
-    return [f"{package}:{name}" for name in names]
+def package_binaries(package: str) -> dict[str, str]:
+    """A package's Rust binary labels and their Cargo names, from generated inventory."""
+    manifest = package.removeprefix("//") + "/Cargo.toml"
+    binaries = {
+        target["label"]: target["cargo"]
+        for entry in json.loads(INVENTORY.read_text(encoding="utf-8"))["packages"]
+        if entry["manifest"] == manifest
+        for target in entry["targets"]
+        if target.get("kind") == "bin"
+    }
+    if not binaries:
+        raise SystemExit(f"{INVENTORY.relative_to(ROOT)} declares no binaries for {package}")
+    return binaries
 
 
 def stage_binaries(package: str, destination: Path) -> list[Path]:
     """Build a package's binaries and stage them under their Cargo names.
 
-    A generated binary label is `<cargo-name>__bin`; consumers (compose files,
-    the E2E drivers) mount the Cargo name. Each is stripped, as Cargo's
-    release profile strips them: the stage is shipped between jobs, and an
-    unstripped fastbuild binary is roughly twice the size.
+    Buck2 names a binary's output after its crate (`lash_e2e_worker`), but
+    consumers (compose files, the E2E drivers) mount the Cargo `[[bin]]` name
+    (`lash-e2e-worker`), which the generated inventory records per label.
+    Each is stripped, as Cargo's release profile strips them: the stage is
+    shipped between jobs, and an unstripped fastbuild binary is roughly twice
+    the size.
     """
-    labels = package_binaries(package)
+    binaries = package_binaries(package)
+    binaries[VM_WORKER_LABEL] = package_binaries("//crates/lash-vm-worker")[VM_WORKER_LABEL]
     destination.mkdir(parents=True, exist_ok=True)
     staged = []
-    for built in build([*labels, "//crates/lash-vm-worker:lash-vm-worker__bin"]):
-        target = destination / built.name.removesuffix("__bin")
+    for label, built in zip(binaries, build(list(binaries)), strict=True):
+        target = destination / binaries[label]
         shutil.copyfile(built, target)
         target.chmod(0o755)
         subprocess.run(["strip", str(target)], check=True)
@@ -615,7 +639,7 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     if args.binary:
         binary = Path(args.binary).resolve()
         if not os.environ.get("LASH_VM_WORKER"):
-            build(["//crates/lash-vm-worker:lash-vm-worker__bin"])
+            build([VM_WORKER_LABEL])
     else:
         (binary,) = build([suite.label])
     cwd = ROOT / suite.cwd
@@ -829,7 +853,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     build_parser.add_argument("labels", nargs="+")
 
     stage = sub.add_parser("stage-binaries", help="build a package's binaries and stage them under Cargo names")
-    stage.add_argument("package", help="a Bazel package, e.g. //runbooks/restate-postgres-workers")
+    stage.add_argument("package", help="a Buck2 package, e.g. //runbooks/restate-postgres-workers")
     stage.add_argument("destination")
 
     serve = sub.add_parser("serve", help="run a command beside one server")

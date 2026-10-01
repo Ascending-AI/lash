@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "v2026.09.14.00",
+  "asset": {
+    "blake3": "2d88219b99ae07cef157ae23238bbc84edb97f6ac7067dbbb4c0c437a012cb77",
+    "compressed_size": 12514794,
+    "executable_sha256": "71d693b1a56947e2b8d43c76f5db16f778878ba2e635951f968bf821985aa00c",
+    "sha256": "616a8fc302c3db2b89e72286cf7a5396991163b088f01587c9bf9cfdcb2cdaac",
+    "url": "https://github.com/facebookincubator/reindeer/releases/download/v2026.09.14.00/reindeer-x86_64-unknown-linux-musl.zst"
+  }
+}

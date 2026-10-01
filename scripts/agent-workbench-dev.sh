@@ -3436,11 +3436,9 @@ validate_reset_ownership() {
     || die "reset refused: Restate deployment registry does not prove exclusive ownership"
 }
 
-# The Bazel label that builds this launcher's host binary, and the config that
-# gives it the judged geometry. `--config=judged` is the Bazel spelling of
-# Cargo's `[profile.judged]`; the block that defines it in `.bazelrc` says why
-# it has to reach the whole graph rather than this binary's own crate.
-workbench_bazel_label='//examples/agent-workbench:agent-workbench'
+# The Buck2 label that builds this launcher's host binary. `--config=judged`
+# selects the target platform with Cargo's `[profile.judged]` geometry.
+workbench_buck2_label='//examples/agent-workbench:agent-workbench'
 
 # Build the host binary and leave its path in `workbench_bin`.
 #
@@ -3454,7 +3452,7 @@ workbench_bazel_label='//examples/agent-workbench:agent-workbench'
 # sibling lane's compile than on driving runbooks (FIG-3153). The locks now
 # cover the ownership mutation and the launch, not the build.
 #
-# And it goes through Bazel, so every checkout on the box shares one action
+# And it goes through Buck2, so every checkout on the box shares one action
 # cache instead of compiling the workspace again into its own Cargo target
 # directory.
 #
@@ -3470,59 +3468,43 @@ prepare_workbench_binary() {
     return 0
   fi
 
-  # The `provider-wire-fixtures` scenario is the one launch this script cannot
-  # hand to Bazel. The feature turns on an optional dependency
-  # (`provider-wire-fixtures = ["dep:lash-sim"]`), and the generated BUILD
-  # files describe exactly one feature resolution of this workspace — the
-  # default one — so no label builds this shape and none can be generated from
-  # that resolve. `scripts/feature-coverage.toml` already covers the feature
-  # through Cargo for the same reason. Its single judged row
-  # (`workbench-valid-empty-completion`) keeps the judged profile and pays for
-  # its own build.
+  local build_label="$workbench_buck2_label"
   if [[ "${AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO:-}" = "valid-empty-completion" ]]; then
-    log "building agent-workbench (cargo, profile: judged, provider-wire-fixtures)"
-    cargo build -p agent-workbench --profile judged --features provider-wire-fixtures
-    workbench_bin="${CARGO_TARGET_DIR:-$repo_root/target}/judged/agent-workbench"
-    [[ -x "$workbench_bin" ]] \
-      || die "the judged cargo build produced no binary at $workbench_bin"
-    return 0
+    build_label="$(python3 "$repo_root/scripts/resolve_buck2_target.py" \
+      //examples/agent-workbench agent-workbench --feature provider-wire-fixtures)" \
+      || die "resolving the provider-wire-fixtures workbench target failed"
   fi
 
-  log "building agent-workbench ($workbench_bazel_label, --config=judged)"
-  local symlink_prefix="$launcher_lock_root/$launcher_lock_hash-bazel-"
+  log "building agent-workbench ($build_label, --config=judged)"
+  local build_report="$launcher_lock_root/$launcher_lock_hash-build-report.json"
   # `kiln build` is the warm path, and it is only a path at all inside a kiln
   # fork: it identifies the checkout from the kiln configuration and then runs
-  # the driver below with `--config=shared`, which needs the `.kiln.bazelrc`
+  # the driver below with its shared configuration, which needs `.buckconfig.local`
   # kiln writes into every fork. A plain checkout — a git worktree, a fresh
   # clone, a CI runner — has neither, so asking kiln there fails with "cannot
   # identify this repository" even though kiln is on PATH, and the shared
-  # config would have no executor to reach anyway. `.kiln.bazelrc` is the fact
+  # config would have no executor to reach anyway. `.buckconfig.local` is the fact
   # that separates the two, so it, and not the presence of the kiln binary,
   # decides. The local build is slower on a cold cache and it works.
   local -a build_command
-  if command -v kiln >/dev/null 2>&1 && [[ -f "$repo_root/.kiln.bazelrc" ]]; then
+  if command -v kiln >/dev/null 2>&1 && [[ -f "$repo_root/.buckconfig.local" ]]; then
     build_command=(kiln build)
   else
-    log "no kiln fork here (.kiln.bazelrc is absent); building locally"
+    log "no kiln fork here (.buckconfig.local is absent); building locally"
     build_command=("$repo_root/scripts/hermetic-build.sh" --local build)
   fi
-  # `build:shared` downloads no action outputs (`remote_download_outputs=
-  # minimal`), so pull the workbench binary the launch below execs. The flag
-  # is inert on the local fallback, which has no remote outputs to fetch. The
-  # invocation stays one line: check_judged_build_geometry.py reads config and
-  # label off the `build_command` line.
-  "${build_command[@]}" --config=judged "--symlink_prefix=$symlink_prefix" "$workbench_bazel_label" \
-    --remote_download_outputs=toplevel \
-    || die "building $workbench_bazel_label --config=judged failed"
-  local built="${symlink_prefix}bin/examples/agent-workbench/agent-workbench"
+  "${build_command[@]}" --config=judged --materializations final \
+    --build-report "$build_report" "$build_label" \
+    || die "building $build_label --config=judged failed"
+  local built
+  built="$(python3 "$repo_root/tools/buck2/outputs.py" \
+    --report "$build_report" --label "$build_label" --single)" \
+    || die "resolving $build_label output failed"
   [[ -x "$built" ]] || die "the judged build produced no binary at $built"
 
-  # Launch a private copy rather than the Bazel output itself. `--config=judged`
-  # adds rustc flags and no output-directory suffix, so the judged and the
-  # ordinary configuration write the same path: a sibling `kiln build` between
-  # this build and the exec below would otherwise replace the file with the
-  # geometry the judged profile exists to avoid. Copy, then rename over the
-  # previous copy — the rename is atomic, so a concurrent launch never reads a
+  # Launch a private copy rather than the Buck2 output itself. This keeps the
+  # executable stable across daemon cleanup and concurrent builds of another
+  # configuration. The rename is atomic, so a concurrent launch never reads a
   # half-written file, and a workbench already running from the old copy keeps
   # its own inode.
   local bin_dir="$launcher_lock_root/$launcher_lock_hash-bin"

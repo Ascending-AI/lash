@@ -9,17 +9,24 @@ queue and packaging measurements, use
 Source the fork's `env.sh`, then build the two examples with the shared executor:
 
 ```sh
-kiln build --compilation_mode=opt --remote_download_outputs=toplevel //crates/lash-typescript:tsvm_costs__example //crates/lash-typescript:tsvm_allocations__example
+kiln build --config=optimized --materializations final \
+  --build-report .buck2/tsvm-costs-build.json \
+  //crates/lash-typescript:tsvm_costs__example \
+  //crates/lash-typescript:tsvm_allocations__example
 ```
 
 Run the downloaded binaries on the same machine, sequentially. Pass the fork
 root as `--repo` so the fixtures come from that exact checkout:
 
 ```sh
-bazel-bin/crates/lash-typescript/tsvm_costs__example --verify --repo "$PWD"
-bazel-bin/crates/lash-typescript/tsvm_costs__example --repo "$PWD" --output "$PWD/measurements"
-bazel-bin/crates/lash-typescript/tsvm_costs__example --rss --output "$PWD/measurements"
-bazel-bin/crates/lash-typescript/tsvm_allocations__example --repo "$PWD" --output "$PWD/measurements"
+COSTS=$(python3 tools/buck2/outputs.py --report .buck2/tsvm-costs-build.json \
+  --label //crates/lash-typescript:tsvm_costs__example --single)
+ALLOCATIONS=$(python3 tools/buck2/outputs.py --report .buck2/tsvm-costs-build.json \
+  --label //crates/lash-typescript:tsvm_allocations__example --single)
+"$COSTS" --verify --repo "$PWD"
+"$COSTS" --repo "$PWD" --output "$PWD/measurements"
+"$COSTS" --rss --output "$PWD/measurements"
+"$ALLOCATIONS" --repo "$PWD" --output "$PWD/measurements"
 ```
 
 The defaults are 10,000 samples per warm boundary and 200 new processes. The

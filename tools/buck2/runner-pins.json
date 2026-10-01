@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "packages": {
+    "grpcio": {
+      "version": "1.76.0",
+      "wheels": [
+        {
+          "filename": "grpcio-1.76.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/68/86/093c46e9546073cefa789bd76d44c5cb2abc824ca62af0c18be590ff13ba/grpcio-1.76.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "8843114c0cfce61b40ad48df65abcfc00d4dba82eae8718fab5352390848c5da"
+        },
+        {
+          "filename": "grpcio-1.76.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/f5/86/f6ec2164f743d9609691115ae8ece098c76b894ebe4f7c94a655c6b03e98/grpcio-1.76.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "980a846182ce88c4f2f7e2c22c56aefd515daeb36149d1c897f83cf57999e0b6"
+        },
+        {
+          "filename": "grpcio-1.76.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/2b/94/8c12319a6369434e7a184b987e8e9f3b49a114c489b8315f029e24de4837/grpcio-1.76.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "61f69297cba3950a524f61c7c8ee12e55c486cb5f7db47ff9dcee33da6f0d3ae"
+        }
+      ]
+    },
+    "grpcio-tools": {
+      "version": "1.76.0",
+      "wheels": [
+        {
+          "filename": "grpcio_tools-1.76.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/f4/3e/23e3a52a77368f47188ed83c34eb53866d3ce0f73835b2f6764844ae89eb/grpcio_tools-1.76.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "6a9818ff884796b12dcf8db32126e40ec1098cacf5697f27af9cfccfca1c1fae"
+        },
+        {
+          "filename": "grpcio_tools-1.76.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/a6/d6/53798827d821098219e58518b6db52161ce4985620850aa74ce3795da8a7/grpcio_tools-1.76.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "30f1d2dda6ece285b3d9084e94f66fa721ebdba14ae76b2bc4c581c8a166535c"
+        },
+        {
+          "filename": "grpcio_tools-1.76.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/b9/0e/770afbb47f0b5f594b93a7b46a95b892abda5eebe60efb511e96cee52170/grpcio_tools-1.76.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "fbbd4e1fc5af98001ceef5e780e8c10921d94941c3809238081e73818ef707f1"
+        }
+      ]
+    },
+    "protobuf": {
+      "version": "6.33.0",
+      "wheels": [
+        {
+          "filename": "protobuf-6.33.0-cp39-abi3-manylinux2014_x86_64.whl",
+          "url": "https://files.pythonhosted.org/packages/21/51/0b1cbad62074439b867b4e04cc09b93f6699d78fd191bed2bbb44562e077/protobuf-6.33.0-cp39-abi3-manylinux2014_x86_64.whl",
+          "sha256": "35be49fd3f4fefa4e6e2aacc35e8b837d6703c37a2168a55ac21e9b1bc7559ef"
+        },
+        {
+          "filename": "protobuf-6.33.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/07/d1/0a28c21707807c6aacd5dc9c3704b2aa1effbf37adebd8caeaf68b17a636/protobuf-6.33.0-py3-none-any.whl",
+          "sha256": "25c9e1963c6734448ea2d308cfa610e692b801304ba0908d7bfa564ac5132995"
+        }
+      ]
+    },
+    "typing_extensions": {
+      "version": "4.15.0",
+      "wheels": [
+        {
+          "filename": "typing_extensions-4.15.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+          "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"
+        }
+      ]
+    },
+    "setuptools": {
+      "version": "80.9.0",
+      "wheels": [
+        {
+          "filename": "setuptools-80.9.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/a3/dc/17031897dae0efacfea57dfd3a82fdd2a2aeb58e0ff71b77b87e44edc772/setuptools-80.9.0-py3-none-any.whl",
+          "sha256": "062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922"
+        }
+      ]
+    }
+  },
+  "protocols": [
+    {
+      "filename": "test.proto",
+      "url": "https://raw.githubusercontent.com/facebook/buck2/6507dd157a6f81a810c48583edf1758dd0c337c5/app/buck2_test_proto/test.proto",
+      "sha256": "0a0418b867d2ec45f7a8e0ca72030e7919e2ac5ab00598f8e16ecf45458572b0"
+    },
+    {
+      "filename": "data.proto",
+      "url": "https://raw.githubusercontent.com/facebook/buck2/6507dd157a6f81a810c48583edf1758dd0c337c5/app/buck2_data/data.proto",
+      "sha256": "60fc7f1ef802af7b1583f035b498666539de4d76da882ee34d9f8d87985b39ca"
+    },
+    {
+      "filename": "error.proto",
+      "url": "https://raw.githubusercontent.com/facebook/buck2/6507dd157a6f81a810c48583edf1758dd0c337c5/app/buck2_data/error.proto",
+      "sha256": "62e0b78db1248da0447afa60814c313729e72cf15a5c4284eb8086f2cc4fe810"
+    },
+    {
+      "filename": "host_sharing.proto",
+      "url": "https://raw.githubusercontent.com/facebook/buck2/6507dd157a6f81a810c48583edf1758dd0c337c5/app/buck2_host_sharing_proto/host_sharing.proto",
+      "sha256": "685a79f5e488a3b69fd1ea310b2b7106368c69e52d91a9bc47a281db2a2f8210"
+    }
+  ]
+}

@@ -8,7 +8,7 @@ just restate-postgres-workers-e2e
 
 Budget for a cold build the first time: the harness builds its own binaries with
 `cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins` on
-plain Cargo, not through kiln, so it does not share the Bazel cache and a release
+plain Cargo, not through kiln, so it does not share the Buck2 cache and a release
 profile build is paid in full. It also builds `lash-vm-worker` from
 `lash-internal-vm-worker` in the same profile and mounts the helper beside each
 host executable. A prebuilt binary directory must contain the helper too.

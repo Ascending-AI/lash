@@ -17,11 +17,11 @@ name: CI
 #
 # Pull requests get fast signal; the merge group gets breadth. A pull request
 # runs the fast gates — lint, hygiene, the path-gated script jobs — plus the
-# Bazel targets the diff actually affects: the same label selection
+# Buck2 targets the diff actually affects: the same label selection
 # `scripts/dev-test.py` makes locally (`scripts/ci_plan.py`
 # `pr_affected_targets`: the touched packages' dev-suite members, their
 # dev-deferred labels, the API seal `//crates/lash:ui_fixtures` on a facade
-# diff, `:all` compile proofs for packages with no selected test, and the
+# diff, inventory build labels for packages with no selected test, and the
 # schema checks). A trusted pull request whose diff can move a Rust build
 # also compiles and lints the feature lanes: a lane break is caused by an API
 # change anywhere upstream, which the diff's own path set cannot see — #2285
@@ -31,7 +31,7 @@ name: CI
 # the selection rule in scripts/ci_plan.py). The merge group runs the full
 # core partition, the test tail, the lane tests and the selected Postgres
 # store suites and, for a schema diff, the PG14/PG18 compatibility legs.
-# Cached Bazel results mean a merge group re-executes only what its combined
+# Cached Buck2 results mean a merge group re-executes only what its combined
 # tree changed.
 # "CI conclusion" is the one required check; scripts/ci/conclusion.py holds
 # it to what the plan and event require.
@@ -46,7 +46,7 @@ name: CI
 # * Fuzz smoke: a bounded libFuzzer run on the nightly toolchain, kept off
 #   the pull-request critical path by design (FIG-878).
 # * Test deferred Unicode suites: slow regress suites, excluded from the PR
-#   Bazel partition.
+#   Buck2 partition.
 # * Lashlang Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
 # * Worker release artifacts and the full Restate + Postgres + S3 workers E2E:
@@ -168,7 +168,7 @@ jobs:
       pr_build_targets: ${{ steps.classify.outputs.pr_build_targets }}
       postgres_primary: ${{ steps.postgres-matrix.outputs.postgres_primary }}
       postgres_compatibility: ${{ steps.postgres-matrix.outputs.postgres_compatibility }}
-      bazel_trusted: >-
+      buck2_trusted: >-
         ${{ github.event_name == 'merge_group'
         || github.event_name == 'workflow_dispatch'
         || (github.event_name == 'pull_request'
@@ -272,7 +272,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   # The API seal lane for untrusted (fork and Dependabot) pull requests. A
-  # trusted event seals the API inside `bazel-tests` (`//crates/lash:ui_fixtures`
+  # trusted event seals the API inside `buck2-tests` (`//crates/lash:ui_fixtures`
   # rides the core test invocation), so this job exists only for events with
   # no cache credentials, which keep trybuild's `cargo test --test ui`. It runs
   # when the facade crate or the root manifests changed.
@@ -282,7 +282,7 @@ jobs:
     timeout-minutes: 35
     needs: plan
     if: >-
-      needs.plan.outputs.bazel_trusted != 'true'
+      needs.plan.outputs.buck2_trusted != 'true'
       && needs.plan.outputs.facade == 'true'
     env:
       # trybuild derives its fixture/output tree from Cargo's target directory.
@@ -388,6 +388,16 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
+      - name: Provision pinned Buck2 tools and vendored sources
+        run: |
+          set -euo pipefail
+          KILN_REAL_CARGO="$(command -v cargo)"
+          export KILN_REAL_CARGO
+          client="$(python3 tools/buck2/bootstrap.py)"
+          test -x "$client"
+          dirname "$client" >> "$GITHUB_PATH"
+          echo "KILN_REAL_CARGO=${KILN_REAL_CARGO}" >> "$GITHUB_ENV"
+
       - name: Check judged build geometry
         run: python3 scripts/check_judged_build_geometry.py
 
@@ -400,10 +410,16 @@ jobs:
       # The feature-lane graph replaces per-lane Cargo legs, so the resolution
       # it compiles has to be Cargo's own. This re-derives every distinct lane
       # request with `cargo tree` and diffs it against the generator's resolver;
-      # `generate_build_files.py --check` reconciles the unit SET, this
+      # `sync.py --check` reconciles the unit set; this
       # reconciles each unit's feature set.
       - name: Reconcile feature-lane resolution against Cargo
-        run: python3 tools/bazel/generate_build_files.py --verify-resolution
+        run: python3 tools/buck2/sync.py --verify-resolution
+
+      - name: Verify generated Buck2 graph
+        run: python3 tools/buck2/sync.py --check
+
+      - name: Test Buck2 graph contracts
+        run: python3 tools/buck2/test_sync.py
 
       # The `dependency-boundary` leg of the retired `Runtime feature boundary`
       # matrix. It never compiled anything -- it reads the resolved graph -- so
@@ -463,15 +479,16 @@ jobs:
           python3 scripts/test_pg_service.py
           python3 scripts/test_check_feature_coverage.py
           python3 scripts/test_fast_test.py
-          python3 scripts/test_bazel_test_contract.py
+          python3 scripts/test_buck2_test_contract.py
+          python3 scripts/test_buck2_action_sizes.py
           python3 scripts/test_vm_worker_runfile_generation.py
           python3 scripts/check_worker_wire_schema.py
           python3 scripts/test_worker_wire_schema.py
           python3 scripts/test_loadtest_measurements.py
           bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py && python3 scripts/test_loadtest_faults.py && python3 scripts/test_loadtest_upgrade.py && python3 scripts/test_loadtest_manifest.py
-          python3 scripts/test_bazel_profile_digest.py
-          python3 scripts/test_bazel_source_ownership.py
-          python3 scripts/test_bazel_diagnostics.py
+          python3 scripts/test_buck2_event_digest.py
+          python3 scripts/test_buck2_diagnostics.py
+          python3 scripts/test_resolve_buck2_target.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/check_retired_terms.py
           python3 scripts/test_check_retired_terms.py
@@ -489,7 +506,6 @@ jobs:
           python3 scripts/test_test_xml.py
           python3 scripts/test_filtered_store_gates.py
           python3 scripts/test_launcher_test_sandbox.py
-          python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_restate_suite.py
           python3 scripts/test_check_facade_only_examples.py
@@ -610,18 +626,18 @@ jobs:
   # `scripts/feature-coverage.toml` declares the exact Cargo commands that
   # witness every declared workspace feature ON and OFF. Each is a different
   # resolution of one package's first-party closure from the workspace graph,
-  # so `tools/bazel/generate_build_files.py` emits one Bazel target per
+  # so `tools/buck2/sync.py` emits one Buck2 target per
   # distinct `(package, resolved features, Cargo target kind)` unit and
-  # `//:feature_lanes` is their aggregate. Fourteen matrix legs of up to 504 s
+  # `//:feature_lane_compile` is their build aggregate. Fourteen matrix legs of up to 504 s
   # of sequential `cargo check` on a 4-vCPU runner, plus the four
   # `Runtime feature boundary` legs, collapse into this one job: the lane
-  # graph shares the pool's cache with every other Bazel job, so a merge group
+  # graph shares the pool's cache with every other Buck2 job, so a merge group
   # whose diff touches no lane closure pays a cache lookup rather than a
   # rebuild.
   #
   # The *proof* is unchanged and still Cargo's. `check_feature_coverage.py
-  # check` keeps running in `repo-gates`, and its `--bazel` reconciliation
-  # (below) fails if the Bazel lane graph compiles a different set of units
+  # check` keeps running in `repo-gates`, and its `--buck2` reconciliation
+  # (below) fails if the Buck2 lane graph compiles a different set of units
   # from the one the declared Cargo commands compile. The resolver witnesses
   # (`cargo tree`) and the cfg-predicate analysis are pure analysis over
   # `cargo metadata`; they cost seconds and stay where they are.
@@ -635,9 +651,9 @@ jobs:
   # (`plan.feature_lanes`, selected by `_is_feature_gate_path` in
   # scripts/ci_plan.py): lane membership covers nearly the whole workspace,
   # so a lane test run on every diff pays for proof an ungated diff cannot
-  # move. It runs beside the Bazel partition on its own
+  # move. It runs beside the Buck2 partition on its own
   # runner, so it adds to a run's wall-clock only when it is the slowest job.
-  # `//:feature_lanes` is the whole lane graph, so it also covers the runtime
+  # `//:feature_lane_compile` is the whole lane build graph, so it also covers the runtime
   # OFF witness (FIG-3427) and the Restate release resolution (FIG-3610) that
   # used to be named individually for the Lint job. It needs the pool's cache
   # credentials, so an untrusted pull request skips it; the merge group is
@@ -648,14 +664,14 @@ jobs:
     timeout-minutes: 45
     needs: plan
     if: >-
-      needs.plan.outputs.bazel_trusted == 'true'
+      needs.plan.outputs.buck2_trusted == 'true'
       && needs.plan.outputs.rust == 'true'
     environment: build-cache
     steps:
       - *checkout
 
       - name: Configure shared build cache
-        uses: ./.github/actions/bazel-shared-cache
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -666,21 +682,24 @@ jobs:
 
       # Every unit of every declared lane command, checked at that command's
       # own feature resolution: one metadata-only rustc action per unit, as
-      # `cargo check` runs it, with no codegen or link. `//:feature_lane_clippy`
-      # rides the same invocation — seven real clippy-driver actions over units
-      # the compile just built — so a pull request lints the lane variants the
+      # `cargo check` runs it, with no codegen or link. The following Clippy
+      # invocation runs the generated clippy subtargets over the same units,
+      # so a pull request lints the lane variants the
       # merge group used to wait for. The step name is
       # pinned by scripts/test_check_feature_coverage.py.
       - name: Compile every feature lane
         shell: bash
         run: |
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --remote_download_outputs=minimal \
-            --profile="${RUNNER_TEMP}/bazel-feature-profile.json.gz" \
-            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            //:feature_lanes //:feature_lane_clippy
+          scripts/hermetic-build.sh build \
+            --jobs 32 --materializations none \
+            --build-report "${RUNNER_TEMP}/feature-build-report.json" \
+            --event-log "${RUNNER_TEMP}/feature-events.json-lines" \
+            //:feature_lane_compile
+          scripts/hermetic-build.sh clippy \
+            --jobs 32 --materializations none \
+            --build-report "${RUNNER_TEMP}/feature-clippy-build-report.json" \
+            --event-log "${RUNNER_TEMP}/feature-clippy-events.json-lines" \
+            //:feature_lane_clippy
 
       # The lane commands that are `cargo test`, not `cargo check`. They are
       # service-free, so the pool executes them under the same feature
@@ -692,26 +711,7 @@ jobs:
           github.event_name != 'pull_request'
           || needs.plan.outputs.feature_lanes == 'true'
         shell: bash
-        run: |
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --cache_test_results=yes --test_output=errors \
-            //:feature_lane_tests 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
-
-      # A FAILED line names the target but not the case; on a remote executor
-      # kill it is all the output there is. The report names each failed
-      # target and its failing cases and stages the targets' testlogs
-      # directories for the artifact below.
-      - name: Summarize failing test targets
-        if: failure()
-        shell: bash
-        run: |
-          python3 scripts/ci/report_failed_tests.py \
-            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
-            --testlogs bazel-testlogs \
-            --stage "${RUNNER_TEMP}/failed-testlogs" \
-            --summary "${GITHUB_STEP_SUMMARY}"
+        run: scripts/ci/buck2-test.sh feature-lanes //:feature_lane_tests
 
       - name: Upload failing test logs
         if: failure()
@@ -735,28 +735,23 @@ jobs:
         shell: bash
         run: python3 scripts/ci/check_feature_lane_test_floors.py
 
-      - name: Summarize feature-lane build profile
+      - name: Summarize feature-lane build events
         if: always()
-        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-feature-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
+        run: |
+          python3 scripts/ci/buck2_event_digest.py "$RUNNER_TEMP/feature-events.json-lines" --summary "$GITHUB_STEP_SUMMARY"
+          python3 scripts/ci/buck2_event_digest.py "$RUNNER_TEMP/feature-clippy-events.json-lines" --summary "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload feature-lane build profile
+      - name: Upload feature-lane build events
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-feature-profile.json.gz
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # The compact execution log names every spawn with its inputs, cache
-      # result and runner: the evidence for "why did this miss the cache".
-      # Bazel's `src/tools/execlog` parser turns it into text.
-      - name: Upload Bazel execution log
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
+          name: buck2-events-${{ github.job }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/feature-events.json-lines
+            ${{ runner.temp }}/feature-build-report.json
+            ${{ runner.temp }}/feature-clippy-events.json-lines
+            ${{ runner.temp }}/feature-clippy-build-report.json
+            ${{ runner.temp }}/feature-lanes-test-report.json
           if-no-files-found: ignore
           retention-days: 14
 
@@ -769,25 +764,24 @@ jobs:
   # pull request runs only the targets its diff affects — the selection
   # `scripts/dev-test.py` makes for the same diff, emitted by the plan as
   # `pr_test_labels`/`pr_build_targets` — while the merge group and the
-  # dispatch run the core suite `//:workspace_tests` minus its long tail,
+  # dispatch run the generated core suite `//:workspace_core_tests`,
   # plus the dev-deferred labels of the packages the diff touches. The merge
-  # group adds the tail on a parallel runner (`bazel-tests-tail`). The job
-  # executes locally on a GitHub-hosted runner and only shares
-  # action results with that exact runner image identity, never Kiln's executor
-  # identity. Fork and Dependabot pull requests intentionally skip this
-  # secret-bearing job and retain the full Cargo workspace suite below.
-  bazel-tests:
-    name: Test Bazel partition
+  # group adds the tail on a parallel runner (`buck2-tests-tail`). The job
+  # executes on the shared pool under Kiln's executor identity. Fork and
+  # Dependabot pull requests intentionally skip this secret-bearing job and
+  # retain the full Cargo workspace suite below.
+  buck2-tests:
+    name: Test Buck2 partition
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
+    if: needs.plan.outputs.buck2_trusted == 'true' && needs.plan.outputs.rust == 'true'
     environment: build-cache
     steps:
       - *checkout
 
       - name: Configure shared build cache
-        uses: ./.github/actions/bazel-shared-cache
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -801,7 +795,7 @@ jobs:
       # labels (the tail job does not run on a pull request, so this leg is
       # their only CI home -- #2109 changed `corpus_laws__test`'s
       # expectations file and admin-merge carried it red), the API seal on a
-      # facade diff, a `:all` compile for each touched package with no
+      # facade diff, the build labels for each touched package with no
       # selected test, and the schema checks. Both lists come from the plan
       # step; a broad or fail-open plan widens them to the whole dev suite.
       - name: Test the affected targets with shared cache
@@ -813,22 +807,13 @@ jobs:
           # shellcheck disable=SC2206
           builds=( ${{ needs.plan.outputs.pr_build_targets }} )
           if (( ${#builds[@]} )); then
-            # shellcheck disable=SC2086
-            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
-              ${BAZEL_SHARED_CACHE_FLAGS} \
-              --remote_download_outputs=minimal \
-              -- "${builds[@]}"
+            scripts/hermetic-build.sh build --jobs 32 --materializations none \
+              --build-report "${RUNNER_TEMP}/affected-build-report.json" \
+              --event-log "${RUNNER_TEMP}/affected-build-events.json-lines" \
+              "${builds[@]}"
           fi
           if (( ${#tests[@]} )); then
-            # shellcheck disable=SC2086
-            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
-              ${BAZEL_SHARED_CACHE_FLAGS} \
-              --remote_download_outputs=minimal \
-              --remote_download_regex='.*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$' \
-              --cache_test_results=yes --test_output=errors \
-              --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
-              --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-              -- "${tests[@]}" 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
+            scripts/ci/buck2-test.sh affected "${tests[@]}"
           fi
 
       # Every label is deterministic and service-free; service-backed tests
@@ -842,22 +827,21 @@ jobs:
         shell: bash
         run: |
           # The all-targets compile proof rides the Lint job instead:
-          # `//:workspace_clippy` type-checks the same 189-target workspace
+          # `//:workspace_clippy` type-checks the same full workspace
           # shape `cargo check --workspace --all-targets` used to, so the
           # workspace compile aggregate does not ride this command -- it
           # would pay the workspace compile a second time on this job's
           # critical path. It remains available for local runs.
           #
-          # `-//:workspace_tail_tests` subtracts the profiled long tail (the
+          # `//:workspace_core_tests` excludes the profiled long tail (the
           # `//examples/` leaves and the `dev-deferred` slow tests), which the
-          # merge-group-only `bazel-tests-tail` job runs on a parallel runner;
+          # merge-group-only `buck2-tests-tail` job runs on a parallel runner;
           # a core-touching diff otherwise ends this leg in a ~5.5-minute
           # agent-workbench compile long after every crate test has finished.
           #
-          # `${{ needs.plan.outputs.pr_tail_labels }}` then re-adds the
-          # `dev-deferred` labels of every package this diff touches: Bazel
-          # applies target patterns in order, so a positive label after the
-          # negative pattern re-adds it. Admin-merged PRs skip the merge group
+          # `${{ needs.plan.outputs.pr_tail_labels }}` then adds the
+          # `dev-deferred` labels of every package this diff touches.
+          # Admin-merged PRs skip the merge group
           # and so skip the tail job entirely -- #2109 changed
           # `corpus_laws__test`'s expectations file and main went red without
           # the deferred test ever running.
@@ -870,30 +854,9 @@ jobs:
           # is, on most diffs, a cache lookup, and it runs on every trusted
           # event because a dependency's change moves the pinned diagnostics
           # as surely as a facade change does.
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --remote_download_outputs=minimal \
-            --remote_download_regex='.*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$' \
-            --cache_test_results=yes --test_output=errors \
-            --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
-            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            -- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures ${{ needs.plan.outputs.pr_tail_labels }} \
-            2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
-
-      # A FAILED line names the target but not the case; on a remote executor
-      # kill it is all the output there is. The report names each failed
-      # target and its failing cases and stages the targets' testlogs
-      # directories for the artifact below.
-      - name: Summarize failing test targets
-        if: failure()
-        shell: bash
-        run: |
-          python3 scripts/ci/report_failed_tests.py \
-            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
-            --testlogs bazel-testlogs \
-            --stage "${RUNNER_TEMP}/failed-testlogs" \
-            --summary "${GITHUB_STEP_SUMMARY}"
+          scripts/ci/buck2-test.sh workspace-core \
+            //:workspace_core_tests \
+            //crates/lash:ui_fixtures ${{ needs.plan.outputs.pr_tail_labels }}
 
       - name: Upload failing test logs
         if: failure()
@@ -910,28 +873,23 @@ jobs:
       # the job log names no crate, and the critical path a partition pays is
       # invisible below job granularity without this. Load the file at
       # chrome://tracing; the digest below puts the longest path in the job summary.
-      - name: Summarize Bazel profile
+      - name: Summarize Buck2 events
         if: always()
-        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
+        run: |
+          for log in "$RUNNER_TEMP"/*-events.json-lines; do
+            [ -f "$log" ] || continue
+            python3 scripts/ci/buck2_event_digest.py "$log" --summary "$GITHUB_STEP_SUMMARY"
+          done
 
-      - name: Upload Bazel profile
+      - name: Upload Buck2 reports and event logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-profile.json.gz
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # The compact execution log names every spawn with its inputs, cache
-      # result and runner: the evidence for "why did this miss the cache".
-      # Bazel's `src/tools/execlog` parser turns it into text.
-      - name: Upload Bazel execution log
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
+          name: buck2-reports-${{ github.job }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/*-events.json-lines
+            ${{ runner.temp }}/*-build-report.json
+            ${{ runner.temp }}/*-test-report.json
           if-no-files-found: ignore
           retention-days: 14
 
@@ -940,7 +898,7 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
-  # The second leg of the Bazel partition. `//:workspace_tail_tests` is the
+  # The second leg of the Buck2 partition. `//:workspace_tail_tests` is the
   # generated tail of `//:workspace_tests` -- the `//examples/` test leaves
   # that end the serial compile chain on a core-touching diff plus the
   # `dev-deferred` slow labels -- so it runs here in parallel with the main
@@ -948,18 +906,18 @@ jobs:
   # same flags: the legs differ only in which suite labels they expand. It is
   # breadth, not signal: pull requests skip it and the merge group runs it on
   # the combined tree.
-  bazel-tests-tail:
-    name: Test Bazel partition tail
+  buck2-tests-tail:
+    name: Test Buck2 partition tail
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true' && github.event_name != 'pull_request'
+    if: needs.plan.outputs.buck2_trusted == 'true' && needs.plan.outputs.rust == 'true' && github.event_name != 'pull_request'
     environment: build-cache
     steps:
       - *checkout
 
       - name: Configure shared build cache
-        uses: ./.github/actions/bazel-shared-cache
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -970,30 +928,7 @@ jobs:
 
       - name: Test the workspace tail suite with shared cache
         shell: bash
-        run: |
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --remote_download_outputs=minimal \
-            --remote_download_regex='.*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$' \
-            --cache_test_results=yes --test_output=errors \
-            --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
-            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            //:workspace_tail_tests 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
-
-      # A FAILED line names the target but not the case; on a remote executor
-      # kill it is all the output there is. The report names each failed
-      # target and its failing cases and stages the targets' testlogs
-      # directories for the artifact below.
-      - name: Summarize failing test targets
-        if: failure()
-        shell: bash
-        run: |
-          python3 scripts/ci/report_failed_tests.py \
-            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
-            --testlogs bazel-testlogs \
-            --stage "${RUNNER_TEMP}/failed-testlogs" \
-            --summary "${GITHUB_STEP_SUMMARY}"
+        run: scripts/ci/buck2-test.sh workspace-tail //:workspace_tail_tests
 
       - name: Upload failing test logs
         if: failure()
@@ -1010,28 +945,19 @@ jobs:
       # the job log names no crate, and the critical path a partition pays is
       # invisible below job granularity without this. Load the file at
       # chrome://tracing; the digest below puts the longest path in the job summary.
-      - name: Summarize Bazel profile
+      - name: Summarize Buck2 events
         if: always()
-        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/ci/buck2_event_digest.py "$RUNNER_TEMP/workspace-tail-events.json-lines" --summary "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Bazel profile
+      - name: Upload Buck2 reports and event log
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-profile.json.gz
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # The compact execution log names every spawn with its inputs, cache
-      # result and runner: the evidence for "why did this miss the cache".
-      # Bazel's `src/tools/execlog` parser turns it into text.
-      - name: Upload Bazel execution log
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
+          name: buck2-reports-${{ github.job }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/workspace-tail-events.json-lines
+            ${{ runner.temp }}/workspace-tail-build-report.json
+            ${{ runner.temp }}/workspace-tail-test-report.json
           if-no-files-found: ignore
           retention-days: 14
 
@@ -1041,7 +967,7 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   # The Cargo fallback for untrusted pull requests, which receive no shared
-  # cache credentials or Bazel partition. Trusted events run every deterministic
+  # cache credentials or Buck2 partition. Trusted events run every deterministic
   # Rust test, including workbench browser projection with pinned Node, above.
   #
   # `plan.workbench` is the workbench binary's compiled dependency closure, read
@@ -1053,7 +979,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
-    if: needs.plan.outputs.bazel_trusted != 'true' && needs.plan.outputs.rust == 'true'
+    if: needs.plan.outputs.buck2_trusted != 'true' && needs.plan.outputs.rust == 'true'
     steps:
       - *checkout
 
@@ -1137,19 +1063,19 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # Trusted events run the workbench browser-projection case in Bazel with
+      # Trusted events run the workbench browser-projection case in Buck2 with
       # a pinned Node interpreter in the test action. Untrusted pull requests
       # retain the full Cargo workspace suite.
       # profile.ci excludes nested-Cargo fault matrices and the trybuild UI
       # binary, which have their own jobs.
       - name: Test workspace
         env:
-          BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+          BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
         run: |
           workbench="${{ needs.plan.outputs.workbench }}"
-          case "${BAZEL_TRUSTED}" in
+          case "${BUCK2_TRUSTED}" in
             true)
-              echo "trusted event must use the Bazel partition" >&2
+              echo "trusted event must use the Buck2 partition" >&2
               exit 1
               ;;
             false)
@@ -1163,7 +1089,7 @@ jobs:
               nextest_args=(--workspace -E "${skip}")
               ;;
             *)
-              echo "invalid Bazel trust decision: ${BAZEL_TRUSTED}" >&2
+              echo "invalid Buck2 trust decision: ${BUCK2_TRUSTED}" >&2
               exit 1
               ;;
           esac
@@ -1182,7 +1108,7 @@ jobs:
   # tests, which each fork real `cargo test ... -- --list` invocations and run
   # 3-9 minutes serially. They are the only tests Cargo still owns for their
   # own sake -- the property they prove is Cargo's own name-based test
-  # selection, which no hermetic action can supply, so the Bazel label skips
+  # selection, which no hermetic action can supply, so the Buck2 label skips
   # them by name and this job is where they run. Deferred to the manual
   # full-profile dispatch like the other heavy jobs: any one of these tests set
   # the wall-clock of the ordinary suite, and their behavior almost never varies
@@ -1231,7 +1157,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
-    # Trusted events run the workspace clippy as cached Bazel actions, which
+    # Trusted events run the workspace clippy as cached Buck2 actions, which
     # need the shared cache credentials. Untrusted events never see them and
     # keep the Cargo command below.
     environment: build-cache
@@ -1337,9 +1263,9 @@ jobs:
           # add it here.
           python3 scripts/check_included_file_formatting.py
 
-      - name: Configure Bazel shared cache
-        if: needs.plan.outputs.bazel_trusted == 'true'
-        uses: ./.github/actions/bazel-shared-cache
+      - name: Configure Buck2 shared cache
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -1352,64 +1278,61 @@ jobs:
       # the resolved default workspace graph — the `--workspace --all-targets`
       # shape — with the `[workspace.lints]` table, the nearest `clippy.toml`
       # and a trailing `-D warnings`, in the order Cargo emits them. See
-      # `tools/bazel/clippy.bzl`.
+      # `tools/buck2/rust_rules.bzl`.
       #
       # `//:feature_lane_clippy` — the slack-clone `e2e` variant and the other
       # feature-lane units — rides the `feature-lanes` job's own compile
       # invocation, which runs on every trusted event whose diff can move a
       # Rust build, pull requests included.
       - name: Clippy (workspace, all targets, shared cache)
-        if: needs.plan.outputs.bazel_trusted == 'true'
+        if: needs.plan.outputs.buck2_trusted == 'true'
         shell: bash
         run: |
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --remote_download_outputs=minimal \
-            --profile="${RUNNER_TEMP}/bazel-lint-profile.json.gz" \
-            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            -- //:workspace_clippy //:schema_checks
+          scripts/hermetic-build.sh clippy \
+            --jobs 32 --materializations none \
+            --build-report "${RUNNER_TEMP}/lint-build-report.json" \
+            --event-log "${RUNNER_TEMP}/lint-events.json-lines" \
+            //:workspace_clippy
+          scripts/hermetic-build.sh build \
+            --jobs 32 --materializations none \
+            --build-report "${RUNNER_TEMP}/schema-build-report.json" \
+            --event-log "${RUNNER_TEMP}/schema-events.json-lines" \
+            //:schema_checks
 
       - name: Remove client credentials
         if: always()
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
-      - name: Summarize compiler and schema action profile
-        if: always() && needs.plan.outputs.bazel_trusted == 'true'
-        run: python3 scripts/ci/bazel_profile_digest.py "$RUNNER_TEMP/bazel-lint-profile.json.gz" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Summarize compiler and schema build events
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
+        run: |
+          python3 scripts/ci/buck2_event_digest.py "$RUNNER_TEMP/lint-events.json-lines" --summary "$GITHUB_STEP_SUMMARY"
+          python3 scripts/ci/buck2_event_digest.py "$RUNNER_TEMP/schema-events.json-lines" --summary "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload compiler and schema action profile
-        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+      - name: Upload compiler and schema build reports
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-lint-profile.json.gz
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # The compact execution log names every spawn with its inputs, cache
-      # result and runner: the evidence for "why did this miss the cache".
-      # Bazel's `src/tools/execlog` parser turns it into text.
-      - name: Upload Bazel execution log
-        if: always() && needs.plan.outputs.bazel_trusted == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
+          name: buck2-reports-${{ github.job }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/lint-events.json-lines
+            ${{ runner.temp }}/lint-build-report.json
+            ${{ runner.temp }}/schema-events.json-lines
+            ${{ runner.temp }}/schema-build-report.json
           if-no-files-found: ignore
           retention-days: 14
 
       # Untrusted pull requests receive no cache credentials and keep exactly
-      # the Cargo command that predates the Bazel branch above.
+      # the Cargo command that predates the Buck2 branch above.
       - name: Clippy (workspace, all targets)
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         run: |
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
       # `slack-clone`'s `e2e` feature is outside the resolved default workspace
-      # graph, so it used to have no Bazel label and this 106 s Cargo compile
+      # graph, so it used to have no Buck2 label and this 106 s Cargo compile
       # ran on every event. It has one now: `//:feature_lane_clippy` lints the
       # feature-lane variants of the same targets inside the `feature-lanes`
       # job's compile invocation on every trusted Rust event. `slack-clone`
@@ -1417,7 +1340,7 @@ jobs:
       # --features e2e` resolution is the resolution this command used.
       # Untrusted events receive no cache credentials and keep the Cargo path.
       - name: Clippy (slack-clone e2e feature)
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
 
       - name: Check Restate handler panic boundary
@@ -1438,7 +1361,7 @@ jobs:
       # diffs.
       - name: Check feature and schema contracts
         env:
-          BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+          BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
         run: bash scripts/ci/lint-contracts.sh
 
       - name: Check core/UI boundary
@@ -1484,8 +1407,8 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Configure shared build cache
-        if: needs.plan.outputs.bazel_trusted == 'true'
-        uses: ./.github/actions/bazel-shared-cache
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -1494,27 +1417,10 @@ jobs:
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
-      - name: Test deferred Unicode suites (Bazel)
-        if: needs.plan.outputs.bazel_trusted == 'true'
+      - name: Test deferred Unicode suites (Buck2)
+        if: needs.plan.outputs.buck2_trusted == 'true'
         shell: bash
-        run: |
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --cache_test_results=yes --test_output=errors \
-            //:deferred_tests 2>&1 | tee "${RUNNER_TEMP}/bazel-test-output.txt"
-
-      # Same failing-target report as the partition jobs: names the target and
-      # its failing cases and stages the testlogs for the artifact below.
-      - name: Summarize failing test targets
-        if: failure()
-        shell: bash
-        run: |
-          python3 scripts/ci/report_failed_tests.py \
-            --output "${RUNNER_TEMP}/bazel-test-output.txt" \
-            --testlogs bazel-testlogs \
-            --stage "${RUNNER_TEMP}/failed-testlogs" \
-            --summary "${GITHUB_STEP_SUMMARY}"
+        run: scripts/ci/buck2-test.sh deferred-unicode //:deferred_tests
 
       - name: Upload failing test logs
         if: failure()
@@ -1527,11 +1433,11 @@ jobs:
           retention-days: 14
 
       - name: Test deferred Unicode suites (Cargo)
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         run: cargo test -p lash-regress --test unicodesets --locked
 
       - name: Remove client credentials
-        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
@@ -1543,7 +1449,7 @@ jobs:
     # Trusted events build every binary below from the shared cache; the
     # PostgreSQL version and connection settings are execution-only inputs, so
     # every major reuses one set of compiled outputs -- and, because every
-    # major runs in this one job, one Bazel client and one analysis. Untrusted
+    # major runs in this one job, one Buck2 client and one analysis. Untrusted
     # events receive no credentials and keep the Cargo compile. See
     # scripts/ci/store-tests.sh.
     #
@@ -1559,7 +1465,7 @@ jobs:
     # connection URL cannot, because the port is chosen per step by
     # `with-service.sh` and a job-level literal would be a lie.
     env:
-      BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+      BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
       LASH_REQUIRE_POSTGRES: "1"
       POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
     # PRs run PG16 for store crates, lash-sim and migrations. The broader
@@ -1591,8 +1497,8 @@ jobs:
       - *checkout
 
       - name: Configure shared build cache
-        if: needs.plan.outputs.bazel_trusted == 'true'
-        uses: ./.github/actions/bazel-shared-cache
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -1602,18 +1508,18 @@ jobs:
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       - name: Install Rust toolchain
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc and nextest
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc,nextest
 
       # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         uses: ./.github/actions/setup-mold
 
       # `with-service.sh` exports LASH_REQUIRE_POSTGRES=1 alongside the URL, so
@@ -1641,7 +1547,7 @@ jobs:
       # queued retry scenarios a narrower pull-request step used to filter.
       # Trusted events shard the conformance and integration binaries and run
       # the shards and the other binaries in parallel, each on a database of
-      # its own (`tools/bazel/postgres_slot_runner.sh`); the step then proves
+      # its own (`tools/buck2/postgres_slot_runner.sh`); the step then proves
       # the shards ran every listed case exactly once.
       - name: Test Postgres store (conformance and attempt atomicity)
         run: |
@@ -1700,8 +1606,18 @@ jobs:
               bash scripts/ci/store-tests.sh pg-catalog-compatibility
           done
 
+      - name: Upload PostgreSQL Buck2 reports and event logs
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: buck2-reports-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/store-test-results/
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
+
       - name: Remove client credentials
-        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
@@ -1722,15 +1638,15 @@ jobs:
     # The require flag stays at job level so no step can lose it on its own; the
     # endpoint cannot, because the port is chosen per step by `with-service.sh`.
     env:
-      BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+      BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
       LASH_REQUIRE_S3: "1"
 
     steps:
       - *checkout
 
       - name: Configure shared build cache
-        if: needs.plan.outputs.bazel_trusted == 'true'
-        uses: ./.github/actions/bazel-shared-cache
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -1740,18 +1656,18 @@ jobs:
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       - name: Install Rust toolchain
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
-        if: needs.plan.outputs.bazel_trusted != 'true'
+        if: needs.plan.outputs.buck2_trusted != 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Test S3 store conformance
@@ -1764,8 +1680,18 @@ jobs:
           bash scripts/ci/with-service.sh s3 -- \
             bash scripts/ci/store-tests.sh s3-attachment-differential
 
+      - name: Upload S3 Buck2 reports and event logs
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: buck2-reports-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/store-test-results/
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
+
       - name: Remove client credentials
-        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        if: always() && needs.plan.outputs.buck2_trusted == 'true'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
@@ -1889,7 +1815,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request'
       && needs.plan.outputs.pr_host_restate == 'true'
-      && needs.plan.outputs.bazel_trusted == 'true'
+      && needs.plan.outputs.buck2_trusted == 'true'
     environment: build-cache
     steps:
       - *checkout
@@ -1898,7 +1824,7 @@ jobs:
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Configure shared build cache
-        uses: ./.github/actions/bazel-shared-cache
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -1935,8 +1861,8 @@ jobs:
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Configure shared build cache
-        if: needs.plan.outputs.bazel_trusted == 'true'
-        uses: ./.github/actions/bazel-shared-cache
+        if: needs.plan.outputs.buck2_trusted == 'true'
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -1945,18 +1871,13 @@ jobs:
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
-      - name: Install Bazel without shared cache
-        if: needs.plan.outputs.bazel_trusted != 'true'
+      - name: Install Buck2 without shared cache
+        if: needs.plan.outputs.buck2_trusted != 'true'
         shell: bash
         run: |
-          curl --fail --location --silent --show-error \
-            https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-amd64 \
-            -o "$RUNNER_TEMP/bazel"
-          printf '5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992  %s\n' \
-            "$RUNNER_TEMP/bazel" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/bazel"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          echo 'BAZEL_SHARED_CACHE_FLAGS=--config=local' >> "$GITHUB_ENV"
+          client="$(python3 tools/buck2/bootstrap.py)"
+          test -x "$client"
+          dirname "$client" >> "$GITHUB_PATH"
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -1996,7 +1917,7 @@ jobs:
     # events receive no cache credentials and keep the Cargo release build.
     environment: build-cache
     env:
-      BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+      BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
       RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' }}
     steps:
       - name: Explain plan deferral
@@ -2034,8 +1955,8 @@ jobs:
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Configure shared build cache
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED == 'true'
-        uses: ./.github/actions/bazel-shared-cache
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED == 'true'
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -2045,21 +1966,21 @@ jobs:
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       - name: Install Rust toolchain
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       - name: Install mold
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Restore worker release dependencies
-        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
@@ -2071,7 +1992,7 @@ jobs:
       - name: Build worker binaries once
         if: env.RUN_WORKER_ARTIFACTS == 'true'
         run: |
-          if [ "${BAZEL_TRUSTED}" = true ]; then
+          if [ "${BUCK2_TRUSTED}" = true ]; then
             # Every binary of the package, under its Cargo name and
             # stripped: the same set `--bins` builds below.
             python3 scripts/ci/restate_suite.py stage-binaries \
@@ -2087,7 +2008,7 @@ jobs:
           tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
 
       - name: Remove client credentials
-        if: always() && env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED == 'true'
+        if: always() && env.RUN_WORKER_ARTIFACTS == 'true' && env.BUCK2_TRUSTED == 'true'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
@@ -2130,7 +2051,7 @@ jobs:
     # other matrix legs remain full-profile work.
     if: >-
       (github.event_name == 'pull_request' && needs.plan.outputs.pr_host_restate == 'true'
-      && needs.plan.outputs.bazel_trusted == 'true')
+      && needs.plan.outputs.buck2_trusted == 'true')
       || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
     # The live Restate suites (`restate: true`) build their test binaries from
     # the shared cache and run them here, beside pinned restate-servers that
@@ -2152,7 +2073,7 @@ jobs:
             node: false
             artifact: none
             browser: false
-            bazel: false
+            buck2: false
             restate: true
             runner: ubuntu-24.04
           - name: agent-workbench
@@ -2160,7 +2081,7 @@ jobs:
             node: false
             artifact: agent-workbench
             browser: false
-            bazel: true
+            buck2: true
             restate: true
             runner: ubuntu-24.04
           - name: effect-group-conformance
@@ -2168,7 +2089,7 @@ jobs:
             node: false
             artifact: effect-group-conformance
             browser: false
-            bazel: true
+            buck2: true
             restate: true
             runner: ubuntu-24.04
           - name: server-double
@@ -2176,7 +2097,7 @@ jobs:
             node: false
             artifact: none
             browser: false
-            bazel: true
+            buck2: true
             restate: true
             runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
@@ -2184,7 +2105,7 @@ jobs:
             node: true
             artifact: none
             browser: false
-            bazel: false
+            buck2: false
             restate: false
             runner: ubuntu-24.04
           - name: slack-clone-full-host
@@ -2192,7 +2113,7 @@ jobs:
             node: false
             artifact: none
             browser: true
-            bazel: false
+            buck2: false
             restate: false
             runner: ubuntu-24.04
 
@@ -2228,8 +2149,8 @@ jobs:
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Configure shared build cache
-        if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.bazel
-        uses: ./.github/actions/bazel-shared-cache
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.buck2
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -2239,18 +2160,18 @@ jobs:
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       - name: Install Rust toolchain
-        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.bazel
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.buck2
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc
-        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.bazel
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.buck2
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
-        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.bazel
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.buck2
         uses: ./.github/actions/setup-mold
 
       - name: Install Node
@@ -2296,7 +2217,7 @@ jobs:
           fi
 
       - name: Remove client credentials
-        if: always() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.bazel
+        if: always() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.buck2
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
@@ -2349,7 +2270,7 @@ jobs:
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Configure shared build cache
-        uses: ./.github/actions/bazel-shared-cache
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -2958,8 +2879,8 @@ jobs:
       - lashlang-git-consumer
       - feature-lanes
       - workspace-tests
-      - bazel-tests
-      - bazel-tests-tail
+      - buck2-tests
+      - buck2-tests-tail
       - heavy-tests
       - lint
       - hygiene
@@ -2982,6 +2903,6 @@ jobs:
       - name: Validate CI conclusion
         env:
           NEEDS_JSON: ${{ toJson(needs) }}
-          BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+          BUCK2_TRUSTED: ${{ needs.plan.outputs.buck2_trusted }}
           WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' }}
         run: python3 scripts/ci/conclusion.py conclusion

@@ -325,7 +325,7 @@ jobs:
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Configure shared build cache
-        uses: ./.github/actions/bazel-shared-cache
+        uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}

@@ -16,7 +16,7 @@ use lash_sim::stack_policy::{PRODUCT_STACK_BUDGET_BYTES, SIM_HARNESS_STACK_LIMIT
 /// replays its contract and exits in tens of milliseconds, so this bound is
 /// three orders of magnitude of headroom. Its job is to make a child that
 /// stops making progress fail *this* contract's case with the child's own
-/// output, instead of blocking the parent in `wait` until the Bazel test
+/// output, instead of blocking the parent in `wait` until the Buck2 test
 /// action's own timeout kills the whole suite with no test line emitted
 /// (FIG-3124).
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);

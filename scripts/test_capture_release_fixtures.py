@@ -102,6 +102,19 @@ class CaptureTests(unittest.TestCase):
         # report a capture error rather than capture the wrong commit.
         self.assertEqual(self.run_capture(), 2)
 
+    def test_regeneration_uses_named_cargo_recipes(self):
+        commands = [
+            argv
+            for leg in capture.LEGS
+            for _environment, argv in leg.regenerate
+        ]
+        self.assertGreater(len(commands), 0)
+        for argv in commands:
+            self.assertEqual(argv[:2], ["cargo", "test"])
+            self.assertIn("--locked", argv)
+            self.assertIn("--", argv)
+            self.assertNotIn("kiln", argv)
+
 
 if __name__ == "__main__":
     unittest.main()

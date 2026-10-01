@@ -267,7 +267,7 @@ MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=16
 # together in run 35117123483) — they verify Cargo's own name-filter
 # selection, not behavior mutants can reach, and alone exceed the baseline's
 # per-test timeout. The trunk-only `Test heavy suites` job owns them and the
-# ordinary Bazel targets already skip them, so the mutation lanes skip them
+# ordinary Buck2 targets already skip them, so the mutation lanes skip them
 # identically by forwarding the filter through `cargo test` to libtest.
 MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
 case "$lane" in

@@ -42,8 +42,8 @@ class AppendVecMiriTests(unittest.TestCase):
         self.assertTrue(ci_plan.evaluate_confidence_conclusion(needs, "schedule", "full"))
         self.assertNotIn("append-vec-miri", yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"])
 
-    def test_driver_reaches_miri_without_requiring_bazel(self):
-        result = subprocess.run(["bash", "scripts/hermetic-build.sh", "miri", "--help"], cwd=ROOT, env=os.environ | {"BAZEL": "append-vec-miri-bazel-must-not-be-used"}, capture_output=True, text=True)
+    def test_driver_reaches_miri_without_requiring_buck2(self):
+        result = subprocess.run(["bash", "scripts/hermetic-build.sh", "miri", "--help"], cwd=ROOT, env=os.environ | {"BUCK2": "append-vec-miri-buck2-must-not-be-used"}, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("AppendVec", result.stdout)
 

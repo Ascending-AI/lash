@@ -184,8 +184,9 @@ mod semantic_boundary_request_identity_tests {
         // per adopting operation. Any projection change requires an explicit
         // per-operation encoding-version bump and corpus replacement. To
         // refresh after an intentional grammar change:
-        // UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 kiln run \
-        //   //crates/lash-core-store:lash-core-store__unit_test -- \
+        // . ./env.sh
+        // UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 \
+        //   cargo test -p lash-internal-core-store --locked --lib \
         //   semantic_boundary_request_identity_v1_golden_corpus
         let rows = [
             ("record-config", "protocol-materialization", 3),
@@ -214,7 +215,7 @@ mod semantic_boundary_request_identity_tests {
             assert!(
                 workspace.is_some()
                     || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).is_absolute(),
-                "Bazel regeneration requires BUILD_WORKSPACE_DIRECTORY"
+                "Buck2 regeneration requires BUILD_WORKSPACE_DIRECTORY"
             );
             let manifest_dir = workspace.map_or_else(
                 || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),

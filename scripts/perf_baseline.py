@@ -44,7 +44,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 _ENV_ARCHIVE_ROOT = os.environ.get("LASH_PERF_BASELINE_ROOT", "").strip()
-BUSY_PROCESS_NAMES = ("rustc", "cargo", "bazel", "lash-perf")
+BUSY_PROCESS_NAMES = ("rustc", "cargo", "buck2", "lash-perf")
 DEFAULT_MAX_LOAD = 8.0
 
 

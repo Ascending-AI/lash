@@ -9,6 +9,7 @@ scope. CI does not set the variable, so its Cargo resolution is unchanged.
 from __future__ import annotations
 
 import os
+import json
 import pathlib
 import re
 import signal
@@ -142,32 +143,34 @@ class FeatureCoverageContractTests(unittest.TestCase):
                       - name: Seal-test the API surface
                         run: cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
 
-                  bazel-tests:
+                  buck2-tests:
                     steps:
                       - name: Test deterministic workspace suite with shared cache
-                        run: bazel test //:workspace_tests
+                        run: buck2 test //:workspace_tests
 
                   lint:
                     steps:
                       - name: Clippy (workspace, all targets, shared cache)
-                        run: bazel build //:workspace_clippy
+                        run: scripts/hermetic-build.sh clippy //:workspace_clippy
 
                   repo-gates:
                     steps:
                       - name: Reconcile feature-lane resolution against Cargo
-                        run: python3 tools/bazel/generate_build_files.py --verify-resolution
+                        run: python3 tools/buck2/sync.py --verify-resolution
                       - name: Test repository scripts
                         run: |
                           python3 scripts/test_check_feature_coverage.py
                           python3 scripts/check_feature_coverage.py check
 
                   feature-lanes:
-                    if: needs.plan.outputs.bazel_trusted == 'true'
+                    if: needs.plan.outputs.buck2_trusted == 'true'
                     steps:
                       - name: Compile every feature lane
-                        run: bazel build //:feature_lanes //:feature_lane_clippy
+                        run: |
+                          scripts/hermetic-build.sh build //:feature_lane_compile
+                          scripts/hermetic-build.sh clippy //:feature_lane_clippy
                       - name: Run the executable feature lanes
-                        run: bazel test //:feature_lane_tests
+                        run: scripts/hermetic-build.sh test //:feature_lane_tests
 
                   ci-conclusion:
                     needs:
@@ -182,13 +185,13 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def write_lane_table(self, lanes: dict | None = None) -> None:
-        """The generated lane -> Bazel label table the contract reads."""
+        """The generated lane -> Buck2 label table the contract reads."""
         if lanes is None:
             lanes = {"member-testing": ["//member:member__fv_00000000"]}
-        directory = self.root / "tools" / "bazel"
+        directory = self.root / "tools" / "buck2"
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "feature_lanes.bzl").write_text(
-            "FEATURE_LANES = " + repr(lanes) + "\n", encoding="utf-8"
+        (directory / "target-inventory.json").write_text(
+            json.dumps({"feature_lanes": lanes}) + "\n", encoding="utf-8"
         )
 
     def write_plan(self, *, commands: bool = True) -> None:
@@ -404,23 +407,23 @@ class FeatureCoverageContractTests(unittest.TestCase):
         workflow = self.root / ".github" / "workflows" / "ci.yml"
         workflow.write_text(
             workflow.read_text(encoding="utf-8").replace(
-                "bazel build //:feature_lanes", "true"
+                "scripts/hermetic-build.sh build //:feature_lane_compile", "true"
             ),
             encoding="utf-8",
         )
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not build //:feature_lanes", result.stdout)
+        self.assertIn("does not execute //:feature_lane_compile", result.stdout)
 
-    def test_a_lane_without_bazel_targets_fails(self) -> None:
+    def test_a_lane_without_buck2_targets_fails(self) -> None:
         self.write_lane_table({"member-testing": []})
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "coverage lane has no Bazel targets: member-testing", result.stdout
+            "coverage lane has no Buck2 targets: member-testing", result.stdout
         )
 
-    def test_run_refuses_a_lane_without_bazel_targets(self) -> None:
+    def test_run_refuses_a_lane_without_buck2_targets(self) -> None:
         # `run` validates the whole contract before it executes a command, so a
         # lane the pool no longer compiles fails the Cargo lane too rather than
         # reporting a pass for a gate that is only half there.
@@ -428,7 +431,7 @@ class FeatureCoverageContractTests(unittest.TestCase):
         result = self.run_lane()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "coverage lane has no Bazel targets: member-testing", result.stdout
+            "coverage lane has no Buck2 targets: member-testing", result.stdout
         )
 
     def test_arbitrary_unresolved_feature_fails(self) -> None:

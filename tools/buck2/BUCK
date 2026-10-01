@@ -1,0 +1,64 @@
+load(":platforms.bzl", "declare_pool_platforms", "runtime_probe")
+load(":host_transition.bzl", "host_transition")
+load(":lash_rust.bzl", "lash_rust_binary")
+load(":clippy_policy.bzl", "declare_clippy_configurations")
+load(":test_rules.bzl", "test_helper_bundle")
+
+# Keep the generated graph macro loaded by this hand-written package so a
+# cheap `buck2 targets //tools/buck2:` validates it before full graph sync.
+_graph_macro_parse_sentinel = lash_rust_binary
+
+declare_clippy_configurations()
+
+constraint_setting(name = "profile")
+constraint_value(name = "profile_judged", constraint_setting = ":profile")
+constraint_value(name = "profile_optimized", constraint_setting = ":profile")
+constraint_value(name = "profile_host", constraint_setting = ":profile")
+
+platform(
+    name = "judged",
+    constraint_values = [
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:x86_64",
+        ":profile_judged",
+    ],
+)
+
+platform(
+    name = "optimized",
+    constraint_values = [
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:x86_64",
+        ":profile_optimized",
+    ],
+)
+
+declare_pool_platforms(
+    name = "platforms",
+    constraints = ["prelude//os:linux", "prelude//cpu:x86_64"],
+)
+host_transition(
+    name = "host_transition",
+    budget = ":budget",
+    host = ":profile_host",
+    platform_target = "prelude//rust/buildscript:buildscript_for_platform[2]",
+)
+runtime_probe(name = "runtime_probe", script = "cgroup_probe.py")
+runtime_probe(name = "runtime_probe_large", script = "cgroup_probe.py", cpu = 2, memory_kb = 3145728)
+
+test_helper_bundle(
+    name = "test_helpers",
+    batch = "test_batch_runner.sh",
+    batch_launcher = "test_batch_launcher.sh",
+    junit = "junit_xml.py",
+    libtest_selection = "libtest_selection.py",
+    launcher = "test_launcher.sh",
+    postgres = "postgres_slot_runner.sh",
+    shard = "test_shard.py",
+    timeout = "test_timeout.py",
+    xml = "test_xml_runner.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(name = "target_inventory", src = "target-inventory.json", visibility = ["PUBLIC"])
+export_file(name = "ui_fixtures_runner.py", src = "ui_fixtures_runner.py", visibility = ["PUBLIC"])

@@ -19,7 +19,10 @@ if (( workbench_port_number < 1 || workbench_port_number > 65535 )); then
 fi
 
 printf '[attachment-usage-gate] Restate engine over the SQLite store set pass\n'
-kiln run //examples/agent-workbench:agent-workbench__unit_test -- \
-  attachment_usage_gate --exact --nocapture --test-threads=1
+kiln test --test_timeout=300 --test_output=all \
+  --test_arg=tests::attachments_usage_tests::attachment_usage_gate \
+  --test_arg=--exact \
+  --test_arg=--nocapture --test_arg=--test-threads=1 \
+  //examples/agent-workbench:agent-workbench__unit_test
 
 printf '[attachment-usage-gate] upload -> reference -> persist -> retrieve and usage restart gates passed\n'

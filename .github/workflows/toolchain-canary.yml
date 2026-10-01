@@ -119,7 +119,7 @@ jobs:
           \`\`\`
 
           Fix forward by bumping the pin (rust-toolchain.toml, the
-          rust-toolchain action default, MODULE.bazel) and eating the lint
+          rust-toolchain action default, tools/buck2/toolchain-lock.json) and eating the lint
           fallout inside that PR, per CONTRIBUTING.md.
           EOF
           )"

@@ -48,13 +48,14 @@
 //! byte-identical artifacts.
 //!
 //! ```text
+//! . ./env.sh
 //! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
-//!   kiln run //crates/lash-sqlite-store:durable_read_fixture__test -- \
-//!   regenerate_sqlite_durable_fixture --ignored --exact
+//!   cargo test -p lash-internal-sqlite-store --locked \
+//!   --test durable_read_fixture regenerate_sqlite_durable_fixture -- --ignored --exact
 //! LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:55487/lash \
 //! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
-//!   kiln run //crates/lash-postgres-store:durable_read_fixture__test -- \
-//!   regenerate_postgres_durable_fixture --ignored --exact
+//!   cargo test -p lash-internal-postgres-store --locked \
+//!   --test durable_read_fixture regenerate_postgres_durable_fixture -- --ignored --exact
 //! ```
 //!
 //! The PostgreSQL generator writes only the dedicated `lash_durable_read_fixture`

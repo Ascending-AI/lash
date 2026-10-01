@@ -7,8 +7,8 @@ import unittest
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools/bazel"))
-import generate_build_files as generator
+sys.path.insert(0, str(ROOT / "tools/buck2"))
+import generate_model as generator
 
 
 class WorkerRunfileGenerationTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
         }
         outputs = {}
         for name in names:
-            outputs[ROOT / "crates" / name / "BUILD.bazel"] = (
+            outputs[ROOT / "crates" / name / "BUCK"] = (
                 f'lash_rust_library(name="{name}", manifest_dir="crates/{name}")\n'
                 f'lash_rust_unit_test(\n    name="{name}__unit_test",\n'
                 f'    manifest_dir="crates/{name}",\n)\n'
@@ -44,7 +44,7 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
 
     def test_generation_preserves_other_support_and_is_idempotent(self):
         metadata, outputs = self.fixture()
-        path = ROOT / "crates/host/BUILD.bazel"
+        path = ROOT / "crates/host/BUCK"
         outputs[path] = outputs[path].replace(
             '    name="host__unit_test",',
             '    name="host__unit_test",\n    extra_data = ["//:fixture"],\n    test_env = {"OTHER": "value"},',
@@ -57,7 +57,7 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
         before = dict(outputs)
         generator.vm_worker_runfiles.add(metadata, outputs, ROOT)
         self.assertEqual(before, outputs)
-        self.assertNotIn("LASH_VM_WORKER", outputs[ROOT / "crates/unrelated/BUILD.bazel"])
+        self.assertNotIn("LASH_VM_WORKER", outputs[ROOT / "crates/unrelated/BUCK"])
 
     def test_dev_edges_are_test_local_and_build_edges_are_excluded(self):
         metadata, outputs = self.fixture("dev")
@@ -72,7 +72,7 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
 
     def test_a_compile_data_helper_is_already_a_runfile(self):
         metadata, outputs = self.fixture()
-        path = ROOT / "crates/host/BUILD.bazel"
+        path = ROOT / "crates/host/BUCK"
         outputs[path] = outputs[path].replace(
             '    name="host__unit_test",',
             '    name="host__unit_test",\n    extra_compile_data=["//crates/lash-vm-worker:lash-vm-worker__bin"],',
@@ -83,20 +83,20 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
 
     def test_feature_variant_swaps_and_extra_dependencies_are_traversed(self):
         metadata, outputs = self.fixture("build")
-        path = ROOT / "crates/host/BUILD.bazel"
+        path = ROOT / "crates/host/BUCK"
         outputs[path] += '''lash_rust_feature_test(
     name="variant",
     manifest_dir="crates/host",
     extra_deps={"//crates/middle:variant": "renamed"},
 )
 '''
-        outputs[ROOT / "crates/middle/BUILD.bazel"] += '''lash_rust_feature_library(
+        outputs[ROOT / "crates/middle/BUCK"] += '''lash_rust_feature_library(
     name="variant",
     manifest_dir="crates/middle",
-    variant_deps={"//crates/lash-internal-vm-client": "//crates/lash-internal-vm-client:variant"},
+    variant_deps={"//crates/lash-internal-vm-client:lash-internal-vm-client": "//crates/lash-internal-vm-client:variant"},
 )
 '''
-        outputs[ROOT / "crates/lash-internal-vm-client/BUILD.bazel"] += '''lash_rust_feature_library(
+        outputs[ROOT / "crates/lash-internal-vm-client/BUCK"] += '''lash_rust_feature_library(
     name="variant",
     manifest_dir="crates/lash-internal-vm-client",
 )
@@ -111,21 +111,21 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
         metadata["workspace_members"].append(name)
         metadata["packages"].append({"id": name, "name": "lash-internal-vm-worker", "manifest_path": str(ROOT / "crates/lash-vm-worker/Cargo.toml")})
         metadata["resolve"]["nodes"].append({"id": name, "deps": []})
-        client = ROOT / "crates/lash-internal-vm-client/BUILD.bazel"
+        client = ROOT / "crates/lash-internal-vm-client/BUCK"
         outputs[client] = outputs[client].replace('name="lash-internal-vm-client",', 'name="lash-internal-vm-client", crate_features=["synthetic-next"],')
-        outputs[ROOT / "crates/lash-vm-worker/BUILD.bazel"] = '''lash_rust_library(name="plain", crate_features=[])
+        outputs[ROOT / "crates/lash-vm-worker/BUCK"] = '''lash_rust_library(name="plain", crate_features=[])
 lash_rust_feature_library(name="next", crate_features=["synthetic-next"])
 lash_rust_binary(name="lash-vm-worker__bin", crate_root="src/main.rs", library=":plain")
 lash_rust_feature_binary(name="next__bin", crate_root="src/main.rs", library=":next")
 '''
         generator.vm_worker_runfiles.add(metadata, outputs, ROOT)
-        self.assertIn("$(rootpath //crates/lash-vm-worker:next__bin)", outputs[ROOT / "crates/host/BUILD.bazel"])
+        self.assertIn("$(location //crates/lash-vm-worker:next__bin)", outputs[ROOT / "crates/host/BUCK"])
         self.assertEqual([], generator.vm_worker_runfiles.check(metadata, outputs, ROOT))
 
     def test_check_rejects_the_wrong_environment_and_unsafe_batch_members(self):
         metadata, outputs = self.fixture()
         generator.vm_worker_runfiles.add(metadata, outputs, ROOT)
-        path = ROOT / "crates/host/BUILD.bazel"
+        path = ROOT / "crates/host/BUCK"
         outputs[path] = outputs[path].replace("LASH_VM_WORKER", "WRONG_VARIABLE")
         self.assertTrue(generator.vm_worker_runfiles.check(metadata, outputs, ROOT))
         outputs[path] += 'lash_batch_test(name="test_batch", tests=[":host__unit_test"])\n'

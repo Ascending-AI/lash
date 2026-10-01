@@ -1,0 +1,10 @@
+{
+  "buck2": {
+    "release": "2026-09-15",
+    "commit": "6507dd157a6f81a810c48583edf1758dd0c337c5",
+    "prelude_commit": "4d101dce3482c35b32f9f1e7072b354ae789d256",
+    "url": "https://github.com/facebook/buck2/releases/download/2026-09-15/buck2-x86_64-unknown-linux-musl.zst",
+    "archive_sha256": "631eb84a8925d19146e0f5d594b9f2d0b1f0864e63f24e0d5914a75a6a0a4dea",
+    "executable_sha256": "8d91d8d3654531f137ee1a0f2752cd67446065c8a2c65a02ee2c810b7899a4c9"
+  }
+}

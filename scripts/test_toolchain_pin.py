@@ -4,8 +4,8 @@ places.
 
 `rust-toolchain.toml` selects the toolchain for local Cargo/rustup use,
 `.github/actions/rust-toolchain/action.yml` carries the default every CI
-install step resolves, and `MODULE.bazel` declares the version rules_rs
-registers for the hermetic Bazel toolchain. All three must agree: a drift of
+install step resolves, and `tools/buck2/toolchain-lock.json` pins the hermetic
+Buck2 toolchain. All three must agree: a drift of
 one patch release is exactly the "local green, CI red" divergence FIG-1672
 shipped, except slower to notice because each site looks correct alone.
 
@@ -19,8 +19,8 @@ the pin.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-import re
 import tomllib
 import unittest
 
@@ -30,7 +30,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 TOOLCHAIN_TOML = ROOT / "rust-toolchain.toml"
 TOOLCHAIN_ACTION = ROOT / ".github" / "actions" / "rust-toolchain" / "action.yml"
-MODULE_BAZEL = ROOT / "MODULE.bazel"
+BUCK2_TOOLCHAIN_LOCK = ROOT / "tools" / "buck2" / "toolchain-lock.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 # The canary deliberately floats; every other workflow resolves the pin.
@@ -49,18 +49,13 @@ def pin_sites() -> dict[str, str]:
             "toolchain"
         ]["default"]
     )
-    block = re.search(
-        r"toolchains\.toolchain\((.*?)\)",
-        MODULE_BAZEL.read_text(encoding="utf-8"),
-        flags=re.DOTALL,
-    )
-    assert block is not None, "MODULE.bazel declares no toolchains.toolchain"
-    bazel_version = re.search(r'version\s*=\s*"([^"]+)"', block.group(1))
-    assert bazel_version is not None
+    buck2_version = json.loads(BUCK2_TOOLCHAIN_LOCK.read_text(encoding="utf-8"))[
+        "rust_version"
+    ]
     return {
         "rust-toolchain.toml channel": channel,
         "rust-toolchain action default": action_default,
-        "MODULE.bazel toolchain version": bazel_version.group(1),
+        "Buck2 toolchain lock version": buck2_version,
     }
 
 

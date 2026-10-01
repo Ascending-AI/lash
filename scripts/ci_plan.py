@@ -206,7 +206,7 @@ def postgres_store_dependency_dirs(repo_root: str | None = None) -> frozenset[st
     change anywhere in their first-party closure can break them: FIG-3595
     and FIG-3550 were runtime changes outside every store crate. The walk
     takes every optional dependency, not only the ones a feature enables:
-    trusted events build those binaries under Bazel at the workspace's
+    trusted events build those binaries under Buck2 at the workspace's
     unified feature resolution, which is a superset of what `cargo test -p`
     asks for. `scripts/test_ci_plan.py` cross-checks it against the declared
     graph in `cargo metadata`.
@@ -323,7 +323,7 @@ DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
 # The PostgreSQL majors. One `postgres-store` job builds the store binaries
 # once and runs every selected major against its own container, so a second
-# major costs a container and a test run, not another runner and Bazel client.
+# major costs a container and a test run, not another runner and Buck2 client.
 # PG16 is the sole primary lane. PG14/PG18 compare catalog shape
 # only; they are merge-group breadth when the diff touches a durable schema
 # crate, and part of the full profile on workflow_dispatch (weekly/release
@@ -406,10 +406,10 @@ RESTATE_SUITE_JOBS = frozenset(
     {"functional-e2e", "functional-e2e-process-operations"}
 )
 
-BAZEL_TEST_JOB = "bazel-tests"
-# Trusted Rust events run the core partition in `bazel-tests`. The tail is
+BUCK2_TEST_JOB = "buck2-tests"
+# Trusted Rust events run the core partition in `buck2-tests`. The tail is
 # breadth: merge groups and dispatches run it on the combined tree.
-BAZEL_TEST_JOBS = frozenset({BAZEL_TEST_JOB, "bazel-tests-tail"})
+BUCK2_TEST_JOBS = frozenset({BUCK2_TEST_JOB, "buck2-tests-tail"})
 
 
 # Confidence is a separate scheduled/manual workflow. Pin its producer and
@@ -497,9 +497,9 @@ class PathClass:
     kind: PathKind
     # `crates/<name>` for a PACKAGE path, else None.
     package: str | None = None
-    # Whether the package directory carries a BUILD.bazel file.
-    bazel_package: bool = False
-    # A package's own Cargo.toml or BUILD.bazel.
+    # Whether the package directory carries a BUCK file.
+    buck2_package: bool = False
+    # A package's own Cargo.toml or BUCK file.
     manifest: bool = False
     # The CI families a CI machinery path selects; empty for every other kind.
     families: frozenset[str] = frozenset()
@@ -523,16 +523,18 @@ RUST_RUNTIME_DOC_INPUTS = frozenset(
 # Root files that feed every job: the workspace manifest and lock, the
 # toolchain pin, and the workspace-wide dependency policy.
 SHARED_ROOT_FILES = frozenset({"Cargo.toml", "Cargo.lock", "justfile", "deny.toml"})
-# Directories that feed every job: Cargo and nextest configuration.
-SHARED_PREFIXES = (".cargo/", ".config/")
-# Root build and repository tooling. `.bazelrc` sets flags for every Bazel
+# Directories that feed every job: Cargo and nextest configuration, plus the
+# generated synthetic manifest, lock, source and Reindeer graph that resolve
+# every Buck2 Rust dependency. Every `third-party/` path is build-affecting;
+# prose there may be packaged crate data and is not classified as docs.
+SHARED_PREFIXES = (".cargo/", ".config/", "third-party/")
+# Root build and repository tooling. `.buckconfig` sets flags for every Buck2
 # action and `.gitleaksignore` feeds the hygiene job, but neither is a Cargo
 # input, so they select the repository gates rather than every family.
 TOOLING_ROOT_FILES = frozenset(
     {
-        "BUILD.bazel",
-        ".bazelrc",
-        ".bazelversion",
+        "BUCK",
+        ".buckconfig",
         "clippy.toml",
         "rustfmt.toml",
         ".pre-commit-config.yaml",
@@ -544,8 +546,8 @@ INERT_ROOT_FILES = frozenset({".gitignore"})
 
 
 @lru_cache(maxsize=None)
-def _is_bazel_package(root: str, package: str) -> bool:
-    return (Path(root) / package / "BUILD.bazel").is_file()
+def _is_buck2_package(root: str, package: str) -> bool:
+    return (Path(root) / package / "BUCK").is_file()
 
 
 # CI machinery: the scripts and GitHub configuration CI runs. A path here is
@@ -567,7 +569,6 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     ".github/dependabot.yml": "GitHub's Dependabot reads it; no CI job does",
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
-    "scripts/profile_monty_comparison.sh": "run by hand to measure the TypeScript VM against Monty's published workloads",
     "scripts/test-mcp-catalog.sh": "run by hand through kiln gate to repeat the MCP catalog turn-path and native Restate witnesses",
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
 }
@@ -588,7 +589,7 @@ SHARD_DIR_READERS: Mapping[str, str] = {
 PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     **{family: frozenset({family}) for family in FAMILIES},
     "postgres_compatibility": frozenset({"schema"}),
-    "bazel_trusted": frozenset(),
+    "buck2_trusted": frozenset(),
     "fail_open": frozenset(),
     "docs_only": frozenset(),
     "reason": frozenset(),
@@ -614,11 +615,11 @@ def _job_families(text: str) -> frozenset[str]:
 
 
 # Tracked files outside `scripts/` and `.github/` that read CI machinery at
-# build or test time: Bazel packages and rules, Cargo and nextest config, and
+# build or test time: Buck2 packages and rules, Cargo and nextest config, and
 # Rust sources (`include_str!`, runfiles). What they read selects `rust`.
 BUILD_READER_PATHSPECS = (
     "crates", "examples", "runbooks", "tools", "fuzz", ".cargo", ".config",
-    "BUILD.bazel", "MODULE.bazel", ".bazelrc",
+    "BUCK", ".buckconfig",
 )
 
 # Prose and data: a file of this kind names paths but never runs one. An npm
@@ -909,7 +910,6 @@ def classify_path(path: str, root: Path | None = None) -> PathClass:
         path in TOOLING_ROOT_FILES
         or path.startswith("tools/")
         or (path.startswith("deploy/helm/") and suffix not in DOC_SUFFIXES)
-        or (len(parts) == 1 and name.startswith("MODULE.bazel"))
     ):
         return PathClass(PathKind.TOOLING)
     if parts and parts[0] in PACKAGE_ROOTS:
@@ -917,8 +917,8 @@ def classify_path(path: str, root: Path | None = None) -> PathClass:
             # A file beside the packages, such as the judged runbook matrix.
             return PathClass(PathKind.TOOLING)
         package = "/".join(parts[:2])
-        bazel = _is_bazel_package(str(root or REPO_ROOT), package)
-        if suffix in DOC_SUFFIXES and not bazel:
+        buck2 = _is_buck2_package(str(root or REPO_ROOT), package)
+        if suffix in DOC_SUFFIXES and not buck2:
             # Prose in a directory no build reads, such as a runbook.
             return PathClass(PathKind.DOCS)
         # Anything inside a package, markdown included, is package-local:
@@ -926,8 +926,8 @@ def classify_path(path: str, root: Path | None = None) -> PathClass:
         return PathClass(
             PathKind.PACKAGE,
             package=package,
-            bazel_package=bazel,
-            manifest=name in {"Cargo.toml", "BUILD.bazel"},
+            buck2_package=buck2,
+            manifest=name in {"Cargo.toml", "BUCK"},
         )
     if path.startswith(DATA_ROOTS):
         if suffix in DOC_SUFFIXES:
@@ -966,16 +966,24 @@ def _is_schema_path(path: str) -> bool:
 # FIG-3550 were runtime changes outside every store crate, invisible to the
 # hand list of store crates this replaced. The root `fixtures/` tree holds the
 # release fixtures their upgrade laws read, and a SQL script or a SQLite
-# database anywhere is store input. Build tooling does not select it, except the files the job
-# itself runs its tests through (`POSTGRES_STORE_TOOLING`): the Lint job's
-# workspace clippy compiles every one of these test targets, so a tooling diff
-# that breaks their build fails there, and the release dispatch runs them all.
+# database anywhere is store input. Build tooling does not select it, except
+# the files that choose, wrap or execute the live tests
+# (`POSTGRES_STORE_TOOLING`). Workspace compilation cannot prove their slot,
+# runtime-environment, timeout or result-reporting behavior, so their owning
+# service suite must run.
 POSTGRES_STORE_TOOLING = frozenset(
     {
-        "tools/bazel/postgres_slot_runner.sh",
-        "tools/bazel/test_xml_runner.sh",
-        "tools/bazel/junit_xml.py",
-        "tools/bazel/postgres_test_labels.txt",
+        "scripts/hermetic-build.sh",
+        "tools/buck2/driver.py",
+        "tools/buck2/junit_xml.py",
+        "tools/buck2/postgres_slot_runner.sh",
+        "tools/buck2/service_policy.py",
+        "tools/buck2/target-inventory.json",
+        "tools/buck2/test_launcher.sh",
+        "tools/buck2/test_runner.py",
+        "tools/buck2/test_shard.py",
+        "tools/buck2/test_timeout.py",
+        "tools/buck2/test_xml_runner.sh",
     }
 )
 
@@ -1119,7 +1127,7 @@ def _is_rolling_upgrade_path(path: str, surface_paths: frozenset[str]) -> bool:
 
 # `facade` gates the untrusted Cargo seal lane: only the facade crate's public
 # API or the root manifests can break the API surface it seals. Trusted events
-# seal on every run inside `bazel-tests`, where an unchanged seal is a cache
+# seal on every run inside `buck2-tests`, where an unchanged seal is a cache
 # hit.
 def _is_facade_path(path: str) -> bool:
     return path.startswith("crates/lash/") or path in {"Cargo.toml", "Cargo.lock"}
@@ -1141,9 +1149,8 @@ def _is_tooling_class(path_class: PathClass) -> bool:
 # a lane package" would run the tests on almost every diff. A path is
 # feature-relevant when it is:
 #
-# * the lane spec itself (`tools/bazel/feature_lanes.bzl`), the coverage
-#   registry (`scripts/feature-coverage.toml`), or Bazel machinery the lanes
-#   resolve through (`tools/bazel/`, the module and root build files);
+# * the target inventory, the coverage registry, or Buck2 machinery the lanes
+#   resolve through;
 # * a lane-covered package's own manifest, where its `[features]` table and
 #   `dep:` entries live;
 # * any other file inside a lane-covered package that carries a
@@ -1154,15 +1161,15 @@ def _is_tooling_class(path_class: PathClass) -> bool:
 #
 # Anything else -- a file in a package no lane compiles, or a lane-covered
 # package's ungated source -- cannot move a lane build or test.
-FEATURE_LANES_SPEC = "tools/bazel/feature_lanes.bzl"
+FEATURE_LANES_SPEC = "tools/buck2/target-inventory.json"
 FEATURE_COVERAGE_PLAN = "scripts/feature-coverage.toml"
 
-# The Bazel configuration that feeds lane resolution: the generator, the lane
-# spec, the module graph and the workspace-wide Bazel inputs. Other tooling
+# The Buck2 configuration that feeds lane resolution: the generator, the lane
+# inventory and workspace-wide Buck2 inputs. Other tooling
 # (kiln, pre-commit config) cannot move a lane compile.
-_FEATURE_LANE_TOOLING_PREFIX = "tools/bazel/"
+_FEATURE_LANE_TOOLING_PREFIX = "tools/buck2/"
 _FEATURE_LANE_TOOLING_FILES = frozenset(
-    {"BUILD.bazel", ".bazelrc", ".bazelversion", "clippy.toml"}
+    {"BUCK", ".buckconfig", "clippy.toml"}
 )
 
 
@@ -1170,33 +1177,18 @@ _FEATURE_LANE_TOOLING_FILES = frozenset(
 def feature_lane_package_dirs(root: str | None = None) -> frozenset[str]:
     """The package directories the generated feature lanes compile or test.
 
-    The `FEATURE_LANE_*` tables in the generated lane spec name every label
-    the lanes build, test or lint; their package prefixes are the directories
-    a feature-lane resolution can reach. A diff outside every one of them
-    cannot move a lane build.
+    The generated inventory names every lane unit. A diff outside every one
+    of their packages cannot move a lane build.
     """
 
-    def collect(value: object, labels: set[str]) -> None:
-        if isinstance(value, str):
-            labels.add(value)
-        elif isinstance(value, (list, tuple)):
-            for item in value:
-                collect(item, labels)
-        elif isinstance(value, dict):
-            for key, item in value.items():
-                collect(key, labels)
-                collect(item, labels)
-
     base = Path(root) if root is not None else REPO_ROOT
-    tree = ast.parse((base / FEATURE_LANES_SPEC).read_text(encoding="utf-8"))
-    labels: set[str] = set()
-    for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id.startswith("FEATURE_LANE_")
-        ):
-            collect(ast.literal_eval(node.value), labels)
+    inventory = json.loads((base / FEATURE_LANES_SPEC).read_text(encoding="utf-8"))
+    labels = {
+        label
+        for unit in inventory.get("feature_lane_units", ())
+        for label in unit.values()
+        if isinstance(label, str) and label.startswith("//")
+    }
     return frozenset(
         label[2:].split(":", 1)[0] for label in labels if label.startswith("//")
     )
@@ -1236,9 +1228,7 @@ def _is_feature_gate_path(
     if path == FEATURE_COVERAGE_PLAN:
         return True
     if path_class.kind is PathKind.TOOLING:
-        return path.startswith(_FEATURE_LANE_TOOLING_PREFIX) or path.startswith(
-            "MODULE.bazel"
-        ) or path in _FEATURE_LANE_TOOLING_FILES
+        return path.startswith(_FEATURE_LANE_TOOLING_PREFIX) or path in _FEATURE_LANE_TOOLING_FILES
     if path_class.kind in {PathKind.DOC_INPUT, PathKind.DATA}:
         # A lane test may read it.
         return True
@@ -1432,7 +1422,7 @@ def collect_gate_paths(repo: Path, base: str, head: str, worktree: bool) -> list
     return paths
 
 
-# `scripts/dev-test.py`'s projection of `classify_path`: which Bazel packages
+# `scripts/dev-test.py`'s projection of `classify_path`: which Buck2 packages
 # to test, whether to widen to the whole developer suite, whether to name the
 # manual seal target, whether to run the repository gates, and which script
 # self-tests are the direct proof of a script edit.
@@ -1456,9 +1446,10 @@ SCRIPT_PROOFS = {
     "scripts/drive-determinism-allowlist.txt": "scripts/test_check_substrate_boundary.py",
     "scripts/drive-store-allowlist.count": "scripts/test_check_substrate_boundary.py",
     "scripts/drive-store-allowlist.txt": "scripts/test_check_substrate_boundary.py",
-    "tools/bazel/test_batch_runner.sh": "scripts/test_test_batch_runner.py",
-    "tools/bazel/junit_xml.py": "scripts/test_test_xml.py",
-    "tools/bazel/test_xml_runner.sh": "scripts/test_test_xml.py",
+    "tools/buck2/junit_xml.py": "scripts/test_test_xml.py",
+    "tools/buck2/target-inventory.json": "scripts/test_ci_plan.py",
+    "tools/buck2/test_shard.py": "scripts/test_buck2_test_contract.py",
+    "tools/buck2/test_xml_runner.sh": "scripts/test_test_xml.py",
 }
 
 
@@ -1492,7 +1483,7 @@ def dev_test_scope(
             facade |= _is_facade_path(path)
             # Without `--dependents` dev-test does not query who depends on a
             # package, so a package manifest widens to the whole suite.
-            if path_class.bazel_package and not path_class.manifest:
+            if path_class.buck2_package and not path_class.manifest:
                 packages.add("//" + path_class.package)
             else:
                 broad = True
@@ -1510,11 +1501,11 @@ def dev_test_scope(
     )
 
 
-# The checked-in output of `tools/bazel/generate_build_files.py`: each Cargo
+# The checked-in output of `tools/buck2/generate.py`: each Cargo
 # package's manifest path and every generated label's kind and test-policy
 # tags. The plan job runs before any toolchain, so the label -> package map is
-# read out of this file rather than queried from Bazel.
-TARGET_INVENTORY = "tools/bazel/target-inventory.json"
+# read out of this file rather than queried from Buck2.
+TARGET_INVENTORY = "tools/buck2/target-inventory.json"
 # The target kinds the generator counts as executable tests.
 EXECUTABLE_TEST_KINDS = frozenset({"bin-unit-test", "test", "unit-test"})
 
@@ -1561,12 +1552,12 @@ def _all_dev_deferred_labels(root: str | None = None) -> list[str]:
 def pr_tail_labels(paths: list[str], root: Path | None = None) -> list[str]:
     """The sorted `dev-deferred` labels of every package a path touches.
 
-    `bazel-tests-tail` runs only on merge groups and dispatches, and lash PRs
+    `buck2-tests-tail` runs only on merge groups and dispatches, and lash PRs
     are often admin-merged past the queue: a change under a package's
     directory otherwise lands without that package's deferred tests ever
     running, which is how #2109's `corpus_laws__test` expectations edit turned
-    main red. The plan emits this list as `pr_tail_labels` and `bazel-tests`
-    names it after its `-//:workspace_tail_tests` subtraction -- Bazel applies
+    main red. The plan emits this list as `pr_tail_labels` and `buck2-tests`
+    names it after its `-//:workspace_tail_tests` subtraction. Buck2 applies
     target patterns in order, so a positive label after the negative pattern
     re-adds it. Package ownership comes from `classify_path`, the one path
     table; adding a second table is how the old consumers drifted apart.
@@ -1582,24 +1573,39 @@ def pr_tail_labels(paths: list[str], root: Path | None = None) -> list[str]:
 
 
 def dev_test_inventory(root: Path | None = None) -> tuple[set[str], dict[str, list[str]]]:
-    """The generated Bazel dev-suite members and their test batches.
+    """The generated Buck2 dev-suite members and their test batches."""
 
-    `WORKSPACE_DEV_TEST_TARGETS` is every deterministic, service-free label
-    `//:dev_tests` expands to; `WORKSPACE_TEST_BATCHES` folds a package's
-    small tests into its one `:test_batch` action, so a package selection
-    names the batch rather than its members.
-    """
-
-    wanted = {"WORKSPACE_DEV_TEST_TARGETS", "WORKSPACE_TEST_BATCHES"}
-    values = {}
     base = root if root is not None else REPO_ROOT
-    tree = ast.parse((base / "tools/bazel/workspace_targets.bzl").read_text())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
-            name = node.targets[0].id
-            if name in wanted:
-                values[name] = ast.literal_eval(node.value)
-    return set(values["WORKSPACE_DEV_TEST_TARGETS"]), values["WORKSPACE_TEST_BATCHES"]
+    inventory = json.loads((base / TARGET_INVENTORY).read_text(encoding="utf-8"))
+    members = set(inventory["workspace_dev_test_targets"])
+    batches = inventory["workspace_test_batches"]
+    if not isinstance(batches, dict):
+        raise ValueError("workspace_test_batches is not an object")
+    return members, batches
+
+
+def package_build_labels(
+    packages: set[str] | frozenset[str], root: Path | None = None
+) -> dict[str, tuple[str, ...]]:
+    """Exact generated build labels for the requested package directories."""
+
+    base = root if root is not None else REPO_ROOT
+    inventory = json.loads((base / TARGET_INVENTORY).read_text(encoding="utf-8"))
+    wanted = {package.removeprefix("//") for package in packages}
+    labels: dict[str, tuple[str, ...]] = {}
+    for entry in inventory["packages"]:
+        directory = PurePosixPath(entry["manifest"]).parent.as_posix()
+        if directory not in wanted:
+            continue
+        exact = sorted(
+            {
+                target["build_label"]
+                for target in entry["targets"]
+                if isinstance(target.get("build_label"), str)
+            }
+        )
+        labels[f"//{directory}"] = tuple(exact)
+    return labels
 
 
 def batch_labels(members: set[str], batches: dict[str, list[str]]) -> list[str]:
@@ -1612,16 +1618,17 @@ def batch_labels(members: set[str], batches: dict[str, list[str]]) -> list[str]:
     return sorted(labels)
 
 
-def affected_bazel_labels(
+def affected_buck2_labels(
     scope: DevTestScope,
     members: set[str],
     tail: list[str],
     batches: Mapping[str, list[str]],
+    package_builds: Mapping[str, tuple[str, ...]] | None = None,
 ) -> tuple[list[str], list[str]]:
-    """The (`bazel test`, `bazel build`) label lists one dev-test scope selects.
+    """The (`buck2 test`, `buck2 build`) label lists one dev-test scope selects.
 
     This is the single affected-target selection: `scripts/dev-test.py` runs
-    it locally and the pull-request leg of `bazel-tests` runs it in CI.
+    it locally and the pull-request leg of `buck2-tests` runs it in CI.
     `members` is the dev-inventory labels the caller selected (the touched
     packages', or a reverse-dependency query's); `tail` is the touched
     packages' `dev-deferred` labels (`pr_tail_labels`) -- merge groups are the
@@ -1630,8 +1637,8 @@ def affected_bazel_labels(
     selection but is still a deferred test's input (#2109's corpus
     expectations file went red on main otherwise). A broad scope means the
     whole `//:dev_tests` suite; the facade seal rides a facade diff; a touched
-    package no selected label covers gets a `:all` compile; and
-    `//:schema_checks` rides whichever invocation is non-empty.
+    package no selected label covers gets its inventory build labels. The
+    `//:schema_checks` build aggregate runs whenever either list is non-empty.
     """
 
     members = set(members) | set(tail)
@@ -1645,10 +1652,17 @@ def affected_bazel_labels(
     ]
     # Service-only and compile-only packages still need compilation proof,
     # including mixed diffs that also select tests in another package.
-    builds = [f"{package}:all" for package in uncovered] if uncovered and not scope.broad else []
-    if labels:
-        labels.append("//:schema_checks")
-    if builds:
+    if uncovered and not scope.broad:
+        package_builds = package_builds or {}
+        missing = sorted(package for package in uncovered if package not in package_builds)
+        if missing:
+            raise ValueError(f"target inventory has no build labels for: {', '.join(missing)}")
+        builds = sorted(
+            {label for package in uncovered for label in package_builds[package]}
+        )
+    else:
+        builds = []
+    if labels or builds:
         builds.append("//:schema_checks")
     return labels, builds
 
@@ -1659,13 +1673,13 @@ def pr_affected_targets(
     broad: bool = False,
     tail: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
-    """The (`bazel test`, `bazel build`) label lists a pull request runs.
+    """The (`buck2 test`, `buck2 build`) label lists a pull request runs.
 
     The same selection `scripts/dev-test.py` computes for the diff: the
     package members of `dev_test_scope`, the touched packages' deferred
-    labels, and the shared assembly in `affected_bazel_labels`. The script
+    labels, and the shared assembly in `affected_buck2_labels`. The script
     self-test inventory does not participate -- CI runs those proofs in
-    `repo-gates`, not in the Bazel partition. `broad` and `tail` let
+    `repo-gates`, not in the Buck2 partition. `broad` and `tail` let
     `classify` widen a run-everything diff to the whole dev suite and the
     whole deferred set.
     """
@@ -1677,7 +1691,8 @@ def pr_affected_targets(
     members = {label for label in allowed if label.split(":")[0] in scope.packages}
     if tail is None:
         tail = pr_tail_labels(paths, root)
-    return affected_bazel_labels(scope, members, tail, batches)
+    builds = package_build_labels(set(scope.packages), root)
+    return affected_buck2_labels(scope, members, tail, batches, builds)
 
 
 def fail_open(reason: str) -> dict[str, str]:
@@ -1697,9 +1712,9 @@ def fail_open(reason: str) -> dict[str, str]:
         # tail: what the tail job would run on a trusted event. The facade
         # seal target is a cheap no-op when it is not an input.
         "pr_test_labels": (
-            f"//:dev_tests {tail} //crates/lash:ui_fixtures //:schema_checks"
+            f"//:dev_tests {tail} //crates/lash:ui_fixtures"
         ),
-        "pr_build_targets": "",
+        "pr_build_targets": "//:schema_checks",
     }
     outputs.update({family: "true" for family in FAMILIES})
     return outputs
@@ -1760,7 +1775,7 @@ def classify(
     ambiguous = sorted(path for path, kind in kinds.items() if kind is PathKind.UNKNOWN)
     docs_only = all(kind is PathKind.DOCS for kind in kinds.values()) and not has_deletion
     # CI machinery selects its own families; every other non-docs path is a
-    # build input and turns on the Bazel partition plus its path families.
+    # build input and turns on the Buck2 partition plus its path families.
     ci_families = set().union(
         *(path_class.families for path_class in classes.values() if path_class.kind is PathKind.CI)
     )
@@ -1797,9 +1812,9 @@ def classify(
         # docs-only diff can name none; a diff that runs everything can touch
         # any package, so it re-adds the whole dev-deferred set.
         "pr_tail_labels": " ".join(pr_tail_labels(paths)),
-        # The Bazel labels the pull-request leg of `bazel-tests` runs: the
+        # The Buck2 labels the pull-request leg of `buck2-tests` runs: the
         # affected-target selection `scripts/dev-test.py` computes for the
-        # same diff. Empty on a docs-only diff, which runs no Bazel leg.
+        # same diff. Empty on a docs-only diff, which runs no Buck2 leg.
         "pr_test_labels": "",
         "pr_build_targets": "",
     }
@@ -1819,11 +1834,11 @@ def classify(
                 paths, broad=True, tail=all_deferred
             )
         except (OSError, ValueError, KeyError) as error:
-            return fail_open(f"affected Bazel targets are underivable: {error}")
+                return fail_open(f"affected Buck2 targets are underivable: {error}")
         outputs["pr_test_labels"] = " ".join(pr_tests)
         outputs["pr_build_targets"] = " ".join(pr_builds)
         return outputs
-    # `rust` gates the Bazel partition, which owns every agent-workbench unit
+    # `rust` gates the Buck2 partition, which owns every agent-workbench unit
     # case, including browser projection with a pinned Node interpreter. The
     # breadth families stay off a workbench-only diff: the workbench is an
     # example host, not a store or a worker.
@@ -1831,7 +1846,7 @@ def classify(
     try:
         pr_tests, pr_builds = pr_affected_targets(paths)
     except (OSError, ValueError, KeyError) as error:
-        return fail_open(f"affected Bazel targets are underivable: {error}")
+        return fail_open(f"affected Buck2 targets are underivable: {error}")
     outputs["pr_test_labels"] = " ".join(pr_tests)
     outputs["pr_build_targets"] = " ".join(pr_builds)
     selected = {
@@ -1874,12 +1889,12 @@ def evaluate_conclusion(
     needs: Mapping[str, Mapping[str, object]],
     event_name: str = "",
     workers_e2e_enabled: bool | None = None,
-    bazel_is_trusted: bool = True,
+    buck2_is_trusted: bool = True,
 ) -> list[str]:
     if workers_e2e_enabled is None:
         workers_e2e_enabled = True
 
-    expected_jobs = UNGATED_JOBS | set(GATED_JOBS) | BAZEL_TEST_JOBS
+    expected_jobs = UNGATED_JOBS | set(GATED_JOBS) | BUCK2_TEST_JOBS
     problems: list[str] = []
 
     missing = sorted(expected_jobs - set(needs))
@@ -1930,7 +1945,7 @@ def evaluate_conclusion(
                 "success"
                 if event_name == "pull_request"
                 and plan_outputs.get("pr_host_restate") == "true"
-                and bazel_is_trusted
+                and buck2_is_trusted
                 else "skipped"
             )
             if result != wanted:
@@ -1941,23 +1956,23 @@ def evaluate_conclusion(
                 "success"
                 if event_name == "pull_request"
                 and plan_outputs.get("pr_host_restate") == "true"
-                and bazel_is_trusted
+                and buck2_is_trusted
                 else "skipped"
             )
             if result != wanted:
                 problems.append(f"{job} ended with {result!r} on a {event_name} event, expected {wanted}")
             continue
-        if job in BAZEL_TEST_JOBS:
+        if job in BUCK2_TEST_JOBS:
             rust_on = plan_outputs.get("rust") == "true"
             wanted = (
-                "success" if bazel_is_trusted and rust_on
-                and (job == BAZEL_TEST_JOB or event_name != "pull_request")
+                "success" if buck2_is_trusted and rust_on
+                and (job == BUCK2_TEST_JOB or event_name != "pull_request")
                 else "skipped"
             )
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"
-                    f" {'trusted' if bazel_is_trusted else 'untrusted'}"
+                    f" {'trusted' if buck2_is_trusted else 'untrusted'}"
                     f"{'' if rust_on else ' non-rust'} event,"
                     f" expected {wanted}"
                 )
@@ -1984,24 +1999,24 @@ def evaluate_conclusion(
             # Rust build, pull requests included. The `feature_lanes` output
             # gates only the job's lane-test steps, which a job-level result
             # cannot see.
-            wanted = "success" if bazel_is_trusted and rust_on else "skipped"
+            wanted = "success" if buck2_is_trusted and rust_on else "skipped"
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"
-                    f" {'trusted' if bazel_is_trusted else 'untrusted'}"
+                    f" {'trusted' if buck2_is_trusted else 'untrusted'}"
                     f"{'' if rust_on else ' non-rust'} event,"
                     f" expected {wanted}"
                 )
             continue
         if job == "check":
-            # A trusted event seals the API inside `bazel-tests`; this Cargo
+            # A trusted event seals the API inside `buck2-tests`; this Cargo
             # seal lane is the untrusted path, required when the facade moved.
-            required = not bazel_is_trusted and plan_outputs.get("facade") == "true"
+            required = not buck2_is_trusted and plan_outputs.get("facade") == "true"
             wanted = "success" if required else "skipped"
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"
-                    f" {'trusted' if bazel_is_trusted else 'untrusted'} event,"
+                    f" {'trusted' if buck2_is_trusted else 'untrusted'} event,"
                     f" expected {wanted}"
                 )
             continue
@@ -2022,16 +2037,16 @@ def evaluate_conclusion(
                 )
             continue
         if job == "workspace-tests":
-            # On a trusted event the Bazel partition owns every deterministic
+            # On a trusted event the Buck2 partition owns every deterministic
             # Rust binary -- the agent-workbench Node-gated case included --
-            # with a pinned Node interpreter. An untrusted event has no Bazel
+            # with a pinned Node interpreter. An untrusted event has no Buck2
             # partition and keeps the full Cargo workspace run.
-            required = not bazel_is_trusted and plan_outputs.get("rust") == "true"
+            required = not buck2_is_trusted and plan_outputs.get("rust") == "true"
             wanted = "success" if required else "skipped"
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"
-                    f" {'trusted' if bazel_is_trusted else 'untrusted'} event,"
+                    f" {'trusted' if buck2_is_trusted else 'untrusted'} event,"
                     f" expected {wanted}"
                 )
             continue
@@ -2197,10 +2212,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    bazel_is_trusted = os.environ.get("BAZEL_TRUSTED")
-    if bazel_is_trusted not in {"true", "false"}:
+    buck2_is_trusted = os.environ.get("BUCK2_TRUSTED")
+    if buck2_is_trusted not in {"true", "false"}:
         print(
-            f"Invalid BAZEL_TRUSTED: {bazel_is_trusted!r}, expected 'true' or 'false'",
+            f"Invalid BUCK2_TRUSTED: {buck2_is_trusted!r}, expected 'true' or 'false'",
             file=sys.stderr,
         )
         return 1
@@ -2208,7 +2223,7 @@ def main() -> int:
         needs,
         os.environ.get("GITHUB_EVENT_NAME", ""),
         workers_e2e_enabled == "true",
-        bazel_is_trusted == "true",
+        buck2_is_trusted == "true",
     )
     print(json.dumps(needs, indent=2, sort_keys=True))
     if problems:

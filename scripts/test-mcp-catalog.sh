@@ -45,9 +45,12 @@ repetitions=${1:-1}
 scope=${2:-all}
 [[ "$repetitions" =~ ^[1-9][0-9]*$ ]] || { echo 'usage: scripts/test-mcp-catalog.sh [repetitions]' >&2; exit 2; }
 [[ "$scope" == all || "$scope" == native ]] || { echo 'scope must be all or native' >&2; exit 2; }
-label=//crates/lash:integration__test__fv_42c78c40
-kiln build "$label" --remote_download_outputs=toplevel
-binary=$(readlink -f bazel-bin/crates/lash/integration__test__fv_42c78c40)
+label="$(python3 scripts/resolve_buck2_target.py \
+  //crates/lash integration__test --feature mcp)"
+report=$(mktemp)
+trap 'rm -f "$report"' EXIT
+kiln build "$label" --materializations final --build-report "$report"
+binary=$(python3 tools/buck2/outputs.py --report "$report" --label "$label" --single)
 logs="$repo/target/mcp-catalog-witnesses"
 bash scripts/ci/with-service.sh pg16 -- \
   bash scripts/ci/with-service.sh restate -- \

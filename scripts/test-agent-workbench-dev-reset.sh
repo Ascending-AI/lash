@@ -229,14 +229,29 @@ case "$command" in
 esac
 MOCK
 
-cat > "$mock_bin/cargo" <<'MOCK'
+# The launcher builds its host binary through the Buck2 driver: `kiln build`
+# in a kiln fork and `scripts/hermetic-build.sh --local build` in any other
+# checkout both end in `python3 <repo>/tools/buck2/driver.py`, which the
+# python3 mock below hands to this stand-in. It counts the build, writes the
+# workbench binary and the build report the launcher resolves that binary from.
+cat > "$mock_bin/mock-buck2-driver" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+label="${@: -1}"
+report=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[$i]}" = --build-report ]]; then
+    report="${args[$((i + 1))]}"
+  fi
+done
+[[ " $* " = *' build '* && " $* " = *' --config=judged '* \
+  && -n "$report" && "$label" = //* ]] || exit 2
 count=0
 [[ ! -f "$MOCK_STATE/build-count" ]] || count="$(<"$MOCK_STATE/build-count")"
 printf '%s\n' "$((count + 1))" > "$MOCK_STATE/build-count"
-mkdir -p "$CARGO_TARGET_DIR/judged"
-cat > "$CARGO_TARGET_DIR/judged/agent-workbench" <<'BIN'
+mkdir -p "$MOCK_BUILD_DIR/buck-out"
+cat > "$MOCK_BUILD_DIR/buck-out/agent-workbench" <<'BIN'
 #!/usr/bin/env bash
 # `register-deployment <endpoint-url>` is the launcher's registration step,
 # run through this binary so the real one applies the engine's collision
@@ -267,12 +282,11 @@ printf 'attempt application state\n' > "$AGENT_WORKBENCH_DATA_DIR/attempt-app-st
 } > "$MOCK_STATE/workbench-env-${AGENT_WORKBENCH_ADDR##*:}"
 while :; do sleep 1; done
 BIN
-chmod +x "$CARGO_TARGET_DIR/judged/agent-workbench"
+chmod +x "$MOCK_BUILD_DIR/buck-out/agent-workbench"
+printf '{"project_root":"%s","results":{"root%s":{"success":"SUCCESS","outputs":{"DEFAULT":["buck-out/agent-workbench"]}}}}\n' \
+  "$MOCK_BUILD_DIR" "$label" > "$report"
 if [[ "${MOCK_BLOCK_PID_PUBLICATION:-0}" = 1 ]]; then
   mkdir -p "$MOCK_PID_FILE"
-fi
-if [[ " $* " = *' run '* ]]; then
-  exec "$CARGO_TARGET_DIR/judged/agent-workbench"
 fi
 MOCK
 
@@ -342,6 +356,10 @@ MOCK
 cat > "$mock_bin/python3" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" = */tools/buck2/driver.py ]]; then
+  shift
+  exec "${BASH_SOURCE[0]%/*}/mock-buck2-driver" "$@"
+fi
 target="${@: -1}"
 if [[ -n "${MOCK_RECORD_CREATE_FAIL_MATCH:-}" \
   && "$target" = *"$MOCK_RECORD_CREATE_FAIL_MATCH"* \
@@ -375,7 +393,7 @@ launcher_env() {
     MOCK_RESTATE_MARKER="$data_dir/run/restate-127.0.0.1_${port}.container" \
     MOCK_POSTGRES_MARKER="$data_dir/run/postgres-127.0.0.1_${port}.container" \
     XDG_RUNTIME_DIR="$test_tmp/runtime" \
-    CARGO_TARGET_DIR="$test_tmp/target-$port" \
+    MOCK_BUILD_DIR="$test_tmp/build-$port" \
     AGENT_WORKBENCH_RUN_DIR="$data_dir/run" \
     AGENT_WORKBENCH_DATA_DIR="$data_dir" \
     RESTATE_ADMIN_URL="http://127.0.0.1:$((19070 + (port - 3030) * 10))/v2" \
@@ -607,7 +625,7 @@ env PATH="$mock_bin:$PATH" \
   MOCK_STATE="$mock_state" \
   MOCK_PID_FILE="$pid_file" \
   XDG_RUNTIME_DIR="$test_tmp/runtime" \
-  CARGO_TARGET_DIR="$test_tmp/target-$port_sqlite" \
+  MOCK_BUILD_DIR="$test_tmp/build-$port_sqlite" \
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/wrong-run" \
   AGENT_WORKBENCH_DATA_DIR="$test_tmp/wrong-data" \
   AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:65501 \
@@ -1037,13 +1055,16 @@ grep -Fq 'application data path encloses another launcher-owned reset footprint'
   || fail "enclosing-run-footprint refusal did not identify the recursive deletion risk"
 
 default_repo="$test_tmp/default-path-repo"
-mkdir -p "$default_repo/scripts"
+mkdir -p "$default_repo/scripts" "$default_repo/tools/buck2"
 cp "$repo_root/scripts/agent-workbench-dev.sh" "$default_repo/scripts/agent-workbench-dev.sh"
+for helper in scripts/hermetic-build.sh scripts/resolve_buck2_target.py tools/buck2/outputs.py; do
+  ln -s "$repo_root/$helper" "$default_repo/$helper"
+done
 default_data="$default_repo/.agent-workbench"
 default_owner_port=3074
 env PATH="$mock_bin:$PATH" MOCK_STATE="$mock_state" \
   MOCK_PID_FILE="$default_data/run/workbench-127.0.0.1_${default_owner_port}.pid" \
-  XDG_RUNTIME_DIR="$test_tmp/runtime" CARGO_TARGET_DIR="$test_tmp/target-$default_owner_port" \
+  XDG_RUNTIME_DIR="$test_tmp/runtime" MOCK_BUILD_DIR="$test_tmp/build-$default_owner_port" \
   RESTATE_ADMIN_URL=http://127.0.0.1:19510/v2 AGENT_WORKBENCH_OPEN=0 \
   AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
   bash "$default_repo/scripts/agent-workbench-dev.sh" up --port "$default_owner_port" \
@@ -1055,7 +1076,7 @@ default_consumer_port=3076
 default_builds_before="$(<"$mock_state/build-count")"
 if env PATH="$mock_bin:$PATH" MOCK_STATE="$mock_state" \
   MOCK_PID_FILE="$default_data/run/workbench-127.0.0.1_${default_consumer_port}.pid" \
-  XDG_RUNTIME_DIR="$test_tmp/runtime" CARGO_TARGET_DIR="$test_tmp/target-$default_consumer_port" \
+  XDG_RUNTIME_DIR="$test_tmp/runtime" MOCK_BUILD_DIR="$test_tmp/build-$default_consumer_port" \
   AGENT_WORKBENCH_DATA_DIR="$default_consumer_data" \
   RESTATE_ADMIN_URL=http://127.0.0.1:19530/v2 AGENT_WORKBENCH_OPEN=0 \
   AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
@@ -2864,15 +2885,15 @@ pid_identity "$run_external_finalize/workbench-$external_finalize_key.pid" \
   || fail "external run-directory reset did not start its replacement"
 
 # A plain checkout is not a kiln fork. `kiln build` identifies a checkout from
-# the kiln configuration and then builds `--config=shared`, which needs the
-# `.kiln.bazelrc` kiln writes into every fork; a git worktree or a fresh clone
+# the kiln configuration and then builds with the shared pool, which needs the
+# `.buckconfig.local` kiln writes into every fork; a git worktree or a fresh clone
 # has neither, so kiln refuses with "cannot identify this repository" even
 # though the binary is on PATH. The launcher must notice that before it asks,
 # and build locally instead.
 #
 # The checkout below is exactly that: a directory holding nothing but the two
-# scripts, symlinked, so `repo_root` resolves to it and no `.kiln.bazelrc`
-# exists. `bazel` and `generate_build_files.py` are mocked, so what this
+# scripts, symlinked, so `repo_root` resolves to it and no `.buckconfig.local`
+# exists. The Buck2 driver is mocked, so what this
 # measures is which driver the launcher chose and which flags it handed over,
 # not a compile.
 plain_checkout="$test_tmp/plain-checkout"
@@ -2880,7 +2901,7 @@ plain_bin="$test_tmp/plain-bin"
 mkdir -p "$plain_checkout/scripts" "$plain_bin"
 ln -s "$repo_root/scripts/agent-workbench-dev.sh" "$plain_checkout/scripts/agent-workbench-dev.sh"
 ln -s "$repo_root/scripts/hermetic-build.sh" "$plain_checkout/scripts/hermetic-build.sh"
-[[ ! -e "$plain_checkout/.kiln.bazelrc" && ! -e "$plain_checkout/env.sh" ]] \
+[[ ! -e "$plain_checkout/.buckconfig.local" && ! -e "$plain_checkout/env.sh" ]] \
   || fail "the plain-checkout fixture accidentally carries kiln fork state"
 
 cat > "$plain_bin/kiln" <<MOCK
@@ -2889,23 +2910,17 @@ printf '%s\n' "\$*" >> "$test_tmp/plain-kiln-invocations"
 printf 'kiln: cannot identify this repository; use a configured Kiln fork\n' >&2
 exit 1
 MOCK
-cat > "$plain_bin/bazel" <<MOCK
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$test_tmp/plain-bazel-invocations"
-exit 1
-MOCK
 cat > "$plain_bin/python3" <<MOCK
 #!/usr/bin/env bash
-for arg in "\$@"; do
-  if [[ "\$arg" = *generate_build_files.py ]]; then
-    exit 0
-  fi
-done
+if [[ "\${1:-}" = *tools/buck2/driver.py ]]; then
+  printf '%s\n' "\$*" >> "$test_tmp/plain-buck2-invocations"
+  exit 1
+fi
 exec /usr/bin/python3 "\$@"
 MOCK
 chmod +x "$plain_bin"/*
 : > "$test_tmp/plain-kiln-invocations"
-: > "$test_tmp/plain-bazel-invocations"
+: > "$test_tmp/plain-buck2-invocations"
 
 plain_data="$test_tmp/data-plain-checkout"
 plain_builds_before="$(<"$mock_state/build-count")"
@@ -2920,13 +2935,13 @@ grep -Fq 'no kiln fork here' "$test_tmp/plain-checkout-build.log" \
   || fail "plain checkout did not say it was building locally"
 [[ ! -s "$test_tmp/plain-kiln-invocations" ]] \
   || fail "plain checkout asked kiln to build a checkout kiln cannot identify"
-grep -Fq -- '--config=local' "$test_tmp/plain-bazel-invocations" \
-  || fail "plain checkout did not build through the local Bazel configuration"
-grep -Fq -- '--config=judged' "$test_tmp/plain-bazel-invocations" \
+grep -Fq -- '--local build' "$test_tmp/plain-buck2-invocations" \
+  || fail "plain checkout did not build through the local Buck2 configuration"
+grep -Fq -- '--config=judged' "$test_tmp/plain-buck2-invocations" \
   || fail "plain checkout dropped the judged geometry from its local build"
-grep -Fq -- '//examples/agent-workbench:agent-workbench' "$test_tmp/plain-bazel-invocations" \
+grep -Fq -- '//examples/agent-workbench:agent-workbench' "$test_tmp/plain-buck2-invocations" \
   || fail "plain checkout built the wrong label"
 [[ "$(<"$mock_state/build-count")" = "$plain_builds_before" ]] \
-  || fail "plain checkout fell back to cargo instead of a local Bazel build"
+  || fail "plain checkout completed a build instead of handing it to the local Buck2 driver"
 
 printf '%s\n' 'agent-workbench explicit reset lifecycle checks passed'

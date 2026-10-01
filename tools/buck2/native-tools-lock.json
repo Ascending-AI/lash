@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "host": "x86_64-unknown-linux-gnu",
+  "tools": {
+    "llvm": {
+      "version": "22.1.8-1",
+      "url": "https://github.com/hermeticbuild/hermetic-llvm/releases/download/llvm-22.1.8-1/llvm-toolchain-minimal-22.1.8-linux-amd64-musl.tar.zst",
+      "sha256": "89f29294a584267251edac00ab723a0a74514b8e1acb7f036840d13635c66bfa",
+      "required": ["bin/clang", "bin/clang++", "bin/llvm-ar", "lib/clang/22/include/stdarg.h"]
+    },
+    "glibc_headers": {
+      "version": "2.28-20250512",
+      "url": "https://github.com/cerisier/glibc-headers/releases/download/2.28-20250512/x86_64-linux-gnu.2.28.tar.zst",
+      "sha256": "8015f4a710987439dfdcde7539b62cc5db52d2cd9456af5e2e297494f13c56f3",
+      "required": ["include/stdio.h"]
+    },
+    "kernel_headers": {
+      "version": "4.19.325-20250511",
+      "url": "https://github.com/cerisier/kernel-headers/releases/download/4.19.325-20250511/4.19.325-x86.tar.zst",
+      "sha256": "55b232aa55b9f4aedbed6a743db0a2b7f4e92bb07b3ffeeb614e9dda30d34851",
+      "required": ["include/linux/version.h"]
+    },
+    "node": {
+      "version": "24.20.0",
+      "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz",
+      "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+      "archive_prefix": "node-v24.20.0-linux-x64",
+      "required": ["bin/node"]
+    }
+  }
+}

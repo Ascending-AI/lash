@@ -1,4 +1,9 @@
-# Development loop experiments, September 2026
+# Historical development loop experiments, September 2026
+
+This is a historical report from before the Buck2 cutover. Its engine-specific
+tools and commands describe that measurement period. Use the current
+[build guide](hermetic-build.md) and [migration measurements](buck2-migration.md)
+for supported workflows and current evidence.
 
 This change follows PR #1908 and the investigation of the effect-group lanes.
 Measurements used Rust 1.98.1, Bazel 9.1.0 and the shared NativeLink pool,
@@ -92,8 +97,8 @@ policy. No live fleet configuration was changed in this PR.
 ## Peer mechanisms
 
 - [rules_rust test source ownership](https://github.com/bazelbuild/rules_rust/blob/88f6b08714cb251638f5676e10ac121e972aa6a4/rust/private/rust.bzl#L1784)
-  informed explicit root/shared source declarations. Lash still uses its pinned
-  rules_rs graph; this is not a build-rule migration.
+  informed explicit root/shared source declarations. These experiments used the pinned
+  rules_rs graph before the later build-rule migration.
 - [BuildBuddy offline explain](https://github.com/buildbuddy-io/buildbuddy/blob/51a570d9a2e641262e5912b6ccff7336b1b734ad/cli/explain/explain.go#L38)
   supplies execution-log comparison.
 - [NativeLink scheduler properties](https://github.com/TraceMachina/nativelink/blob/0d5f173fd39edbf5b284e550aede94c60e93479a/nativelink-config/src/schedulers.rs#L43)

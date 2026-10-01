@@ -2,7 +2,7 @@
 # beside a pinned `restate-server`: one server per shard, shared by the tests
 # it runs, isolated by unique keys and never reset.
 #
-# A suite names the Bazel label of its test binary (built on the shared pool),
+# A suite names the Buck2 label of its test binary (built on the shared pool),
 # the directory its tests run in, the `#[ignore]`d tests it runs (libtest name
 # filters; the runner asks for ignored tests only), and the loopback endpoints
 # each shard binds: every name in `endpoints` becomes `<NAME>_BIND` and

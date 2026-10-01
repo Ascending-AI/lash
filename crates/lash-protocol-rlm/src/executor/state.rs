@@ -48,7 +48,7 @@ include!(concat!(env!("OUT_DIR"), "/rlm_snapshot_fields.rs"));
 // These types live in `lash-sansio` and `lash-lashlang-runtime`, and the build
 // script used to derive each list by serializing an all-fields-set witness.
 // That put both crates -- and every first-party crate beneath them -- into
-// Bazel's exec configuration, compiled a second time at `opt-level=3` for an
+// Buck2's exec configuration, compiled a second time at `opt-level=3` for an
 // output no product artifact consumes (FIG-3032). The lists are declared here
 // instead, and `generated_snapshot_field_schemas_match_all_fields_set_serialization`
 // re-derives every one of them from the same witnesses at test time, so a

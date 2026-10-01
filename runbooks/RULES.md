@@ -211,9 +211,9 @@ environment selector, expected exact output, and dev-only startup warning.
 **Boot and teardown are part of the run.** Phase 0 boots the example (`cargo run -p
 agent-service --profile judged`, `just agent-workbench <port>`) and gates on its readiness
 signal (`/healthz`, the listening line). Boot via `cargo run` / the `just` recipe / the
-launcher script **only** — never launch a `target/*/…` or `bazel-bin/…` path directly:
+launcher script **only** — never launch a `target/*/…` or `buck-out/…` path directly:
 this repo redirects Cargo builds through `CARGO_TARGET_DIR` and writes the judged and the
-ordinary Bazel configuration to one output path, so a binary picked up by hand can predate
+ordinary Buck2 configuration to one output path, so a binary picked up by hand can predate
 the endpoints a runbook gates on, or carry the wrong geometry, and fake a contract
 violation. A caller that genuinely has a binary to reuse passes it as
 `AGENT_WORKBENCH_BIN` and lets the launcher own the boot. You own everything you started: end the run — success
@@ -244,17 +244,17 @@ typed, and a row booted without it is invalid evidence — rerun it.
 
 The geometry has two spellings, because `agent-workbench` is no longer built by Cargo.
 `scripts/agent-workbench-dev.sh` builds `//examples/agent-workbench:agent-workbench`
-through Bazel (`kiln build --config=judged`), so every checkout on the box shares one
+through Buck2 (`kiln build --config=judged`), so every checkout on the box shares one
 action cache instead of compiling the workspace again into its own target directory, and
 it builds before it takes any launcher lock rather than stalling every other stack's boot
-behind its own compile. `--config=judged` in `.bazelrc` is the rustc-flag spelling of
+behind its own compile. `--config=judged` in the Buck2 target configuration is the rustc-flag spelling of
 `[profile.judged]` — without it the label would keep the debug assertions rustc turns on
 by default at `-C opt-level=0`. `AGENT_WORKBENCH_BIN=<path>` skips the build and launches
 that binary instead, which is how a driver that boots row after row pays for one build.
 Building a workbench with the `provider-wire-fixtures` feature
 (`AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion`) still goes through Cargo
 and `--profile judged`: the feature turns on an optional dependency outside the single
-workspace feature resolution the generated BUILD files describe, so no Bazel label builds
+workspace feature resolution the generated BUCK files describe, so no Buck2 label builds
 that shape.
 
 This exists because a judged run scores what the host ships. A `dev` build turns
@@ -277,7 +277,7 @@ and defaults to `judged`; only the scripted gate sets `dev`, because determinist
 evidence wants its debug assertions armed. `scripts/check_judged_build_geometry.py`
 holds all of this — the profile's settings, the absence of `testing` on any host's
 runtime dependencies, the `--profile judged` on every judged boot command, the two rustc
-flags that say the same thing to Bazel, and the rule that the workbench build happens
+flags that say the same thing to Buck2, and the rule that the workbench build happens
 before any launcher lock.
 
 ## Agent Workbench lifecycle constraint (FIG-1164)
