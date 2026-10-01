@@ -1336,7 +1336,7 @@ mod tests;
 /// Adopt a durable session config onto resident state: the one config→state
 /// mapping, shared by head adoption and by a root's recorded turn config
 /// (FIG-3600 S6, D3 §2.1). The durable config wins for every fact it
-/// carries, the execution controls included (FIG-4376); a `None` prompt or
+/// carries, the execution controls included (FIG-4376); a `None`
 /// protocol-turn-options value (a head written before the field existed)
 /// keeps the resident one.
 pub fn adopt_session_config(
@@ -1400,10 +1400,6 @@ pub(crate) fn apply_persisted_config_to_policy(
     policy.autonomous = config.autonomous;
     policy.no_progress_budget = config.no_progress_budget;
     policy.charge_safety = config.charge_safety.clone();
-    policy.core_prompt = config.core_prompt.clone();
-    if let Some(prompt) = config.prompt.as_ref() {
-        policy.prompt = prompt.clone();
-    }
     policy.generation = config.generation.clone();
 }
 

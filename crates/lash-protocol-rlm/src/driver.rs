@@ -34,7 +34,6 @@ pub struct RlmProjectorConfig {
 }
 
 pub(crate) struct RlmPreambleConfig {
-    pub(crate) discovery: Option<lash_core::ToolDiscovery>,
     pub(crate) max_output_chars: usize,
     pub(crate) max_budget_tokens: Option<usize>,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
@@ -65,7 +64,6 @@ pub fn build_rlm_preamble(
     build_rlm_preamble_with_dialect(
         input,
         RlmPreambleConfig {
-            discovery: config.discovery,
             max_output_chars: config.max_output_chars,
             max_budget_tokens: config.max_budget_tokens,
             prompt_features: config.prompt_features,
@@ -74,10 +72,6 @@ pub fn build_rlm_preamble(
     )
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the dialect registry validates its execution surface at construction; render_execution_section only errs on an unvalidated catalog"
-)]
 pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
@@ -85,25 +79,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 ) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
-    let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
-    let mut prompt_contributions = Vec::new();
-    let visible_catalog;
-    let tool_catalog = if config.discovery.is_some() {
-        visible_catalog = tool_catalog.inline_tools();
-        &visible_catalog
-    } else {
-        tool_catalog
-    };
-
-    prompt_contributions.extend(input.extra_prompt_contributions);
-    let execution = dialect
-        .render_execution_section(
-            config.prompt_features,
-            tool_catalog,
-            crate::plugin::RlmChannel::Cell,
-            config.discovery.as_ref(),
-        )
-        .expect("validated dialect surface");
     TurnDriverPreamble {
         config: TurnDriverConfig {
             protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
@@ -119,10 +94,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         },
         tool_specs: Arc::new(Vec::new()),
         tool_names,
-        tool_names_fingerprint,
-        execution_title: Arc::from(dialect.prompt_vocabulary().execution_title),
-        execution_prompt: Arc::from(execution),
-        prompt_contributions,
         writer_formats: input.writer_formats,
     }
 }
@@ -151,67 +122,77 @@ mod catalogue_tests {
         .with_tool_binding(ToolBinding::new([module], operation))
     }
 
+    /// The execution section a session configured as `config` renders over
+    /// `catalog` on the cell channel.
+    fn execution(config: &RlmProjectorConfig, catalog: &lash_core::ToolCatalog) -> String {
+        let dialect = SessionDialect::prompt_only(
+            Arc::clone(&config.dialect),
+            config.lashlang_surface.clone(),
+        );
+        crate::system_prompt::execution_section(
+            &dialect,
+            &crate::system_prompt::RlmSystemPromptBehaviour {
+                channel: crate::plugin::RlmChannel::Cell,
+                prompt_features: config.prompt_features,
+                discovery: config.discovery.as_ref(),
+            },
+            catalog,
+        )
+        .joined()
+    }
+
     #[test]
     fn rlm_preamble_uses_resolved_tool_catalog_without_search_tool_special_cases() {
         let definitions = vec![
             tool("search_tools", "tools", "search"),
             tool("grep", "files", "grep"),
         ];
-        let surface = lash_core::ToolCatalog::from_tool_definitions(definitions);
+        let surface = Arc::new(lash_core::ToolCatalog::from_tool_definitions(definitions));
+        let config = RlmProjectorConfig {
+            lashlang_surface: LashlangSurface::new(
+                lashlang::LashlangAbilities::all(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::tool_default(["search_tools", "grep"]),
+            ),
+            ..RlmProjectorConfig::new(Arc::new(crate::dialect::TypescriptDialect))
+        };
 
         let preamble = build_rlm_preamble(
             lash_core::ProtocolBuildInput {
-                tool_catalog: Arc::new(surface),
+                tool_catalog: Arc::clone(&surface),
                 plugin_extensions: Default::default(),
                 trigger_events: Default::default(),
-                extra_prompt_contributions: Vec::new(),
                 writer_formats: lash_core::build_newest_writer_formats(),
             },
-            RlmProjectorConfig {
-                lashlang_surface: LashlangSurface::new(
-                    lashlang::LashlangAbilities::all(),
-                    lashlang::LashlangLanguageFeatures::default(),
-                    lashlang::LashlangHostCatalog::tool_default(["search_tools", "grep"]),
-                ),
-                ..RlmProjectorConfig::new(Arc::new(crate::dialect::TypescriptDialect))
-            },
+            config.clone(),
         );
 
         assert_eq!(preamble.tool_names.as_ref(), &vec!["search_tools", "grep"]);
         // The TypeScript dialect renders the tool catalogue inline in the
-        // execution section rather than as a separate prompt contribution.
-        let prompt = preamble.execution_prompt.as_ref();
+        // execution section.
+        let prompt = execution(&config, &surface);
         assert!(prompt.contains("tools.search"));
         assert!(prompt.contains("files.grep"));
         assert!(!prompt.contains("search_tools("));
     }
 
     #[test]
-    fn rlm_preamble_uses_lashlang_host_environment_abilities() {
+    fn the_execution_section_uses_lashlang_host_environment_abilities() {
         let definitions = vec![tool("grep", "files", "grep")];
         let surface = lash_core::ToolCatalog::from_tool_definitions(definitions);
+        let config = RlmProjectorConfig {
+            lashlang_surface: LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::tool_default(["grep"]),
+            ),
+            ..RlmProjectorConfig::new(Arc::new(crate::dialect::TypescriptDialect))
+        };
 
-        let preamble = build_rlm_preamble(
-            lash_core::ProtocolBuildInput {
-                tool_catalog: Arc::new(surface),
-                plugin_extensions: Default::default(),
-                trigger_events: Default::default(),
-                extra_prompt_contributions: Vec::new(),
-                writer_formats: lash_core::build_newest_writer_formats(),
-            },
-            RlmProjectorConfig {
-                lashlang_surface: LashlangSurface::new(
-                    lashlang::LashlangAbilities::default(),
-                    lashlang::LashlangLanguageFeatures::default(),
-                    lashlang::LashlangHostCatalog::tool_default(["grep"]),
-                ),
-                ..RlmProjectorConfig::new(Arc::new(crate::dialect::TypescriptDialect))
-            },
-        );
-
-        assert!(!preamble.execution_prompt.contains("process name"));
-        assert!(!preamble.execution_prompt.contains("sleep for"));
-        assert!(preamble.execution_prompt.contains("### Tools"));
+        let prompt = execution(&config, &surface);
+        assert!(!prompt.contains("process name"));
+        assert!(!prompt.contains("sleep for"));
+        assert!(prompt.contains("### Tools"));
     }
 
     #[test]

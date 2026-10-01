@@ -460,6 +460,19 @@ pub(crate) async fn send_message(
                         Arc::clone(&turn_state),
                         Some(tx.clone()),
                     );
+                    // The board is the turn's context: the system prompt is
+                    // the session's recorded config, so the board the turn
+                    // starts from rides with its input.
+                    let board = run_state
+                        .with_db({
+                            let chat_id = chat_id.clone();
+                            move |db| db.chat_board(&chat_id)
+                        })
+                        .await?;
+                    let turn_input = format!(
+                        "{turn_input}\n\n## Tic Tac Toe Board\n\n{}",
+                        crate::board::board_prompt(&board)
+                    );
                     let turn = match session
                         .send(TurnInput::text(turn_input))
                         .id(turn_id)

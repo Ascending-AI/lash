@@ -568,34 +568,6 @@ mod tests {
     }
 
     #[test]
-    fn large_head_prompt_is_included_in_commit_byte_budget() {
-        let prompt = crate::PromptLayer::new().with_contribution(
-            crate::PromptContribution::guidance("large", "x".repeat(4_096)),
-        );
-        let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-        policy.prompt = prompt;
-        let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("budget-head-prompt"),
-            policy,
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-        commit.commit_budget = CommitBudget::bounded(512, 512);
-
-        assert!(matches!(
-            commit.validate_budget(),
-            Err(StoreError::CommitByteBudgetExceeded {
-                session_config_bytes,
-                graph_delta_bytes: 0,
-                max_bytes: 512,
-                ..
-            }) if session_config_bytes > 4_096
-        ));
-    }
-
-    #[test]
     fn follow_on_bytes_can_exceed_the_commit_budget_alone() {
         const BYTE_LIMIT: usize = 2_048;
         let state = crate::RuntimeSessionState {

@@ -329,13 +329,6 @@ pub struct SessionNodeRecord {
 ///         ),
 ///     ),
 ///     shapes(
-///         path = "crates/lash-sansio/src/session_model/prompt.rs",
-///         cover(
-///             PromptLayer, PromptTemplate, PromptTemplateSection, PromptTemplateEntry, PromptSlot,
-///             PromptSlotLayer, PromptBuiltin,
-///         ),
-///     ),
-///     shapes(
 ///         path = "crates/lash-sansio/src/llm/types.rs",
 ///         path = "crates/lash-sansio/src/llm/types/non_negative_finite_f64.rs",
 ///         cover(
@@ -507,19 +500,6 @@ pub struct PersistedSessionConfig {
     pub no_progress_budget: crate::NoProgressBudget,
     /// The session's appetite for duplicate provider billing.
     pub charge_safety: crate::ChargeSafetyPolicy,
-    /// The creating core's prompt layer, recorded at creation (FIG-4397) and
-    /// rendered beneath `prompt` on every worker. Absent means the session
-    /// recorded an empty core layer; no opener supplies one in its place.
-    #[serde(default, skip_serializing_if = "crate::PromptLayer::is_empty")]
-    pub core_prompt: crate::PromptLayer,
-    /// Session prompt configuration required to continue a cold-loaded
-    /// session with the composition it last committed.
-    ///
-    /// `None` is reserved for heads written before prompt persistence existed.
-    /// `Some(PromptLayer::new())` is an explicit committed empty layer and is
-    /// serialized so reopen authority can distinguish it from legacy absence.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<crate::PromptLayer>,
     /// Generation controls required to continue a cold-loaded session with
     /// the options it last committed.
     #[serde(default)]
@@ -566,10 +546,6 @@ impl PersistedSessionConfig {
         policy.autonomous = self.autonomous;
         policy.no_progress_budget = self.no_progress_budget;
         policy.charge_safety = self.charge_safety.clone();
-        policy.core_prompt = self.core_prompt.clone();
-        if let Some(prompt) = self.prompt.as_ref() {
-            policy.prompt = prompt.clone();
-        }
         policy.generation = self.generation.clone();
         policy
     }
@@ -590,8 +566,6 @@ impl PersistedSessionConfig {
             autonomous: neutral.autonomous,
             no_progress_budget: neutral.no_progress_budget,
             charge_safety: neutral.charge_safety,
-            core_prompt: crate::PromptLayer::new(),
-            prompt: None,
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
@@ -616,8 +590,6 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             autonomous: policy.autonomous,
             no_progress_budget: policy.no_progress_budget,
             charge_safety: policy.charge_safety.clone(),
-            core_prompt: policy.core_prompt.clone(),
-            prompt: Some(policy.prompt.clone()),
             generation: policy.generation.clone(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,

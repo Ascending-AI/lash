@@ -73,8 +73,6 @@ pub(super) fn register_rlm_protocol_plugin(
         Box::pin(async move { normalize_projected_tool_args(ctx) })
     }));
 
-    register_projected_bindings_prompt_contributor(reg, Arc::clone(&protocol_session));
-
     let warn_session = protocol_session.clone();
     reg.turn().checkpoint(Arc::new(move |ctx| {
         let session = warn_session.clone();
@@ -83,14 +81,4 @@ pub(super) fn register_rlm_protocol_plugin(
 
     stream_mask::register_stream_mask(reg, dialect)?;
     Ok(())
-}
-
-fn register_projected_bindings_prompt_contributor(
-    reg: &mut PluginRegistrar,
-    protocol_session: Arc<RlmProtocolSession>,
-) {
-    reg.prompt().contribute(Arc::new(move |_ctx| {
-        let session = protocol_session.clone();
-        Box::pin(async move { Ok(session.projected_binding_prompt_contributions().await) })
-    }));
 }

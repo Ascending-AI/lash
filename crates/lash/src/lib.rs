@@ -85,12 +85,11 @@ pub mod preflight;
 pub(crate) mod process_admin;
 mod process_lifecycle;
 mod process_observation;
-mod prompt_layer;
 pub mod recoverable_chat;
 /// A session's config and the typed commands that change it (FIG-4379).
 ///
 /// Every installed owner records its namespace when a session is created,
-/// beside the core owner's share (provider, model, prompt, generation, turn
+/// beside the core owner's share (provider, model, generation, turn
 /// budget and tool access). After that the config changes only through a
 /// [`ConfigTransaction`]: an ordered list of typed commands of any owners,
 /// written against the config revision the caller read under a stable
@@ -102,17 +101,18 @@ pub mod recoverable_chat;
 /// lists every command the installed owners register.
 ///
 /// The core owner's commands are here; a protocol's are in its module
-/// ([`render::SetStandardRender`], and `rlm::SetRlmRender`).
+/// ([`standard::SetStandardPrompt`], [`standard::SetStandardRender`],
+/// `rlm::SetRlmPrompt` and `rlm::SetRlmRender`). The core has no prompt
+/// command: a session's system prompt is its protocol plugin's recorded
+/// config (FIG-4586).
 pub mod config {
     pub use crate::admin::SessionConfigAdmin;
     pub use crate::admin::config_transactions::{ConfigSettlement, ConfigWrite};
     /// The owner of the core configuration the commands below change.
     pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
-        AddPromptContribution, ClearPromptSlot, ClearPromptTemplate, ReplacePromptSlot,
         SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetModel,
-        SetNoProgressBudget, SetPrompt, SetPromptTemplate, SetReasoning, SetToolAccess,
-        SetTurnBudget,
+        SetNoProgressBudget, SetReasoning, SetToolAccess, SetTurnBudget,
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
@@ -120,15 +120,44 @@ pub mod config {
         CoreConfigRefusal,
     };
 }
+/// The standard protocol's host surface: its creation options, its recorded
+/// namespace, its prompt config and the commands that change it.
+///
+/// A session's system prompt is recorded config of its protocol plugin
+/// (FIG-4586). A host states the standard protocol's at creation, in the
+/// session spec's plugin options under [`STANDARD_PROTOCOL_PLUGIN_ID`]:
+///
+/// ```ignore
+/// let spec = SessionSpec::new().plugin(
+///     lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+///     lash::standard::StandardTurnOptions {
+///         prompt: Some(lash::standard::StandardPrompt {
+///             intro: Some("You are the support desk's assistant.".to_string()),
+///             ..Default::default()
+///         }),
+///         render: None,
+///     },
+/// )?;
+/// ```
+///
+/// The same spec is the core's default
+/// ([`LashCoreBuilder::session_spec`](crate::LashCoreBuilder::session_spec))
+/// or one session's ([`SessionCreation::spec`](crate::SessionCreation::spec)).
+/// After creation the prompt changes only through [`SetStandardPrompt`] and
+/// [`SetStandardPromptContext`], which reach the next root. A run's options
+/// are [`StandardRunOptions`]: they cannot state the prompt.
+pub mod standard {
+    pub use lash_protocol_standard::{
+        STANDARD_PROTOCOL_PLUGIN_ID, SetStandardPrompt, SetStandardPromptContext,
+        SetStandardRender, StandardConfigOwner, StandardConfigRefusal, StandardPrompt,
+        StandardRecordedBehaviour, StandardRecordedConfig, StandardRunOptions, StandardTurnOptions,
+    };
+}
 pub mod render {
     pub use lash_protocol_standard::render::{
         AuthoredViewPolicy, BuiltinToolOutputRenderer, ResolvedStandardRenderConfig,
         StandardRenderConfig, ToolOutputRenderer, ToolOutputRendererSlot, ToolRenderParams,
         ToolRenderPatch, resolve,
-    };
-    pub use lash_protocol_standard::{
-        SetStandardRender, StandardConfigOwner, StandardConfigRefusal, StandardRecordedBehaviour,
-        StandardRecordedConfig, StandardTurnOptions,
     };
     #[cfg(feature = "rlm")]
     pub use lash_render::*;
@@ -170,7 +199,6 @@ pub use crate::parked_work::{
     ParkedWorkEventsCursor, ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef,
     ParkedWorkReport,
 };
-pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::send::{
     BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle,
     SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, StalledDelivery, TurnEvents,
@@ -288,15 +316,14 @@ pub mod prelude {
         DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession, ModelConfig,
         ModelKey, ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder,
         ModelRegistry, NoProgressBudget, ObservableSession, ParkedSession,
-        PendingTurnInputCancelOutcome, PluginOperations, PluginStack, PromptLayerSink,
-        RegisteredModel, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
-        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionCreateRequest,
-        SessionCreation, SessionDeleteReport, SessionDeletion, SessionListFilter,
-        SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
-        SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
-        TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent, TurnExecutionMetrics,
-        TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
-        TurnStatus, TurnStop, message_role, message_text,
+        PendingTurnInputCancelOutcome, PluginOperations, PluginStack, RegisteredModel, Result,
+        SendBuilder, SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
+        SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeleteReport,
+        SessionDeletion, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
+        SessionStartPoint, SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity,
+        TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent,
+        TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome,
+        TurnOutput, TurnReport, TurnStatus, TurnStop, message_role, message_text,
     };
 }
 
@@ -433,10 +460,7 @@ pub mod tools {
     pub use lash_lashlang_runtime::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
         DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, RemoteToolGrantBindingExt,
-        ToolBindingResolutionExt, ToolManifestBindingExt, catalogue_preview_contribution,
-        catalogue_preview_contribution_for_entries,
-        catalogue_preview_contribution_for_entries_with_options,
-        catalogue_preview_contribution_for_manifests, catalogue_preview_contribution_with_options,
+        ToolBindingResolutionExt, ToolManifestBindingExt, catalogue_preview,
         catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
         catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
     };
@@ -694,7 +718,7 @@ pub mod plugins {
     pub use lash_core::plugin::{
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, CompactionSystemPrompt,
         DecidedContextPressure, PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture,
-        PromptContributor, ResolvedToolSurface, ToolCatalogContributor, ToolPresentationArtifacts,
+        ResolvedToolSurface, ToolCatalogContributor, ToolPresentationArtifacts,
         ToolPresentationInput, ToolPresentationStep,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
@@ -774,15 +798,16 @@ pub mod plugins {
         PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
         PluginSessionRequest, PluginState, PrepareTurnRequest, ProtocolBeforeLlmCallContext,
         ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-        ProtocolSessionRestoreView, SessionAuthorityContext, TurnFinalization, TurnPreparation,
+        ProtocolSessionRestoreView, SessionAuthorityContext, SystemPromptContext,
+        SystemPromptPurpose, TurnFinalization, TurnPreparation,
     };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
     /// one as a parameter.
     pub use lash_core::plugin::{
         ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
-        PluginOperationRegistrations, PromptRegistrations, ProtocolRegistrations,
-        SessionRegistrations, ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
+        PluginOperationRegistrations, ProtocolRegistrations, SessionRegistrations,
+        ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
         ToolResultRegistrations, TriggerEventRegistrations, TurnRegistrations,
     };
     /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
@@ -852,9 +877,9 @@ pub mod plugins {
         PluginError, PluginMessage, PluginRuntimeEvent, ToolCatalog, facade_support::PluginFactory,
         facade_support::PluginHost, facade_support::PluginRegistrar, facade_support::PluginSession,
         facade_support::PluginSessionContext, facade_support::PluginSpec,
-        facade_support::PluginSpecFactory, facade_support::PromptHookContext,
-        facade_support::SessionPlugin, facade_support::ToolCatalogContribution,
-        facade_support::TurnHookContext, facade_support::TurnResultHookContext,
+        facade_support::PluginSpecFactory, facade_support::SessionPlugin,
+        facade_support::ToolCatalogContribution, facade_support::TurnHookContext,
+        facade_support::TurnResultHookContext,
     };
     /// Lifecycle observation: what a `reg.session().on_event(..)` hook receives
     /// once durable session state has advanced, and the contexts each event
@@ -878,8 +903,6 @@ pub mod plugins {
     /// Projection contract stored by [`TurnDriverConfig`] when a protocol supplies a custom
     /// context projector.
     pub use lash_sansio::ContextProjector;
-    /// In-process prompt identity carried by [`TurnDriverPreamble::tool_names_fingerprint`].
-    pub use lash_sansio::PromptFingerprint;
     /// Sans-I/O protocol handle accepted by [`TurnDriverConfig::chat`]; custom host drivers use
     /// [`HostTurnProtocol`] as its protocol parameter.
     pub use lash_sansio::ProtocolDriverHandle;
@@ -1039,16 +1062,6 @@ pub mod remote {
             RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
             RemoteSessionTurnOutcome, RemoteStartLifetime, RemoteToolFailureClass,
             RemoteTurnBudget,
-        };
-    }
-
-    /// Prompt-layer envelopes: templates, slots, and contributions.
-    pub mod prompt {
-        pub use lash_remote_protocol::prompt::{
-            RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,
-            RemotePromptLayer, RemotePromptSectionTitle, RemotePromptSlot, RemotePromptSlotLayer,
-            RemotePromptTemplate, RemotePromptTemplateEntry, RemotePromptTemplateSection,
-            RemotePromptTitleBuiltin,
         };
     }
 
@@ -1358,19 +1371,6 @@ pub mod runtime {
     pub use lash_core::{
         ProtocolSessionExtensionHandle, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
         facade_support::SessionHandle, facade_support::render_turn_causes_prompt,
-    };
-}
-
-/// Prompt templates, layers, and contributions.
-pub mod prompt {
-    // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_sansio::PromptContext;
-
-    pub use lash_core::{
-        PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate,
-        PromptLayer, PromptSectionTitle, PromptSlot, PromptSlotLayer, PromptTemplate,
-        PromptTemplateEntry, PromptTemplateSection, PromptTitleBuiltin,
-        facade_support::default_prompt_template,
     };
 }
 

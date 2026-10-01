@@ -13,7 +13,7 @@ use lash::tools::{
     ToolOutcome, ToolProvider,
 };
 use lash::tracing::{JsonlTraceSink, TraceLevel};
-use lash::{LashCore, ModelMetadata, PromptLayerSink as _};
+use lash::{LashCore, ModelMetadata};
 use lash_provider_openai::{
     OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider, ProviderRoutingPrefs,
 };
@@ -244,7 +244,17 @@ pub(super) fn standard_core_over(
             .model(model_key)
             .reasoning(live_reasoning())
             .generation(generation(spec.output_cap))
-            .instructions(spec.instructions)
+            .session_plugin(
+                lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                lash::standard::StandardTurnOptions {
+                    prompt: Some(lash::standard::StandardPrompt {
+                        instructions: vec![spec.instructions.to_string()],
+                        ..Default::default()
+                    }),
+                    render: None,
+                },
+            )
+            .context("encode the live-E2E standard prompt")?
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
@@ -297,7 +307,17 @@ pub(super) async fn rlm_core(
     .model(model_key)
     .reasoning(live_reasoning())
     .generation(generation(output_cap))
-    .instructions(instructions)
+    .session_plugin(
+        lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+        lash::rlm::RlmCreateExtras {
+            prompt: Some(lash::rlm::RlmPrompt {
+                instructions: vec![instructions.to_string()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .context("encode the live-E2E RLM prompt")?
     .tools(tools)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

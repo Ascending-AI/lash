@@ -35,6 +35,8 @@ use lash_core::session_model::{
 };
 
 mod batch;
+mod prompt;
+pub use prompt::{SetStandardPrompt, SetStandardPromptContext, StandardPrompt};
 pub mod render;
 pub use batch::BatchResultRow;
 pub use render::{
@@ -54,8 +56,9 @@ use serde_json::Value;
 #[cfg(test)]
 use lash_core::{ToolCall, ToolContract, ToolManifest, ToolOutcome, ToolProvider};
 
-const STANDARD_EXECUTION_TITLE: &str = "Execution";
-const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
+/// The standard protocol plugin's id: the key of its creation options in a
+/// session spec's plugin options, and the owner of its config commands.
+pub const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
 
 /// The execution section of the prompt, naming `batch` and its maximum only
 /// when the sugar is offered.
@@ -169,14 +172,15 @@ pub struct StandardRecordedBehaviour {
 }
 
 /// The standard protocol's recorded session namespace (FIG-4379,
-/// FIG-4398): the render options its tool results render with, over the
-/// render its creation recorded, and the behaviour the session was created
-/// with. A stated `null` in a run's render options resets a key, so the
-/// render is read with its nulls dropped.
+/// FIG-4398): its prompt, the render options its tool results render with,
+/// and the behaviour the session was created with. Render options apply over
+/// the recorded render. A stated `null` in a run's render options resets a
+/// key, so the render is read with its nulls dropped.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(try_from = "serde_json::Value")]
 pub struct StandardRecordedConfig {
+    pub prompt: StandardPrompt,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub render: Option<StandardRenderConfig>,
@@ -188,6 +192,7 @@ pub struct StandardRecordedConfig {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StandardRecordedConfigWire {
+    prompt: StandardPrompt,
     #[serde(default)]
     render: Option<serde_json::Value>,
     behaviour: StandardRecordedBehaviour,
@@ -199,6 +204,7 @@ impl TryFrom<serde_json::Value> for StandardRecordedConfig {
     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
         let wire: StandardRecordedConfigWire = serde_json::from_value(value)?;
         Ok(Self {
+            prompt: wire.prompt,
             render: wire
                 .render
                 .map(|render| serde_json::from_value(render::without_nulls(render)))
@@ -224,8 +230,8 @@ fn standard_turn_options(
     options.decode()
 }
 
-/// What a creator and a run state for the standard protocol (FIG-4379): the
-/// render options its tool results render with, over the host's configured
+/// Standard protocol creation input (FIG-4379): the prompt and the render
+/// options its tool results render with, over the host's configured
 /// render. A stated `null` in a run's options resets a key, so a value is
 /// read with its nulls dropped.
 #[derive(
@@ -234,6 +240,9 @@ fn standard_turn_options(
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(try_from = "serde_json::Value")]
 pub struct StandardTurnOptions {
+    /// Creation input. A child copies its parent's recorded prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<StandardPrompt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub render: Option<StandardRenderConfig>,
@@ -245,6 +254,8 @@ pub struct StandardTurnOptions {
 #[serde(deny_unknown_fields)]
 struct StandardTurnOptionsWire {
     #[serde(default)]
+    prompt: Option<StandardPrompt>,
+    #[serde(default)]
     render: Option<StandardRenderConfig>,
 }
 
@@ -253,6 +264,43 @@ impl TryFrom<serde_json::Value> for StandardTurnOptions {
 
     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
         let wire: StandardTurnOptionsWire = serde_json::from_value(render::without_nulls(value))?;
+        Ok(Self {
+            prompt: wire.prompt,
+            render: wire.render,
+        })
+    }
+}
+
+/// The options a run states for the standard protocol (FIG-4589): its render
+/// options, over the session's. A run cannot state the session's prompt,
+/// which is recorded config: a payload that carries one is refused as
+/// [`StandardConfigRefusal::PromptInRunOptions`]. A stated `null` resets a
+/// key, so a value is read with its nulls dropped.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(try_from = "serde_json::Value")]
+pub struct StandardRunOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub render: Option<StandardRenderConfig>,
+}
+
+/// The wire form a [`StandardRunOptions`] decodes through once its nulls are
+/// dropped.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StandardRunOptionsWire {
+    #[serde(default)]
+    render: Option<StandardRenderConfig>,
+}
+
+impl TryFrom<serde_json::Value> for StandardRunOptions {
+    type Error = serde_json::Error;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        let wire: StandardRunOptionsWire = serde_json::from_value(render::without_nulls(value))?;
         Ok(Self {
             render: wire.render,
         })
@@ -263,8 +311,8 @@ impl TryFrom<serde_json::Value> for StandardTurnOptions {
 pub const STANDARD_CONFIG_IMPLEMENTATION: &str = "lash-standard-config:1";
 
 /// The standard protocol's config owner: it records the creator's render
-/// options, or none, and this host's configured behaviour, admits
-/// [`SetStandardRender`] and keeps the behaviour pinned.
+/// options, its prompt and this host's configured behaviour. Its render and
+/// prompt commands keep the behaviour pinned.
 #[derive(Clone, Debug)]
 pub struct StandardConfigOwner {
     behaviour: StandardRecordedBehaviour,
@@ -278,6 +326,11 @@ pub enum StandardConfigRefusal {
     /// The candidate changes the behaviour the session recorded at
     /// creation.
     BehaviourChanged { recorded: String, candidate: String },
+    /// A run's options state the session's prompt (FIG-4589). The prompt is
+    /// recorded config: creation states it and the owner's prompt commands
+    /// change it, for the next root. A run's options are
+    /// [`StandardRunOptions`], which has no prompt.
+    PromptInRunOptions,
 }
 
 impl std::fmt::Display for StandardConfigRefusal {
@@ -290,6 +343,10 @@ impl std::fmt::Display for StandardConfigRefusal {
                 formatter,
                 "the session's standard-protocol behaviour is recorded as {recorded} and cannot \
                  become {candidate}"
+            ),
+            Self::PromptInRunOptions => formatter.write_str(
+                "a run's standard-protocol options cannot state the session's prompt: set it at \
+                 creation or with the `set_prompt` and `set_prompt_context` config commands",
             ),
         }
     }
@@ -306,16 +363,22 @@ impl ConfigOwner for StandardConfigOwner {
 
     /// Every session records its namespace: the creator's render options,
     /// or none, under which the recorded render applies, and its
-    /// behaviour. A child inherits its parent's recorded behaviour, whatever
-    /// the host creating it is configured with (FIG-4527); a session with no
-    /// recorded parent behaviour records this host's.
+    /// behaviour and prompt. A child inherits its parent's recorded behaviour
+    /// and prompt, whatever the host creating it is configured with
+    /// (FIG-4527). Without a recorded parent, the creator's prompt applies,
+    /// or the built-in default, alongside this host's behaviour.
     fn create(
         &self,
         input: Option<StandardTurnOptions>,
         facts: CreationFacts<'_, StandardRecordedConfig>,
     ) -> Result<Option<StandardRecordedConfig>, StandardConfigRefusal> {
+        let input = input.unwrap_or_default();
         Ok(Some(StandardRecordedConfig {
-            render: input.unwrap_or_default().render,
+            prompt: facts.parent.map_or_else(
+                || input.prompt.unwrap_or_default(),
+                |parent| parent.prompt.clone(),
+            ),
+            render: input.render,
             behaviour: facts
                 .parent
                 .map_or_else(|| self.behaviour.clone(), |parent| parent.behaviour.clone()),
@@ -340,6 +403,18 @@ impl ConfigOwner for StandardConfigOwner {
                 recorded: spelled(&base.behaviour),
                 candidate: spelled(&value.behaviour),
             });
+        }
+        Ok(())
+    }
+
+    /// A run's options are a [`StandardRunOptions`]; a payload that carries
+    /// the session's prompt is refused, whatever value it states.
+    fn validate_run_options(
+        &self,
+        options: &serde_json::Value,
+    ) -> Result<(), StandardConfigRefusal> {
+        if options.get("prompt").is_some() {
+            return Err(StandardConfigRefusal::PromptInRunOptions);
         }
         Ok(())
     }
@@ -379,7 +454,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
         STANDARD_PROTOCOL_PLUGIN_ID
     }
 
-    /// The session's standard-protocol namespace and its one command
+    /// The session's standard-protocol namespace and its typed commands
     /// (FIG-4379).
     fn register_config(
         &self,
@@ -392,10 +467,16 @@ impl PluginFactory for StandardProtocolPluginFactory {
             Ok(OwnerChange {
                 recorded: StandardRecordedConfig {
                     render: command.render,
-                    behaviour: recorded.behaviour.clone(),
+                    ..recorded.clone()
                 },
                 output: (),
             })
+        })?;
+        registrar.command::<SetStandardPrompt>(|recorded, command| {
+            Ok(prompt::replace_prompt(recorded, command))
+        })?;
+        registrar.command::<SetStandardPromptContext>(|recorded, command| {
+            Ok(prompt::replace_context(recorded, command))
         })
     }
 
@@ -455,7 +536,9 @@ impl SessionPlugin for StandardProtocolPlugin {
             let renderer = renderer.clone();
             Box::pin(async move { render::present(input, &renderer).await })
         }))?;
-        reg.protocol().session(Arc::new(StandardProtocolSession))?;
+        reg.protocol().session(Arc::new(StandardProtocolSession {
+            behaviour: self.config.recorded_behaviour(),
+        }))?;
         reg.protocol()
             .protocol_driver(Arc::new(StandardProtocolDriver {
                 config: self.config.clone(),
@@ -505,7 +588,11 @@ fn validate_batch_name(
     Ok(())
 }
 
-struct StandardProtocolSession;
+struct StandardProtocolSession {
+    /// The behaviour this session's plugin was built under: its recorded
+    /// one, or the deployment's for a session that has recorded none yet.
+    behaviour: StandardRecordedBehaviour,
+}
 
 #[async_trait]
 impl ProtocolSessionPlugin for StandardProtocolSession {
@@ -514,6 +601,40 @@ impl ProtocolSessionPlugin for StandardProtocolSession {
         _ctx: ProtocolSessionContext<'_>,
     ) -> Result<(), SessionError> {
         Ok(())
+    }
+
+    /// The prompt renders from the standard namespace the given plugin
+    /// config recorded: the admitted root's, so a prompt command applied
+    /// while a root runs reaches the next root (FIG-4589).
+    async fn render_system_prompt(
+        &self,
+        ctx: lash_core::plugin::SystemPromptContext<'_>,
+    ) -> Result<Arc<str>, SessionError> {
+        let recorded = ctx
+            .plugin_config
+            .decode::<StandardRecordedConfig>(STANDARD_PROTOCOL_PLUGIN_ID)
+            .map_err(|error| {
+                SessionError::Protocol(format!(
+                    "invalid recorded standard-protocol session config: {error}"
+                ))
+            })?
+            // A session that has recorded no standard namespace yet renders
+            // the built-in prompt under the behaviour its plugin was built
+            // with. A reopened session with no namespace never gets here:
+            // its plugin refuses to build.
+            .unwrap_or_else(|| StandardRecordedConfig {
+                prompt: StandardPrompt::default(),
+                render: None,
+                behaviour: self.behaviour.clone(),
+            });
+        Ok(Arc::from(match ctx.purpose {
+            lash_core::plugin::SystemPromptPurpose::Turn => {
+                recorded.render_system_prompt(ctx.tool_catalog)
+            }
+            lash_core::plugin::SystemPromptPurpose::Compaction => {
+                recorded.render_compaction_prompt()
+            }
+        }))
     }
 }
 
@@ -540,7 +661,6 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
 
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
-        let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
         let visible_catalog;
         let catalog = if self.config.discovery.is_some() {
             visible_catalog = input.tool_catalog.inline_tools();
@@ -549,17 +669,6 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             input.tool_catalog.as_ref()
         };
         let catalog_specs = catalog.model_tool_specs();
-        let mut prompt_contributions = input.extra_prompt_contributions;
-        let module_guidance = catalog
-            .modules()
-            .map(|module| module.render_markdown())
-            .collect::<Vec<_>>();
-        if !module_guidance.is_empty() {
-            prompt_contributions.push(lash_core::PromptContribution::guidance(
-                "Tool modules",
-                module_guidance.join("\n\n"),
-            ));
-        }
         let tool_specs = match self.config.batch {
             BatchSugar::Enabled { max_members } => {
                 let definition = batch_tool_definition(max_members);
@@ -585,10 +694,6 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             ),
             tool_specs,
             tool_names,
-            tool_names_fingerprint,
-            execution_title: Arc::from(STANDARD_EXECUTION_TITLE),
-            execution_prompt: Arc::from(standard_execution_section(self.config.batch)),
-            prompt_contributions,
             writer_formats: input.writer_formats,
         }
     }
@@ -1145,3 +1250,6 @@ mod provider_part_persistence_tests;
 
 #[cfg(test)]
 mod recorded_behaviour_tests;
+
+#[cfg(test)]
+mod prompt_tests;

@@ -6,12 +6,11 @@ use std::task::{Context, Poll};
 use crate::durable_session::DurableSession;
 use crate::session_binding::BoundSession;
 use crate::support::{
-    Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginOperations, PluginOptions,
-    ProcessHandleView, PromptLayer, PromptLayerSink, Result, RuntimeErrorCode, RuntimeHandle,
-    RuntimeObservation, RuntimeSessionState, SessionAdmin, SessionCreationHead, SessionCursor,
-    SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
-    SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
-    ToolManifest, ToolState, TurnInput, build_plugin_host,
+    Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginOperations, ProcessHandleView,
+    Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation, RuntimeSessionState, SessionAdmin,
+    SessionCreationHead, SessionCursor, SessionError, SessionObservation,
+    SessionObservationSubscription, SessionPolicy, SessionReadView, SessionResume, SessionScope,
+    SessionSpec, SessionStoreCreateRequest, ToolManifest, ToolState, TurnInput, build_plugin_host,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
@@ -54,10 +53,22 @@ pub struct SessionBuilder {
 #[derive(Clone, Debug, Default)]
 pub struct SessionCreation {
     /// The session's config: model key and reasoning, attachment acceptance,
-    /// prompt, generation and the rest of [`SessionSpec`], resolved against
-    /// the core's policy. Unset fields take the core's values. The model key
-    /// is minted into a recorded binding by the core's models when the
-    /// session is created; every open runs that recorded binding.
+    /// generation, plugin creation options and the rest of [`SessionSpec`],
+    /// resolved against the core's policy. Unset fields take the core's
+    /// values. The model key is minted into a recorded binding by the core's
+    /// models when the session is created; every open runs that recorded
+    /// binding.
+    ///
+    /// Its [`plugin_options`](SessionSpec::plugin_options) are laid over the
+    /// core's default spec's, plugin by plugin (FIG-4589). Every plugin the
+    /// core installs, the protocol among them, creates its own namespace
+    /// from its key, defaults included, and the result is recorded with the
+    /// session's initial config head: every open delivers it unchanged, and
+    /// only its owner's typed config commands change it ([`crate::config`]).
+    /// The protocol plugin's prompt config is one of these options. A key no
+    /// installed plugin owns, or a value its owner refuses, fails the
+    /// creation typed as
+    /// [`SessionConfigRefused`](lash_core::SessionError::SessionConfigRefused).
     pub spec: SessionSpec,
     /// The session's parent, recorded as its Session Relation (ADR 0089).
     /// This is the only facade path to a related session: the session is an
@@ -65,21 +76,6 @@ pub struct SessionCreation {
     /// ledger — rolling related sessions together is host policy, not a
     /// facade service. `None` creates a root session.
     pub parent: Option<SessionId>,
-    /// Plugin-keyed, serializable creation options (FIG-4379). Every plugin
-    /// the core installs — the protocol among them — creates its own
-    /// namespace from its key, defaults included, and the result is recorded
-    /// with the session's initial config head: every open delivers it
-    /// unchanged, and only its owner's typed config commands change it
-    /// ([`crate::config`]). A key no installed plugin owns, or a
-    /// value its owner refuses, fails the creation typed as
-    /// [`SessionConfigRefused`](lash_core::SessionError::SessionConfigRefused).
-    pub plugin_options: PluginOptions,
-}
-
-impl PromptLayerSink for SessionCreation {
-    fn prompt_layer_mut(&mut self) -> &mut PromptLayer {
-        self.spec.prompt.get_or_insert_with(PromptLayer::new)
-    }
 }
 
 struct ResolvedSessionStore {
@@ -284,11 +280,16 @@ impl SessionBuilder {
     /// is refused before admission as [`CoreConfigRefusal::UnsafeRetriesAboveCeiling`](crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling)
     /// inside [`SessionError::SessionConfigRefused`].
     pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
-        let SessionCreation {
-            spec,
-            parent,
-            plugin_options,
-        } = creation;
+        let SessionCreation { spec, parent } = creation;
+        // The session's stated plugin options, over the core's default
+        // spec's (FIG-4589). A session created here is an ordinary session
+        // even when it names a parent (ADR 0089): it is created from this
+        // core's defaults, unlike a child a running parent creates, which
+        // copies its parent's recorded config.
+        let plugin_options = spec
+            .plugin_options
+            .clone()
+            .over(self.core.default_plugin_options.clone());
         let policy = self.minted_policy(spec)?;
         lash_core::CoreConfigOwner::validate_charge_safety(&policy.charge_safety)
             .map_err(lash_core::SessionConfigRefusal::new)

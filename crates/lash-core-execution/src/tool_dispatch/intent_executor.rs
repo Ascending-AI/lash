@@ -834,16 +834,14 @@ mod tests {
     }
 
     /// A start carrying `payload` as its declared input under an execution
-    /// env captured from a session whose project instructions are `prompt`.
+    /// env captured from a session whose recorded protocol prompt is `prompt`.
     fn start_under_prompt(payload: serde_json::Value, prompt: String) -> crate::ToolIntent {
-        let policy = crate::SessionPolicy {
-            prompt: crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
-                crate::PromptSlot::ProjectInstructions,
-                "Synthetic load context",
-                prompt,
-            )),
-            ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
-        };
+        let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+        plugin_config.insert(
+            "protocol",
+            serde_json::json!({ "prompt": { "instructions": [prompt] } }),
+        );
         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
             owner: session("session"),
             declaration: crate::ProcessStartDeclaration::new(
@@ -855,9 +853,12 @@ mod tests {
                 crate::Lifetime::Detached,
             )
             .with_env_ref(
-                crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy)
-                    .stable_ref()
-                    .expect("environment digest"),
+                crate::ProcessExecutionEnvSpec::new(
+                    crate::AdmittedPluginConfig::new(plugin_config, 0),
+                    policy,
+                )
+                .stable_ref()
+                .expect("environment digest"),
             ),
         }))
     }

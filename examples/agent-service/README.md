@@ -247,7 +247,7 @@ The plugin demonstrates:
 - `read_board` and `play_move` app tools provided by the plugin's
   `ToolProvider`. `read_board` reads the canonical board from SQLite;
   `play_move` validates and mutates that canonical board.
-- Prompt contribution that reflects the current canonical board state.
+- The current canonical board state, stated with each turn's input.
 - Additive semantic streaming: thinking is shown live from
   `TurnEvent::ReasoningDelta`, assistant prose as
   `TurnEvent::AssistantProseDelta`, code/tool activity as structured cards, and

@@ -40,7 +40,6 @@ use lash::observe::SessionCursor;
 use lash::plugins::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
 };
-use lash::prompt::PromptContribution;
 use lash::provider::ProviderHandle;
 use lash::sync::MutexExt;
 use lash::triggers::TriggerEvent;

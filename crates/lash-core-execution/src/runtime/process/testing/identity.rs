@@ -51,7 +51,6 @@ fn process_execution_env_identity_golden_corpus() {
         autonomous: true,
         turn_budget: crate::TurnBudget::bounded(1),
         no_progress_budget: Default::default(),
-        prompt: crate::PromptLayer::with_template(crate::PromptTemplate::new(vec![])),
         generation: crate::GenerationOptions {
             output_token_cap: std::num::NonZeroUsize::new(1024),
             temperature: Some(crate::NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
@@ -60,7 +59,6 @@ fn process_execution_env_identity_golden_corpus() {
             parallel_tool_calls: None,
             projection_provenance: Default::default(),
         },
-        core_prompt: crate::PromptLayer::new(),
     };
     let specs = [
         ProcessExecutionEnvSpec::new(
@@ -86,8 +84,8 @@ fn process_execution_env_identity_golden_corpus() {
                 "process-env:v6:blake3:20e2a0daf5845a51a6c44a39fe5e21e4994fd741514edd2cd1dd322d3c2b319a".to_string(),
             ),
             (
-                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:288cb44aeb2e0c20578a9a2f77e438eee339312cac28ae8b2085800109126d24".to_string(),
+                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:16a3f530708b8327383651f9329b3b2a93de75e752fe716aa7b2da9b81e11040".to_string(),
             ),
         ]
     );

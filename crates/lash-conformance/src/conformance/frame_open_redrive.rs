@@ -79,6 +79,8 @@ mod command_budget;
 pub use command_budget::*;
 mod uncommitted_head;
 pub use uncommitted_head::*;
+mod recorded_prompt;
+pub use recorded_prompt::*;
 
 /// The prompt usage at which the laws' pressure hook compacts.
 const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
@@ -133,31 +135,46 @@ impl StandardFrameLawProtocol {
     }
 }
 
+/// The plugin whose tool switches a standard-protocol turn's frame.
+fn switch_tool_plugin() -> Arc<dyn PluginFactory> {
+    Arc::new(crate::plugin::StaticPluginFactory::new(
+        "conformance-frame-open-switch",
+        crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool)),
+    ))
+}
+
+/// A standard-protocol model response that ends the turn with `text`.
+fn standard_answer(text: &str) -> crate::LlmOutputPart {
+    crate::LlmOutputPart::Text {
+        text: text.to_string(),
+        response_meta: None,
+    }
+}
+
+/// A standard-protocol model response that switches the turn's frame.
+fn standard_continue_as(task: &str) -> crate::LlmOutputPart {
+    crate::LlmOutputPart::ToolCall {
+        call_id: "frame-open-law-switch-call".into(),
+        tool_name: SWITCH_TOOL.into(),
+        input_json: serde_json::json!({ "task": task }).to_string(),
+        replay: None,
+    }
+}
+
 impl FrameLawProtocol for StandardFrameLawProtocol {
     fn plugins(&self) -> Vec<Arc<dyn PluginFactory>> {
         crate::testing::test_standard_protocol_factories()
             .into_iter()
-            .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
-                "conformance-frame-open-switch",
-                crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool)),
-            )) as Arc<dyn PluginFactory>])
+            .chain([switch_tool_plugin()])
             .collect()
     }
 
     fn answer(&self, text: &str) -> crate::LlmOutputPart {
-        crate::LlmOutputPart::Text {
-            text: text.to_string(),
-            response_meta: None,
-        }
+        standard_answer(text)
     }
 
     fn continue_as(&self, task: &str) -> crate::LlmOutputPart {
-        crate::LlmOutputPart::ToolCall {
-            call_id: "frame-open-law-switch-call".into(),
-            tool_name: SWITCH_TOOL.into(),
-            input_json: serde_json::json!({ "task": task }).to_string(),
-            replay: None,
-        }
+        standard_continue_as(task)
     }
 }
 
@@ -480,6 +497,8 @@ struct LawModel {
     /// Every summarizer request's compaction session id and turn id (its
     /// scope's frame and request ids), in call order.
     summary_requests: CompactionIds,
+    /// Every summarizer request's system prompt, in call order.
+    summary_instructions: Arc<std::sync::Mutex<Vec<Option<String>>>>,
 }
 
 /// A turn the law's model answers with a provider's context-overflow
@@ -510,6 +529,7 @@ fn law_model(script: ModelScript) -> LawModel {
     let hang_next_summary = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let summary_answered = Arc::new(tokio::sync::Notify::new());
     let summary_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let summary_instructions = Arc::new(std::sync::Mutex::new(Vec::new()));
     let turns = Arc::new(script.turns);
     let provider = crate::testing::TestProvider::builder()
         .kind("stub")
@@ -519,6 +539,7 @@ fn law_model(script: ModelScript) -> LawModel {
             let hang_next_summary = Arc::clone(&hang_next_summary);
             let summary_answered = Arc::clone(&summary_answered);
             let summary_requests = Arc::clone(&summary_requests);
+            let summary_instructions = Arc::clone(&summary_instructions);
             move |request: crate::LlmRequest| {
                 let mut hang = false;
                 let (part, input_tokens) = if is_summary_request(&request) {
@@ -530,6 +551,10 @@ fn law_model(script: ModelScript) -> LawModel {
                             request.scope.agent_frame_id.clone(),
                             request.scope.request_id.clone(),
                         ));
+                    summary_instructions
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(request.instructions.as_deref().map(str::to_string));
                     hang = hang_next_summary.swap(false, Ordering::SeqCst);
                     (
                         crate::LlmOutputPart::Text {
@@ -585,6 +610,7 @@ fn law_model(script: ModelScript) -> LawModel {
         hang_next_summary,
         summary_answered,
         summary_requests,
+        summary_instructions,
     }
 }
 
@@ -1789,7 +1815,9 @@ macro_rules! frame_open_redrive_tests {
             (a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_engine_path,
                 Engine));
         $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
-            a_compaction_redriven_with_a_changed_prompt_parks_without_settling,
+            a_commanded_compaction_redriven_on_another_worker_replays_its_recorded_prompt,
+            a_pressure_compaction_redriven_on_another_worker_replays_its_recorded_prompt,
+            an_overflow_recovery_redriven_on_another_worker_replays_its_recorded_prompt,
             compact_with_production_compactor_crash_matrix,
             a_session_deleted_during_an_open_keeps_nothing_of_it,
             a_fork_made_during_an_open_never_sees_its_seed,

@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::collections::BTreeMap;
 
-use lash_core::{PromptContribution, ProtocolSessionExtension};
+use lash_core::ProtocolSessionExtension;
 
 use lashlang::{ProjectedBindingError, ProjectedBindings, ProjectedValue, Value as FlowValue};
 
@@ -137,20 +137,19 @@ impl RlmProjectionExtension {
     pub(crate) fn new(bindings: RlmProjectedBindings) -> Self {
         Self { bindings }
     }
+}
 
-    pub(crate) fn prompt_contributions_for(
-        bindings: &RlmProjectedBindings,
-        vocabulary: crate::dialect::DialectPromptVocabulary,
-    ) -> Vec<PromptContribution> {
-        let docs = bindings.prompt_docs();
-        if docs.is_empty() {
-            return Vec::new();
-        }
-        vec![PromptContribution::environment(
-            "Read-Only Variables",
-            crate::rlm_support::render_read_only_variables(docs, vocabulary),
-        )]
-    }
+/// The heading the read-only variables render under.
+pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
+
+/// The declaration of the session's read-only variables, or `None` when it
+/// binds none.
+pub(crate) fn read_only_variables_prompt(
+    bindings: &RlmProjectedBindings,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> Option<String> {
+    let docs = bindings.prompt_docs();
+    (!docs.is_empty()).then(|| crate::rlm_support::render_read_only_variables(docs, vocabulary))
 }
 
 impl ProtocolSessionExtension for RlmProjectionExtension {
@@ -243,28 +242,26 @@ mod tests {
                 }),
             )
             .expect("bind task payload");
-        let contribution = RlmProjectionExtension::prompt_contributions_for(
+        let declaration = read_only_variables_prompt(
             &bindings,
             crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
         )
-        .pop()
-        .expect("prompt contribution");
+        .expect("read-only variables declaration");
 
         assert!(
-            contribution
-                .content
+            declaration
                 .contains("`input`: `Input`, read-only (descriptor: `Record<string, unknown>`)"),
             "{}",
-            contribution.content
+            declaration
         );
         assert!(
-            contribution.content.contains("type Input = {")
-                && contribution.content.contains("prompt: string;")
-                && contribution.content.contains("constraints: Array<string>;"),
+            declaration.contains("type Input = {")
+                && declaration.contains("prompt: string;")
+                && declaration.contains("constraints: Array<string>;"),
             "{}",
-            contribution.content
+            declaration
         );
-        assert!(!contribution.content.contains("print input"));
-        assert!(!contribution.content.contains("discover"));
+        assert!(!declaration.contains("print input"));
+        assert!(!declaration.contains("discover"));
     }
 }

@@ -1,7 +1,6 @@
 pub use lash_core_store::session_policy::*;
 pub mod context;
 pub use lash_sansio::session_model::message;
-pub use lash_sansio::session_model::prompt;
 
 use crate::llm::types::{LlmEventSender, LlmStreamEvent};
 use crate::provider::{AttachmentCapabilitySnapshot, ProviderHandle, ReasoningSelection};
@@ -9,12 +8,11 @@ use crate::{ModelConfig, ModelKey, ModelUnavailable, RuntimeModels};
 
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
-    ConversationRecord, ErrorEnvelope, FailureCode, MAIN_AGENT_INTRO, Message, MessageRole,
-    Namespace, NoProgressBudget, Part, PartKind, PromptBuiltin, PromptSlot, PromptTemplate,
-    PromptTemplateEntry, PromptTemplateSection, ProtocolEvent, SessionStreamEvent,
-    StreamMessageKind, TokenUsage, TokenUsageOverflow, TurnBudget, TurnFailureCode,
-    TurnFailureKind, default_prompt_template, make_error_envelope, make_error_event,
-    reassign_part_ids, render_prompt, render_transcript_prompt, shared_parts,
+    ConversationRecord, ErrorEnvelope, FailureCode, Message, MessageRole, Namespace,
+    NoProgressBudget, Part, PartKind, ProtocolEvent, SessionStreamEvent, StreamMessageKind,
+    TokenUsage, TokenUsageOverflow, TurnBudget, TurnFailureCode, TurnFailureKind,
+    make_error_envelope, make_error_event, reassign_part_ids, render_prompt,
+    render_transcript_prompt, shared_parts,
 };
 
 pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
@@ -181,7 +179,7 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
 /// the spec mints that key's binding through the host's models, once, and the
 /// resulting policy records it. A spec that selects no model keeps the base
 /// policy's recorded binding verbatim, never re-resolving its key.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SessionSpec {
     inherit: bool,
     pub model: Option<ModelKey>,
@@ -200,13 +198,25 @@ pub struct SessionSpec {
     pub no_progress_budget: Option<NoProgressBudget>,
     /// Duplicate-billing appetite. `None` keeps the base policy's.
     pub charge_safety: Option<ChargeSafetyPolicy>,
-    pub prompt: Option<crate::PromptLayer>,
+    /// Plugin-keyed, serializable creation options (FIG-4379), the protocol
+    /// plugin's prompt config among them. Each installed plugin creates its
+    /// recorded namespace from its key, and only its owner's typed config
+    /// commands change it afterwards. A key stated here is laid over the same
+    /// key of the spec beneath it ([`PluginOptions::over`]); a key no
+    /// installed plugin owns, or a value its owner refuses, fails the
+    /// creation typed as
+    /// [`SessionConfigRefused`](crate::SessionError::SessionConfigRefused).
+    pub plugin_options: crate::PluginOptions,
     /// Generation intent for every LLM call the session makes. `None` inherits
     /// the base policy's options unchanged; `Some` applies a
     /// [`GenerationOverlay`], which merges per option unless it explicitly
     /// replaces.
     pub generation: Option<GenerationOverlay>,
 }
+
+// `serde_json::Value` never holds NaN or an infinite number, so the plugin
+// options' `PartialEq` is reflexive.
+impl Eq for SessionSpec {}
 
 impl SessionSpec {
     /// Unset fields resolve from the runtime's core defaults.
@@ -220,7 +230,7 @@ impl SessionSpec {
             autonomous: None,
             no_progress_budget: None,
             charge_safety: None,
-            prompt: None,
+            plugin_options: crate::PluginOptions::default(),
             generation: None,
         }
     }
@@ -282,8 +292,20 @@ impl SessionSpec {
         self
     }
 
-    pub fn prompt_layer(mut self, prompt: crate::PromptLayer) -> Self {
-        self.prompt = Some(prompt);
+    /// State `plugin_id`'s creation options, replacing what this spec stated
+    /// for that plugin before.
+    pub fn plugin<T: serde::Serialize>(
+        mut self,
+        plugin_id: impl Into<String>,
+        options: T,
+    ) -> Result<Self, serde_json::Error> {
+        self.plugin_options.insert_typed(plugin_id, options)?;
+        Ok(self)
+    }
+
+    /// State every plugin's creation options at once.
+    pub fn plugin_options(mut self, plugin_options: crate::PluginOptions) -> Self {
+        self.plugin_options = plugin_options;
         self
     }
 
@@ -365,9 +387,6 @@ impl SessionSpec {
         }
         if let Some(charge_safety) = self.charge_safety.as_ref() {
             policy.charge_safety = charge_safety.clone();
-        }
-        if let Some(prompt) = self.prompt.as_ref() {
-            policy.prompt = prompt.clone();
         }
         if let Some(generation) = self.generation.as_ref() {
             policy.generation = generation.resolve(&policy.generation);

@@ -363,32 +363,27 @@ async fn freshness_hydrates_when_revision_changed() {
 }
 
 /// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
-/// durable head's prompt. Session config settles through the commanded
+/// durable head's generation. Session config settles through the commanded
 /// durable write (FIG-1555/FIG-1895), so the head already carries every
 /// committed override — no resident copy is preserved across adoption.
 #[tokio::test(flavor = "multi_thread")]
-async fn resident_refresh_adopts_the_durable_head_prompt() {
+async fn resident_refresh_adopts_the_durable_head_generation() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
     crate::runtime_support::configure(
         &mut runtime,
         &double,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
-            contribution: lash_core::PromptContribution::guidance(
-                "Settled host change",
-                "COMMITTED THROUGH THE COMMANDED WRITE",
-            ),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Replace(seeded(1)),
         }),
-        "settled-prompt",
+        "settled-generation",
     )
     .await;
 
-    let head_prompt = lash_core::PromptLayer::new().with_contribution(
-        lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
-    );
+    let head_generation = seeded(2);
     advance_session_head(store.as_ref(), |state| {
-        state.policy.prompt = head_prompt.clone();
+        state.policy.generation = head_generation.clone();
     })
     .await;
 
@@ -398,51 +393,55 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
         .expect("refresh resident graph");
 
     assert_eq!(
-        runtime.state().effective_policy().prompt,
-        head_prompt,
-        "adoption is head-authoritative: the durable head's prompt wins"
+        runtime.state().effective_policy().generation,
+        head_generation,
+        "adoption is head-authoritative: the durable head's generation wins"
     );
 }
 
+/// Generation options that state only `seed`.
+fn seeded(seed: i64) -> lash_core::GenerationOptions {
+    lash_core::GenerationOptions {
+        seed: Some(seed),
+        ..lash_core::GenerationOptions::default()
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_path() {
+async fn a_config_command_composes_with_the_reloaded_config_on_the_invalidated_resident_path() {
     let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
 
     advance_session_head(store.as_ref(), |state| {
-        state.policy.prompt = lash_core::PromptLayer::new().with_contribution(
-            lash_core::PromptContribution::guidance("Durable base", "KEEP THE DURABLE PROMPT"),
-        );
+        state.policy.generation = seeded(7);
     })
     .await;
     runtime.invalidate_resident_session_state();
 
+    // A merging command keeps what the head recorded and adds its own.
     crate::runtime_support::configure(
         &mut runtime,
         &double,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
-            contribution: lash_core::PromptContribution::guidance(
-                "Live edit",
-                "KEEP THE LIVE EDIT",
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Merge(
+                lash_core::GenerationOptions {
+                    output_token_cap: std::num::NonZeroUsize::new(64),
+                    ..lash_core::GenerationOptions::default()
+                },
             ),
         }),
-        "live-prompt-edit",
+        "live-generation-edit",
     )
     .await;
 
     assert_eq!(
-        runtime.state().effective_policy().prompt,
-        lash_core::PromptLayer::new()
-            .with_contribution(lash_core::PromptContribution::guidance(
-                "Durable base",
-                "KEEP THE DURABLE PROMPT",
-            ))
-            .with_contribution(lash_core::PromptContribution::guidance(
-                "Live edit",
-                "KEEP THE LIVE EDIT",
-            )),
-        "the helper must edit the prompt reloaded by the config applier"
+        runtime.state().effective_policy().generation,
+        lash_core::GenerationOptions {
+            output_token_cap: std::num::NonZeroUsize::new(64),
+            ..seeded(7)
+        },
+        "the command must edit the config reloaded by the config applier"
     );
 }
 
@@ -737,13 +736,10 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     crate::runtime_support::configure(
         &mut runtime,
         &double,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
-            contribution: lash_core::PromptContribution::guidance(
-                "Live override",
-                "SETTLED THROUGH THE COMMANDED WRITE",
-            ),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetGeneration {
+            generation: lash_core::facade_support::GenerationOverlay::Replace(seeded(1)),
         }),
-        "prompt-override",
+        "generation-override",
     )
     .await;
 
@@ -751,15 +747,13 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
         .context_window_tokens(65_536)
         .build()
         .expect("advanced head model");
-    let head_prompt = lash_core::PromptLayer::new().with_contribution(
-        lash_core::PromptContribution::guidance("Advanced durable value", "THE HEAD WINS"),
-    );
+    let head_generation = seeded(2);
     advance_session_head(store.as_ref(), |state| {
         state.policy.model = Some(lash_core::testing::test_model_config(
             head_model.wire_model.clone(),
             head_model.clone(),
         ));
-        state.policy.prompt = head_prompt.clone();
+        state.policy.generation = head_generation.clone();
     })
     .await;
 
@@ -778,9 +772,9 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
         "the invalidation reload must adopt the head's model"
     );
     assert_eq!(
-        runtime.state().effective_policy().prompt,
-        head_prompt,
-        "the invalidation reload must adopt the head's prompt"
+        runtime.state().effective_policy().generation,
+        head_generation,
+        "the invalidation reload must adopt the head's generation"
     );
     assert_eq!(
         *runtime.resident_session.validity(),

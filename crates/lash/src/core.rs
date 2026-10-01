@@ -1,10 +1,9 @@
 use crate::support::{
     Arc, DeploymentStore, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime,
     LashSession, LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginSpec,
-    PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, Result, RuntimeEnvironment,
-    RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy,
-    SessionSpec, SessionView, SessionWorkEngine, StaticPluginFactory, TerminationPolicy,
-    ToolProvider,
+    PluginStack, ProcessRegistry, Result, RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig,
+    SessionBuilder, SessionListFilter, SessionPolicy, SessionSpec, SessionView, SessionWorkEngine,
+    StaticPluginFactory, TerminationPolicy, ToolProvider,
 };
 use lash_core::Backend;
 use lash_core::facade_support;
@@ -38,6 +37,10 @@ pub struct LashCore {
     /// The model key and reasoning a session is created with when its
     /// creation spec names none.
     pub(crate) default_selection: crate::session::DefaultSelection,
+    /// The plugin creation options of the core's default session spec
+    /// (FIG-4589): a session's creation spec is laid over them, plugin by
+    /// plugin. A child takes its parent's recorded config instead.
+    pub(crate) default_plugin_options: lash_core::PluginOptions,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
     pub(crate) backend: Backend,
@@ -764,9 +767,6 @@ pub struct LashCoreBuilder {
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
-    /// The core's prompt layer: a creation default every session this core
-    /// creates records as its `core_prompt` (FIG-4397).
-    prompt: Option<PromptLayer>,
     // Core fields applied over the config the backend's ports assemble.
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_level: Option<lash_trace::TraceLevel>,
@@ -799,7 +799,6 @@ impl LashCoreBuilder {
             attachment_upload_expiry: None,
             output_retention: None,
             process_wake_delivery_policy: None,
-            prompt: None,
             trace_sink: None,
             trace_level: None,
             trace_context: None,
@@ -1073,7 +1072,7 @@ impl LashCoreBuilder {
                 .map_err(EmbedError::ModelUnknown)?;
         }
         // With the model fields taken, resolving the spec mints nothing.
-        let mut policy = session_spec
+        let policy = session_spec
             .resolve_against(&SessionPolicy::new(turn_budget), &lash_core::EmptyModels)
             .map_err(|error| match error {
                 lash_core::facade_support::SpecResolveError::Model(error) => {
@@ -1086,9 +1085,6 @@ impl LashCoreBuilder {
                     EmbedError::ReasoningRefused(error)
                 }
             })?;
-        // The core's prompt layer is a creation default like the rest of the
-        // spec (FIG-4397): every session this core creates records it.
-        policy.core_prompt = self.prompt.take().unwrap_or_default();
 
         let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();
@@ -1229,6 +1225,7 @@ impl LashCoreBuilder {
             env,
             policy,
             default_selection,
+            default_plugin_options: session_spec.plugin_options.clone(),
             backend,
             store_factory,
             process_registry,
@@ -1326,12 +1323,6 @@ pub(crate) fn build_plugin_host(
     }
     factories.extend(plugin_factories.iter().cloned());
     Ok(PluginHost::new(factories))
-}
-
-impl PromptLayerSink for LashCoreBuilder {
-    fn prompt_layer_mut(&mut self) -> &mut PromptLayer {
-        self.prompt.get_or_insert_with(PromptLayer::new)
-    }
 }
 
 impl LashCore {

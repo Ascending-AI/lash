@@ -12,12 +12,13 @@ use super::PluginError;
 
 /// Lazily renders the system prompt a compaction completion carries.
 ///
-/// Deferred so plugin prompt hooks run only when a compaction actually
-/// happens — a context-pressure hook summarizes rarely, and resolving the
-/// prompt eagerly on every turn prepare would fire prompt hooks for prompts
-/// that are never sent.
-pub type CompactionSystemPrompt =
-    Arc<dyn Fn() -> BoxFuture<'static, Result<Option<Arc<str>>, PluginError>> + Send + Sync>;
+/// The protocol plugin renders it from the session's recorded config, as one
+/// recorded step of the caller's scope (FIG-4589): the first call renders and
+/// journals the text, and every later call, a redrive's included, serves the
+/// recorded text. Deferred so the step is taken only when a compaction
+/// actually happens; a context-pressure hook summarizes rarely.
+pub type CompactionSystemPrompt<'run> =
+    Arc<dyn Fn() -> BoxFuture<'run, Result<Option<Arc<str>>, PluginError>> + Send + Sync + 'run>;
 
 /// Emits trace events and nothing else.
 ///
@@ -89,11 +90,10 @@ pub struct CompactionContext<'run> {
     pub traces: PluginTraceEmitter,
     pub scoped_effect_controller: crate::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
-    /// The system prompt the compaction completion carries: the same
-    /// capability, core, and session prompt layers a turn on this session
-    /// would resolve, minus the turn layer and every tool-gated contribution
-    /// (the request ships no tools, so a gated contribution could never be
-    /// honored). `None` when the resolved stack renders empty.
+    /// The system prompt the compaction completion carries: the session's
+    /// protocol plugin rendered it from recorded config, without tools or
+    /// execution prose (the request ships no tools), and the text was
+    /// journaled before this compactor ran. `None` when it renders empty.
     pub system_prompt: Option<Arc<str>>,
 }
 
@@ -119,12 +119,11 @@ pub struct ContextPressureContext<'run> {
     pub traces: PluginTraceEmitter,
     pub scoped_effect_controller: crate::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
-    /// The system prompt a summarizer completion carries: the same
-    /// capability, core, and session prompt layers a turn on this session
-    /// would resolve, minus the turn layer and every tool-gated contribution.
-    /// Lazy — resolved only if the hook summarizes; `None` when this session
-    /// cannot build one at all.
-    pub system_prompt: Option<CompactionSystemPrompt>,
+    /// The system prompt a summarizer completion carries: the session's
+    /// protocol plugin renders it from recorded config, without tools or
+    /// execution prose. Lazy: rendered and journaled only if the hook
+    /// summarizes; `None` when this session cannot build one at all.
+    pub system_prompt: Option<CompactionSystemPrompt<'run>>,
 }
 
 /// What a [`ContextPressureHook`] decided for the turn being prepared.

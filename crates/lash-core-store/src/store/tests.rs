@@ -411,7 +411,7 @@ fn intent_hash_golden_vector() {
     // FIG-4236: the usage deltas left the intent (ADR 0125).
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "d65c1cdeef5ff5b89f1f99825bbcab4687efe6f73c2ac2d19902b7975c7f48cd"
+        "bead92b40f4b1e4610c5c3df4ee06539f6d66c2d61478685f11553270fc9724a"
     );
 }
 
@@ -420,7 +420,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "d65c1cdeef5ff5b89f1f99825bbcab4687efe6f73c2ac2d19902b7975c7f48cd",
+        "bead92b40f4b1e4610c5c3df4ee06539f6d66c2d61478685f11553270fc9724a",
         "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
@@ -454,7 +454,7 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "d65c1cdeef5ff5b89f1f99825bbcab4687efe6f73c2ac2d19902b7975c7f48cd"
+        "bead92b40f4b1e4610c5c3df4ee06539f6d66c2d61478685f11553270fc9724a"
     );
 
     let mut with_evidence = baseline;

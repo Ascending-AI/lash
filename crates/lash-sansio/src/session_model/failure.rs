@@ -33,8 +33,6 @@ pub enum TurnFailureKind {
     LlmProvider,
     /// A plugin aborted the turn or a plugin lifecycle hook failed.
     Plugin,
-    /// A plugin's prompt contribution failed.
-    PluginPrompt,
     /// A protocol extension's before-LLM-call hook failed.
     ProtocolBeforeLlmCall,
     /// The RLM protocol refused the model's cell.
@@ -63,7 +61,6 @@ impl TurnFailureKind {
             Self::InputValidation => "input_validation",
             Self::LlmProvider => "llm_provider",
             Self::Plugin => "plugin",
-            Self::PluginPrompt => "plugin_prompt",
             Self::ProtocolBeforeLlmCall => "protocol_before_llm_call",
             Self::RlmProtocol => "rlm_protocol",
             Self::RlmDriverState => "rlm_driver_state",
@@ -83,7 +80,6 @@ impl TurnFailureKind {
             "input_validation" => Self::InputValidation,
             "llm_provider" => Self::LlmProvider,
             "plugin" => Self::Plugin,
-            "plugin_prompt" => Self::PluginPrompt,
             "protocol_before_llm_call" => Self::ProtocolBeforeLlmCall,
             "rlm_protocol" => Self::RlmProtocol,
             "rlm_driver_state" => Self::RlmDriverState,
@@ -1110,7 +1106,6 @@ mod tests {
             TurnFailureKind::InputValidation,
             TurnFailureKind::LlmProvider,
             TurnFailureKind::Plugin,
-            TurnFailureKind::PluginPrompt,
             TurnFailureKind::ProtocolBeforeLlmCall,
             TurnFailureKind::RlmProtocol,
             TurnFailureKind::RlmDriverState,

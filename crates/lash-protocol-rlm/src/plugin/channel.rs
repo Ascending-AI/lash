@@ -142,6 +142,7 @@ mod tests {
                     .memory_limit(super::super::MemoryBound::unbounded())
                     .build()
                     .recorded_behaviour(false),
+                prompt: Default::default(),
             })
             .unwrap(),
         )
@@ -214,11 +215,14 @@ mod tests {
             PluginSessionMaterialization::Creation,
         )
         .unwrap();
-        assert!(
+        // What remains of a recorded namespace without its pins is its
+        // create extras: here, the prompt alone.
+        assert_eq!(
             without_session_pins(&pinned(Some(RlmChannel::Cell), Some("typescript")))
                 .payload
                 .as_object()
-                .is_none_or(serde_json::Map::is_empty)
+                .map(|extras| extras.keys().map(String::as_str).collect::<Vec<_>>()),
+            Some(vec!["prompt"])
         );
     }
 }

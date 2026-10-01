@@ -10,8 +10,6 @@
 
 use std::sync::Arc;
 
-use crate::PromptContribution;
-use crate::PromptFingerprint;
 use crate::llm::types::{
     LlmOutputPart, LlmResponse, LlmToolSpec, ProviderReasoningReplay, ResponseTextMeta,
 };
@@ -87,12 +85,6 @@ pub struct TurnDriverPreamble<M: TurnProtocol = UnitTurnProtocol> {
     pub config: TurnDriverConfig<M>,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub tool_names: Arc<Vec<String>>,
-    pub tool_names_fingerprint: PromptFingerprint,
-    /// The heading the protocol gives its execution instructions, rendered
-    /// wherever the prompt template places `PromptTitleBuiltin::Execution`.
-    pub execution_title: Arc<str>,
-    pub execution_prompt: Arc<str>,
-    pub prompt_contributions: Vec<PromptContribution>,
     /// The fleet's writer-version table (FIG-3796): the turn machine hands it
     /// to `DriverContextView` so drivers stamp durable envelopes at the
     /// versions the fleet writes.

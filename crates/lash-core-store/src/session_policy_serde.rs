@@ -32,12 +32,6 @@ impl serde::Serialize for SessionPolicy {
         if self.charge_safety != crate::ChargeSafetyPolicy::default() {
             fields += 1;
         }
-        if !self.core_prompt.is_empty() {
-            fields += 1;
-        }
-        if !self.prompt.is_empty() {
-            fields += 1;
-        }
         if self.generation != crate::GenerationOptions::default() {
             fields += 1;
         }
@@ -56,12 +50,6 @@ impl serde::Serialize for SessionPolicy {
         }
         if self.charge_safety != crate::ChargeSafetyPolicy::default() {
             state.serialize_field("charge_safety", &self.charge_safety)?;
-        }
-        if !self.core_prompt.is_empty() {
-            state.serialize_field("core_prompt", &self.core_prompt)?;
-        }
-        if !self.prompt.is_empty() {
-            state.serialize_field("prompt", &self.prompt)?;
         }
         if self.generation != crate::GenerationOptions::default() {
             state.serialize_field("generation", &self.generation)?;
@@ -92,10 +80,6 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             #[serde(default)]
             charge_safety: crate::ChargeSafetyPolicy,
             #[serde(default)]
-            core_prompt: crate::PromptLayer,
-            #[serde(default)]
-            prompt: crate::PromptLayer,
-            #[serde(default)]
             generation: crate::GenerationOptions,
         }
 
@@ -108,8 +92,6 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             turn_budget: wire.turn_budget,
             no_progress_budget: wire.no_progress_budget,
             charge_safety: wire.charge_safety,
-            core_prompt: wire.core_prompt,
-            prompt: wire.prompt,
             generation: wire.generation,
         })
     }

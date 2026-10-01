@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;
 use crate::tool_dispatch::ToolDispatchContext;
-use crate::{PromptContribution, RuntimeServices, ToolProvider};
+use crate::{RuntimeServices, ToolProvider};
 
 mod execution_context;
 mod opener_groups;
@@ -390,14 +390,8 @@ pub struct Session {
     context_overlay_revision: u64,
     context_tools: Vec<Arc<dyn ToolProvider>>,
     tool_registry: Arc<crate::ToolRegistry>,
-    context_prompt_contributions: Vec<PromptContribution>,
     tool_catalog_cache: Arc<std::sync::Mutex<Option<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
     composition_tool_fingerprint_cache: CompositionToolFingerprintCache,
-    /// Memoizes the rendered system prompt across turns. Most consecutive
-    /// turns reuse the same template + context overlay, so the cache hits
-    /// and we skip the section/Vec-join work in
-    /// `lash_sansio::PromptTemplate::render`.
-    prompt_cache: Arc<lash_sansio::PromptCache>,
     /// Fingerprint of the last model-facing composition emitted to the trace
     /// sink for this resident session. Effect-driver clones share the slot so
     /// a mid-turn execution-environment refresh cannot double-emit it.
@@ -416,10 +410,8 @@ impl Session {
             context_overlay_revision: 0,
             context_tools: Vec::new(),
             tool_registry,
-            context_prompt_contributions: Vec::new(),
             tool_catalog_cache: Arc::new(std::sync::Mutex::new(None)),
             composition_tool_fingerprint_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
-            prompt_cache: Arc::new(lash_sansio::PromptCache::new()),
             composition_trace_fingerprint: Arc::new(std::sync::Mutex::new(None)),
         };
 
@@ -441,12 +433,10 @@ impl Session {
             context_overlay_revision: self.context_overlay_revision,
             context_tools: self.context_tools.clone(),
             tool_registry: Arc::clone(&self.tool_registry),
-            context_prompt_contributions: self.context_prompt_contributions.clone(),
             tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
             composition_tool_fingerprint_cache: Arc::clone(
                 &self.composition_tool_fingerprint_cache,
             ),
-            prompt_cache: Arc::clone(&self.prompt_cache),
             composition_trace_fingerprint: Arc::clone(&self.composition_trace_fingerprint),
         }
     }
@@ -464,13 +454,6 @@ impl Session {
         &self.session_id
     }
 
-    pub(crate) fn protocol_extra_prompt_contributions(&self) -> Vec<PromptContribution> {
-        // Protocol-specific prompt contributions are owned by the protocol
-        // plugins via their
-        // `reg.prompt().contribute(...)` hooks. Nothing to add here.
-        Vec::new()
-    }
-
     pub fn tools(&self) -> Arc<dyn ToolProvider> {
         Arc::clone(&self.tool_registry) as Arc<dyn ToolProvider>
     }
@@ -482,7 +465,6 @@ impl Session {
     pub fn set_context_overlay(
         &mut self,
         tool_providers: Vec<Arc<dyn ToolProvider>>,
-        prompt_contributions: Vec<PromptContribution>,
     ) -> Result<(), crate::PluginError> {
         let tool_providers_unchanged = self.context_tools.len() == tool_providers.len()
             && self
@@ -490,8 +472,6 @@ impl Session {
                 .iter()
                 .zip(&tool_providers)
                 .all(|(current, next)| Arc::ptr_eq(current, next));
-        let overlay_unchanged =
-            self.context_prompt_contributions == prompt_contributions && tool_providers_unchanged;
         let registry = self
             .services
             .plugins
@@ -501,22 +481,13 @@ impl Session {
             .map_err(|err| {
                 crate::PluginError::Session(format!("failed to build session tool registry: {err}"))
             })?;
-        if !overlay_unchanged {
+        if !tool_providers_unchanged {
             self.context_overlay_revision = self.context_overlay_revision.wrapping_add(1);
         }
         self.context_tools = tool_providers;
         self.tool_registry = registry;
-        self.context_prompt_contributions = prompt_contributions;
         *self.tool_catalog_cache.lock_recover() = None;
         Ok(())
-    }
-
-    pub fn prompt_cache(&self) -> Arc<lash_sansio::PromptCache> {
-        Arc::clone(&self.prompt_cache)
-    }
-
-    pub fn context_prompt_contributions(&self) -> &[PromptContribution] {
-        &self.context_prompt_contributions
     }
 
     pub fn history_store(&self) -> Option<crate::store::SessionStore> {
@@ -562,7 +533,6 @@ impl Session {
             tool_catalog: Arc::clone(&tool_catalog),
             plugin_extensions: self.plugins().extensions().clone(),
             trigger_events: self.plugins().triggers().clone(),
-            extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
             writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
         };
         let driver = self.plugins().protocol_driver();
@@ -615,7 +585,6 @@ impl Session {
                 tool_catalog: Arc::clone(&tool_catalog),
                 plugin_extensions: self.plugins().extensions().clone(),
                 trigger_events: self.plugins().triggers().clone(),
-                extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
                 writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
             });
         let handle = ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
@@ -644,7 +613,6 @@ impl Session {
                     tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
                     plugin_extensions: self.plugins().extensions().clone(),
                     trigger_events: self.plugins().triggers().clone(),
-                    extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
                     writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
                 });
         preamble.config.sync_execution_environment = true;
@@ -853,7 +821,6 @@ impl Session {
 
     pub fn invalidate_runtime_caches(&self) {
         *self.tool_catalog_cache.lock_recover() = None;
-        self.prompt_cache.clear();
     }
 
     pub async fn refresh_tool_catalog(&mut self) -> Result<(), SessionError> {

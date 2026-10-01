@@ -18,8 +18,8 @@ The host submits through `LashSession::send`. The engine endpoint runs the
 production session driver and process worker. The scripted model returns a
 TypeScript cell that starts a child waiting for a signal, with the process
 plugin's `lifetime::starter` policy. PostgreSQL must record `Until(Turn)`.
-A fixture prompt contribution raises typed `StoreCommitFailed` while rebuilding
-the next execution environment after the child starts. Restate pauses after
+A fixture checkpoint hook raises typed `StoreCommitFailed` at the checkpoint
+after the work that starts the child. Restate pauses after
 the turn handler's existing eight-attempt bound, with 50 ms retry intervals;
 the production recovery tick records the engine park.
 Repair removes the fault. Redrive serves the recorded first cell and model

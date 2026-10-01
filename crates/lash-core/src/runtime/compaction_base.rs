@@ -27,8 +27,8 @@ fn compaction_base_replay_key(ordinal: u32) -> String {
 }
 
 impl LashRuntime {
-    /// Record the base the compaction running under `controller` summarizes,
-    /// as one recorded step, and adopt it as the resident session.
+    /// Record the base the `ordinal`th compaction of `controller`'s run
+    /// summarizes, as one recorded step, and adopt it as the resident session.
     ///
     /// The first execution records the resident head and frame. A replay
     /// adopts the recorded head through
@@ -38,8 +38,8 @@ impl LashRuntime {
     pub(in crate::runtime) async fn adopt_recorded_compaction_base(
         &mut self,
         controller: &ScopedEffectController<'_>,
+        ordinal: u32,
     ) -> Result<CompactionBase, RuntimeError> {
-        let ordinal = controller.next_compaction_ordinal();
         let session_id = self.state.session_id.clone();
         let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(

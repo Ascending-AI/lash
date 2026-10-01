@@ -263,15 +263,6 @@ pub(crate) fn submit_error_tool_result(args: &Value) -> ToolOutcome {
     ToolOutcome::ok(args.clone()).with_control(lash_core::ToolControl::Fail { failure })
 }
 
-/// Under the flat catalog, tool-list notes are ordinary prompt contributions authored by the
-/// host, not a catalog property.
-pub(crate) fn subagent_capability_note(authority: &SubagentSessionContext) -> String {
-    format!(
-        "Subagent capability: {}. Depth: {}/{}.",
-        authority.capability, authority.depth, authority.max_depth
-    )
-}
-
 pub(crate) fn finalise_tool_result(result: Result<Value, String>) -> ToolOutcome {
     match result {
         Ok(value) => ToolOutcome::ok(value),

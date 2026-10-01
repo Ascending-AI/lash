@@ -19,9 +19,8 @@ use crate::llm::types::LlmToolSpec;
 use crate::{
     AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord, MediaType, Message,
     MessageSequence, ModelEffortValidationCategory, ModelToolReturn, ModelToolReturnPart,
-    PromptContribution, PromptFingerprint, ProtocolEvent, SessionAppendNode, ToolCancellation,
-    ToolCatalog, ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest,
-    ToolRetryPolicy, ToolValue,
+    ProtocolEvent, SessionAppendNode, ToolCancellation, ToolCatalog, ToolContract, ToolDefinition,
+    ToolFailure, ToolFailureClass, ToolId, ToolManifest, ToolRetryPolicy, ToolValue,
 };
 
 /// Reserved BLAKE3 domains used by workspace hash owners. Entries are
@@ -270,12 +269,7 @@ pub trait ToolCatalogCoreSupport: Sized {
         contracts: BTreeMap<ToolId, Arc<ToolContract>>,
     ) -> Result<Self, crate::ToolCatalogBuildError>;
     fn tool_names(&self) -> Arc<Vec<String>>;
-    fn tool_names_fingerprint(&self) -> PromptFingerprint;
     fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>>;
-    fn filter_prompt_contributions(
-        &self,
-        contributions: Vec<PromptContribution>,
-    ) -> Vec<PromptContribution>;
 }
 
 #[doc(hidden)]
@@ -295,19 +289,8 @@ impl ToolCatalogCoreSupport for ToolCatalog {
         ToolCatalog::tool_names(self)
     }
 
-    fn tool_names_fingerprint(&self) -> PromptFingerprint {
-        ToolCatalog::tool_names_fingerprint(self)
-    }
-
     fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>> {
         ToolCatalog::model_tool_specs(self)
-    }
-
-    fn filter_prompt_contributions(
-        &self,
-        contributions: Vec<PromptContribution>,
-    ) -> Vec<PromptContribution> {
-        ToolCatalog::filter_prompt_contributions(self, contributions)
     }
 }
 

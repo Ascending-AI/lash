@@ -206,8 +206,8 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
                 .session(id.clone())
                 .create(crate::SessionCreation {
                     parent: parent.map(Into::into),
-                    plugin_options,
-                    ..Default::default()
+                    spec: lash_core::facade_support::SessionSpec::new()
+                        .plugin_options(plugin_options),
                 })
                 .await?;
             let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;

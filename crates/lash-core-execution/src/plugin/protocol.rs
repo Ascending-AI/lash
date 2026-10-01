@@ -82,6 +82,48 @@ pub trait ProtocolSessionPlugin: Send + Sync {
     ) -> Result<Option<Arc<str>>, crate::SessionError> {
         Ok(None)
     }
+
+    /// Render the session's system prompt (FIG-4586). The prompt is the
+    /// protocol plugin's own: its host data is the plugin's recorded
+    /// namespace in [`SystemPromptContext::plugin_config`], and its shape,
+    /// built-in text and section order are the plugin's.
+    ///
+    /// The runtime calls this only where the text becomes a recorded value:
+    /// the journaled execution-environment sync of a turn, and the recorded
+    /// render step of a compaction. A replay serves the recorded text and
+    /// never calls this again, so a fresh render may use current code.
+    /// The default is a protocol with no system prompt.
+    async fn render_system_prompt(
+        &self,
+        _ctx: SystemPromptContext<'_>,
+    ) -> Result<Arc<str>, crate::SessionError> {
+        Ok(Arc::from(""))
+    }
+}
+
+/// What a system-prompt render is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemPromptPurpose {
+    /// A turn's model call: the whole prompt.
+    Turn,
+    /// A compaction's summarizer call. Its request ships no tools, so the
+    /// render leaves out the tools and the execution prose.
+    Compaction,
+}
+
+/// What a protocol plugin renders its system prompt from: recorded data only.
+#[derive(Clone, Copy)]
+pub struct SystemPromptContext<'a> {
+    /// The plugin configuration the running root was admitted under, or the
+    /// head's for a compaction no root runs. Never the plugin's construction
+    /// options: config commands change the prompt between roots.
+    pub plugin_config: &'a super::AdmittedPluginConfig,
+    /// The tool surface the render describes: the turn's pinned catalog, and
+    /// an empty one for a compaction.
+    pub tool_catalog: &'a crate::ToolCatalog,
+    /// The session's recorded subagent authority, when it is a subagent.
+    pub subagent: Option<&'a crate::SubagentSessionContext>,
+    pub purpose: SystemPromptPurpose,
 }
 
 /// The protocol-owned inputs needed to restore a session.

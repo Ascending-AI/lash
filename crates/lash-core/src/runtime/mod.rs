@@ -12,6 +12,7 @@ pub use host_commands::{
     SESSION_COMMAND_STAGED_PHASE, request_plugin_task_cancel,
 };
 mod compaction_base;
+mod compaction_prompt;
 mod decoded_outcome;
 pub(crate) use decoded_outcome::DecodedEffectOutcome;
 pub use lash_core_execution::runtime::attachment_delivery;
@@ -151,9 +152,9 @@ use crate::session_model::{
     TokenUsage, make_error_event, reassign_part_ids, shared_parts, transport_stream_events,
 };
 use crate::{
-    CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, PromptHookContext,
-    RuntimeServices, Session, SessionCreateRequest, SessionError, SessionHandle, SessionSnapshot,
-    TurnFinish, TurnOutcome, TurnStop,
+    CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices,
+    Session, SessionCreateRequest, SessionError, SessionHandle, SessionSnapshot, TurnFinish,
+    TurnOutcome, TurnStop,
 };
 use crate::{Effect, TurnMachine};
 

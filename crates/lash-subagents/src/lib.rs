@@ -148,24 +148,9 @@ impl PluginFactory for SubagentsPluginFactory {
             .into_provider(),
         );
 
-        let subagent_authority = ctx.subagent.clone();
         PluginSpecFactory::new(
             "subagents",
-            Arc::new(move |_ctx| {
-                let mut spec = PluginSpec::new().with_tool_provider(Arc::clone(&provider));
-                if let Some(authority) = subagent_authority.clone() {
-                    let note = rlm_support::subagent_capability_note(&authority);
-                    spec = spec.with_prompt_contributor(Arc::new(move |_ctx| {
-                        let note = note.clone();
-                        Box::pin(async move {
-                            Ok(vec![lash_core::PromptContribution::execution(
-                                "Subagent", note,
-                            )])
-                        })
-                    }));
-                }
-                Ok(spec)
-            }),
+            Arc::new(move |_ctx| Ok(PluginSpec::new().with_tool_provider(Arc::clone(&provider)))),
         )
         .build(ctx)
     }

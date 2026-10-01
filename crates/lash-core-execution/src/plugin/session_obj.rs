@@ -473,23 +473,6 @@ impl PluginSession {
         Ok(None)
     }
 
-    pub async fn collect_prompt_contributions(
-        &self,
-        ctx: PromptHookContext,
-    ) -> Result<Vec<PromptContribution>, PluginError> {
-        Ok(collect_owned_async(
-            &self.contributions.prompt_contributors,
-            ctx,
-            "prompt_contributor",
-            None,
-            |hook, ctx| hook(ctx),
-        )
-        .await?
-        .into_iter()
-        .map(|owned| owned.value)
-        .collect())
-    }
-
     pub async fn before_turn(
         &self,
         ctx: TurnHookContext,

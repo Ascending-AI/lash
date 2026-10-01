@@ -74,21 +74,16 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
         // The recorded catalog is sufficient to rebuild the prompt without consulting the peer.
         let recorded = serde_json::to_vec(catalog.as_ref()).expect("record catalog");
         let catalog = serde_json::from_slice(&recorded).expect("restore catalog");
-        let preamble = session
-            .protocol_driver()
-            .build_preamble(lash_core::ProtocolBuildInput {
-                tool_catalog: Arc::new(catalog),
-                plugin_extensions: Default::default(),
-                trigger_events: Default::default(),
-                extra_prompt_contributions: Vec::new(),
-                writer_formats: lash_core::build_newest_writer_formats(),
-            });
-        let prompt = lash_core::PromptTemplate::default().render(&lash::prompt::PromptContext {
-            execution_title: preamble.execution_title,
-            execution_prompt: preamble.execution_prompt,
-            tool_names: preamble.tool_names,
-            contributions: Arc::new(preamble.prompt_contributions),
-        });
+        let prompt = session
+            .protocol_session()
+            .render_system_prompt(lash::plugins::SystemPromptContext {
+                plugin_config: &session.admitted_plugin_config(),
+                tool_catalog: &catalog,
+                subagent: None,
+                purpose: lash::plugins::SystemPromptPurpose::Turn,
+            })
+            .await
+            .expect("the protocol renders its system prompt");
         observations.push((surface, prompt.matches(INSTRUCTIONS).count()));
     }
     factory.shutdown().await.expect("peer shutdown");

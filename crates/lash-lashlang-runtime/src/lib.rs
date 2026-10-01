@@ -1523,10 +1523,7 @@ pub use bridge::{
 };
 pub use catalogue_preview::{
     CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
-    DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, catalogue_preview_contribution,
-    catalogue_preview_contribution_for_entries,
-    catalogue_preview_contribution_for_entries_with_options,
-    catalogue_preview_contribution_for_manifests, catalogue_preview_contribution_with_options,
+    DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, catalogue_preview,
     catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
     catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
 };

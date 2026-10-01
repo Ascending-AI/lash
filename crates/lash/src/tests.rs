@@ -3,7 +3,7 @@ use crate::support::SessionSpec;
 use crate::support::SessionWorkEngine;
 use crate::support::{
     Arc, CancellationToken, DeploymentStore, EmbedError, LashCore, PluginFactory, ProcessRegistry,
-    PromptLayerSink, Result, RunActivityCollector, RuntimeSessionState, SessionError,
+    Result, RunActivityCollector, RuntimeSessionState, SessionError,
     SessionObservationSubscription, SessionResume, StaticPluginFactory, StdMutex, ToolProvider,
     TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport,
     async_trait, message_text,
@@ -16,7 +16,6 @@ use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, SessionGraphFacadeOps, SessionNodeProjection, ToolStateFacadeOps,
 };
 use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
-use lash_core::{PromptContribution, PromptSlot, PromptTemplate};
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::VecDeque;
@@ -1196,8 +1195,8 @@ mod output_retention;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;
-mod recorded_core_prompt;
 mod recorded_execution_controls;
+mod recorded_protocol_prompt;
 mod recorded_request_defaults;
 #[cfg(feature = "rlm")]
 mod redrive_residue;

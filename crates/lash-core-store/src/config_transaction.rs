@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The owner id of the session's core config: model, reasoning, attachment
-/// acceptance, prompt, generation, the execution controls and tool access.
+/// acceptance, generation, the execution controls and tool access.
 /// No plugin may register it.
 pub const CORE_CONFIG_OWNER: &str = "core";
 
@@ -45,10 +45,6 @@ pub struct CoreConfig {
     pub autonomous: bool,
     pub no_progress_budget: crate::NoProgressBudget,
     pub charge_safety: crate::ChargeSafetyPolicy,
-    /// `None` only for a head written before prompt persistence existed; a
-    /// command that changes the prompt records `Some`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<crate::PromptLayer>,
     pub generation: crate::GenerationOptions,
     pub tool_access: crate::SessionToolAccess,
 }
@@ -63,7 +59,6 @@ impl CoreConfig {
             autonomous: config.autonomous,
             no_progress_budget: config.no_progress_budget,
             charge_safety: config.charge_safety.clone(),
-            prompt: config.prompt.clone(),
             generation: config.generation.clone(),
             tool_access: config.tool_access.clone(),
         }
@@ -77,15 +72,8 @@ impl CoreConfig {
         config.autonomous = self.autonomous;
         config.no_progress_budget = self.no_progress_budget;
         config.charge_safety = self.charge_safety.clone();
-        config.prompt = self.prompt.clone();
         config.generation = self.generation.clone();
         config.tool_access = self.tool_access.clone();
-    }
-
-    /// The prompt layer a prompt command edits: the recorded one, or an
-    /// empty layer for a head that recorded none.
-    pub fn prompt_layer(&self) -> crate::PromptLayer {
-        self.prompt.clone().unwrap_or_default()
     }
 }
 

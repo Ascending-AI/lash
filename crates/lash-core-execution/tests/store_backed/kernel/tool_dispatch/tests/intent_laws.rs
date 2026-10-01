@@ -1413,13 +1413,17 @@ async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_ou
 #[tokio::test]
 async fn an_attempt_holds_its_large_captured_environment_before_realizing_a_start() {
     let world = intent_law_world().await;
-    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-    policy.prompt = crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
-        crate::PromptSlot::ProjectInstructions,
-        "instructions",
-        "x".repeat(128 * 1024),
-    ));
-    let spec = crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
+    // A captured environment as large as a session with 128 KiB of recorded
+    // protocol prompt.
+    let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+    plugin_config.insert(
+        "protocol",
+        serde_json::json!({ "prompt": { "instructions": ["x".repeat(128 * 1024)] } }),
+    );
+    let spec = crate::ProcessExecutionEnvSpec::new(
+        crate::AdmittedPluginConfig::new(plugin_config, 0),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
     let env_ref = spec.stable_ref().expect("captured digest");
     let intent = crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
         owner: crate::RuntimeOwner::Session(SessionId::from("session")),

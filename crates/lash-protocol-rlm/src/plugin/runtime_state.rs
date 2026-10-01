@@ -55,14 +55,35 @@ impl RlmRuntimeState {
         )))
     }
 
-    pub(crate) async fn projected_binding_prompt_contributions(
+    /// The system prompt over the session's current bindings.
+    pub(crate) async fn system_prompt(
         &self,
-    ) -> Vec<lash_core::PromptContribution> {
+        behaviour: &crate::system_prompt::RlmSystemPromptBehaviour<'_>,
+        prompt: &lash_rlm_types::RlmPrompt,
+        tool_catalog: &lash_core::ToolCatalog,
+        subagent: Option<&lash_core::SubagentSessionContext>,
+        scope: crate::system_prompt::RlmSystemPromptScope,
+    ) -> Arc<str> {
         let bindings = self.session_projected_bindings.lock().await;
-        RlmProjectionExtension::prompt_contributions_for(
-            &bindings,
-            self.dialect.prompt_vocabulary(),
-        )
+        Arc::from(crate::system_prompt::render_system_prompt(
+            &self.dialect,
+            behaviour,
+            crate::system_prompt::RlmSystemPromptInput {
+                prompt,
+                tool_catalog,
+                bindings: &bindings,
+                subagent,
+            },
+            scope,
+        ))
+    }
+
+    /// The declaration of the session's read-only variables, as its system
+    /// prompt renders it.
+    #[cfg(test)]
+    pub(crate) async fn read_only_variables_prompt(&self) -> Option<String> {
+        let bindings = self.session_projected_bindings.lock().await;
+        crate::projection::read_only_variables_prompt(&bindings, self.dialect.prompt_vocabulary())
     }
 
     /// Render the current bound-variables view on demand.
@@ -988,8 +1009,8 @@ mod tests {
         crate::projection::rlm_seed_initial_nodes(seed)
     }
 
-    fn projected_binding_names(contributions: &[lash_core::PromptContribution]) -> Vec<String> {
-        let rendered = format!("{contributions:?}");
+    fn projected_binding_names(declaration: &Option<String>) -> Vec<String> {
+        let rendered = declaration.clone().unwrap_or_default();
         ["projected_seed", "projected_discarded"]
             .into_iter()
             .filter(|name| rendered.contains(name))
@@ -1019,7 +1040,7 @@ mod tests {
                     )
                     .await
                     .expect("first restore binds the seed");
-                let first = state.projected_binding_prompt_contributions().await;
+                let first = state.read_only_variables_prompt().await;
                 assert_eq!(projected_binding_names(&first), ["projected_seed"]);
 
                 state
@@ -1029,7 +1050,7 @@ mod tests {
                     )
                     .await
                     .expect("a same-frame restore re-binds the seed it already holds");
-                let second = state.projected_binding_prompt_contributions().await;
+                let second = state.read_only_variables_prompt().await;
                 assert_eq!(
                     format!("{second:?}"),
                     format!("{first:?}"),
@@ -1061,13 +1082,13 @@ mod tests {
                     )
                     .await
                     .expect("restore binds the durable seed");
-                let durable = state.projected_binding_prompt_contributions().await;
+                let durable = state.read_only_variables_prompt().await;
 
                 state
                     .append_session_nodes(&projected_seed_nodes("discarded"))
                     .await
                     .expect("the append binds the pending seed");
-                let pending = state.projected_binding_prompt_contributions().await;
+                let pending = state.read_only_variables_prompt().await;
                 assert_eq!(
                     projected_binding_names(&pending),
                     ["projected_seed", "projected_discarded"]
@@ -1080,7 +1101,7 @@ mod tests {
                     )
                     .await
                     .expect("rolling back to the durable view on the same frame succeeds");
-                let rolled_back = state.projected_binding_prompt_contributions().await;
+                let rolled_back = state.read_only_variables_prompt().await;
                 assert_eq!(
                     format!("{rolled_back:?}"),
                     format!("{durable:?}"),

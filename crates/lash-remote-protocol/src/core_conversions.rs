@@ -22,7 +22,6 @@ mod llm;
 mod model_request_defaults;
 mod observations;
 mod processes;
-mod prompt;
 mod queued_events;
 mod tool_result;
 mod tools;

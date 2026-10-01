@@ -383,10 +383,7 @@ impl LashRuntime {
         let messages = prepared_context.messages;
         if let Some(session) = self.session.as_mut() {
             session
-                .set_context_overlay(
-                    prepared_context.tool_providers,
-                    prepared_context.prompt_contributions,
-                )
+                .set_context_overlay(prepared_context.tool_providers)
                 .map_err(|err| {
                     RuntimeError::new(RuntimeErrorCode::SessionToolRegistry, err.to_string())
                 })?;

@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-A session records its config with its head: the core model, prompt,
+A session records its config with its head: the core model,
 generation, attachment acceptance, tool access, the execution controls
 (turn budget, autonomy, no-progress budget and charge safety; FIG-4376), and
 one namespace per installed plugin, the protocol's included (FIG-4379,
@@ -37,12 +37,17 @@ A reducer is a pure function from the recorded namespace and the command to
 the next namespace and the command's output. It sees immutable facts only. A
 setting with no command cannot change after creation. Core config is owned
 by the reserved `core` owner, whose commands include `SetModel`,
-`SetReasoning`, `SetAttachmentAcceptance`, the prompt commands,
+`SetReasoning`, `SetAttachmentAcceptance`,
 `SetGeneration`, `SetToolAccess`, `SetTurnBudget`, `SetAutonomy`,
 `SetNoProgressBudget` and `SetChargeSafety`. `SetChargeSafety` refuses a
 policy accepting more unsafe retries than the provider handle ever buys. The
 RLM and standard protocols register one render command each
-(`SetRlmRender`, `SetStandardRender`).
+(`SetRlmRender`, `SetStandardRender`) and its prompt commands
+(`SetRlmPrompt` and `SetRlmPromptContext`, `SetStandardPrompt` and
+`SetStandardPromptContext`). The system prompt has no core command: it is
+the protocol's recorded config (ADR 0030, FIG-4589). An owner also validates
+the raw options a run states, and refuses a payload that carries the
+session's prompt.
 
 `SetModel` carries an opaque `ModelKey` (FIG-4374). Its reducer is the one
 core reducer that reads more than the recorded namespace: it asks the host's
@@ -131,7 +136,7 @@ recorded namespace or a caller-minted replacement.
 ## Consequences
 
 - `SessionConfigPatch`, `ApplyConfigPatch`, `SessionConfigAdmin::update`, the
-  prompt and tool-access setters, the raw protocol-options setters and
+  tool-access setters, the raw protocol-options setters and
   `PluginFactory::{resolve_session_config, patch_session_config}` are gone.
 - An unknown model key and a reasoning selection the recorded model does not
   support are refused at resolution and settle as a typed `Refused` outcome

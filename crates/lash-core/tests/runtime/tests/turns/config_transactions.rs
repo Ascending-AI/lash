@@ -1,8 +1,6 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::plugin::config::core::{
-    SetGeneration, SetModel, SetPrompt, SetPromptTemplate, SetTurnBudget,
-};
+use lash_core::plugin::config::core::{SetAutonomy, SetGeneration, SetModel, SetTurnBudget};
 
 const SEED: u64 = 0x5_f420;
 
@@ -496,14 +494,9 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
 
     assert_eq!(observed.lock().await.len(), 3);
 
-    let prompt = lash_core::PromptLayer::new().with_contribution(
-        lash_core::PromptContribution::guidance("Patch", "prompt-only session config"),
-    );
     apply(
         &mut runtime,
-        lash_core::ConfigTransaction::of(SetPrompt {
-            prompt: prompt.clone(),
-        }),
+        lash_core::ConfigTransaction::of(SetAutonomy { autonomous: true }),
     )
     .await;
 
@@ -523,14 +516,10 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
 
     assert_eq!(observed.lock().await.len(), 5);
 
-    let helper_template =
-        lash_core::PromptTemplate::new(vec![lash_core::PromptTemplateSection::untitled(vec![
-            lash_core::PromptTemplateEntry::text("prompt helper template"),
-        ])]);
     apply(
         &mut runtime,
-        lash_core::ConfigTransaction::of(SetPromptTemplate {
-            template: helper_template.clone(),
+        lash_core::ConfigTransaction::of(SetTurnBudget {
+            turn_budget: lash_core::TurnBudget::bounded(9),
         }),
     )
     .await;
@@ -565,16 +554,17 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
     );
     let (previous, current) = &changes[3];
     assert_eq!(key(previous), "combined-model");
-    assert_eq!(current.prompt, prompt);
+    assert!(!previous.autonomous);
+    assert!(current.autonomous);
     let (previous, current) = &changes[4];
-    assert_eq!(previous.prompt, prompt);
+    assert!(previous.autonomous);
     assert_eq!(current.generation, generation);
     let (previous, current) = &changes[5];
     assert_eq!(previous.generation, generation);
     assert_eq!(
-        current.prompt.template,
-        Some(helper_template),
-        "prompt template commands emit SessionConfigChanged"
+        current.turn_budget,
+        lash_core::TurnBudget::bounded(9),
+        "every core command emits SessionConfigChanged"
     );
 }
 

@@ -5,7 +5,6 @@
 
 use crate::dialect::SessionDialect;
 
-use crate::native::prompt::execution_section;
 use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
 
 fn catalog() -> lash_core::ToolCatalog {
@@ -85,18 +84,31 @@ fn system_with(
         images: enabled,
         decomposition: enabled,
     };
-    let execution = if native {
-        execution_section(dialect, features, &catalog, None)
-    } else {
-        dialect
-            .render_execution_section(features, &catalog, crate::plugin::RlmChannel::Cell, None)
-            .unwrap()
-    };
-    lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
-        execution_title: dialect.prompt_vocabulary().execution_title.into(),
-        execution_prompt: execution.into(),
-        ..Default::default()
-    })
+    crate::system_prompt::render_system_prompt(
+        dialect,
+        &crate::system_prompt::RlmSystemPromptBehaviour {
+            channel: if native {
+                crate::plugin::RlmChannel::NativeTool
+            } else {
+                crate::plugin::RlmChannel::Cell
+            },
+            prompt_features: features,
+            discovery: None,
+        },
+        crate::system_prompt::RlmSystemPromptInput {
+            prompt: &lash_rlm_types::RlmPrompt::default(),
+            tool_catalog: &catalog,
+            bindings: &crate::projection::RlmProjectedBindings::new(),
+            subagent: None,
+        },
+        crate::system_prompt::RlmSystemPromptScope::Turn,
+    )
+}
+
+/// The `## Guidance` section of a rendered prompt, up to the next section.
+fn guidance(prompt: &str) -> &str {
+    let after = prompt.split_once("## Guidance").unwrap().1;
+    after.split_once("\n## ").map_or(after, |(body, _)| body)
 }
 
 #[test]
@@ -145,18 +157,15 @@ fn prompt_diet_sizes_and_capability_gates() {
 
 #[test]
 fn mode_independent_header_and_guidance_are_identical() {
-    let standard = lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
-        execution_prompt: "Use direct tool calls.".into(),
-        ..Default::default()
-    });
+    let cell = system(&dialect(false), false, false);
     for native in [false, true] {
         {
             let prompt = system(&dialect(false), native, false);
-            assert_eq!(prompt.lines().next(), standard.lines().next());
             assert_eq!(
-                prompt.split_once("## Guidance").unwrap().1,
-                standard.split_once("## Guidance").unwrap().1
+                prompt.lines().next(),
+                Some(crate::system_prompt::RLM_BUILTIN_INTRO)
             );
+            assert_eq!(guidance(&prompt), guidance(&cell));
         }
     }
 }
@@ -359,6 +368,7 @@ fn prompt_section_order_and_termination_have_one_owner() {
                 "### Response shape"
             };
             let expected = vec![
+                "## Guidance",
                 "## TypeScript execution",
                 transport,
                 if native {
@@ -368,7 +378,6 @@ fn prompt_section_order_and_termination_have_one_owner() {
                 },
                 "### Host API",
                 "### Tools",
-                "## Guidance",
             ];
             assert_eq!(headings, expected, "native={native}");
             assert_eq!(
@@ -431,7 +440,8 @@ fn each_host_capability_gates_its_own_vocabulary() {
                     surface,
                 );
                 let text = if native {
-                    execution_section(&dialect, features, &catalog, None)
+                    crate::native::prompt::execution_section(&dialect, features, &catalog, None)
+                        .joined()
                 } else {
                     dialect
                         .render_execution_section(

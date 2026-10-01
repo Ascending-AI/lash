@@ -57,12 +57,23 @@ so a worker with another policy assembles the same terminal for a turn whose
 stream ended without `Done`. The policy stays host configuration: a change
 reaches roots that start after it.
 
-The core's prompt is recorded the same way as the rest of the configuration.
-The session records the creating core's prompt layer (`core_prompt`) and
-renders it beneath its own `prompt`. The core builder's prompt setters only
-seed creation, and a child inherits its parent's recorded layer. A prompt
-sync that runs after a worker change therefore builds what the root recorded
-(FIG-4397).
+The system prompt is recorded the same way as the rest of the configuration.
+It is the protocol plugin's: core has no prompt type. A session's protocol
+namespace records its prompt config when the session is created, from the
+plugin creation options of the session's `SessionSpec` laid over the creating
+core's default spec, and the protocol's prompt commands change it for the
+roots after them (ADR 0126). The protocol renders the system prompt from the
+namespace the running root was admitted under, and the render is a recorded
+step: a redrive is served the recorded text and renders nothing. A child
+created by its parent copies the parent's recorded prompt config, and a
+process carries the recorded plugin config of its starter. A run's options
+cannot state a prompt: a run-options payload that carries one is refused,
+typed (FIG-4589).
+
+A compaction's summarizer call carries the prompt the same protocol renders
+for it, without tool or execution prose since the call ships no tools. That
+text is recorded before the call on every compaction path (commanded,
+context pressure and overflow recovery), so a redrive replays it.
 
 The opener owns only the session binding: the store and the worker wiring
 it runs on. An open, including the engine's own reopen, overrides no recorded

@@ -317,6 +317,14 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 ..Default::default()
             }),
     )
+    .session_plugin(
+        lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+        lash::rlm::RlmCreateExtras {
+            prompt: Some(workbench_rlm_prompt(&mail_world, &deferred_tools)),
+            ..Default::default()
+        },
+    )
+    .context("encode the workbench prompt")?
     .model(selection.key())
     .reasoning(selection.reasoning())
     .attachment_acceptance(Arc::new(workbench_attachment_acceptance()));

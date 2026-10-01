@@ -84,8 +84,8 @@ impl WorkbenchDeferredTools {
         reason = "workbench_deferred_definitions() always returns at least one tool, so the \
                   preview builder's empty-catalogue refusal cannot fire"
     )]
-    pub(crate) fn preview_contribution(&self) -> lash::prompt::PromptContribution {
-        lash::tools::catalogue_preview_contribution_for_entries_with_options(
+    pub(crate) fn preview(&self) -> String {
+        lash::tools::catalogue_preview(
             lash::tools::catalogue_preview_entries_from_manifests(
                 self.catalogue
                     .definitions
@@ -94,9 +94,8 @@ impl WorkbenchDeferredTools {
                     .collect::<Vec<_>>()
                     .iter(),
             ),
-            CataloguePreviewOptions {
+            &CataloguePreviewOptions {
                 title: "Deferred workbench utilities".to_string(),
-                search_tool_name: SEARCH_TOOL_NAME.to_string(),
                 search_call_path: SEARCH_CALL_PATH.to_string(),
                 module_limit: PREVIEW_MODULE_LIMIT,
                 call_name_limit: PREVIEW_CALL_NAME_LIMIT,
@@ -803,16 +802,12 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let preview = tools.preview_contribution();
-        let repeated = tools.preview_contribution();
-        assert_eq!(preview.content, repeated.content);
-        assert!(
-            preview.content.contains("Modules: 3 total"),
-            "{}",
-            preview.content
-        );
-        assert!(!preview.content.contains("Catalogued calls:"));
-        assert_eq!(preview.gate.tools, vec![SEARCH_TOOL_NAME.to_string()]);
+        let preview = tools.preview();
+        let repeated = tools.preview();
+        assert_eq!(preview, repeated);
+        assert!(preview.contains("Modules: 3 total"), "{preview}");
+        assert!(!preview.contains("Catalogued calls:"));
+        assert!(preview.contains(SEARCH_CALL_PATH), "{preview}");
     }
 
     #[test]
@@ -835,7 +830,7 @@ mod tests {
             .compact_contract()
             .render_markdown()
             .len()
-            + tools.preview_contribution().content.len();
+            + tools.preview().len();
         assert!(
             deferred_bytes < resident_bytes,
             "deferred surface {deferred_bytes} bytes must be smaller than resident {resident_bytes} bytes"

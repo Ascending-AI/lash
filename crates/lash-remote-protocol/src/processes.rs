@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::prompt::RemotePromptLayer;
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::turn_input::RemoteTurnInput;
 use crate::turn_result::RemoteCausalRef;

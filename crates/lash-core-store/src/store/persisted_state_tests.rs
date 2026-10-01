@@ -19,13 +19,11 @@ fn persisted_state_hydrates_the_recorded_model_without_live_rebinding() {
             autonomous: false,
             no_progress_budget: crate::NoProgressBudget::default(),
             charge_safety: crate::ChargeSafetyPolicy::default(),
-            prompt: Some(crate::PromptLayer::new()),
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
             config_revision: 0,
             plugin_config: crate::PluginConfig::default(),
-            core_prompt: crate::PromptLayer::new(),
         },
         None,
     )

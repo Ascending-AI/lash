@@ -177,10 +177,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // the fault as a failed turn.
                 let (result, tool_surface) = match runner
                     .driver
-                    .refresh_execution_environment(
-                        runner.messages.clone(),
-                        runner.protocol_iteration,
-                    )
+                    .refresh_execution_environment(runner.protocol_iteration)
                     .await
                 {
                     Ok((sync, tool_surface)) => (Ok(Some(sync)), tool_surface),

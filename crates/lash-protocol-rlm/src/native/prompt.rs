@@ -1,4 +1,4 @@
-use crate::dialect::SessionDialect;
+use crate::dialect::{ExecutionSection, SessionDialect};
 use crate::plugin::RlmChannel;
 use lash_rlm_types::RlmTermination;
 
@@ -19,15 +19,21 @@ pub(crate) fn execution_section(
     features: crate::protocol::RlmPromptFeatures,
     catalog: &lash_core::ToolCatalog,
     discovery: Option<&lash_core::ToolDiscovery>,
-) -> String {
+) -> ExecutionSection {
     let tags = dialect.cell_tags();
-    dialect
-        .render_execution_section(features, catalog, RlmChannel::NativeTool, discovery)
-        .expect("validated dialect catalog")
-        .lines()
-        .filter(|line| ![tags.open, tags.close].contains(&line.trim()))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let without_tag_lines = |text: String| {
+        text.lines()
+            .filter(|line| ![tags.open, tags.close].contains(&line.trim()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let section = dialect
+        .execution_section(features, catalog, RlmChannel::NativeTool, discovery)
+        .expect("validated dialect catalog");
+    ExecutionSection {
+        prose: without_tag_lines(section.prose),
+        declarations: without_tag_lines(section.declarations),
+    }
 }
 
 pub(super) fn finalization(dialect: &SessionDialect, termination: &RlmTermination) -> String {

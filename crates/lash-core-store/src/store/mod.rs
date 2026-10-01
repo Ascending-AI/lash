@@ -237,8 +237,6 @@ pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 11;
 pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 12;
 
 #[cfg(test)]
-mod prompt_persistence_compat_tests;
-
 #[cfg(test)]
 mod guarded_surface_tests;
 #[cfg(test)]

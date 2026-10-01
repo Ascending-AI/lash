@@ -330,12 +330,6 @@ mod recorded_execution_controls_live {
         live_harness("recorded-controls-redrive").await
     }; (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
 
-    lash_conformance::turn_config_tests!(@law [
-        #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-    ] {
-        live_harness("recorded-core-prompt-redrive").await
-    }; (a_redrive_builds_the_core_prompt_its_root_recorded, "turn-config-recorded-core-prompt-redrive"));
-
     // FIG-4389's recorded termination law beside it: the redrive assembles
     // the terminal the root's recorded policy decides.
     lash_conformance::turn_config_tests!(@law [

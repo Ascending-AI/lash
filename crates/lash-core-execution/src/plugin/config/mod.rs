@@ -2,7 +2,7 @@
 //!
 //! A session records every installed owner's config namespace with its
 //! config head, the protocol's among them, beside the core owner's share
-//! (model, reasoning, attachment acceptance, prompt, generation, budget and
+//! (model, reasoning, attachment acceptance, generation, budget and
 //! tool access). Each
 //! namespace has one owner:
 //!
@@ -108,6 +108,15 @@ pub trait ConfigOwner: Send + Sync + 'static {
         base: Option<&Self::Recorded>,
         facts: &CandidateFacts<'_>,
     ) -> Result<(), Self::Refusal>;
+
+    /// Judge the raw options a run states for this owner's namespace, before
+    /// they are laid over it. A protocol's run options are their own typed
+    /// shape, narrower than its recorded namespace: what only creation or a
+    /// config command may set (its prompt config, FIG-4589) is refused here,
+    /// whatever value the run states for it. The default admits everything.
+    fn validate_run_options(&self, _options: &serde_json::Value) -> Result<(), Self::Refusal> {
+        Ok(())
+    }
 }
 
 /// One allowed change to an owner's namespace.
@@ -312,6 +321,11 @@ trait ErasedOwner: Send + Sync {
         base: Option<&serde_json::Value>,
         facts: &CandidateFacts<'_>,
     ) -> Result<(), ConfigRefusal>;
+    fn validate_run_options(
+        &self,
+        owner_id: &str,
+        options: &serde_json::Value,
+    ) -> Result<(), ConfigRefusal>;
 }
 
 trait ErasedCommand: Send + Sync {
@@ -437,6 +451,16 @@ impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
             })?;
         self.0
             .validate(&value, base.as_ref(), facts)
+            .map_err(|refusal| owner_refusal(owner_id, &refusal))
+    }
+
+    fn validate_run_options(
+        &self,
+        owner_id: &str,
+        options: &serde_json::Value,
+    ) -> Result<(), ConfigRefusal> {
+        self.0
+            .validate_run_options(options)
             .map_err(|refusal| owner_refusal(owner_id, &refusal))
     }
 }
@@ -1007,12 +1031,24 @@ impl ConfigRegistry {
     /// Validate a root's config that a run override derived from the
     /// session's `base`: every namespace the override changed is judged by
     /// its owner against its recorded value, so an overlay cannot set what
-    /// the owner does not admit.
+    /// the owner does not admit. `run_options` is the raw protocol options
+    /// the run stated: the protocol's owner judges them first, as stated, so
+    /// an option it refuses is refused even when it restates the recorded
+    /// value.
     pub fn validate_derived(
         &self,
         base: &crate::PersistedSessionConfig,
         derived: &crate::PersistedSessionConfig,
+        run_options: Option<&crate::ProtocolTurnOptions>,
     ) -> Result<(), ConfigRefusal> {
+        if let Some(options) = run_options
+            && let Some(protocol) = base.plugin_config.protocol_plugin_id()
+            && let Some(registered) = self.owners.get(protocol)
+        {
+            registered
+                .owner
+                .validate_run_options(protocol, &options.payload)?;
+        }
         let core = CoreConfig::of(derived);
         let facts = CandidateFacts {
             core: &core,

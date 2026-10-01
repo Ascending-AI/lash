@@ -131,8 +131,6 @@ pub type AfterTurnHook =
     Arc<dyn Fn(TurnResultHookContext) -> PluginFuture<Vec<AfterTurnPluginDirective>> + Send + Sync>;
 pub type CheckpointHook =
     Arc<dyn Fn(CheckpointHookContext) -> PluginFuture<Vec<TurnPluginDirective>> + Send + Sync>;
-pub type PromptContributor =
-    Arc<dyn Fn(PromptHookContext) -> PluginFuture<Vec<PromptContribution>> + Send + Sync>;
 pub type ToolCatalogContributor =
     Arc<dyn Fn(ToolCatalogContext) -> Result<ToolCatalogContribution, PluginError> + Send + Sync>;
 pub type AssistantStreamHook =
@@ -186,20 +184,6 @@ pub type AssistantResponseHook = Arc<
 pub type AssistantStreamFinishedHook = Arc<
     dyn Fn(AssistantStreamFinishedContext) -> PluginFuture<Option<serde_json::Value>> + Send + Sync,
 >;
-
-#[derive(Clone)]
-pub struct PromptHookContext {
-    pub session_id: SessionId,
-    /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
-    pub plugin_config: super::AdmittedPluginConfig,
-    pub sessions: Arc<dyn SessionStateService>,
-    pub state: SessionReadView,
-    pub protocol_turn_options: ProtocolTurnOptions,
-    pub turn_context: crate::TurnContext,
-}
 
 #[derive(Clone)]
 pub struct TurnHookContext {

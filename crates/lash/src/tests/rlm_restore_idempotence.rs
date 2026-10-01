@@ -36,8 +36,7 @@ use lash_core::facade_support::{
     PluginSpec, RuntimeHostConfig, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
-    PluginFactory, PromptHookContext, RuntimeServices, SessionAuthorityContext,
-    SessionStateService, StaticPluginFactory,
+    PluginFactory, RuntimeServices, SessionAuthorityContext, StaticPluginFactory,
 };
 use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
@@ -118,11 +117,6 @@ impl RuntimeStoreDecorator for FaultStore {
         }
     }
 }
-
-struct NoSessions;
-
-#[async_trait::async_trait]
-impl SessionStateService for NoSessions {}
 
 fn policy() -> SessionPolicy {
     SessionPolicy {
@@ -391,21 +385,20 @@ async fn open_with_plugins(
     (runtime, plugins)
 }
 
-/// The RLM plugin's prompt contribution for its projected bindings, rendered
-/// as text so a witness can check which binding names reach the next prompt.
-async fn projected_prompt(runtime: &LashRuntime, plugins: &PluginSession) -> String {
-    let contributions = plugins
-        .collect_prompt_contributions(PromptHookContext {
-            session_id: SessionId::from(runtime.read_view().session_id()),
-            sessions: Arc::new(NoSessions),
-            state: runtime.read_view(),
-            protocol_turn_options: ProtocolTurnOptions::default(),
-            turn_context: Default::default(),
-            plugin_config: Default::default(),
+/// The system prompt the RLM plugin renders for the session's next root,
+/// so a witness can check which binding names reach it.
+async fn projected_prompt(_runtime: &LashRuntime, plugins: &PluginSession) -> String {
+    plugins
+        .protocol_session()
+        .render_system_prompt(lash_core::plugin::SystemPromptContext {
+            plugin_config: &plugins.admitted_plugin_config(),
+            tool_catalog: &lash_core::ToolCatalog::default(),
+            subagent: None,
+            purpose: lash_core::plugin::SystemPromptPurpose::Turn,
         })
         .await
-        .expect("prompt contributions");
-    format!("{contributions:?}")
+        .expect("the RLM system prompt renders")
+        .to_string()
 }
 
 fn count(haystack: &str, needle: &str) -> usize {

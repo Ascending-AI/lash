@@ -293,12 +293,12 @@ async fn replay_session_through(actor: u64, ordinal: u64) {
         );
         let output = session
             .send(TurnInput::text(format!(
-                "Run the synthetic load turn. load_turn={operation}\n{}",
+                "Run the synthetic load turn. load_turn={operation}\n{}\n{}",
                 generator
                     .record(actor, turn, "input", plan.input_bytes)
-                    .expect("the turn input")
+                    .expect("the turn input"),
+                load_context(&generator, &plan)
             )))
-            .prompt_layer(prompt_layer(&generator, &plan))
             .output()
             .await;
         let output = output.unwrap_or_else(|error| {
@@ -328,14 +328,14 @@ async fn replay_session_through(actor: u64, ordinal: u64) {
     }
 }
 
-/// The turn's project-instructions layer, exactly as the kind worker sends it.
-fn prompt_layer(generator: &Generator<'_>, plan: &TurnPlan) -> lash::prompt::PromptLayer {
+/// The turn's synthetic context, exactly as the kind worker sends it: after
+/// the turn's input, since a run states no prompt (FIG-4589).
+fn load_context(generator: &Generator<'_>, plan: &TurnPlan) -> String {
     let id = &plan.operation;
-    lash::prompt::PromptLayer::new().with_contribution(lash::prompt::PromptContribution::new(
-        lash::prompt::PromptSlot::ProjectInstructions,
-        "Synthetic load context",
-        generator.text(id.actor, id.ordinal, "prompt", plan.prompt_bytes),
-    ))
+    format!(
+        "## Synthetic load context\n\n{}",
+        generator.text(id.actor, id.ordinal, "prompt", plan.prompt_bytes)
+    )
 }
 
 fn run_on_stack(test: impl std::future::Future<Output = ()> + Send + 'static) {

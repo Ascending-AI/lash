@@ -4,10 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::llm::types::LlmToolSpec;
 use crate::sync::MutexExt;
-use crate::{
-    PromptContribution, PromptFingerprint, ToolContract, ToolDefinition, ToolManifest,
-    prompt_tool_names_fingerprint,
-};
+use crate::{ToolContract, ToolDefinition, ToolManifest};
 
 pub type ToolContractResolver =
     Arc<dyn Fn(&ToolManifest) -> Option<Arc<ToolContract>> + Send + Sync + 'static>;
@@ -55,8 +52,6 @@ pub struct ToolCatalog {
     #[serde(skip)]
     tool_names: OnceLock<Arc<Vec<String>>>,
     #[serde(skip)]
-    tool_names_fingerprint: OnceLock<PromptFingerprint>,
-    #[serde(skip)]
     derived_documents: DerivedDocuments,
 }
 
@@ -86,7 +81,6 @@ impl Clone for ToolCatalog {
             tools: self.tools.clone(),
             model_tool_specs: OnceLock::new(),
             tool_names: OnceLock::new(),
-            tool_names_fingerprint: OnceLock::new(),
             derived_documents: self.derived_documents.clone(),
         };
         if let Some(value) = self.model_tool_specs.get() {
@@ -94,9 +88,6 @@ impl Clone for ToolCatalog {
         }
         if let Some(value) = self.tool_names.get() {
             let _ = clone.tool_names.set(Arc::clone(value));
-        }
-        if let Some(value) = self.tool_names_fingerprint.get() {
-            let _ = clone.tool_names_fingerprint.set(*value);
         }
         clone
     }
@@ -116,7 +107,6 @@ impl Default for ToolCatalog {
             tools: Vec::new(),
             model_tool_specs: OnceLock::new(),
             tool_names: OnceLock::new(),
-            tool_names_fingerprint: OnceLock::new(),
             derived_documents: DerivedDocuments::default(),
         }
     }
@@ -202,7 +192,6 @@ impl ToolCatalog {
             tools,
             model_tool_specs: OnceLock::new(),
             tool_names: OnceLock::new(),
-            tool_names_fingerprint: OnceLock::new(),
             derived_documents: DerivedDocuments::default(),
         }
     }
@@ -232,12 +221,6 @@ impl ToolCatalog {
         }))
     }
 
-    pub fn tool_names_fingerprint(&self) -> PromptFingerprint {
-        *self
-            .tool_names_fingerprint
-            .get_or_init(|| prompt_tool_names_fingerprint(&self.tool_names()))
-    }
-
     pub fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>> {
         Arc::clone(self.model_tool_specs.get_or_init(|| {
             Arc::new(
@@ -253,27 +236,6 @@ impl ToolCatalog {
                     .collect(),
             )
         }))
-    }
-
-    pub(crate) fn filter_prompt_contributions(
-        &self,
-        contributions: Vec<PromptContribution>,
-    ) -> Vec<PromptContribution> {
-        contributions
-            .into_iter()
-            .filter(|contribution| self.includes_prompt_contribution(contribution))
-            .collect()
-    }
-
-    fn includes_prompt_contribution(&self, contribution: &PromptContribution) -> bool {
-        if contribution.gate.is_empty() {
-            return true;
-        }
-        contribution
-            .gate
-            .tools
-            .iter()
-            .any(|tool_name| self.has_callable_tool(tool_name))
     }
 }
 
@@ -421,28 +383,6 @@ mod tests {
     }
 
     #[test]
-    fn prompt_gate_requires_member_tool() {
-        let catalog = build_tool_catalog(build_input(vec![tool("read_file")], Vec::new()))
-            .expect("complete resident definition");
-
-        let kept = catalog.filter_prompt_contributions(vec![
-            PromptContribution::guidance("Plain", "always"),
-            PromptContribution::guidance("WithTool", "withtool").requires_tool("read_file"),
-            PromptContribution::guidance("MissingTool", "missing").requires_tool("missing_tool"),
-        ]);
-
-        assert_eq!(kept.len(), 2);
-        assert!(
-            kept.iter()
-                .any(|contribution| contribution.title.as_deref() == Some("Plain"))
-        );
-        assert!(
-            kept.iter()
-                .any(|contribution| contribution.title.as_deref() == Some("WithTool"))
-        );
-    }
-
-    #[test]
     fn catalog_pins_contract_once_before_any_projection() {
         let contract_resolutions = Arc::new(AtomicUsize::new(0));
         let callable = tool("read_file");
@@ -567,20 +507,6 @@ mod tests {
         assert_eq!(
             error,
             ToolCatalogBuildError::DuplicateName { name: first.name }
-        );
-    }
-
-    #[test]
-    fn tool_names_fingerprint_matches_prompt_hash() {
-        let catalog = build_tool_catalog(build_input(
-            vec![tool("read_file"), tool("grep")],
-            Vec::new(),
-        ))
-        .expect("complete resident definitions");
-
-        assert_eq!(
-            catalog.tool_names_fingerprint(),
-            prompt_tool_names_fingerprint(&catalog.tool_names())
         );
     }
 }

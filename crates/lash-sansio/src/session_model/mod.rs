@@ -1,6 +1,5 @@
 pub mod failure;
 pub mod message;
-pub mod prompt;
 
 pub use failure::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
@@ -9,11 +8,6 @@ pub use message::{
     BaseRenderCache, InvalidPartCombination, Message, MessageRole, MessageSequence, Part,
     PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
     messages_are_prompt_resume_safe, render_prompt, render_transcript_prompt, shared_parts,
-};
-pub use prompt::{
-    MAIN_AGENT_INTRO, PromptBuiltin, PromptLayer, PromptSectionTitle, PromptSlot, PromptSlotLayer,
-    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PromptTitleBuiltin,
-    ResolvedPromptLayer, default_prompt_template, resolve_prompt_layers,
 };
 
 use std::sync::Arc;

@@ -17,6 +17,8 @@ pub use native::{
 };
 mod projection;
 mod protocol;
+mod system_prompt;
+pub use system_prompt::{RLM_BUILTIN_INTRO, RlmSystemPromptInput, render_rlm_system_prompt};
 pub mod render;
 pub use render::{BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ResolvedRlmRender};
 mod rlm_support;
@@ -29,7 +31,7 @@ mod tool_catalog;
 pub use control_tools::continue_as_tool_definition;
 pub use dialect::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSectionRequest, ShapeNotation, TypescriptDialect,
+    ExecutionSection, ExecutionSectionRequest, ShapeNotation, TypescriptDialect,
 };
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::RLM_SNAPSHOT_VERSION;
@@ -52,8 +54,9 @@ pub use plugin::{
     RLM_CONFIG_IMPLEMENTATION, RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner,
     RlmConfigRefusal, RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
-    RlmRecordedConfig, RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel,
-    rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
+    RlmRecordedConfig, RlmSessionConfigDecodeError, SetRlmPrompt, SetRlmPromptContext,
+    SetRlmRender, UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_protocol_config,
+    rlm_session_config,
 };
 pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,

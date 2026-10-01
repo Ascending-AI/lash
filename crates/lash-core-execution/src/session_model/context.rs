@@ -7,14 +7,12 @@
 use std::sync::Arc;
 
 use crate::ToolProvider;
-use lash_sansio::PromptContribution;
 
-/// Output of the per-turn context transform pipeline — the messages,
-/// prompt contributions, and tool providers the runtime hands to the
+/// Output of the per-turn context transform pipeline — the messages and
+/// tool providers the runtime hands to the
 /// LLM call.
 #[derive(Clone, Default)]
 pub struct PreparedContext {
     pub messages: crate::MessageSequence,
-    pub prompt_contributions: Vec<PromptContribution>,
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
 }

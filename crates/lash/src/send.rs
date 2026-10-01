@@ -41,7 +41,7 @@ use crate::support::{
     TurnOutcome,
 };
 use crate::turn::{TurnOutput, TurnReport};
-use lash_core::{GenerationOptions, ModelKey, PromptLayer, ReasoningSelection, RunSpec};
+use lash_core::{GenerationOptions, ModelKey, ReasoningSelection, RunSpec};
 
 use lash_core::facade_support::{
     TurnCancelMode, TurnCancelReceipt, TurnCancelUndeliveredInputPolicy,
@@ -292,18 +292,6 @@ impl SendBuilder {
     /// [`id`](Self::id) must carry the same spec.
     pub fn run(mut self, spec: RunSpec) -> Self {
         self.run_spec = spec;
-        self
-    }
-
-    /// A prompt layer for this input's root only, stacked on the session
-    /// prompt with the usual precedence. Layers set twice stack.
-    pub fn prompt_layer(mut self, layer: PromptLayer) -> Self {
-        let overrides = std::mem::take(&mut *self.run_spec.overrides);
-        *self.run_spec.overrides = lash_core::RunOverrides {
-            prompt: Some(layer),
-            ..lash_core::RunOverrides::default()
-        }
-        .over(overrides);
         self
     }
 

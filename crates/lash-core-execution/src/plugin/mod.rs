@@ -2,13 +2,9 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::runtime::AssembledTurn;
-use crate::{
-    MessageRole, ProtocolTurnOptions, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider,
-};
+use crate::{MessageRole, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider};
 
-pub use lash_sansio::{
-    CheckpointKind, PluginMessage, PluginRuntimeEvent, PromptContribution, ToolCatalogContribution,
-};
+pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution};
 
 mod actions;
 pub mod config;
@@ -65,9 +61,9 @@ pub use hooks::{
     AssistantStreamFinishedHook, AssistantStreamHook, AssistantStreamHookContext,
     AssistantStreamTransform, BeforeToolCallHook, BeforeTurnHook, CheckpointHook,
     CheckpointHookContext, NoPresentationArtifacts, PluginFuture, PluginLifecycleEvent,
-    PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask, PromptContributor,
-    PromptHookContext, SessionConfigChangedContext, SessionStateChangedContext,
-    ToolCallHookContext, ToolCatalogContributor, ToolPresentationArtifacts, ToolPresentationInput,
+    PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask,
+    SessionConfigChangedContext, SessionStateChangedContext, ToolCallHookContext,
+    ToolCatalogContributor, ToolPresentationArtifacts, ToolPresentationInput,
     ToolPresentationPresenter, ToolPresentationStep, ToolResultHookContext,
     ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
 };
@@ -76,13 +72,13 @@ pub use protocol::{
     EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
     HydratedExecutionState, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
     ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-    ProtocolSessionRestoreView,
+    ProtocolSessionRestoreView, SystemPromptContext, SystemPromptPurpose,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
-    PluginOperationRegistrations, PluginRegistrar, PromptRegistrations, ProtocolRegistrations,
-    SessionRegistrations, ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
-    ToolResultRegistrations, TriggerEventRegistrations, TurnRegistrations,
+    PluginOperationRegistrations, PluginRegistrar, ProtocolRegistrations, SessionRegistrations,
+    ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations, ToolResultRegistrations,
+    TriggerEventRegistrations, TurnRegistrations,
 };
 pub(crate) use registrar::{PluginContributions, RegisteredHook};
 pub use registry::{
@@ -149,7 +145,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{SessionSnapshot, ToolDefinition};
+    use crate::ToolDefinition;
 
     struct MockToolProvider;
 
@@ -315,8 +311,6 @@ mod tests {
         session_id: SessionId,
     }
 
-    use crate::testing::MockSessionManager;
-
     impl SessionPlugin for MockPlugin {
         fn id(&self) -> &'static str {
             "mock"
@@ -325,18 +319,6 @@ mod tests {
         fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
             reg.state().set("session_id", json!(self.session_id))?;
             reg.tools().provider(Arc::new(MockToolProvider))?;
-            reg.prompt().contribute(Arc::new(|_ctx| {
-                Box::pin(async move {
-                    Ok(vec![
-                        PromptContribution::guidance("Dynamic Note", "dynamic note")
-                            .with_priority(1),
-                        PromptContribution::guidance("Gated", "Shared guidance")
-                            .requires_tool("mock_tool"),
-                        PromptContribution::guidance("Always", "Shared guidance"),
-                        PromptContribution::guidance("Plugin Prompt", "Structured plugin prompt"),
-                    ])
-                })
-            }));
             let session_id = self.session_id.clone();
             reg.operations().query(
                 PluginOperationSpec {
@@ -489,7 +471,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_collects_tools_and_prompts() {
+    async fn session_collects_tools() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
         let session = host
             .build_session(PluginSessionRequest::creation("root", Default::default()))
@@ -501,28 +483,6 @@ mod tests {
             .map(|manifest| manifest.name)
             .collect::<std::collections::BTreeSet<_>>();
         assert!(tool_names.contains("mock_tool"));
-        let contributions = session
-            .collect_prompt_contributions(PromptHookContext {
-                session_id: SessionId::from("root"),
-                sessions: Arc::new(MockSessionManager::default()),
-                state: SessionReadView::from_snapshot(&SessionSnapshot::new(
-                    crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-                )),
-                protocol_turn_options: ProtocolTurnOptions::default(),
-                turn_context: crate::TurnContext::default(),
-                plugin_config: Default::default(),
-            })
-            .await
-            .expect("prompt contributions");
-        assert_eq!(
-            contributions,
-            vec![
-                PromptContribution::guidance("Dynamic Note", "dynamic note").with_priority(1),
-                PromptContribution::guidance("Gated", "Shared guidance").requires_tool("mock_tool"),
-                PromptContribution::guidance("Always", "Shared guidance"),
-                PromptContribution::guidance("Plugin Prompt", "Structured plugin prompt"),
-            ]
-        );
     }
 
     #[tokio::test]

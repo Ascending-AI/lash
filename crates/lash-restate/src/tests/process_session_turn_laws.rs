@@ -922,7 +922,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let panic_plugin = Arc::new(lash_core::plugin::StaticPluginFactory::new(
         "child-panic-test",
-        lash_core::plugin::PluginSpec::new().with_prompt_contributor(Arc::new(move |_| {
+        lash_core::plugin::PluginSpec::new().with_before_turn(Arc::new(move |_| {
             let panic_once = Arc::clone(&panic_once);
             Box::pin(async move {
                 if panic_once.swap(false, std::sync::atomic::Ordering::SeqCst) {

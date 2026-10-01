@@ -127,6 +127,18 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    pub fn into_compaction_prompt(
+        self,
+    ) -> Result<Option<std::sync::Arc<str>>, RuntimeEffectControllerError> {
+        match self {
+            Self::RenderCompactionPrompt { system_prompt } => Ok(system_prompt),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::RenderCompactionPrompt,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_config_resolution(
         self,
     ) -> Result<crate::ConfigResolution, RuntimeEffectControllerError> {

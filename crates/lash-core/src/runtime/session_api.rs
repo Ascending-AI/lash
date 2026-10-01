@@ -707,68 +707,6 @@ impl LashRuntime {
         self.session.as_ref().map(|s| Arc::clone(s.plugins()))
     }
 
-    /// Renders the system prompt a compaction completion carries (`FIG-3374`).
-    ///
-    /// A turn resolves capability contributions, the core layer, the session
-    /// layer, and the turn layer (`turn_driver/tool_catalog.rs`
-    /// `build_prompt`). Compaction is one direct completion, not a turn: it
-    /// resolves the same stack minus the turn layer, with an empty execution
-    /// prompt and an empty tool list, so every tool-gated contribution drops
-    /// — the request ships no tools and could never honor them. Plugin prompt
-    /// hooks see the session's current read view, and a failing hook fails
-    /// the compaction exactly as it would fail a turn's prompt build.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "prompt assembly needs each resolved layer and the hook context pieces as explicit owned inputs so the recovery path can defer them into a 'static provider"
-    )]
-    pub(crate) async fn compaction_system_prompt(
-        context_contributions: Vec<crate::PromptContribution>,
-        plugin_session: Arc<crate::PluginSession>,
-        services: Arc<RuntimeSessionServices>,
-        session_id: crate::SessionId,
-        state: crate::SessionReadView,
-        protocol_turn_options: crate::ProtocolTurnOptions,
-        core_prompt: crate::PromptLayer,
-        policy_prompt: crate::PromptLayer,
-    ) -> Result<Option<Arc<str>>, crate::PluginError> {
-        let mut capability_prompt = crate::PromptLayer::new();
-        for contribution in context_contributions {
-            capability_prompt.add_contribution(contribution);
-        }
-        for contribution in plugin_session
-            .collect_prompt_contributions(crate::PromptHookContext {
-                session_id,
-                plugin_config: plugin_session.admitted_plugin_config(),
-                sessions: services.state_service(),
-                state,
-                protocol_turn_options,
-                turn_context: crate::TurnContext::new(),
-            })
-            .await?
-        {
-            capability_prompt.add_contribution(contribution);
-        }
-        let resolved =
-            crate::resolve_prompt_layers([&capability_prompt, &core_prompt, &policy_prompt]);
-        let contributions = resolved
-            .contributions
-            .into_iter()
-            .filter(|contribution| contribution.gate.is_empty())
-            .collect();
-        let rendered = lash_sansio::build_prompt(crate::PromptBuildInput {
-            template_fingerprint: crate::prompt_template_fingerprint(&resolved.template),
-            template: resolved.template,
-            execution_title: Arc::from("Execution"),
-            execution_prompt_fingerprint: crate::prompt_text_fingerprint(""),
-            execution_prompt: Arc::from(""),
-            tool_names_fingerprint: lash_sansio::prompt_tool_names_fingerprint(&[]),
-            tool_names: Arc::new(Vec::new()),
-            contributions: lash_sansio::PromptContributionSet::new(contributions),
-        });
-        let system_prompt = rendered.system_prompt.trim();
-        Ok((!system_prompt.is_empty()).then(|| Arc::from(system_prompt)))
-    }
-
     pub fn session_policy(&self) -> SessionPolicy {
         self.state.effective_policy().clone()
     }

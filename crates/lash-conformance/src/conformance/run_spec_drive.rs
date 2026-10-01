@@ -29,8 +29,8 @@ const REDEPLOYED_MODEL: &str = "run-spec-redeployed-model";
 /// A second key for the wire model [`SESSION_MODEL`] names: another
 /// registration of the same model, as a host would make for a second route.
 const SHARED_WIRE_KEY: &str = "run-spec-shared-wire-key";
-/// Guidance only a spec's prompt layer carries.
-const PINNED_GUIDANCE: &str = "run-spec pinned guidance";
+/// A generation seed only the pinned spec states.
+const PINNED_SEED: i64 = 4_589;
 
 fn model(id: &str) -> crate::ModelKey {
     crate::ModelKey::new(id)
@@ -59,13 +59,14 @@ fn law_models(provider: crate::ProviderHandle) -> Arc<crate::ModelRegistry> {
     Arc::new(registry)
 }
 
-/// A spec pinning its root to [`PINNED_MODEL`] with [`PINNED_GUIDANCE`].
+/// A spec pinning its root to [`PINNED_MODEL`] with [`PINNED_SEED`].
 fn pinned_spec() -> crate::RunSpec {
     crate::RunSpec::overrides(crate::RunOverrides {
         model: Some(model(PINNED_MODEL)),
-        prompt: Some(crate::PromptLayer::new().with_contribution(
-            crate::PromptContribution::guidance("Pinned", PINNED_GUIDANCE),
-        )),
+        generation: Some(crate::GenerationOptions {
+            seed: Some(PINNED_SEED),
+            ..crate::GenerationOptions::default()
+        }),
         ..crate::RunOverrides::default()
     })
 }
@@ -373,10 +374,10 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
         COMMANDED_MODEL,
         "the sticky model is the command's"
     );
-    assert!(
-        !format!("{:?}", head.prompt).contains(PINNED_GUIDANCE),
-        "the pinned prompt never reached the sticky config: {:?}",
-        head.prompt
+    assert_ne!(
+        head.generation.seed,
+        Some(PINNED_SEED),
+        "the pinned generation never reached the sticky config"
     );
 }
 

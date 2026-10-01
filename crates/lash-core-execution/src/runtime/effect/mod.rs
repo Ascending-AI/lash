@@ -207,15 +207,16 @@ mod tests {
 mod captured_environment_row_tests {
     #[test]
     fn an_environment_load_journal_row_stays_under_the_intent_budget() {
-        let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-        policy.prompt =
-            crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
-                crate::PromptSlot::ProjectInstructions,
-                "instructions",
-                "x".repeat(128 * 1024),
-            ));
-        let spec =
-            crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
+        let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+        plugin_config.insert(
+            "protocol",
+            serde_json::json!({ "prompt": { "instructions": ["x".repeat(128 * 1024)] } }),
+        );
+        let spec = crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::new(plugin_config, 0),
+            policy,
+        );
         let outcome = crate::RuntimeEffectOutcome::LoadExecutionEnv {
             env: spec.stable_ref().expect("environment digest"),
         };

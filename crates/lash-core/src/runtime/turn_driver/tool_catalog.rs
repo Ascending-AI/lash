@@ -1,6 +1,3 @@
-use lash_sansio::core_support::*;
-use lash_sansio::{PreparedPrompt, PromptCache, PromptContributionSet, PromptLayer};
-
 use super::*;
 use crate::{PluginError, ToolCatalog, TurnDriverPreamble};
 
@@ -8,51 +5,6 @@ struct PreparedExecutionEnvironment {
     tool_catalog: Arc<ToolCatalog>,
     tool_definitions: Vec<crate::ToolDefinition>,
     turn_driver_preamble: Arc<TurnDriverPreamble>,
-    prompt: PromptLayer,
-}
-
-impl PreparedExecutionEnvironment {
-    fn build_prompt(
-        &self,
-        core_prompt: &PromptLayer,
-        session_prompt: &PromptLayer,
-        prompt_cache: Option<Arc<PromptCache>>,
-    ) -> PreparedPrompt {
-        let mut capability_prompt = PromptLayer::new();
-        for contribution in self
-            .turn_driver_preamble
-            .prompt_contributions
-            .iter()
-            .cloned()
-        {
-            capability_prompt.add_contribution(contribution);
-        }
-        let resolved = crate::resolve_prompt_layers([
-            &capability_prompt,
-            &self.prompt,
-            core_prompt,
-            session_prompt,
-        ]);
-        let prompt_contributions = self
-            .tool_catalog
-            .filter_prompt_contributions(resolved.contributions);
-        let contributions = PromptContributionSet::new(prompt_contributions);
-        lash_sansio::build_prompt_cached(
-            crate::PromptBuildInput {
-                template_fingerprint: crate::prompt_template_fingerprint(&resolved.template),
-                template: resolved.template,
-                execution_title: Arc::clone(&self.turn_driver_preamble.execution_title),
-                execution_prompt_fingerprint: crate::prompt_text_fingerprint(
-                    &self.turn_driver_preamble.execution_prompt,
-                ),
-                execution_prompt: Arc::clone(&self.turn_driver_preamble.execution_prompt),
-                tool_names_fingerprint: self.turn_driver_preamble.tool_names_fingerprint,
-                tool_names: Arc::clone(&self.turn_driver_preamble.tool_names),
-                contributions,
-            },
-            prompt_cache.as_deref(),
-        )
-    }
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -114,10 +66,6 @@ impl RuntimeTurnDriver<'_> {
             turn_causes: self.turn_causes.clone(),
             protocol_run_offset: run_offset,
             turn_driver_preamble,
-            prepared_prompt: lash_sansio::PreparedPrompt {
-                context: Default::default(),
-                system_prompt: Arc::from(""),
-            },
             projector_turn_inputs: Default::default(),
             turn_budget: session_policy.turn_budget,
             no_progress_budget: session_policy.no_progress_budget,
@@ -145,7 +93,6 @@ impl RuntimeTurnDriver<'_> {
     /// drive installs the surface the sync recorded.
     pub(in crate::runtime) async fn refresh_execution_environment(
         &mut self,
-        messages: crate::MessageSequence,
         protocol_iteration: usize,
     ) -> Result<
         (
@@ -154,19 +101,25 @@ impl RuntimeTurnDriver<'_> {
         ),
         SyncFailure,
     > {
-        let policy = self.policy.policy.clone();
         let execution_environment = self
-            .prepare_execution_environment(&policy, self.turn_index, messages)
-            .await
+            .prepare_execution_environment()
             .map_err(SyncFailure::of_plugin_error)?;
-        // Both prompt layers are the root's recorded config (FIG-4397): a
-        // sync redriven after a core redeploy builds what the root recorded.
-        let prepared_prompt = execution_environment.build_prompt(
-            &policy.core_prompt,
-            &policy.prompt,
-            Some(self.session.prompt_cache()),
-        );
-        self.trace_prompt_built(protocol_iteration, &prepared_prompt.system_prompt);
+        // The protocol plugin renders the prompt from the running root's
+        // admitted config and the pinned tool surface (FIG-4589): a config
+        // command applied while this root runs reaches the next root, and a
+        // sync redriven after a redeploy renders what the root recorded.
+        let plugin_config = self.session.plugins().admitted_plugin_config();
+        let protocol_session = Arc::clone(self.session.plugins().protocol_session());
+        let system_prompt = protocol_session
+            .render_system_prompt(crate::plugin::SystemPromptContext {
+                plugin_config: &plugin_config,
+                tool_catalog: execution_environment.tool_catalog.as_ref(),
+                subagent: self.turn_pipeline.state().authority.subagent.as_ref(),
+                purpose: crate::plugin::SystemPromptPurpose::Turn,
+            })
+            .await
+            .map_err(SyncFailure::of_session_error)?;
+        self.trace_prompt_built(protocol_iteration, &system_prompt);
         let projector_turn_inputs = self
             .projector_turn_inputs()
             .await
@@ -174,7 +127,7 @@ impl RuntimeTurnDriver<'_> {
 
         Ok((
             crate::sansio::ExecutionEnvironmentSync {
-                system_prompt: prepared_prompt.system_prompt,
+                system_prompt,
                 tool_specs: execution_environment
                     .turn_driver_preamble
                     .tool_specs
@@ -241,49 +194,16 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
-    async fn prepare_execution_environment(
-        &mut self,
-        session_policy: &SessionPolicy,
-        turn_index: usize,
-        messages: crate::MessageSequence,
-    ) -> Result<PreparedExecutionEnvironment, PluginError> {
+    fn prepare_execution_environment(&self) -> Result<PreparedExecutionEnvironment, PluginError> {
         let state = self.turn_pipeline.state();
         let tool_surface = self.session.pin_tool_surface(
             &state.authority.tool_access,
             state.authority.subagent.as_ref(),
         )?;
-        let tool_catalog = tool_surface.tool_catalog();
-        let tool_definitions = tool_surface.definitions();
-        let turn_driver_preamble = tool_surface.preamble();
-        let plugin_prompt_contributions = self
-            .session
-            .plugins()
-            .collect_prompt_contributions(PromptHookContext {
-                session_id: self.session_id.clone(),
-                plugin_config: self.session.plugins().admitted_plugin_config(),
-                sessions: self.session_services.state_service(),
-                state: self.turn_pipeline.read_view(
-                    session_policy.clone(),
-                    turn_index,
-                    self.protocol_turn_options.clone(),
-                    messages,
-                ),
-                protocol_turn_options: self.protocol_turn_options.clone(),
-                turn_context: self.turn_context.clone(),
-            })
-            .await?;
-        let mut prompt = PromptLayer::new();
-        for contribution in self.session.context_prompt_contributions().iter().cloned() {
-            prompt.add_contribution(contribution);
-        }
-        for contribution in plugin_prompt_contributions {
-            prompt.add_contribution(contribution);
-        }
         Ok(PreparedExecutionEnvironment {
-            tool_catalog,
-            tool_definitions,
-            turn_driver_preamble,
-            prompt,
+            tool_catalog: tool_surface.tool_catalog(),
+            tool_definitions: tool_surface.definitions(),
+            turn_driver_preamble: tool_surface.preamble(),
         })
     }
 

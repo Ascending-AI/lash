@@ -22,8 +22,8 @@ const BATCH_INPUTS: usize = 5;
 
 fn batch_spec(guidance: &str) -> crate::RunSpec {
     crate::RunSpec::overrides(crate::RunOverrides {
-        prompt: Some(crate::PromptLayer::new().with_contribution(
-            crate::PromptContribution::guidance("Batch", guidance.to_string()),
+        protocol_turn_options: Some(crate::ProtocolTurnOptions::from_payload(
+            serde_json::json!({ "batch": guidance }),
         )),
         ..crate::RunOverrides::default()
     })

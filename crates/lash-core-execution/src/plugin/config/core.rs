@@ -1,5 +1,5 @@
 //! The core owner's config commands (FIG-4379): the changes a session's
-//! model, reasoning, attachment acceptance, prompt, generation, execution
+//! model, reasoning, attachment acceptance, generation, execution
 //! controls (turn budget, autonomy, no-progress budget, charge safety;
 //! FIG-4376) and tool access admit.
 //!
@@ -184,85 +184,6 @@ impl ConfigCommand for SetAttachmentAcceptance {
     const NAME: &'static str = "set_attachment_acceptance";
 }
 
-/// Replace the session's prompt layer, whole.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetPrompt {
-    pub prompt: crate::PromptLayer,
-}
-
-impl ConfigCommand for SetPrompt {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_prompt";
-}
-
-/// Set the prompt layer's template.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetPromptTemplate {
-    pub template: crate::PromptTemplate,
-}
-
-impl ConfigCommand for SetPromptTemplate {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_prompt_template";
-}
-
-/// Remove the prompt layer's template.
-#[derive(
-    Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct ClearPromptTemplate {}
-
-impl ConfigCommand for ClearPromptTemplate {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "clear_prompt_template";
-}
-
-/// Add one contribution to the prompt layer.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AddPromptContribution {
-    pub contribution: crate::PromptContribution,
-}
-
-impl ConfigCommand for AddPromptContribution {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "add_prompt_contribution";
-}
-
-/// Replace every contribution of one prompt slot.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ReplacePromptSlot {
-    pub slot: crate::PromptSlot,
-    pub contributions: Vec<crate::PromptContribution>,
-}
-
-impl ConfigCommand for ReplacePromptSlot {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "replace_prompt_slot";
-}
-
-/// Remove every contribution of one prompt slot.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ClearPromptSlot {
-    pub slot: crate::PromptSlot,
-}
-
-impl ConfigCommand for ClearPromptSlot {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "clear_prompt_slot";
-}
-
 /// Layer generation options over the session's: merged per option, or
 /// replacing them, as the overlay says.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -378,17 +299,6 @@ fn changed(core: CoreConfig) -> Result<OwnerChange<CoreConfig, ()>, CoreConfigRe
     })
 }
 
-fn edit_prompt(
-    core: &CoreConfig,
-    edit: impl FnOnce(&mut crate::PromptLayer),
-) -> Result<OwnerChange<CoreConfig, ()>, CoreConfigRefusal> {
-    let mut next = core.clone();
-    let mut prompt = next.prompt_layer();
-    edit(&mut prompt);
-    next.prompt = Some(prompt);
-    changed(next)
-}
-
 /// The core owner's registration: the owner and every core command.
 pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError> {
     let mut reg = ConfigRegistrar::new(CORE_CONFIG_OWNER);
@@ -428,29 +338,6 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
             attachment_acceptance: std::sync::Arc::new(command.acceptance),
             ..core.clone()
         })
-    })?;
-    reg.command::<SetPrompt>(|core, command| {
-        changed(CoreConfig {
-            prompt: Some(command.prompt),
-            ..core.clone()
-        })
-    })?;
-    reg.command::<SetPromptTemplate>(|core, command| {
-        edit_prompt(core, |prompt| prompt.template = Some(command.template))
-    })?;
-    reg.command::<ClearPromptTemplate>(|core, _| {
-        edit_prompt(core, |prompt| prompt.template = None)
-    })?;
-    reg.command::<AddPromptContribution>(|core, command| {
-        edit_prompt(core, |prompt| prompt.add_contribution(command.contribution))
-    })?;
-    reg.command::<ReplacePromptSlot>(|core, command| {
-        edit_prompt(core, |prompt| {
-            prompt.replace_slot(command.slot, command.contributions)
-        })
-    })?;
-    reg.command::<ClearPromptSlot>(|core, command| {
-        edit_prompt(core, |prompt| prompt.clear_slot(command.slot))
     })?;
     reg.command::<SetGeneration>(|core, command| {
         changed(CoreConfig {

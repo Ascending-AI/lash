@@ -122,23 +122,6 @@ impl SessionPlugin for WorkbenchSessionPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let mail_world = self.mail_world.clone();
-        let deferred_preview = self.deferred_tools.clone();
-        // ADR 0063: the host's worked examples are written in the session's own
-        // language. TypeScript is the sole RLM language (ADR 0096).
-        let prompt = workbench_prompt();
-        reg.prompt().contribute(Arc::new(move |_ctx| {
-            let mail_world = mail_world.clone();
-            let deferred_preview = deferred_preview.clone();
-            Box::pin(async move {
-                let mut contributions = vec![PromptContribution::environment(
-                    "Agent Workbench",
-                    format!("{prompt}\n\n{}", connected_accounts_prompt(&mail_world)),
-                )];
-                contributions.push(deferred_preview.preview_contribution());
-                Ok(contributions)
-            })
-        }));
         reg.triggers().declare(TriggerEvent::new(
             BUTTON_TRIGGER_RESOURCE,
             BUTTON_TRIGGER_ALIAS,
@@ -202,7 +185,6 @@ pub(crate) struct WorkbenchContextBudget {
 pub(crate) struct WorkbenchContextObservation {
     pub(crate) session_id: SessionId,
     pub(crate) message_count: usize,
-    pub(crate) contribution_count: usize,
     pub(crate) tool_provider_count: usize,
     pub(crate) committed_message_count: usize,
     pub(crate) max_context_tokens: Option<usize>,
@@ -230,7 +212,6 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
         let observation = WorkbenchContextObservation {
             session_id: ctx.session_id.clone(),
             message_count: input.messages.len(),
-            contribution_count: input.prompt_contributions.len(),
             tool_provider_count: input.tool_providers.len(),
             committed_message_count: ctx.state.messages().len(),
             max_context_tokens: ctx.max_context_tokens,
@@ -241,18 +222,24 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
         };
         *self.observed.lock_recover() = Some(observation.clone());
 
+        // The transform shapes the messages the model call carries: it adds
+        // its note after the prepared ones. The system prompt is the
+        // session's recorded config and no transform's to change.
         let mut output = input;
-        output.prompt_contributions.push(
-            lash::prompt::PromptContribution::new(
-                lash::prompt::PromptSlot::Environment,
-                "Context budget",
+        output.messages.make_mut().push(lash::messages::Message {
+            id: "workbench-context-budget".to_string(),
+            role: lash::messages::MessageRole::User,
+            parts: vec![lash::messages::Part::text(
+                "workbench-context-budget.p0".to_string(),
                 format!(
-                    "prepared {} message(s) from {} committed",
+                    "Context budget: prepared {} message(s) from {} committed",
                     observation.message_count, observation.committed_message_count,
                 ),
-            )
-            .with_priority(-100),
-        );
+                None,
+            )]
+            .into(),
+            origin: None,
+        });
         Ok(output)
     }
 }
@@ -571,6 +558,62 @@ pub(crate) fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {
 /// Live, per-turn prompt line naming the inbox authorities that actually exist,
 /// so the agent never assumes the illustrative `inbox.work`/`inbox.personal`
 /// names from the static guidance are real.
+/// The workbench's RLM prompt, stated in the core's default session spec: the
+/// standing instructions (ADR 0063: worked examples in the session's own
+/// language, and TypeScript is the sole RLM language, ADR 0096) with the
+/// deferred catalogue's advertisement, and the connected accounts as context.
+pub(crate) fn workbench_rlm_prompt(
+    mail_world: &mail::MailWorld,
+    deferred_tools: &deferred_tools::WorkbenchDeferredTools,
+) -> lash::rlm::RlmPrompt {
+    lash::rlm::RlmPrompt {
+        instructions: vec![workbench_prompt().to_string(), deferred_tools.preview()],
+        context: workbench_prompt_context(mail_world),
+        ..lash::rlm::RlmPrompt::default()
+    }
+}
+
+/// The prompt context a root should run under now: the connected accounts.
+pub(crate) fn workbench_prompt_context(mail_world: &mail::MailWorld) -> Vec<String> {
+    vec![connected_accounts_prompt(mail_world)]
+}
+
+/// Bring `session`'s recorded prompt context up to the accounts connected
+/// now, for the roots after this. A session whose context already says so is
+/// left alone.
+pub(crate) async fn refresh_prompt_context(
+    state: &AppState,
+    session: &lash::LashSession,
+) -> Result<(), AppError> {
+    let context = workbench_prompt_context(&state.mail_world);
+    let recorded = session
+        .read_view()
+        .protocol_turn_options()
+        .decode::<lash::rlm::RlmRecordedConfig>()
+        .map_err(AppError::internal)?;
+    if recorded.prompt.context == context {
+        return Ok(());
+    }
+    let config = session.admin().config();
+    let revision = config.revision().await.map_err(AppError::internal)?;
+    let outcome = config
+        .apply(
+            lash::config::ConfigWrite::new(format!("prompt-context:{revision}"), revision),
+            lash::config::ConfigTransaction::of(lash::rlm::SetRlmPromptContext { context }),
+        )
+        .await
+        .map_err(AppError::internal)?;
+    if !matches!(
+        outcome,
+        lash::config::ConfigTransactionOutcome::Applied { .. }
+    ) {
+        return Err(AppError::internal(format!(
+            "the prompt context did not apply: {outcome:?}"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String {
     let accounts = mail_world.account_summaries();
     if accounts.is_empty() {

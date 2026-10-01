@@ -71,8 +71,36 @@ pub trait Dialect: Send + Sync + 'static {
     /// where the prompt introduces the history collection.
     fn history_item_definition(&self, images: bool) -> Vec<String>;
 
-    /// The whole execution section of the system prompt.
-    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> String;
+    /// The execution section of the system prompt, in its two parts.
+    fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection;
+}
+
+/// A dialect's execution section, split by who authored it (FIG-4588).
+///
+/// A session's prompt config may leave the built-in prose out; the
+/// declarations describe what this session can call and render either way,
+/// so a dialect never puts a tool, a host operation or a discovery hint in
+/// its prose.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExecutionSection {
+    /// The dialect's built-in teaching: how to write a program, the response
+    /// shape, the worked example and the host API every session has.
+    pub prose: String,
+    /// What this session's catalog and host generate: the tool declarations,
+    /// with each module's instructions once, and the host surface. Empty when
+    /// the session has neither.
+    pub declarations: String,
+}
+
+impl ExecutionSection {
+    /// Both parts as one section, the prose first.
+    pub fn joined(&self) -> String {
+        [self.prose.trim(), self.declarations.trim()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
 }
 
 /// A dialect's refusal of something the host asked it to spell.
@@ -338,6 +366,8 @@ impl SessionDialect {
         )
     }
 
+    /// The execution section as one text, prose then declarations.
+    #[cfg(test)]
     pub(crate) fn render_execution_section(
         &self,
         features: crate::protocol::RlmPromptFeatures,
@@ -345,6 +375,17 @@ impl SessionDialect {
         channel: crate::plugin::RlmChannel,
         discovery: Option<&lash_core::ToolDiscovery>,
     ) -> Result<String, SessionError> {
+        self.execution_section(features, tool_catalog, channel, discovery)
+            .map(|section| section.joined())
+    }
+
+    pub(crate) fn execution_section(
+        &self,
+        features: crate::protocol::RlmPromptFeatures,
+        tool_catalog: &lash_core::ToolCatalog,
+        channel: crate::plugin::RlmChannel,
+        discovery: Option<&lash_core::ToolDiscovery>,
+    ) -> Result<ExecutionSection, SessionError> {
         let tools = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features);
         let host_environment = self
             .surface
@@ -878,8 +919,11 @@ mod tests {
             Vec::new()
         }
 
-        fn render_execution_section(&self, _request: ExecutionSectionRequest<'_>) -> String {
-            String::new()
+        fn render_execution_section(
+            &self,
+            _request: ExecutionSectionRequest<'_>,
+        ) -> ExecutionSection {
+            ExecutionSection::default()
         }
     }
 

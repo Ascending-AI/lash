@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use lash::persistence::LeaseOwnerIdentity;
-use lash::prompt::{PromptContribution, PromptLayer};
 use lash::provider::ProviderHandle;
+use lash::standard::{StandardPrompt, StandardTurnOptions};
 use lash::tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink};
 use lash::{LashCore, ModelMetadata, SessionSpec};
 use lash_plugin_mcp::{
@@ -240,9 +240,16 @@ pub async fn build_core(
         .session_spec(
             SessionSpec::new()
                 .turn_budget(lash::TurnBudget::Unbounded)
-                .prompt_layer(bot_prompt(
-                    config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
-                )),
+                .plugin(
+                    lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                    StandardTurnOptions {
+                        prompt: Some(bot_prompt(
+                            config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
+                        )),
+                        render: None,
+                    },
+                )
+                .context("encode the bot's prompt")?,
         )
         .model(model_key)
         .attachment_acceptance(Arc::new(slack_attachment_acceptance()))
@@ -301,45 +308,44 @@ fn resolve_stdio_command(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// The bot's system prompt, expressed as a session prompt layer.
-fn bot_prompt(include_demo_mcp: bool) -> PromptLayer {
-    let mut prompt = PromptLayer::new()
-        .with_contribution(PromptContribution::intro(
-            "Role",
+/// The bot's system prompt: the standard protocol's recorded prompt config.
+/// Its intro replaces the protocol's built-in one, so a channel session's
+/// prompt opens with one identity statement.
+fn bot_prompt(include_demo_mcp: bool) -> StandardPrompt {
+    let mut instructions = vec![
+        "Answer in one or two short paragraphs of plain text. There is no rich \
+         formatting in this client, so avoid headings, tables and long bullet lists. \
+         Refer to people by the display names you see in the transcript."
+            .to_string(),
+        "Use `list_channels` and `channel_history` when a question is about the \
+         workspace itself rather than about this channel's conversation. Do not guess \
+         at channel names or at what was said somewhere else."
+            .to_string(),
+    ];
+    if include_demo_mcp {
+        instructions.push(format!(
+            "The bundled MCP server exposes workspace reads plus four client-depth demos: \
+             `{}` asks the host model to summarize, `{}` asks the host a structured \
+             question, `{}` exercises a URL flow and completion, and `{}` reads \
+             host-supplied workspace roots. Use the exact tool the request names; do not \
+             fabricate any of their results.",
+            SAMPLE_SUMMARY_TOOL.as_str(),
+            ELICIT_CONFIRMATION_TOOL.as_str(),
+            URL_ELICITATION_TOOL.as_str(),
+            LIST_HOST_ROOTS_TOOL.as_str(),
+        ));
+    }
+    StandardPrompt {
+        intro: Some(
             "You are a helpful assistant in a team chat workspace. Each conversation \
              belongs to one channel, and you see the channel's traffic as it happens: \
              messages that do not mention you arrive as context you should remember but \
-             not answer. Reply only to the message that mentions you.",
-        ))
-        .with_contribution(PromptContribution::guidance(
-            "Chat style",
-            "Answer in one or two short paragraphs of plain text. There is no rich \
-             formatting in this client, so avoid headings, tables and long bullet lists. \
-             Refer to people by the display names you see in the transcript.",
-        ))
-        .with_contribution(PromptContribution::guidance(
-            "Workspace tools",
-            "Use `list_channels` and `channel_history` when a question is about the \
-             workspace itself rather than about this channel's conversation. Do not guess \
-             at channel names or at what was said somewhere else.",
-        ));
-    if include_demo_mcp {
-        prompt = prompt.with_contribution(PromptContribution::guidance(
-            "MCP workspace tools",
-            format!(
-                "The bundled MCP server exposes workspace reads plus four client-depth demos: \
-                 `{}` asks the host model to summarize, `{}` asks the host a structured \
-                 question, `{}` exercises a URL flow and completion, and `{}` reads \
-                 host-supplied workspace roots. Use the exact tool the request names; do not \
-                 fabricate any of their results.",
-                SAMPLE_SUMMARY_TOOL.as_str(),
-                ELICIT_CONFIRMATION_TOOL.as_str(),
-                URL_ELICITATION_TOOL.as_str(),
-                LIST_HOST_ROOTS_TOOL.as_str(),
-            ),
-        ));
+             not answer. Reply only to the message that mentions you."
+                .to_string(),
+        ),
+        instructions,
+        ..StandardPrompt::default()
     }
-    prompt
 }
 
 /// Tee stderr and a JSONL file, matching the other examples' trace idiom.
@@ -447,6 +453,34 @@ fn slack_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bot's intro replaces the protocol's built-in one: a channel
+    /// session's system prompt states who the model is once (FIG-4589).
+    #[test]
+    fn the_bots_prompt_renders_one_identity_statement() {
+        for include_demo_mcp in [false, true] {
+            let rendered = lash::standard::StandardRecordedConfig {
+                prompt: bot_prompt(include_demo_mcp),
+                render: None,
+                behaviour: lash::plugins::StandardProtocolConfig::default().recorded_behaviour(),
+            }
+            .render_system_prompt(&lash::plugins::ToolCatalog::default());
+            assert_eq!(
+                rendered.matches("You are ").count(),
+                1,
+                "one identity statement: {rendered}"
+            );
+            assert!(
+                rendered.starts_with("You are a helpful assistant in a team chat workspace."),
+                "the bot's own statement opens the prompt: {rendered}"
+            );
+            assert_eq!(
+                rendered.contains("The bundled MCP server"),
+                include_demo_mcp,
+                "{rendered}"
+            );
+        }
+    }
 
     #[test]
     fn missing_stdio_command_is_rejected_before_boot() {

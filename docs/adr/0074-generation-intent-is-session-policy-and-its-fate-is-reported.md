@@ -21,13 +21,11 @@ to creation, child-policy resolution, and `SetGeneration`. A child that
 sets only its cap therefore keeps an inherited temperature and seed unless it
 explicitly replaces them.
 
-The durable config includes the generation controls, the session prompt and
-the creating core's prompt layer (`core_prompt`), which renders beneath the
-session prompt. A core's prompt is a creation default: a session records it at
-creation and renders the recorded layer on every worker, and a child inherits
-its parent's (FIG-4397). A legacy absent session prompt reconstructs as an
-empty session layer; explicit emptiness also remains empty. A head with no
-recorded core prompt renders none. On open, the recorded model binds back to its
+The durable config includes the generation controls and every plugin's
+namespace. The system prompt is part of the protocol plugin's namespace, not
+of core config: a core's default spec states it as a creation default, a
+session records it at creation and renders the recorded config on every
+worker (ADR 0030, FIG-4589). On open, the recorded model binds back to its
 transport by its recorded key and cannot be silently replaced.
 
 Every request taken from session policy pairs its generation options with the

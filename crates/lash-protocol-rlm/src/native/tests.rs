@@ -32,7 +32,6 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             tool_catalog: session.resolved_tool_catalog().unwrap(),
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
-            extra_prompt_contributions: Vec::new(),
             writer_formats: lash_core::build_newest_writer_formats(),
         });
     TurnMachineConfig {
@@ -742,7 +741,6 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             tool_catalog: catalog,
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
-            extra_prompt_contributions: Vec::new(),
             writer_formats: lash_core::build_newest_writer_formats(),
         });
     assert_eq!(preamble.tool_specs.len(), 1);
@@ -750,8 +748,6 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     let schema = preamble.tool_specs[0].input_schema.canonical();
     assert_eq!(schema["required"], serde_json::json!(["code"]));
     assert_eq!(schema["additionalProperties"], false);
-    assert!(!preamble.execution_prompt.contains("### Response shape"));
-    assert!(!preamble.execution_prompt.contains("<typescript>"));
     let response = LlmResponse {
         parts: vec![call(
             "native-id",

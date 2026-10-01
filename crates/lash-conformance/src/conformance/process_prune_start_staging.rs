@@ -803,13 +803,17 @@ pub async fn two_starts_share_one_captured_environment(
         crate::ArtifactCleanupPlan::AwaitJournal,
     )
     .expect("declaration claim");
-    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-    policy.prompt = crate::PromptLayer::new().with_contribution(crate::PromptContribution::new(
-        crate::PromptSlot::ProjectInstructions,
-        "instructions",
-        "x".repeat(128 * 1024),
-    ));
-    let spec = crate::ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
+    // A captured environment as large as a session with 128 KiB of recorded
+    // protocol prompt.
+    let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
+    plugin_config.insert(
+        "protocol",
+        serde_json::json!({ "prompt": { "instructions": ["x".repeat(128 * 1024)] } }),
+    );
+    let spec = crate::ProcessExecutionEnvSpec::new(
+        crate::AdmittedPluginConfig::new(plugin_config, 0),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
     let stores = crate::ProcessStartStores {
         registry: registry.as_ref(),
         env_store: Some(&env_store),

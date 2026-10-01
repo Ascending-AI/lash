@@ -218,7 +218,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
-    pub use crate::plugin::PromptHookContext;
     pub use crate::plugin::ReplaceToolArgsDirective;
     pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
@@ -453,7 +452,6 @@ pub mod facade_support {
     pub use lash_sansio::TurnStop;
     pub use lash_sansio::append_assistant_text_part;
     pub use lash_sansio::build_tool_catalog;
-    pub use lash_sansio::default_prompt_template;
     pub use lash_sansio::head_tail_truncate;
     pub use lash_sansio::normalized_response_parts;
     pub use lash_sansio::reasoning_part;
@@ -540,23 +538,19 @@ pub use lash_sansio::{
     ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, FrameKey, FrameKeyError, InputId,
     LashSchema, LlmCallError, MediaType, Message, MessageOrigin, MessageRole, NodeId, Observation,
     ObservedProcessFailure, OmittedToolCalls, OutputRetentionPolicy, OutputValue, Part, PartKind,
-    PluginMessage, PluginRuntimeEvent, ProjectionMode, PromptBuiltin, PromptContribution,
-    PromptContributionBody, PromptContributionGate, PromptLayer, PromptSectionTitle, PromptSlot,
-    PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
-    PromptTitleBuiltin, RetainedOutput, SchemaContract, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata,
-    TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
-    ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDefinitionBindingExt,
-    ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
-    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
-    ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue,
-    ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
+    PluginMessage, PluginRuntimeEvent, ProjectionMode, RetainedOutput, SchemaContract,
+    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY,
+    TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy,
+    ToolBinding, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
+    ToolCatalogBuildError, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
+    ToolDefinitionBindingExt, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
+    ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    ToolIntentRefusalReason, ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy,
+    ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
+    TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
-    BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
-    prompt_template_fingerprint, prompt_text_fingerprint, resolve_prompt_layers,
-    visible_response_parts,
+    BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,
 };
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};

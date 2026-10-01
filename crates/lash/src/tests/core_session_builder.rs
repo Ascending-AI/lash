@@ -16,8 +16,6 @@ mod creation_config;
 #[cfg(test)]
 mod driver_install;
 mod lineage_materialization;
-#[cfg(test)]
-mod prompt_reopen_authority;
 #[cfg(all(test, feature = "rlm"))]
 mod rlm_session_facts;
 mod runtime_assembly;

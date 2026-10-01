@@ -540,12 +540,12 @@ async fn main() -> Result<()> {
         .session(&args.session_id)
         .create(lash::SessionCreation {
             spec: lash::SessionSpec::default()
-                .no_progress_budget(lash::NoProgressBudget::bounded(4)),
-            plugin_options: lash::plugins::PluginOptions::typed(
-                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras::default(),
-            )
-            .context("encode RLM session option")?,
+                .no_progress_budget(lash::NoProgressBudget::bounded(4))
+                .plugin(
+                    lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    lash::rlm::RlmCreateExtras::default(),
+                )
+                .context("encode RLM session option")?,
             ..Default::default()
         })
         .await

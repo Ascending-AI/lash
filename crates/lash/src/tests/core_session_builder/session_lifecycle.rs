@@ -334,8 +334,12 @@ async fn generic_lash_core_builder_requires_protocol_plugin() {
     assert!(matches!(err, EmbedError::MissingProtocolPlugin));
 }
 
+/// The standard prompt is recorded config (FIG-4589): the core's default
+/// spec states it for a session that states none, a session's own spec
+/// replaces it, and a prompt command replaces it for the roots after it.
 #[tokio::test]
-async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result<()> {
+async fn the_standard_prompt_comes_from_the_core_spec_the_session_spec_and_its_command()
+-> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
@@ -345,104 +349,82 @@ async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result
         recording_prompt_provider(Arc::clone(&seen)),
         mock_model_spec(),
     )
-    .instructions("Zulu core instruction.")
-    .instructions("Repeated instruction.")
-    .instructions("Repeated instruction.")
-    .prompt_contribution(PromptContribution::guidance("Core", "core guidance"))
-    .build(crate::testing::runtime_lease_owner())?;
-    core.session("prompt-api")
-        .create(
-            crate::SessionCreation::default()
-                .instructions("Alpha session instruction.")
-                .prompt_contribution(PromptContribution::guidance("Session", "session guidance")),
-        )
-        .await?;
-    let session = core.session("prompt-api").open().await?;
-
-    session.send(TurnInput::text("first")).output().await?;
-    Box::pin(
-        session
-            .admin()
-            .config()
-            .configure(crate::config::ConfigTransaction::of(
-                crate::config::ReplacePromptSlot {
-                    slot: PromptSlot::Guidance,
-                    contributions: vec![PromptContribution::guidance(
-                        "Replacement",
-                        "replacement guidance",
-                    )],
-                },
-            )),
+    .session_plugin(
+        crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+        crate::standard::StandardTurnOptions {
+            prompt: Some(crate::standard::StandardPrompt {
+                intro: Some("Core intro.".to_string()),
+                instructions: vec!["Core instruction.".to_string()],
+                ..Default::default()
+            }),
+            render: None,
+        },
     )
-    .await?;
-    session.send(TurnInput::text("second")).output().await?;
-    session
-        .admin()
-        .config()
-        .configure(crate::config::ConfigTransaction::of(
-            crate::config::ClearPromptSlot {
-                slot: PromptSlot::Guidance,
-            },
-        ))
-        .await?;
-    session.send(TurnInput::text("third")).output().await?;
-
-    let prompts = seen.lock_recover();
-    assert_eq!(prompts.len(), 3);
-    for prompt in prompts.iter() {
-        assert!(prompt.contains("Alpha session instruction."));
-        assert!(prompt.contains("Zulu core instruction."));
-        assert_eq!(prompt.matches("Repeated instruction.").count(), 1);
-        assert!(
-            prompt.find("Alpha session instruction.") < prompt.find("Zulu core instruction."),
-            "same-priority instructions should sort by content, not scope or call order: {prompt}"
-        );
-    }
-    assert!(prompts[0].contains("core guidance"));
-    assert!(prompts[0].contains("session guidance"));
-    assert!(prompts[1].contains("replacement guidance"));
-    assert!(!prompts[1].contains("core guidance"));
-    assert!(!prompts[1].contains("session guidance"));
-    assert!(!prompts[2].contains("core guidance"));
-    assert!(!prompts[2].contains("replacement guidance"));
-    Ok(())
-}
-
-/// A per-send prompt layer shapes its own root and nothing after it: the next
-/// root runs on the session prompt, which the layer never wrote.
-#[tokio::test]
-async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
-    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-    ))
-    .serve_test_model(
-        recording_prompt_provider(Arc::clone(&seen)),
-        mock_model_spec(),
-    )
+    .map_err(EmbedError::ProtocolTurnOptions)?
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("per-turn-prompt")
+
+    let defaulted = core
+        .session("prompt-core-default")
         .created()
         .await
         .open()
         .await?;
-    session
-        .send(TurnInput::text("first"))
-        .prompt_layer(
-            crate::prompt::PromptLayer::new()
-                .with_contribution(PromptContribution::guidance("Turn", "turn guidance")),
-        )
-        .output()
+    defaulted.send(TurnInput::text("first")).output().await?;
+
+    core.session("prompt-own")
+        .create(crate::SessionCreation {
+            spec: lash_core::facade_support::SessionSpec::new()
+                .plugin(
+                    crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                    crate::standard::StandardTurnOptions {
+                        prompt: Some(crate::standard::StandardPrompt {
+                            intro: Some("Session intro.".to_string()),
+                            instructions: vec!["Session instruction.".to_string()],
+                            ..Default::default()
+                        }),
+                        render: None,
+                    },
+                )
+                .map_err(EmbedError::ProtocolTurnOptions)?,
+            ..Default::default()
+        })
         .await?;
-    session.send(TurnInput::text("second")).output().await?;
-    let prompts = seen.lock_recover().clone();
-    assert_eq!(prompts.len(), 2);
-    assert!(prompts[0].contains("turn guidance"));
+    let own = core.session("prompt-own").open().await?;
+    own.send(TurnInput::text("second")).output().await?;
+    own.admin()
+        .config()
+        .configure(crate::config::ConfigTransaction::of(
+            crate::standard::SetStandardPrompt {
+                prompt: crate::standard::StandardPrompt {
+                    instructions: vec!["Commanded instruction.".to_string()],
+                    ..Default::default()
+                },
+            },
+        ))
+        .await?;
+    own.send(TurnInput::text("third")).output().await?;
+
+    let prompts = seen.lock_recover();
+    assert_eq!(prompts.len(), 3);
+    assert_eq!(
+        prompts[0].matches("Core intro.").count(),
+        1,
+        "the core spec's intro is stated once: {}",
+        prompts[0]
+    );
+    assert!(prompts[0].contains("Core instruction."));
+    assert!(prompts[1].contains("Session intro."));
+    assert!(prompts[1].contains("Session instruction."));
     assert!(
-        !prompts[1].contains("turn guidance"),
-        "a per-send layer never reaches the session prompt the next root runs on"
+        !prompts[1].contains("Core"),
+        "a session's stated prompt replaces the core spec's: {}",
+        prompts[1]
+    );
+    assert!(prompts[2].contains("Commanded instruction."));
+    assert!(
+        !prompts[2].contains("Session"),
+        "the command replaces the whole prompt: {}",
+        prompts[2]
     );
     Ok(())
 }
@@ -921,14 +903,16 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
 
     core.session("rlm-root-raw")
         .create(crate::SessionCreation {
-            plugin_options: lash_core::PluginOptions::typed(
-                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash_rlm_types::RlmCreateExtras {
-                    final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                    ..lash_rlm_types::RlmCreateExtras::default()
-                },
-            )
-            .map_err(EmbedError::ProtocolTurnOptions)?,
+            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+                lash_core::PluginOptions::typed(
+                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    lash_rlm_types::RlmCreateExtras {
+                        final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                        ..lash_rlm_types::RlmCreateExtras::default()
+                    },
+                )
+                .map_err(EmbedError::ProtocolTurnOptions)?,
+            ),
             ..Default::default()
         })
         .await?;
@@ -961,14 +945,16 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
 
     core.session("rlm-format-survives-reopen")
         .create(crate::SessionCreation {
-            plugin_options: lash_core::PluginOptions::typed(
-                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash_rlm_types::RlmCreateExtras {
-                    final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
-                    ..lash_rlm_types::RlmCreateExtras::default()
-                },
-            )
-            .map_err(EmbedError::ProtocolTurnOptions)?,
+            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+                lash_core::PluginOptions::typed(
+                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    lash_rlm_types::RlmCreateExtras {
+                        final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                        ..lash_rlm_types::RlmCreateExtras::default()
+                    },
+                )
+                .map_err(EmbedError::ProtocolTurnOptions)?,
+            ),
             ..Default::default()
         })
         .await?;
@@ -1022,8 +1008,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
         .session("rlm-child-bad-extras")
         .create(crate::SessionCreation {
             parent: Some("rlm-root".into()),
-            plugin_options,
-            ..Default::default()
+            spec: lash_core::facade_support::SessionSpec::new().plugin_options(plugin_options),
         })
         .await
     {
@@ -1142,15 +1127,14 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
 }
 
 #[tokio::test]
-async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
-    let expected_prompt =
-        lash_core::PromptLayer::new().with_contribution(lash_core::PromptContribution::guidance(
-            "Committed policy",
-            "Continue with the committed prompt configuration.",
-        ));
+async fn cold_reopen_restores_its_committed_generation() -> Result<()> {
+    let expected = lash_core::GenerationOptions {
+        seed: Some(11),
+        ..Default::default()
+    };
     let mut persisted_policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
     persisted_policy.model = Some(recorded_model(mock_model_spec()));
-    persisted_policy.prompt = expected_prompt.clone();
+    persisted_policy.generation = expected.clone();
     let persisted = RuntimeSessionState {
         session_id: SessionId::from("committed-session"),
         policy: persisted_policy,
@@ -1173,7 +1157,7 @@ async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
         .open()
         .await?;
 
-    assert_eq!(reopened.policy_snapshot().prompt, expected_prompt);
+    assert_eq!(reopened.policy_snapshot().generation, expected);
     Ok(())
 }
 

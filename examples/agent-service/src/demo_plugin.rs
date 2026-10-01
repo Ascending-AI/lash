@@ -5,7 +5,6 @@ use lash::process::ProcessOriginator;
 use lash::sync::MutexExt;
 use lash::{
     plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},
-    prompt::PromptContribution,
     tools::{
         PendingToolCall, PreparedToolCall, StaticToolExecute, StaticToolProvider,
         ToolAttemptOutcome, ToolBinding, ToolCall, ToolDefinition, ToolDefinitionBindingExt,
@@ -14,7 +13,7 @@ use lash::{
 };
 use serde_json::json;
 
-use crate::board::{BoardState, board_prompt, board_snapshot};
+use crate::board::{BoardState, board_snapshot};
 use crate::db::AppDb;
 
 const DEMO_PLUGIN_ID: &str = "demo_tic_tac_toe";
@@ -54,18 +53,6 @@ impl SessionPlugin for DemoSessionPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let db = Arc::clone(&self.db);
-        reg.prompt().contribute(Arc::new(move |ctx| {
-            let db = Arc::clone(&db);
-            Box::pin(async move {
-                let board = load_chat_board_for_plugin(&db, &ctx.session_id)?;
-                let context = board_prompt(&board);
-                Ok(vec![PromptContribution::environment(
-                    "Tic Tac Toe Board",
-                    context,
-                )])
-            })
-        }));
         reg.tools().provider(Arc::new(StaticToolProvider::new(
             demo_tool_definitions(),
             DemoTools {
@@ -173,15 +160,6 @@ fn play_move_tool() -> ToolDefinition {
         json!({ "type": "object" }),
     )
     .with_tool_binding(ToolBinding::new(["board"], "play"))
-}
-
-fn load_chat_board_for_plugin(
-    db: &Arc<Mutex<AppDb>>,
-    chat_id: &str,
-) -> Result<BoardState, PluginError> {
-    let mut db = db.lock_recover();
-    db.chat_board(chat_id)
-        .map_err(|err| PluginError::Session(err.to_string()))
 }
 
 fn load_chat_board_for_tool(db: &Arc<Mutex<AppDb>>, chat_id: &str) -> Result<BoardState, String> {

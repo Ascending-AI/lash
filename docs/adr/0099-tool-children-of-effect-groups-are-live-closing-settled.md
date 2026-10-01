@@ -364,9 +364,9 @@ sender and the clock.
 
 **4. Turn context is never recorded.** `TurnContext` holds only live runtime
 correlation and has no `Serialize`. The request carries no correlation; process
-runners construct their tool dispatch with `TurnContext::default()`. Per-send
-prompts live in durable `RunSpec` overrides, and a tool reads no live plugin
-input (ADR 0101). So the request records no turn-context payload and needs no
+runners construct their tool dispatch with `TurnContext::default()`. A send
+states no prompt (the prompt is the protocol's recorded config, ADR 0030),
+and a tool reads no live plugin input (ADR 0101). So the request records no turn-context payload and needs no
 refusal.
 
 ---

@@ -51,8 +51,8 @@ artifact store, deferred-grant resolvers and trace sinks. Each serves the
 identity the session recorded or refuses.
 
 The same holds for the core. No open-time option and no core setting is a
-behaviour layer over a created session: the core prompt layer is recorded at
-creation (ADR 0030), and what a call asks for and captures — reasoning
+behaviour layer over a created session: the protocol's prompt config is
+recorded at creation (ADR 0030), and what a call asks for and captures — reasoning
 publication, the fallback output cap, the cache hint and the
 response-metadata allowlists — is recorded with the session's model binding
 and carried on every request (ADR 0074). The transport an open resolves keeps

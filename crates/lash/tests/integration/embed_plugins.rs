@@ -74,7 +74,7 @@ impl lash::plugins::ConfigOwner for TestConfigOwner {
 /// creation recorded.
 #[derive(Default)]
 struct TestPluginFactory {
-    prompt_seen: Arc<Mutex<Vec<String>>>,
+    hook_seen: Arc<Mutex<Vec<String>>>,
     tool_seen: Arc<Mutex<Vec<String>>>,
 }
 
@@ -99,7 +99,7 @@ impl PluginFactory for TestPluginFactory {
             .map(|config| config.label);
         Ok(Arc::new(TestSessionPlugin {
             label,
-            prompt_seen: Arc::clone(&self.prompt_seen),
+            hook_seen: Arc::clone(&self.hook_seen),
             tool_seen: Arc::clone(&self.tool_seen),
         }))
     }
@@ -108,7 +108,7 @@ impl PluginFactory for TestPluginFactory {
 struct TestSessionPlugin {
     /// The label the session recorded, if it stated one.
     label: Option<String>,
-    prompt_seen: Arc<Mutex<Vec<String>>>,
+    hook_seen: Arc<Mutex<Vec<String>>>,
     tool_seen: Arc<Mutex<Vec<String>>>,
 }
 
@@ -119,17 +119,17 @@ impl SessionPlugin for TestSessionPlugin {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         // A session that recorded no label runs the plugin with nothing to
-        // contribute: no prompt and no tools.
+        // contribute: no turn hook and no tools.
         let Some(label) = self.label.clone() else {
             return Ok(());
         };
-        let prompt_seen = Arc::clone(&self.prompt_seen);
-        let prompt_label = label.clone();
-        reg.prompt().contribute(Arc::new(move |_ctx| {
-            let prompt_seen = Arc::clone(&prompt_seen);
-            let label = prompt_label.clone();
+        let hook_seen = Arc::clone(&self.hook_seen);
+        let hook_label = label.clone();
+        reg.turn().before(Arc::new(move |_ctx| {
+            let hook_seen = Arc::clone(&hook_seen);
+            let label = hook_label.clone();
             Box::pin(async move {
-                prompt_seen.lock_recover().push(label);
+                hook_seen.lock_recover().push(label);
                 Ok(Vec::new())
             })
         }));
@@ -297,7 +297,7 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
     };
     core.session(session_id)
         .create(lash::SessionCreation {
-            plugin_options,
+            spec: lash::SessionSpec::new().plugin_options(plugin_options),
             ..Default::default()
         })
         .await
@@ -305,7 +305,7 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
 }
 
 #[tokio::test]
-async fn prompt_hook_and_tool_provider_read_recorded_session_config() {
+async fn turn_hook_and_tool_provider_read_recorded_session_config() {
     let plugin = Arc::new(TestPluginFactory::default());
     let (core, _double) = core_with_responses(
         vec![response_tool_call(), response_text("done")],
@@ -322,13 +322,9 @@ async fn prompt_hook_and_tool_provider_read_recorded_session_config() {
         .expect("turn");
 
     assert_eq!(assistant_prose(&result), "done");
-    // The prompt is built only by the protocol-start and the second
-    // iteration's execution-environment syncs, each journaled so a redrive
-    // replays it (FIG-3587); the drive builds none of its own (FIG-3672).
-    assert_eq!(
-        plugin.prompt_seen.lock_recover().as_slice(),
-        ["page-a", "page-a"]
-    );
+    // The before-turn hook runs once for the root, under the label its
+    // session recorded.
+    assert_eq!(plugin.hook_seen.lock_recover().as_slice(), ["page-a"]);
     assert_eq!(plugin.tool_seen.lock_recover().as_slice(), ["page-a"]);
 }
 

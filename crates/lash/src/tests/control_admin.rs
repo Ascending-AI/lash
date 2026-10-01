@@ -326,28 +326,31 @@ impl lash_core::facade_support::ContextCompactor for PromptAssertingCompactor {
         Option<lash_core::facade_support::ContextCompaction>,
         lash_core::facade_support::ContextError,
     > {
-        // FIG-3374: the direct completion carries the same prompt stack a
-        // turn on this session would resolve — capability (context + plugin
-        // hook), core, and session layers — minus the turn layer and every
-        // tool-gated contribution, since the request ships no tools.
+        // FIG-3374, FIG-4589: the direct completion carries the prompt the
+        // session's protocol renders for a compaction: its recorded intro,
+        // instructions and context, and no tool or execution prose, since
+        // the request ships no tools.
         let prompt = ctx
             .system_prompt
             .as_deref()
-            .expect("compaction request carries the resolved prompt stack");
+            .expect("compaction request carries the protocol's recorded prompt");
         for marker in [
-            "core-layer-guidance-marker",
-            "plugin-hook-guidance-marker",
-            "session-layer-guidance-marker",
+            "recorded-intro-marker",
+            "recorded-instruction-marker",
+            "recorded-context-marker",
         ] {
-            assert!(
-                prompt.contains(marker),
-                "system prompt must contain `{marker}`: {prompt}"
+            assert_eq!(
+                prompt.matches(marker).count(),
+                1,
+                "system prompt must state `{marker}` once: {prompt}"
             );
         }
-        assert!(
-            !prompt.contains("tool-gated-guidance-marker"),
-            "a tool-gated contribution cannot ship on a no-tools request: {prompt}"
-        );
+        for absent in ["## Execution", "## Tool modules", "app_lookup"] {
+            assert!(
+                !prompt.contains(absent),
+                "a no-tools request carries no `{absent}`: {prompt}"
+            );
+        }
         Ok(Some(lash_core::facade_support::ContextCompaction::new(
             vec![lash_core::SessionAppendNode::message(
                 lash_core::PluginMessage::text(
@@ -364,35 +367,37 @@ impl lash_core::facade_support::ContextCompactor for PromptAssertingCompactor {
 }
 
 #[tokio::test]
-async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result<()> {
-    let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
-            .instructions("core-layer-guidance-marker"),
-    )
+async fn compact_context_system_prompt_is_the_protocols_compaction_render() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        double_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
     .serve_test_model(mock_provider(), mock_model_spec())
+    .tools(Arc::new(AppTools))
     .plugin(Arc::new(StaticPluginFactory::new(
         "test-prompt-compactor",
         lash_core::facade_support::PluginSpec::new()
-            .with_context_compactor(100, Arc::new(PromptAssertingCompactor))
-            .with_prompt_contributor(Arc::new(|_ctx| {
-                Box::pin(async {
-                    Ok(vec![
-                        lash_core::PromptContribution::guidance(
-                            "hook",
-                            "plugin-hook-guidance-marker",
-                        ),
-                        lash_core::PromptContribution::guidance(
-                            "gated",
-                            "tool-gated-guidance-marker",
-                        )
-                        .requires_tool("absent_tool"),
-                    ])
-                })
-            })),
+            .with_context_compactor(100, Arc::new(PromptAssertingCompactor)),
     )))
     .build(crate::testing::runtime_lease_owner())?;
     core.session("compact-prompt-stack")
-        .create(crate::SessionCreation::default().instructions("session-layer-guidance-marker"))
+        .create(crate::SessionCreation {
+            spec: lash_core::facade_support::SessionSpec::new()
+                .plugin(
+                    crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                    crate::standard::StandardTurnOptions {
+                        prompt: Some(crate::standard::StandardPrompt {
+                            intro: Some("recorded-intro-marker".to_string()),
+                            instructions: vec!["recorded-instruction-marker".to_string()],
+                            context: vec!["recorded-context-marker".to_string()],
+                            omit_builtin_guidance: false,
+                        }),
+                        render: None,
+                    },
+                )
+                .map_err(EmbedError::ProtocolTurnOptions)?,
+            ..Default::default()
+        })
         .await?;
     let session = core.session("compact-prompt-stack").open().await?;
     session
@@ -1325,14 +1330,10 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
         .admin()
         .config()
         .configure(crate::config::ConfigTransaction::of(
-            crate::config::SetPromptTemplate {
-                template: PromptTemplate::new(vec![lash_core::PromptTemplateSection::untitled(
-                    vec![lash_core::PromptTemplateEntry::text("updated")],
-                )]),
-            },
+            crate::config::SetAutonomy { autonomous: true },
         ))
         .await?;
-    assert!(session.policy_snapshot().prompt.template.is_some());
+    assert!(session.policy_snapshot().autonomous);
 
     session
         .admin()

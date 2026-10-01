@@ -273,22 +273,21 @@ fn assembled_prompt_fragments_with_projection(
     ));
 
     // The deferred-tool advertisement, which is prose a *lower* crate composes
-    // (`lash_lashlang_runtime::catalogue_preview`) and a host contributes to the
-    // execution section. It is model-facing on every turn of any session with a
+    // (`lash_lashlang_runtime::catalogue_preview`) and a host states in its
+    // prompt config. It is model-facing on every turn of any session with a
     // deferred catalogue, it takes no vocabulary, and neither this walker nor
     // the tool-prose gate saw it: a judged TypeScript session was advertised
     // `await tools.search({ query: "..." })?`, try-operator included.
     fragments.push((
         "deferred-tool advertisement",
-        lash_lashlang_runtime::catalogue_preview_contribution_for_entries([
-            lash_lashlang_runtime::CataloguePreviewEntry {
+        lash_lashlang_runtime::catalogue_preview(
+            [lash_lashlang_runtime::CataloguePreviewEntry {
                 module_path: vec!["workbench_deferred".to_string()],
                 call: "stats".to_string(),
-            },
-        ])
-        .expect("one catalogued entry renders an advertisement")
-        .content
-        .to_string(),
+            }],
+            &lash_lashlang_runtime::CataloguePreviewOptions::default(),
+        )
+        .expect("one catalogued entry renders an advertisement"),
     ));
 
     // Bound variables, rendered through the dialect's **own session**, which is
@@ -350,11 +349,7 @@ fn assembled_prompt_fragments_with_projection(
         .expect("seed one projected binding");
     fragments.push((
         "read-only variables",
-        crate::projection::RlmProjectionExtension::prompt_contributions_for(&projected, vocabulary)
-            .into_iter()
-            .map(|contribution| contribution.content.to_string())
-            .collect::<Vec<_>>()
-            .join("\n"),
+        crate::projection::read_only_variables_prompt(&projected, vocabulary).unwrap_or_default(),
     ));
 
     // The budget escalation tails, at each of the three thresholds.

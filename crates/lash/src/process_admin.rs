@@ -589,6 +589,16 @@ impl Processes {
         // admission; a host states a model by its key or its policy.
         if let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut request.input {
             create_request.record_default_model(None);
+            // A session-turn start with no parent session is created from
+            // the core's creation defaults, as `SessionBuilder::create`
+            // creates one: the start carries the core's default plugin
+            // options beneath the ones its request states (FIG-4589), so the
+            // worker that later creates the session records them whatever
+            // its own core states.
+            if create_request.relation.parent_session_id().is_none() {
+                create_request.plugin_options = std::mem::take(&mut create_request.plugin_options)
+                    .over(self.core.default_plugin_options.clone());
+            }
         }
         // A root start's session grant is the host's lookup, whether it came
         // from `session_scope` or from a remote start's `until_session` data

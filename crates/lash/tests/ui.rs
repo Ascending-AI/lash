@@ -38,8 +38,6 @@ mod durable_builder_without_advanced;
 mod facade_boundary_types_are_public;
 #[path = "ui/process_surface_types_are_public.rs"]
 mod process_surface_types_are_public;
-#[path = "ui/prompt_types_are_public.rs"]
-mod prompt_types_are_public;
 #[path = "ui/remote_protocol_types_are_public.rs"]
 mod remote_protocol_types_are_public;
 #[cfg(feature = "rlm")]

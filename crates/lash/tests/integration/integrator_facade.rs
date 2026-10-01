@@ -29,11 +29,11 @@ use lash::plugins::{
     PluginNamespaceState, PluginState, PrepareTurnRequest, ProcessEngine,
     ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError, ProcessRunOutcome,
-    PromptFingerprint, ProtocolBeforeLlmCallContext, ProtocolBuildInput, ProtocolDriverHandle,
-    ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-    ProtocolTurnOptionsError, RuntimeExecutionContext, SegmentHandover, SessionAuthorityContext,
-    SessionPluginSource, ToolCatalog, TurnDriverConfig, TurnDriverPreamble, TurnFinalization,
-    TurnHookReport, TurnPreparation,
+    ProtocolBeforeLlmCallContext, ProtocolBuildInput, ProtocolDriverHandle, ProtocolDriverPlugin,
+    ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin, ProtocolTurnOptionsError,
+    RuntimeExecutionContext, SegmentHandover, SessionAuthorityContext, SessionPluginSource,
+    ToolCatalog, TurnDriverConfig, TurnDriverPreamble, TurnFinalization, TurnHookReport,
+    TurnPreparation,
 };
 use lash::process::{
     ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessEventSemantics,
@@ -94,16 +94,11 @@ impl ProtocolDriverPlugin for Driver {
             Arc::new(lash_protocol_standard::StandardDriver::default());
         let tool_specs: Arc<Vec<LlmToolSpec>> = input.tool_catalog.model_tool_specs();
         let tool_names = input.tool_catalog.tool_names();
-        let tool_names_fingerprint: PromptFingerprint = input.tool_catalog.tool_names_fingerprint();
 
         TurnDriverPreamble {
             config: TurnDriverConfig::chat(protocol, true),
             tool_specs,
             tool_names,
-            tool_names_fingerprint,
-            execution_title: Arc::from("Execution"),
-            execution_prompt: Arc::from("facade protocol witness"),
-            prompt_contributions: input.extra_prompt_contributions,
             writer_formats: input.writer_formats,
         }
     }
@@ -133,14 +128,11 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
         tool_catalog: Arc::new(ToolCatalog::default()),
         plugin_extensions: PluginExtensions::default(),
         trigger_events: TriggerEventCatalog::default(),
-        extra_prompt_contributions: Vec::new(),
         writer_formats: lash_core::build_newest_writer_formats(),
     });
     assert!(preamble.config.sync_execution_environment);
     assert!(preamble.tool_specs.is_empty());
     assert!(preamble.tool_names.is_empty());
-    assert_eq!(&*preamble.execution_prompt, "facade protocol witness");
-    assert!(preamble.prompt_contributions.is_empty());
 }
 
 #[test]

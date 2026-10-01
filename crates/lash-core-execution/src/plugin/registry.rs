@@ -14,8 +14,8 @@ use super::{
     PluginError, PluginHost, PluginLifecycleEventHook, PluginOperationFailure,
     PluginOperationOutcome, PluginOperationRegistration, PluginOperationSpec, PluginQuery,
     PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler,
-    PromptContributor, SessionToolAccess, SubagentSessionContext, ToolCatalogContributor,
-    ToolPresentationStep, TurnContextTransform,
+    SessionToolAccess, SubagentSessionContext, ToolCatalogContributor, ToolPresentationStep,
+    TurnContextTransform,
 };
 use crate::ToolProvider;
 
@@ -83,7 +83,6 @@ pub struct PluginSpec {
     pub extension_contributions: Vec<PluginExtensionContribution>,
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
     pub triggers: Vec<crate::TriggerEvent>,
-    pub prompt_contributors: Vec<PromptContributor>,
     pub tool_catalog_contributors: Vec<ToolCatalogContributor>,
     pub before_turn_hooks: Vec<BeforeTurnHook>,
     pub before_tool_call_hooks: Vec<BeforeToolCallHook>,
@@ -122,11 +121,6 @@ impl PluginSpec {
 
     pub fn with_trigger_event(mut self, event: crate::TriggerEvent) -> Self {
         self.triggers.push(event);
-        self
-    }
-
-    pub fn with_prompt_contributor(mut self, contributor: PromptContributor) -> Self {
-        self.prompt_contributors.push(contributor);
         self
     }
 
@@ -715,9 +709,6 @@ impl SessionPlugin for SpecPlugin {
         }
         for event in &self.spec.triggers {
             reg.triggers().declare(event.clone())?;
-        }
-        for contributor in &self.spec.prompt_contributors {
-            reg.prompt().contribute(Arc::clone(contributor));
         }
         for contributor in &self.spec.tool_catalog_contributors {
             reg.tool_catalog().contribute(Arc::clone(contributor));

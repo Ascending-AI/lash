@@ -538,9 +538,7 @@ fn core_commands_keep_what_they_do_not_name() {
             .then(core::SetModel {
                 model: crate::ModelKey::new("next-model"),
             })
-            .then(core::AddPromptContribution {
-                contribution: crate::PromptContribution::guidance("Added", "added"),
-            }),
+            .then(core::SetAutonomy { autonomous: true }),
     );
     let mut published = base.clone();
     assert!(matches!(
@@ -559,14 +557,7 @@ fn core_commands_keep_what_they_do_not_name() {
         published.attachment_acceptance, base.attachment_acceptance,
         "a model change keeps the attachment-acceptance snapshot"
     );
-    assert_eq!(
-        published.prompt.as_ref().map(|prompt| prompt
-            .slots
-            .values()
-            .map(|slot| slot.contributions.len())
-            .sum::<usize>()),
-        Some(1)
-    );
+    assert!(published.autonomous, "the second command applied too");
     assert_eq!(published.plugin_config, base.plugin_config);
 }
 

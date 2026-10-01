@@ -235,6 +235,29 @@ impl PluginOptions {
         Ok(())
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.plugins.is_empty()
+    }
+
+    /// `self` over `under`, plugin by plugin. Where both state a JSON object
+    /// for one plugin, its fields merge and `self`'s win; any other value of
+    /// `self` replaces `under`'s. So a session's spec can state one option of
+    /// a plugin and keep the rest of the defaults beneath it.
+    #[must_use]
+    pub fn over(self, mut under: Self) -> Self {
+        for (plugin_id, top) in self.plugins {
+            match (under.plugins.get_mut(&plugin_id), top) {
+                (Some(serde_json::Value::Object(base)), serde_json::Value::Object(top)) => {
+                    base.extend(top);
+                }
+                (_, top) => {
+                    under.plugins.insert(plugin_id, top);
+                }
+            }
+        }
+        under
+    }
+
     pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
     where
         T: DeserializeOwned,

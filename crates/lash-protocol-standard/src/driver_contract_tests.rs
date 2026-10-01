@@ -494,7 +494,6 @@ fn the_preamble_offers_batch_only_when_enabled() {
             tool_catalog: Arc::new(catalog.clone()),
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
-            extra_prompt_contributions: Vec::new(),
             writer_formats: lash_core::build_newest_writer_formats(),
         })
     };
@@ -511,7 +510,12 @@ fn the_preamble_offers_batch_only_when_enabled() {
         enabled.tool_specs[0].input_schema.canonical["properties"]["tool_calls"]["maxItems"],
         serde_json::json!(8)
     );
-    assert!(enabled.execution_prompt.contains("at most 8 per batch"));
+    assert!(
+        crate::standard_execution_section(BatchSugar::Enabled {
+            max_members: std::num::NonZeroUsize::new(8).expect("eight is non-zero"),
+        })
+        .contains("at most 8 per batch")
+    );
     assert!(
         !enabled.tool_names.iter().any(|name| name == "batch"),
         "batch is not a catalog entry"

@@ -18,7 +18,7 @@ pub use config::{
 };
 pub use config_owner::{
     RLM_CONFIG_IMPLEMENTATION, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig,
-    RlmRecordedConfig, SetRlmRender,
+    RlmRecordedConfig, SetRlmPrompt, SetRlmPromptContext, SetRlmRender,
 };
 pub use config_types::{
     ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures,

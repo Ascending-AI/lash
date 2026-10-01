@@ -22,10 +22,8 @@
 //! recorded shape, so an input addressed to a running turn under a differing
 //! explicit spec is refused before acceptance.
 
-use std::collections::HashMap;
-
 use crate::session_graph::PersistedSessionConfig;
-use crate::{GenerationOptions, ModelKey, PromptLayer, ProtocolTurnOptions, ReasoningSelection};
+use crate::{GenerationOptions, ModelKey, ProtocolTurnOptions, ReasoningSelection};
 
 /// Family version of the [`RunSpecHash`] preimage and of the canonical spec
 /// bytes it hashes.
@@ -146,11 +144,6 @@ impl Eq for CapabilityRef {}
 /// input. Each field left `None` keeps the root's snapshot value.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RunOverrides {
-    /// A prompt layer stacked on the session's prompt with the usual
-    /// assembly precedence: its template replaces, a reset slot replaces
-    /// that slot, and other contributions add.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<PromptLayer>,
     /// The model this root runs, by the host's key. The root resolves it once,
     /// when it records its shape: the registry mints the binding then, and
     /// every replay reads the recorded binding. The snapshot's reasoning
@@ -179,8 +172,7 @@ impl RunOverrides {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.prompt.is_none()
-            && self.model.is_none()
+        self.model.is_none()
             && self.reasoning.is_none()
             && self.generation.is_none()
             && self.protocol_turn_options.is_none()
@@ -190,13 +182,6 @@ impl RunOverrides {
     #[must_use]
     pub fn over(self, under: Self) -> Self {
         Self {
-            prompt: match (under.prompt, self.prompt) {
-                (Some(mut under), Some(top)) => {
-                    stack_prompt_layer(&mut under, &top);
-                    Some(under)
-                }
-                (under, top) => top.or(under),
-            },
             model: self.model.or(under.model),
             reasoning: self.reasoning.or(under.reasoning),
             generation: self.generation.or(under.generation),
@@ -217,11 +202,6 @@ impl RunOverrides {
         config: &mut PersistedSessionConfig,
         models: &dyn crate::provider::RuntimeModels,
     ) -> Result<(), RunResolveError> {
-        if let Some(prompt) = &self.prompt {
-            let mut stacked = config.prompt.clone().unwrap_or_default();
-            stack_prompt_layer(&mut stacked, prompt);
-            config.prompt = Some(stacked);
-        }
         if let Some(key) = &self.model {
             let recorded = models.snapshot(key).map_err(RunResolveError::Model)?;
             let reasoning = config
@@ -283,27 +263,6 @@ pub enum RunResolveError {
     ProtocolOptionsWithoutProtocol,
     #[error("the spec could not be encoded: {0}")]
     Encode(#[from] serde_json::Error),
-}
-
-/// Stack `top` on `base` so that resolving `[base]` equals resolving
-/// `[base, top]`: a template replaces, a reset slot replaces the slot, and
-/// other contributions add after the base's.
-fn stack_prompt_layer(base: &mut PromptLayer, top: &PromptLayer) {
-    if let Some(template) = &top.template {
-        base.template = Some(template.clone());
-    }
-    let slots: &HashMap<_, _> = &top.slots;
-    for (slot, layer) in slots {
-        if layer.reset {
-            base.slots.insert(*slot, layer.clone());
-        } else {
-            base.slots
-                .entry(*slot)
-                .or_default()
-                .contributions
-                .extend(layer.contributions.iter().cloned());
-        }
-    }
 }
 
 /// The shape one accepted input runs under.

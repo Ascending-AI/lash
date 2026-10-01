@@ -22,16 +22,38 @@ const SERVED_MODELS: [&str; 4] = [
     "upgraded-model",
 ];
 
-fn guidance(text: &str) -> lash_core::PromptLayer {
-    lash_core::PromptLayer::new()
-        .with_contribution(lash_core::PromptContribution::guidance(text, text))
+/// A standard prompt whose one instruction is `text`.
+fn guidance(text: &str) -> crate::standard::StandardPrompt {
+    crate::standard::StandardPrompt {
+        instructions: vec![text.to_string()],
+        ..Default::default()
+    }
+}
+
+/// The standard prompt `config` records.
+fn recorded_prompt(config: &lash_core::PersistedSessionConfig) -> crate::standard::StandardPrompt {
+    config
+        .plugin_config
+        .decode::<crate::standard::StandardRecordedConfig>(
+            crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+        )
+        .expect("the standard namespace decodes")
+        .expect("the session records its standard namespace")
+        .prompt
 }
 
 fn creation_spec() -> crate::SessionSpec {
     crate::SessionSpec::new()
         .model("created-model")
         .attachment_acceptance(snapshot("created-attachments"))
-        .prompt_layer(guidance("CREATED PROMPT"))
+        .plugin(
+            crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+            crate::standard::StandardTurnOptions {
+                prompt: Some(guidance("CREATED PROMPT")),
+                render: None,
+            },
+        )
+        .expect("the standard options encode")
         .generation(lash_core::GenerationOptions {
             seed: Some(7),
             ..Default::default()
@@ -116,7 +138,6 @@ fn assert_runs_creation_config(policy: &lash_core::SessionPolicy) {
         policy.attachment_acceptance,
         snapshot("created-attachments")
     );
-    assert_eq!(policy.prompt, guidance("CREATED PROMPT"));
     assert_eq!(policy.generation.seed, Some(7));
 }
 
@@ -181,7 +202,7 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
             .then(crate::config::SetAttachmentAcceptance {
                 acceptance: (*snapshot("patched-attachments")).clone(),
             })
-            .then(crate::config::SetPrompt {
+            .then(crate::standard::SetStandardPrompt {
                 prompt: guidance("PATCHED PROMPT"),
             })
             .then(crate::config::SetGeneration {
@@ -200,7 +221,7 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
         config.attachment_acceptance,
         snapshot("patched-attachments")
     );
-    assert_eq!(config.prompt, Some(guidance("PATCHED PROMPT")));
+    assert_eq!(recorded_prompt(&config), guidance("PATCHED PROMPT"));
     assert_eq!(config.generation.seed, Some(7), "a merge keeps the seed");
     assert_eq!(
         config.generation.output_token_cap,
@@ -214,7 +235,6 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
         policy.attachment_acceptance,
         snapshot("patched-attachments")
     );
-    assert_eq!(policy.prompt, guidance("PATCHED PROMPT"));
     assert_eq!(policy.generation, config.generation);
     Ok(())
 }
@@ -282,7 +302,7 @@ async fn a_command_no_plugin_owns_is_refused_typed_and_writes_nothing() -> Resul
     let error = config
         .apply(
             crate::config::ConfigWrite::new("unowned-plugin-command", revision),
-            crate::config::ConfigTransaction::of(crate::config::SetPrompt {
+            crate::config::ConfigTransaction::of(crate::standard::SetStandardPrompt {
                 prompt: guidance("NEVER WRITTEN"),
             })
             .then_entry(crate::config::ConfigCommandEntry {
@@ -306,7 +326,11 @@ async fn a_command_no_plugin_owns_is_refused_typed_and_writes_nothing() -> Resul
         recorded_config(&backend, "patch-unread-plugin-options").await,
         before
     );
-    assert_eq!(session.policy_snapshot().prompt, guidance("CREATED PROMPT"));
+    assert_eq!(
+        recorded_prompt(&before.1),
+        guidance("CREATED PROMPT"),
+        "the refused transaction's prompt command wrote nothing"
+    );
     Ok(())
 }
 

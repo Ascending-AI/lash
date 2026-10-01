@@ -318,21 +318,15 @@ impl LoadWorker {
         let input = generator
             .record(id.actor, id.ordinal, "input", plan.input_bytes)
             .map_err(terminal_chain)?;
-        let prompt = generator.text(id.actor, id.ordinal, "prompt", plan.prompt_bytes);
-        let layer = lash::prompt::PromptLayer::new().with_contribution(
-            lash::prompt::PromptContribution::new(
-                lash::prompt::PromptSlot::ProjectInstructions,
-                "Synthetic load context",
-                prompt,
-            ),
-        );
+        // A run states no prompt (FIG-4589): the plan's context bytes ride
+        // after the turn's input.
+        let context = generator.text(id.actor, id.ordinal, "prompt", plan.prompt_bytes);
         let main = session
             .send(TurnInput::text(format!(
-                "Run the synthetic load turn. {TURN_MARKER}{operation} {WORKLOAD_MARKER}{}\n{input}",
+                "Run the synthetic load turn. {TURN_MARKER}{operation} {WORKLOAD_MARKER}{}\n{input}\n## Synthetic load context\n\n{context}",
                 self.load.sha256()
             )))
             .id(turn_id_for(&operation))
-            .prompt_layer(layer)
             .accept_restate(ctx)
             .await?;
         // A queued input or a cancel is meant for a running root: wait until

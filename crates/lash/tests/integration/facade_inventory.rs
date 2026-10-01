@@ -175,7 +175,6 @@ mod host_wrapping_inventory {
     use lash::plugins::OutputRegistrations as _;
     use lash::plugins::PluginOperationRegistrations as _;
     use lash::plugins::ProcessEngineContributionContext as _;
-    use lash::plugins::PromptRegistrations as _;
     use lash::plugins::ProtocolRegistrations as _;
     use lash::plugins::SessionRegistrations as _;
     use lash::plugins::ToolCallRegistrations as _;

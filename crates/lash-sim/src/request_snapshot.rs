@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use lash::PromptLayerSink as _;
-use lash_core::{
-    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, facade_support::TraceLevel,
-};
+use lash_core::facade_support::TraceLevel;
 use serde_json::{Value, json};
 
 use crate::provider::ScriptedLlmHttpTransport;
@@ -33,9 +30,18 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .serve_test_model(provider, model)
-        .prompt_template(PromptTemplate::new(vec![PromptTemplateSection::untitled(
-            vec![PromptTemplateEntry::text("System snapshot instruction.")],
-        )]))
+        .session_plugin(
+            lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+            lash::standard::StandardTurnOptions {
+                prompt: Some(lash::standard::StandardPrompt {
+                    intro: Some("System snapshot instruction.".to_string()),
+                    omit_builtin_guidance: true,
+                    ..Default::default()
+                }),
+                render: None,
+            },
+        )
+        .expect("standard prompt options")
         .trace_jsonl_path(&trace_path)
         .trace_level(TraceLevel::Extended)
         .build(crate::sim_process_owner())

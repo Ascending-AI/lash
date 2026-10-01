@@ -272,7 +272,7 @@ async fn created_config_reaches_every_open() -> Result<()> {
     let durable = core
         .session("probe-session")
         .create(crate::SessionCreation {
-            plugin_options: stating(12)?,
+            spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
             ..Default::default()
         })
         .await?;
@@ -316,18 +316,12 @@ async fn the_command_catalog_lists_every_registered_command() -> Result<()> {
     assert_eq!(
         names(crate::config::CORE_CONFIG_OWNER),
         [
-            "add_prompt_contribution",
-            "clear_prompt_slot",
-            "clear_prompt_template",
-            "replace_prompt_slot",
             "set_attachment_acceptance",
             "set_autonomy",
             "set_charge_safety",
             "set_generation",
             "set_model",
             "set_no_progress_budget",
-            "set_prompt",
-            "set_prompt_template",
             "set_reasoning",
             "set_tool_access",
             "set_turn_budget",
@@ -378,10 +372,9 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
     let Err(error) = core
         .session("probe-unknown-create")
         .create(crate::SessionCreation {
-            plugin_options: lash_core::PluginOptions::typed(
-                "no-such-plugin",
-                serde_json::json!({ "k": 1 }),
-            )?,
+            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+                lash_core::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))?,
+            ),
             ..Default::default()
         })
         .await
@@ -446,7 +439,7 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     drop(
         core.session("probe-command")
             .create(crate::SessionCreation {
-                plugin_options: stating(12)?,
+                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
                 ..Default::default()
             })
             .await?,
@@ -514,7 +507,7 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     drop(
         core.session("probe-atomic")
             .create(crate::SessionCreation {
-                plugin_options: stating(12)?,
+                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
                 ..Default::default()
             })
             .await?,
@@ -597,7 +590,7 @@ async fn a_stale_transaction_publishes_nothing() -> Result<()> {
     drop(
         core.session("probe-stale")
             .create(crate::SessionCreation {
-                plugin_options: stating(12)?,
+                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
                 ..Default::default()
             })
             .await?,
@@ -634,7 +627,7 @@ async fn redriven_roots_see_their_admitted_revision() -> Result<()> {
     drop(
         core.session("probe-admitted")
             .create(crate::SessionCreation {
-                plugin_options: stating(12)?,
+                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
                 ..Default::default()
             })
             .await?,
@@ -689,7 +682,7 @@ async fn a_fork_captures_the_config_of_its_fork_point() -> Result<()> {
     drop(
         core.session("probe-fork-source")
             .create(crate::SessionCreation {
-                plugin_options: stating(12)?,
+                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
                 ..Default::default()
             })
             .await?,

@@ -149,10 +149,6 @@ fn count(texts: &[String], wanted: impl Fn(&str) -> bool) -> usize {
 /// root was admitted on, after the frame's commit moved the head), derives
 /// the same compaction session id and turn id, and they are the ids the
 /// summarizer's provider requests carry.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn a_standard_compaction_frame_opens_once_whatever_its_crash(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -160,7 +156,31 @@ pub async fn a_standard_compaction_frame_opens_once_whatever_its_crash(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
 ) {
-    let protocol = StandardFrameLawProtocol::shared();
+    standard_pressure_crash_case(
+        prefix,
+        effect_host,
+        stores,
+        runner,
+        crash,
+        StandardFrameLawProtocol::shared(),
+    )
+    .await;
+}
+
+/// [`a_standard_compaction_frame_opens_once_whatever_its_crash`] over
+/// `protocol`, answering the law's model.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn standard_pressure_crash_case(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    crash: FrameOpenCrash,
+    protocol: Arc<dyn FrameLawProtocol>,
+) -> LawModel {
     let model = law_model(ModelScript {
         turns: vec![
             (protocol.answer("answer 1"), STANDARD_PRESSURE_TOKENS),
@@ -228,6 +248,7 @@ pub async fn a_standard_compaction_frame_opens_once_whatever_its_crash(
         requested.iter().all(|request| request == &derived[0]),
         "the summarizer's requests carry the derived ids: {requested:?} vs {derived:?}"
     );
+    model
 }
 
 /// What a standard-compaction frame's laws hold after the redrive.
@@ -275,10 +296,6 @@ async fn assert_standard_frame_opened_once(
 /// root that recovers and redriven: the provider refused the first root as
 /// too long, and the next root records `Completed` in the frame it leaves
 /// and opens one recovery frame, each exactly once.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -286,7 +303,31 @@ pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
 ) {
-    let protocol = StandardFrameLawProtocol::shared();
+    overflow_recovery_crash_case(
+        prefix,
+        effect_host,
+        stores,
+        runner,
+        crash,
+        StandardFrameLawProtocol::shared(),
+    )
+    .await;
+}
+
+/// [`an_overflow_recovery_frame_opens_once_whatever_its_crash`] over
+/// `protocol`, answering the law's model.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn overflow_recovery_crash_case(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    crash: FrameOpenCrash,
+    protocol: Arc<dyn FrameLawProtocol>,
+) -> LawModel {
     let model = law_model(ModelScript {
         turns: vec![context_overflow(), (protocol.answer("answer 2"), 1)],
     });
@@ -335,6 +376,7 @@ pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
         1,
         "the recovery records Completed once: {messages:?}"
     );
+    model
 }
 
 /// An administrative compaction queued before an input applies before it

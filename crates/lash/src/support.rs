@@ -14,13 +14,12 @@ pub(crate) use lash_core::{
 };
 pub(crate) use tokio_util::sync::CancellationToken;
 
-pub(crate) use lash_core::PromptLayer;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
-    DeploymentStore, LlmCallRecord, LocalTurnStop, Message, PluginMessage, PluginOptions,
-    ProcessRegistry, ProtocolTurnOptions, RuntimeErrorCode, SessionCursor, SessionError,
-    SessionReadView, SessionScope, SessionSnapshot, ToolCallRecord, ToolManifest, ToolProvider,
-    ToolState, facade_support::PluginFactory, facade_support::SessionObservation,
+    DeploymentStore, LlmCallRecord, LocalTurnStop, Message, PluginMessage, ProcessRegistry,
+    ProtocolTurnOptions, RuntimeErrorCode, SessionCursor, SessionError, SessionReadView,
+    SessionScope, SessionSnapshot, ToolCallRecord, ToolManifest, ToolProvider, ToolState,
+    facade_support::PluginFactory, facade_support::SessionObservation,
     facade_support::SessionObservationSubscription, facade_support::SessionResume,
     facade_support::TerminationPolicy, facade_support::ToolRestoreReport,
     facade_support::ToolSourceHandle, facade_support::TurnActivitySink,
@@ -34,7 +33,6 @@ pub(crate) use lash_core::{TurnActivityId, TurnEvent};
 pub(crate) use crate::admin::{PluginOperations, SessionAdmin};
 pub(crate) use crate::core::{LashCore, build_plugin_host};
 pub(crate) use crate::error::{EmbedError, Result};
-pub(crate) use crate::prompt_layer::PromptLayerSink;
 pub(crate) use crate::session::{LashSession, ParkedSession, SessionBuilder};
 #[cfg(test)]
 pub(crate) use crate::turn::{RunActivityCollector, TurnReport, message_text};

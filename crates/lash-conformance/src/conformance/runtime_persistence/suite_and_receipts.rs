@@ -132,57 +132,6 @@ pub(super) async fn pending_turn_input_mint_is_unique_across_store_instances(
     );
 }
 
-/// Prove lease and claim expiry using an injected embedded-backend clock.
-///
-/// This focused vector proves an embedded store consults its injected
-/// [`Clock`](crate::Clock) across session leases and both claim families. Full
-/// conformance suites state their timing mode explicitly; the `Realtime` mode
-/// keeps its expired-to-reclaimable direction on the production backend clock
-/// with bounded polling.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn session_prompt_layer_round_trips_through_the_committed_head(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let expected_prompt =
-        crate::PromptLayer::new().with_contribution(crate::PromptContribution::guidance(
-            "Session policy",
-            "Continue with the persisted session-specific instructions.",
-        ));
-    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-    policy.prompt = expected_prompt.clone();
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("session-prompt-layer"),
-        policy,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state),
-        "session-prompt-layer",
-    )
-    .await
-    .expect("commit session prompt layer");
-
-    let head = store
-        .load_session_head_meta(&SessionId::from("session-prompt-layer"))
-        .await
-        .expect("load session head")
-        .expect("committed session head");
-    assert_eq!(head.config.prompt, Some(expected_prompt.clone()));
-    let restored = crate::conformance::helpers::load_window_state(
-        &store,
-        &SessionId::from("session-prompt-layer"),
-    )
-    .await
-    .expect("load persisted session state")
-    .expect("committed session state");
-    assert_eq!(restored.policy.prompt, expected_prompt);
-}
-
 /// FIG-2479: the commanded protocol-turn-options fact round-trips resident
 /// state → committed head row (SESSION_HEAD_META v6) → cold load, and the head
 /// value is what the loaded state carries.

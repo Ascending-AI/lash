@@ -230,6 +230,7 @@ fn render_options(max_chars: usize) -> lash_core::ProtocolTurnOptions {
             },
             ..Default::default()
         }),
+        ..Default::default()
     })
     .expect("render options")
 }

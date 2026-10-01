@@ -31,13 +31,6 @@ pub struct SessionPolicy {
     /// like the turn budget (FIG-4376). A carrier that states none resolves to
     /// the charge-safe default.
     pub charge_safety: ChargeSafetyPolicy,
-    /// The creating core's prompt layer, recorded at creation (FIG-4397) and
-    /// rendered beneath [`Self::prompt`]. A core's prompt is a creation
-    /// default: a session renders the layer it recorded on every worker, and
-    /// a child inherits its parent's.
-    pub core_prompt: crate::PromptLayer,
-    /// The session's own prompt layer, rendered over [`Self::core_prompt`].
-    pub prompt: crate::PromptLayer,
     /// Caller-owned generation intent applied to every LLM call this session
     /// makes. It lives on the policy rather than on a single turn because it
     /// is session-wide truth: child sessions resolve their spec against this
@@ -45,7 +38,7 @@ pub struct SessionPolicy {
     ///
     /// The durable session-head copy restores this intent on a cold load. Per
     /// ADR 0030, a live facade host may still reconcile its current spec over
-    /// loaded state at open time, exactly as it does for the prompt.
+    /// loaded state at open time.
     /// The process/remote policy carrier mirrors the same field.
     pub generation: crate::GenerationOptions,
 }
@@ -62,8 +55,6 @@ impl SessionPolicy {
             turn_budget,
             no_progress_budget: NoProgressBudget::default(),
             charge_safety: ChargeSafetyPolicy::default(),
-            core_prompt: crate::PromptLayer::new(),
-            prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         }
     }

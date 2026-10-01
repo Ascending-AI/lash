@@ -184,7 +184,10 @@ impl RootSpec {
         self,
         snapshot: &PersistedSessionConfig,
         termination: crate::runtime::TerminationPolicy,
-    ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
+    ) -> Result<
+        (crate::ResolvedRun, Option<crate::ProtocolTurnOptions>),
+        RuntimeEffectControllerError,
+    > {
         let repairable = |code: RuntimeErrorCode, message: String| {
             RuntimeEffectControllerError::new(code, message).retryable_uncommitted_derivation()
         };
@@ -231,7 +234,14 @@ impl RootSpec {
                 )
             }
         };
+        // The protocol options the run states, as stated: the explicit
+        // overrides over the definition's, before either meets the snapshot.
+        let run_options = (*spec.overrides)
+            .clone()
+            .over(definition.clone().unwrap_or_default())
+            .protocol_turn_options;
         spec.resolve(snapshot, definition, termination, self.models.as_ref())
+            .map(|resolved| (resolved, run_options))
             .map_err(|error| match error {
                 crate::RunResolveError::Model(error) => repairable(
                     RuntimeErrorCode::ModelUnavailable,
@@ -279,22 +289,25 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
             ));
         }
         let inherited = self.inherited.is_some();
-        let mut resolved = match (self.inherited, self.spec) {
+        let (mut resolved, run_options) = match (self.inherited, self.spec) {
             // A recovered follow-on re-records the shape its parent root
             // resolved, verbatim: it does not re-resolve.
-            (Some(inherited), _) => inherited,
-            (None, None) => crate::ResolvedRun::snapshot(self.snapshot, self.termination),
+            (Some(inherited), _) => (inherited, None),
+            (None, None) => (
+                crate::ResolvedRun::snapshot(self.snapshot, self.termination),
+                None,
+            ),
             (None, Some(spec)) => spec.resolve(&self.snapshot, self.termination).await?,
         };
         // An override is judged by the owner of every namespace it changed,
         // as a config command's candidate is: an overlay cannot set what the
         // owner does not admit. The refusal is the root's recorded shape.
         if !inherited
-            && resolved.resolved.is_some()
+            && (resolved.resolved.is_some() || run_options.is_some())
             && let Some(registry) = self.config_registry.as_ref()
         {
             registry
-                .validate_derived(&resolved.base, resolved.config())
+                .validate_derived(&resolved.base, resolved.config(), run_options.as_ref())
                 .map_err(|refusal| {
                     RuntimeEffectControllerError::new(
                         RuntimeErrorCode::RunShapeRefused,

@@ -2163,7 +2163,6 @@ fn drive_rlm_to_second_llm_request(
             tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(Vec::new())),
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
-            extra_prompt_contributions: Vec::new(),
             writer_formats: lash_core::build_newest_writer_formats(),
         },
         lash_protocol_rlm::RlmProjectorConfig {

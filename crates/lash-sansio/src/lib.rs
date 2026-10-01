@@ -15,7 +15,6 @@ pub mod llm;
 pub mod plugin;
 pub mod process_cursor;
 pub mod profile;
-pub mod prompt;
 mod redacted;
 mod retained_output;
 pub mod sansio;
@@ -122,18 +121,10 @@ pub use llm::capability::{
     ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningSelection,
 };
 pub use llm::types::{LlmTerminalReason, ProviderFailureKind};
-pub use plugin::{
-    CheckpointKind, PluginMessage, PluginRuntimeEvent, PromptContribution, PromptContributionBody,
-    PromptContributionGate,
-};
+pub use plugin::{CheckpointKind, PluginMessage, PluginRuntimeEvent};
 pub use process_cursor::{
     PROCESS_CURSOR_UNROUTED_EPOCH, PROCESS_CURSOR_VERSION, ProcessCursor, ProcessCursorError,
     ProcessCursorReference,
-};
-pub use prompt::{
-    PreparedPrompt, PromptBuildInput, PromptCache, PromptContext, PromptContributionSet,
-    PromptFingerprint, build_prompt, build_prompt_cached, prompt_template_fingerprint,
-    prompt_text_fingerprint, prompt_tool_names_fingerprint,
 };
 pub use redacted::Redacted;
 pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput};
@@ -159,15 +150,12 @@ pub use session::{
 pub use session_model::message::{MessageOrigin, TurnOutputSource, same_message};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope, FailureCode,
-    HostNamespace, InvalidNamespace, MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence,
-    Namespace, NoProgressBudget, Part, PartAttachment, PartKind, PromptBuiltin, PromptLayer,
-    PromptSectionTitle, PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry,
-    PromptTemplateSection, PromptTitleBuiltin, ProtocolEvent, RenderedPrompt, ResolvedPromptLayer,
+    HostNamespace, InvalidNamespace, Message, MessageRole, MessageSequence, Namespace,
+    NoProgressBudget, Part, PartAttachment, PartKind, ProtocolEvent, RenderedPrompt,
     SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, StreamMessageKind, TokenUsage,
     TokenUsageOverflow, TurnBudget, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
     TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
-    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers,
-    same_history_record, shared_parts,
+    messages_are_prompt_resume_safe, same_history_record, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
 pub use tool_call_id::{

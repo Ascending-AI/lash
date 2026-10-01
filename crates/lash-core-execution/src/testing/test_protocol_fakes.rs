@@ -235,7 +235,6 @@ struct TestProtocolDriver {
 impl ProtocolDriverPlugin for TestProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
-        let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
         let driver: Arc<dyn ProtocolDriverHandle<crate::HostTurnProtocol>> = match self.driver {
             TestDriverKind::Standard => Arc::new(TestDriver),
             TestDriverKind::EndsWithoutDone => Arc::new(EndsWithoutDoneDriver),
@@ -244,10 +243,6 @@ impl ProtocolDriverPlugin for TestProtocolDriver {
             config: TurnDriverConfig::chat(driver, false),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names,
-            tool_names_fingerprint,
-            execution_title: Arc::from("Execution"),
-            execution_prompt: Arc::from(""),
-            prompt_contributions: input.extra_prompt_contributions,
             writer_formats: input.writer_formats,
         }
     }

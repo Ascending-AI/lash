@@ -125,7 +125,6 @@ macro_rules! runtime_persistence_tests {
             (execution_state_replace_then_clear_removes_the_live_checkpoint_ref, "execution-state-replace-then-clear"),
             (checkpoint_rejects_unknown_component_ref, "checkpoint-unknown-ref"),
             (session_read_loads_persisted_history, "branchy"),
-            (session_prompt_layer_round_trips_through_the_committed_head, "session-prompt-layer"),
             (session_plugin_config_round_trips_through_the_committed_head, "session-plugin-config"),
             (session_metadata_round_trips, "root"),
             (head_and_window_reads_agree_for_each_named_session, "read-agreement"),

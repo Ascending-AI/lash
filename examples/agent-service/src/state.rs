@@ -475,9 +475,9 @@ mod session_language_tests {
 
     /// A raw per-turn dialect change is refused before provider dispatch,
     /// preserves the recorded TypeScript dialect, and leaves subsequent
-    /// legal turns' board prompts in TypeScript (FIG-1979, FIG-4463).
+    /// legal turns' prompts in TypeScript (FIG-1979, FIG-4463).
     #[tokio::test]
-    async fn a_per_turn_dialect_key_cannot_re_word_the_board_prompt() {
+    async fn a_per_turn_dialect_key_cannot_re_word_the_prompt() {
         use lash::rlm::RlmSendBuilderExt as _;
 
         let temp = tempfile::tempdir().expect("tempdir");
@@ -596,12 +596,12 @@ mod session_language_tests {
         );
         for prompt in &prompts {
             assert!(
-                prompt.contains("outside the typescript cell"),
-                "the board prompt must stay in TypeScript: {prompt}"
+                prompt.contains("## TypeScript execution"),
+                "the prompt must stay in TypeScript: {prompt}"
             );
             assert!(
-                !prompt.contains("outside the lashlang block"),
-                "a per-turn dialect key must not re-word the board prompt: {prompt}"
+                !prompt.contains("<lashlang>"),
+                "a per-turn dialect key must not re-word the prompt: {prompt}"
             );
         }
     }

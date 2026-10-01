@@ -2,7 +2,7 @@
 //!
 //! Each domain module carries one slice of the protocol vocabulary
 //! ([`llm`], [`turn_input`], [`turn_result`], [`processes`], [`triggers`],
-//! [`prompt`], [`tools`], [`observations`], [`usage_activity`],
+//! [`tools`], [`observations`], [`usage_activity`],
 //! [`registry_errors`]); the crate root re-exports all of them, which is the
 //! established public API for direct consumers of this crate. The
 //! cross-cutting protocol envelope ([`Envelope`],
@@ -13,7 +13,6 @@ pub mod llm;
 pub mod negotiation;
 pub mod observations;
 pub mod processes;
-pub mod prompt;
 pub mod queued_events;
 pub mod registry_errors;
 pub mod tools;
@@ -29,7 +28,6 @@ pub use llm::*;
 pub use negotiation::{Negotiated, Negotiation, REMOTE_PROTOCOL, VersionRange, answer};
 pub use observations::*;
 pub use processes::*;
-pub use prompt::*;
 pub use queued_events::*;
 pub use registry_errors::*;
 pub use tools::*;
@@ -299,7 +297,7 @@ pub use usage_activity::*;
 // incarnations this decoder refuses, so peers must adopt 100.
 // The same window also moves input onto `send()` (FIG-3600): `RemoteTurnRequest`
 // drops `idempotency_key` (`turn_id` is the send's id: the root and the
-// idempotency key at once), `RemoteTurnInput` drops `prompt_layer` (a
+// idempotency key at once), `RemoteTurnInput` drops its prompt field (a
 // per-turn prompt cannot cross durable acceptance), `RemoteTurnOutcome` drops
 // `queued` (no turn answers "queued" once the engine drives every accepted
 // input), and `RemoteTurnStatus` becomes a tagged
@@ -530,9 +528,6 @@ mod context_overflow_tests;
 
 #[cfg(test)]
 mod versioned_decode_tests;
-
-#[cfg(test)]
-mod prompt_body_tests;
 
 #[cfg(test)]
 mod attachment_capability_tests;

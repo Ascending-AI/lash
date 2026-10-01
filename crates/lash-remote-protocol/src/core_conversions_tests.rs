@@ -416,26 +416,6 @@ fn llm_request_and_response_round_trip_owned_dtos() {
 #[path = "core_conversions_tests/model_passthrough.rs"]
 mod model_passthrough;
 
-#[test]
-fn prompt_layer_round_trips_without_protocol_crate_depending_on_core_by_default() {
-    let mut template =
-        lash_core::PromptTemplate::new(vec![lash_core::PromptTemplateSection::titled(
-            "Custom",
-            vec![lash_core::PromptTemplateEntry::slot(
-                lash_core::PromptSlot::Guidance,
-            )],
-        )]);
-    template
-        .sections
-        .extend(lash_core::facade_support::default_prompt_template().sections);
-    let prompt = lash_core::PromptLayer::with_template(template)
-        .with_contribution(lash_core::PromptContribution::guidance("Guide", "remote"));
-
-    let remote = RemotePromptLayer::from(prompt.clone());
-    let core = lash_core::PromptLayer::from(remote);
-    assert_eq!(core, prompt);
-}
-
 #[path = "core_conversions_tests/trigger_route_refusals.rs"]
 mod trigger_route_refusals;
 

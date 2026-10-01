@@ -25,15 +25,16 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     core.session("materialize-stated")
         .create(crate::SessionCreation {
             parent: Some("materialize-root".into()),
-            plugin_options: lash_core::PluginOptions::typed(
-                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash_rlm_types::RlmCreateExtras {
-                    final_answer_format: Some(crate::rlm::RlmFinalAnswerFormat::Markdown),
-                    ..Default::default()
-                },
-            )
-            .map_err(EmbedError::ProtocolTurnOptions)?,
-            ..Default::default()
+            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+                lash_core::PluginOptions::typed(
+                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    lash_rlm_types::RlmCreateExtras {
+                        final_answer_format: Some(crate::rlm::RlmFinalAnswerFormat::Markdown),
+                        ..Default::default()
+                    },
+                )
+                .map_err(EmbedError::ProtocolTurnOptions)?,
+            ),
         })
         .await?;
     for (id, format) in [
@@ -98,12 +99,13 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         .session("materialize-refused")
         .create(crate::SessionCreation {
             parent: Some("materialize-root".into()),
-            plugin_options: lash_core::PluginOptions::typed(
-                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                serde_json::json!({"termination": {"kind": "unknown"}}),
-            )
-            .map_err(EmbedError::ProtocolTurnOptions)?,
-            ..Default::default()
+            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+                lash_core::PluginOptions::typed(
+                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    serde_json::json!({"termination": {"kind": "unknown"}}),
+                )
+                .map_err(EmbedError::ProtocolTurnOptions)?,
+            ),
         })
         .await;
     assert!(bad.is_err(), "unknown creation options must be refused");

@@ -424,11 +424,14 @@ impl SessionPlugin for FaultPlugin {
         ], Hold)))?;
         let repaired = self.repaired.clone();
         let pool = self.pool.clone();
-        reg.prompt().contribute(Arc::new(move |ctx| {
+        // The fault fires once the root's work has started its child: the
+        // checkpoint after that work fails until the operator repairs it.
+        reg.turn().checkpoint(Arc::new(move |ctx| {
             let repaired = repaired.clone();
             let pool = pool.clone();
             Box::pin(async move {
-                if ctx.session_id.as_str() != "operator:running"
+                if ctx.checkpoint == lash_core::CheckpointKind::AfterWork
+                    && ctx.session_id.as_str() != "operator:running"
                     && !repaired.load(Ordering::SeqCst)
                 {
                     let has_child: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM lash_processes p JOIN lash_session_roots r ON p.lifetime_scope_id = 'turn:' || octet_length(r.session_id)::text || ':' || r.session_id || ':' || octet_length(r.root)::text || ':' || r.root WHERE r.session_id = $1 AND r.terminal_kind IS NULL)")

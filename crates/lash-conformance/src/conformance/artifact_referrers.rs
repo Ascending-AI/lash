@@ -413,17 +413,18 @@ where
     let fixture = make();
     let store = &fixture.open.process_env;
     let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy {
-            prompt: lash_core::PromptLayer::new().with_contribution(
-                lash_core::PromptContribution::new(
-                    lash_core::PromptSlot::ProjectInstructions,
-                    "instructions",
-                    "x".repeat(128 * 1024),
-                ),
-            ),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        {
+            // A captured environment as large as a session with 128 KiB of
+            // recorded protocol prompt.
+            let mut plugin_config =
+                lash_core::PluginConfig::for_protocol(Some("protocol".to_string()));
+            plugin_config.insert(
+                "protocol",
+                serde_json::json!({ "prompt": { "instructions": ["x".repeat(128 * 1024)] } }),
+            );
+            lash_core::AdmittedPluginConfig::new(plugin_config, 0)
         },
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     );
     let first_ref = spec.stable_ref().expect("first captured digest");
     let second_ref = spec.clone().stable_ref().expect("second captured digest");

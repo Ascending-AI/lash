@@ -147,39 +147,42 @@ impl LashRuntime {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
         let read_view = self.read_view();
-        // Lazy: resolved only if a hook actually summarizes — an eager build
-        // would fire plugin prompt hooks on every turn for a prompt that is
-        // almost never sent.
-        let system_prompt: crate::plugin::CompactionSystemPrompt = {
-            let context_contributions = session.context_prompt_contributions().to_vec();
-            let plugin_session = Arc::clone(&plugin_session);
-            let manager = Arc::clone(&manager);
-            let session_id = self.state.session_id.clone();
-            let read_view = read_view.clone();
-            let protocol_turn_options = self.protocol_turn_options().clone();
-            let core_prompt = self.state.effective_policy().core_prompt.clone();
-            let policy_prompt = self.state.effective_policy().prompt.clone();
+        // Lazy: rendered only if a hook actually summarizes. The render is
+        // one recorded step of this turn, taken before the summarizer call,
+        // so a redrive serves the recorded text and renders nothing
+        // (FIG-4589). Every hook of the step shares the one render.
+        let system_prompt: crate::plugin::CompactionSystemPrompt<'_> = {
+            let input = super::super::compaction_prompt::CompactionPromptInput {
+                session_id: self.state.session_id.clone(),
+                protocol_session: Arc::clone(plugin_session.protocol_session()),
+                plugin_config: self.state.admitted_plugin_config(),
+                subagent: self.state.authority.subagent.clone(),
+            };
+            let controller = scoped_effect_controller.clone();
+            let turn_id = trace_turn_id.to_string();
+            // The step's hooks run one after another, so the first to ask
+            // takes the recorded step and the rest read what it answered.
+            let rendered: Arc<std::sync::Mutex<Option<Option<Arc<str>>>>> = Arc::default();
             Arc::new(move || {
-                let context_contributions = context_contributions.clone();
-                let plugin_session = Arc::clone(&plugin_session);
-                let manager = Arc::clone(&manager);
-                let session_id = session_id.clone();
-                let read_view = read_view.clone();
-                let protocol_turn_options = protocol_turn_options.clone();
-                let core_prompt = core_prompt.clone();
-                let policy_prompt = policy_prompt.clone();
+                let input = input.clone();
+                let controller = controller.clone();
+                let turn_id = turn_id.clone();
+                let rendered = Arc::clone(&rendered);
                 Box::pin(async move {
-                    LashRuntime::compaction_system_prompt(
-                        context_contributions,
-                        plugin_session,
-                        manager,
-                        session_id,
-                        read_view,
-                        protocol_turn_options,
-                        core_prompt,
-                        policy_prompt,
+                    if let Some(prompt) =
+                        lash_sansio::sync::MutexExt::lock_recover(&*rendered).clone()
+                    {
+                        return Ok(prompt);
+                    }
+                    let prompt = super::super::compaction_prompt::recorded_compaction_prompt(
+                        &controller,
+                        super::super::compaction_prompt::CompactionPromptKey::Turn(&turn_id),
+                        input,
                     )
                     .await
+                    .map_err(crate::PluginError::RuntimeEffectController)?;
+                    *lash_sansio::sync::MutexExt::lock_recover(&*rendered) = Some(prompt.clone());
+                    Ok(prompt)
                 })
             })
         };

@@ -717,9 +717,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
     let sticky = crate::store::persisted_session_config_from_state(&state);
     let mut root = sticky.clone();
     root.model = Some(recorded_model("root-route"));
-    root.prompt = Some(crate::PromptLayer::with_template(
-        crate::PromptTemplate::new(vec![]),
-    ));
+    root.autonomous = !sticky.autonomous;
 
     adopt_root_execution_config(&mut state, &root);
     assert_eq!(
@@ -779,7 +777,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         state.to_snapshot().policy.model,
         Some(recorded_model("sticky-route"))
     );
-    assert_eq!(state.to_snapshot().policy.prompt, sticky.prompt.unwrap());
+    assert_eq!(state.to_snapshot().policy.autonomous, sticky.autonomous);
 }
 
 /// A root's commit is identified by the view it ran under, never by the

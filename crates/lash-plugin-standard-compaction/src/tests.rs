@@ -740,16 +740,17 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
 fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
     let mut state = SessionSnapshot::new(lash_core::testing::mock_session_policy());
     state.session_id = SessionId::from("retry-map-parent");
-    for slot in [
-        lash_core::PromptSlot::Intro,
-        lash_core::PromptSlot::Execution,
-        lash_core::PromptSlot::Guidance,
-        lash_core::PromptSlot::ProjectInstructions,
-        lash_core::PromptSlot::RuntimeContext,
-        lash_core::PromptSlot::Environment,
-    ] {
-        state.policy.prompt.slots.insert(slot, Default::default());
-    }
+    // A recorded namespace with nested maps: a reconstructed snapshot must
+    // hash to the same identity whatever order its maps were rebuilt in.
+    state.plugin_config = lash_core::PluginConfig::for_protocol(Some("protocol".to_string()));
+    state.plugin_config.insert(
+        "protocol",
+        serde_json::json!({
+            "prompt": { "intro": "i", "instructions": ["a", "b"], "context": ["c"] },
+            "render": { "print": { "max_chars": 10 }, "preview": { "max_chars": 20 } },
+            "behaviour": { "zeta": 1, "alpha": 2, "mid": { "y": 1, "x": 2 } },
+        }),
+    );
 
     let snapshot_value = serde_json::to_value(&state).expect("serialize snapshot");
     let expected = compaction_request_identity(&state, "same prompt")
@@ -1373,7 +1374,7 @@ fn compactable_messages() -> Vec<Message> {
 }
 
 #[tokio::test]
-async fn compaction_request_carries_the_core_resolved_system_prompt() {
+async fn compaction_request_carries_the_recorded_system_prompt() {
     let captured = Arc::new(RecordingLlmCompletions {
         summary: "summary".to_string(),
         ..Default::default()
@@ -1384,7 +1385,7 @@ async fn compaction_request_carries_the_core_resolved_system_prompt() {
         &Arc::new(RecordingTraces::default()),
         RecordingLlmCompletions::client(&captured),
     );
-    ctx.system_prompt = Some(Arc::from("resolved capability+core+session stack"));
+    ctx.system_prompt = Some(Arc::from("the protocol's recorded compaction prompt"));
     StandardContextCompactor::new(StandardCompactionConfig)
         .compact(&ctx)
         .await
@@ -1394,8 +1395,8 @@ async fn compaction_request_carries_the_core_resolved_system_prompt() {
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].instructions.as_deref(),
-        Some("resolved capability+core+session stack"),
-        "the request carries the prompt the core resolved, not a plugin-side rebuild"
+        Some("the protocol's recorded compaction prompt"),
+        "the request carries the prompt the core recorded, not a plugin-side rebuild"
     );
 }
 

@@ -14,7 +14,7 @@ RLM's host-provided `DeferredToolResolver` resolves missing call paths during li
 
 ## Why and alternatives
 
-An availability ladder mixes callability, prompt presentation and discovery into one ordering even though they vary independently. A resident-but-searchable tier changes request budgeting without changing the runtime's ability to call the tool. Both are rejected. Resolver enumeration and preview methods are rejected because ranking, discovery and previews belong to host tools and prompt contributions.
+An availability ladder mixes callability, prompt presentation and discovery into one ordering even though they vary independently. A resident-but-searchable tier changes request budgeting without changing the runtime's ability to call the tool. Both are rejected. Resolver enumeration and preview methods are rejected because ranking, discovery and previews belong to host tools and the host's protocol prompt config.
 
 ## Consequences
 

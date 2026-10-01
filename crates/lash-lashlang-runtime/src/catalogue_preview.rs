@@ -1,4 +1,4 @@
-//! Catalogue-preview prompt contribution for RLM deferred tool discovery.
+//! Catalogue-preview prompt text for RLM deferred tool discovery.
 //!
 //! Resident catalog members render as full RLM tool docs. A host may also keep
 //! a larger searchable catalogue outside the resident catalog and resolve
@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use lash_core::{PromptContribution, ToolManifest};
+use lash_core::ToolManifest;
 use serde_json::Value;
 
 use crate::{ResolvedToolBinding, TOOL_BINDING_KEY, ToolBinding, ToolBindingResolutionExt};
@@ -50,7 +50,6 @@ impl CataloguePreviewEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CataloguePreviewOptions {
     pub title: String,
-    pub search_tool_name: String,
     pub search_call_path: String,
     pub module_limit: usize,
     pub call_name_limit: usize,
@@ -60,7 +59,6 @@ impl Default for CataloguePreviewOptions {
     fn default() -> Self {
         Self {
             title: "Catalogued Capabilities".to_string(),
-            search_tool_name: "search_tools".to_string(),
             search_call_path: "tools.search".to_string(),
             module_limit: DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT,
             call_name_limit: DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
@@ -68,44 +66,17 @@ impl Default for CataloguePreviewOptions {
     }
 }
 
-/// Each record needs a `name` and a `bindings["lash.tool"]` value. Extra
-/// fields such as id, description, and compact contract are ignored by the
-/// preview but can still be used by the search index.
-pub fn catalogue_preview_contribution(catalog: &[Value]) -> Option<PromptContribution> {
-    catalogue_preview_contribution_for_entries(catalogue_preview_entries_from_catalog_records(
-        catalog,
-    ))
-}
-
-pub fn catalogue_preview_contribution_with_options(
-    catalog: &[Value],
-    options: CataloguePreviewOptions,
-) -> Option<PromptContribution> {
-    catalogue_preview_contribution_for_entries_with_options(
-        catalogue_preview_entries_from_catalog_records(catalog),
-        options,
-    )
-}
-
-pub fn catalogue_preview_contribution_for_manifests<'a>(
-    manifests: impl IntoIterator<Item = &'a ToolManifest>,
-) -> Option<PromptContribution> {
-    catalogue_preview_contribution_for_entries(catalogue_preview_entries_from_manifests(manifests))
-}
-
-pub fn catalogue_preview_contribution_for_entries(
+/// The advertisement of a searchable catalogue, as prompt text under an
+/// `### <title>` heading, or `None` when `entries` is empty.
+///
+/// The text is the host's to place: it states it in its protocol plugin's
+/// prompt config (an instruction or a context entry), which records it with
+/// the session. It names `options.search_call_path`, so a host states it only
+/// for a session that has that search tool.
+pub fn catalogue_preview(
     entries: impl IntoIterator<Item = CataloguePreviewEntry>,
-) -> Option<PromptContribution> {
-    catalogue_preview_contribution_for_entries_with_options(
-        entries,
-        CataloguePreviewOptions::default(),
-    )
-}
-
-pub fn catalogue_preview_contribution_for_entries_with_options(
-    entries: impl IntoIterator<Item = CataloguePreviewEntry>,
-    options: CataloguePreviewOptions,
-) -> Option<PromptContribution> {
+    options: &CataloguePreviewOptions,
+) -> Option<String> {
     let mut by_module: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut catalogued_count = 0usize;
     for entry in entries {
@@ -123,10 +94,8 @@ pub fn catalogue_preview_contribution_for_entries_with_options(
     }
 
     let search_call = options.search_call_path.trim().to_string();
-    let search_tool_name = options.search_tool_name.trim().to_string();
-    // No code snippet here. This crate has no dialect: the advertisement is
-    // contributed to the execution section of whatever session holds the
-    // catalogue, and the Lashlang spelling this sentence used to carry
+    // No code snippet here. This crate has no dialect: the advertisement
+    // goes into the prompt of whatever session holds the catalogue, and the Lashlang spelling this sentence used to carry
     // (`await {search_call}({ query: "..." })?`) put the try-operator — a
     // TypeScript syntax error — in front of every judged TypeScript session
     // with a deferred catalogue. The search tool's own doc block already shows
@@ -163,12 +132,7 @@ pub fn catalogue_preview_contribution_for_entries_with_options(
         }
     }
 
-    let contribution = PromptContribution::execution(options.title, rendered);
-    if search_tool_name.is_empty() {
-        Some(contribution)
-    } else {
-        Some(contribution.requires_tool(search_tool_name))
-    }
+    Some(format!("### {}\n\n{rendered}", options.title.trim()))
 }
 
 pub fn catalogue_preview_entries_from_catalog_records(
@@ -238,41 +202,28 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_preview_contribution_groups_catalog_records_by_module() {
+    fn catalogue_preview_groups_catalog_records_by_module() {
         let catalog = vec![
             catalog_record("gmail_fetch_email", &["gmail"], "fetch_email"),
             catalog_record("figments_list", &["figments"], "list"),
         ];
 
-        let contribution =
-            catalogue_preview_contribution(&catalog).expect("catalogue preview contribution");
+        let preview = catalogue_preview(
+            catalogue_preview_entries_from_catalog_records(&catalog),
+            &CataloguePreviewOptions::default(),
+        )
+        .expect("catalogue preview");
 
-        assert_eq!(
-            contribution.title.as_deref(),
-            Some("Catalogued Capabilities")
-        );
-        assert_eq!(contribution.gate.tools, vec!["search_tools".to_string()]);
-        assert!(
-            contribution
-                .content
-                .contains("callable directly by their module path")
-        );
-        assert!(
-            contribution
-                .content
-                .contains("only if you need more detail than shown")
-        );
-        assert!(
-            contribution
-                .content
-                .contains("Modules: figments(1), gmail(1)")
-        );
-        assert!(contribution.content.contains("figments: figments.list"));
-        assert!(contribution.content.contains("gmail: gmail.fetch_email"));
+        assert!(preview.starts_with("### Catalogued Capabilities\n\n"));
+        assert!(preview.contains("callable directly by their module path"));
+        assert!(preview.contains("only if you need more detail than shown"));
+        assert!(preview.contains("Modules: figments(1), gmail(1)"));
+        assert!(preview.contains("figments: figments.list"));
+        assert!(preview.contains("gmail: gmail.fetch_email"));
     }
 
     #[test]
-    fn catalogue_preview_contribution_can_render_from_manifests() {
+    fn catalogue_preview_renders_from_manifests() {
         let definition = lash_core::ToolDefinition::raw(
             "tool:calendar_work_create",
             "calendar_work_create",
@@ -283,42 +234,43 @@ mod tests {
         .with_tool_binding(ToolBinding::new(["calendar", "work"], "create"));
         let manifest = definition.manifest();
 
-        let contribution = catalogue_preview_contribution_for_manifests([&manifest])
-            .expect("catalogue preview contribution");
+        let preview = catalogue_preview(
+            catalogue_preview_entries_from_manifests([&manifest]),
+            &CataloguePreviewOptions::default(),
+        )
+        .expect("catalogue preview");
 
-        assert!(contribution.content.contains("calendar.work(1)"));
-        assert!(
-            contribution
-                .content
-                .contains("calendar.work: calendar.work.create")
-        );
+        assert!(preview.contains("calendar.work(1)"));
+        assert!(preview.contains("calendar.work: calendar.work.create"));
     }
 
     #[test]
-    fn catalogue_preview_options_customize_search_tool_and_limits() {
+    fn catalogue_preview_options_customize_search_call_and_limits() {
         let entries = vec![
             CataloguePreviewEntry::new(["one"], "one.call"),
             CataloguePreviewEntry::new(["two"], "two.call"),
         ];
-        let contribution = catalogue_preview_contribution_for_entries_with_options(
+        let preview = catalogue_preview(
             entries,
-            CataloguePreviewOptions {
+            &CataloguePreviewOptions {
                 title: "Hidden Tools".to_string(),
-                search_tool_name: "find_tools".to_string(),
                 search_call_path: "tools.find".to_string(),
                 module_limit: 1,
                 call_name_limit: 1,
             },
         )
-        .expect("catalogue preview contribution");
+        .expect("catalogue preview");
 
-        assert_eq!(contribution.title.as_deref(), Some("Hidden Tools"));
-        assert_eq!(contribution.gate.tools, vec!["find_tools".to_string()]);
-        assert!(
-            contribution
-                .content
-                .contains("Modules: 2 total; use `tools.find` to narrow them.")
+        assert!(preview.starts_with("### Hidden Tools\n\n"));
+        assert!(preview.contains("Modules: 2 total; use `tools.find` to narrow them."));
+        assert!(!preview.contains("Catalogued calls:"));
+    }
+
+    #[test]
+    fn an_empty_catalogue_has_no_preview() {
+        assert_eq!(
+            catalogue_preview(Vec::new(), &CataloguePreviewOptions::default()),
+            None
         );
-        assert!(!contribution.content.contains("Catalogued calls:"));
     }
 }

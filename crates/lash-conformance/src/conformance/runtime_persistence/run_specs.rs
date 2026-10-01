@@ -10,10 +10,11 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-fn spec_with_prompt(guidance: &str) -> crate::RunSpec {
+/// A spec whose protocol options state `shape`: two shapes are two specs.
+fn spec_with_shape(shape: &str) -> crate::RunSpec {
     crate::RunSpec::overrides(crate::RunOverrides {
-        prompt: Some(crate::PromptLayer::new().with_contribution(
-            crate::PromptContribution::guidance("Shape", guidance.to_string()),
+        protocol_turn_options: Some(crate::ProtocolTurnOptions::from_payload(
+            serde_json::json!({ "shape": shape }),
         )),
         ..crate::RunOverrides::default()
     })
@@ -56,7 +57,7 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn
         .expect("an explicit default spec is the same submission");
     assert_eq!(explicit_default.input_id, omitted.input_id);
 
-    let shaped = spec_with_prompt("review carefully");
+    let shaped = spec_with_shape("review carefully");
     let hash = shaped
         .hash()
         .expect("hash the spec")
@@ -91,7 +92,7 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn
             "dropping the spec changes the submission",
         ),
         (
-            draft("shaped", "host:shaped").with_run_spec(spec_with_prompt("skim")),
+            draft("shaped", "host:shaped").with_run_spec(spec_with_shape("skim")),
             "a different spec changes the submission",
         ),
         (
@@ -117,7 +118,7 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn
     assert!(matches!(
         store
             .enqueue_pending_turn_input(
-                draft("shaped", "host:shaped").with_run_spec(spec_with_prompt("skim"))
+                draft("shaped", "host:shaped").with_run_spec(spec_with_shape("skim"))
             )
             .await,
         Err(StoreError::PendingTurnInputSourceKeyConflict { .. })
@@ -138,7 +139,7 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn
 )]
 pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("run-spec-admissions");
-    let a = spec_with_prompt("shape a");
+    let a = spec_with_shape("shape a");
     let mut enqueued = Vec::new();
     for (text, spec) in [
         ("a1", a.clone()),
@@ -205,7 +206,7 @@ pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
 ) {
     let session_id = SessionId::from("run-spec-steering");
     let turn = TurnId::from("run-spec-steered-turn");
-    let shape = spec_with_prompt("steered shape");
+    let shape = spec_with_shape("steered shape");
     let started = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&session_id, "start the turn")
@@ -346,8 +347,8 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dy
     // The fact carries the shape the parent root recorded: steering joins it,
     // a differing spec — even the parent input's own — is refused.
     let session_id = SessionId::from("run-spec-follow-on-steering");
-    let parent_shape = spec_with_prompt("the parent input's shape");
-    let recorded_shape = spec_with_prompt("the recorded shape");
+    let parent_shape = spec_with_shape("the parent input's shape");
+    let recorded_shape = spec_with_shape("the recorded shape");
     let recorded_hash = recorded_shape
         .hash()
         .expect("hash the spec")
@@ -421,7 +422,7 @@ pub async fn a_steering_spec_must_match_a_legacy_follow_ons_parent_shape(
     store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("run-spec-follow-on-legacy");
-    let parent_shape = spec_with_prompt("the parent input's shape");
+    let parent_shape = spec_with_shape("the parent input's shape");
     store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&session_id, "start the parent")
@@ -443,7 +444,7 @@ pub async fn a_steering_spec_must_match_a_legacy_follow_ons_parent_shape(
     };
     assert!(matches!(
         store
-            .enqueue_pending_turn_input(steer(spec_with_prompt("another shape")))
+            .enqueue_pending_turn_input(steer(spec_with_shape("another shape")))
             .await,
         Err(StoreError::PendingTurnInputRunSpecMismatch { turn_id, .. })
             if turn_id == follow_on
@@ -495,7 +496,7 @@ pub async fn a_steering_spec_must_match_a_queued_headed_roots_default_shape(
 
     assert!(matches!(
         store
-            .enqueue_pending_turn_input(steer("another shape", spec_with_prompt("skim")))
+            .enqueue_pending_turn_input(steer("another shape", spec_with_shape("skim")))
             .await,
         Err(StoreError::PendingTurnInputRunSpecMismatch { turn_id, .. })
             if turn_id == turn

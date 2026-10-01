@@ -73,6 +73,19 @@ async fn run_composition_probe_turn(
     handler.close().await.expect("close the turn's handler");
 }
 
+/// A protocol session whose rendered system prompt is the text it holds.
+struct SwitchablePrompt(Arc<std::sync::Mutex<&'static str>>);
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ProtocolSessionPlugin for SwitchablePrompt {
+    async fn render_system_prompt(
+        &self,
+        _ctx: lash_core::plugin::SystemPromptContext<'_>,
+    ) -> Result<Arc<str>, lash_core::SessionError> {
+        Ok(Arc::from(*self.0.lock().expect("prompt lock")))
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -91,11 +104,21 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
             .expect("clock")
             .as_nanos()
     ));
-    let mut runtime = standard_runtime_with_transport_and_host(
-        transport,
-        test_host_config_with_trace_path(&backend, trace_path.clone()),
-    )
-    .await;
+    // The protocol's rendered prompt, which the law changes between turns.
+    let prompt = Arc::new(std::sync::Mutex::new("the first rendered prompt"));
+    let mut runtime = lash_core::testing::runtime_helpers::TestRuntime::new(&backend, transport)
+        .plugins(vec![
+            lash_core::testing::test_standard_protocol_factory_with_runtime_state(
+                Arc::new(SwitchablePrompt(Arc::clone(&prompt))),
+                None,
+            ),
+        ])
+        .host(test_host_config_with_trace_path(
+            &backend,
+            trace_path.clone(),
+        ))
+        .build()
+        .await;
 
     let serializations_before = lash_core::trace::composition_schema_serialization_count();
     run_composition_probe_turn(&double, &mut runtime, &TurnId::from("first-composition")).await;
@@ -126,16 +149,7 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
     )
     .await;
     run_composition_probe_turn(&double, &mut runtime, &TurnId::from("route-capacity-noise")).await;
-    crate::runtime_support::configure_storeless(
-        &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::AddPromptContribution {
-            contribution: lash_core::PromptContribution::guidance(
-                "Changed policy",
-                "This text proves the rendered prompt changed.",
-            ),
-        }),
-    )
-    .await;
+    *prompt.lock().expect("prompt lock") = "This text proves the rendered prompt changed.";
     run_composition_probe_turn(&double, &mut runtime, &TurnId::from("changed-prompt")).await;
 
     let entries = composition_change_entries(&trace_path);

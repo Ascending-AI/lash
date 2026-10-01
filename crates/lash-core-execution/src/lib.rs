@@ -218,7 +218,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
-    pub use crate::plugin::PromptHookContext;
     pub use crate::plugin::ReplaceToolArgsDirective;
     pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
@@ -438,7 +437,6 @@ pub mod facade_support {
     pub use lash_sansio::TurnStop;
     pub use lash_sansio::append_assistant_text_part;
     pub use lash_sansio::build_tool_catalog;
-    pub use lash_sansio::default_prompt_template;
     pub use lash_sansio::head_tail_truncate;
     pub use lash_sansio::normalized_response_parts;
     pub use lash_sansio::reasoning_part;
@@ -507,12 +505,9 @@ pub use lash_sansio::{
     ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, FrameKey, FrameKeyError, InputId,
     LashSchema, LlmCallError, MediaType, Message, MessageOrigin, MessageRole, NodeId, Observation,
     ObservedProcessFailure, OmittedToolCalls, OutputRetentionPolicy, OutputValue, Part, PartKind,
-    PluginMessage, PluginRuntimeEvent, ProjectionMode, PromptBuiltin, PromptContribution,
-    PromptContributionBody, PromptContributionGate, PromptLayer, PromptSectionTitle, PromptSlot,
-    PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
-    PromptTitleBuiltin, RetainedOutput, SchemaContract, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata, TokenUsage,
-    TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput,
+    PluginMessage, PluginRuntimeEvent, ProjectionMode, RetainedOutput, SchemaContract,
+    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata,
+    TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput,
     ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
     ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass,
     ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,

@@ -110,12 +110,24 @@ impl SubagentSpawnContext<'_> {
                     termination: Some(termination),
                     final_answer_format: Some(self.final_answer_format.clone()),
                     render: None,
+                    // Stating nothing: the child copies its parent's recorded
+                    // prompt (FIG-4588).
+                    prompt: None,
                 },
             )
             .map_err(|err| format!("failed to encode rlm plugin options: {err}"))?
         } else {
             PluginOptions::default()
         };
+        // The child's spec states its plugin creation options (FIG-4589):
+        // the capability's spec over the factory's, under what the spawn
+        // itself states. A spec that states no prompt leaves it to the
+        // child's lineage.
+        let plugin_options = plugin_options.over(
+            spec.plugin_options
+                .clone()
+                .over(self.session_spec.plugin_options.clone()),
+        );
 
         let initial_nodes = lash_protocol_rlm::rlm_seed_initial_nodes(self.seed.clone());
         let request = SessionCreateRequest::child(

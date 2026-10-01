@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ModelConfig, PromptContribution, PromptSlot, RecordedModel};
+use crate::{ModelConfig, RecordedModel};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::provider::{ModelUnavailable, ModelUnavailableReason, RuntimeModels};
@@ -85,9 +85,6 @@ fn snapshot() -> PersistedSessionConfig {
     config.model = Some(
         ModelConfig::new(recorded("session-model"))
             .with_reasoning(ReasoningSelection::Effort("low".to_string())),
-    );
-    config.prompt = Some(
-        PromptLayer::new().with_contribution(PromptContribution::guidance("Session", "session")),
     );
     config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
     config.plugin_config.insert(
@@ -202,16 +199,12 @@ fn unfinished_rendering_requires_the_exact_recorded_renderer() {
 }
 
 #[test]
-fn a_spec_hash_is_canonical_over_prompt_slot_order() {
-    let mut forward = PromptLayer::new();
-    forward.add_contribution(PromptContribution::guidance("A", "a"));
-    forward.clear_slot(PromptSlot::Environment);
-    let mut backward = PromptLayer::new();
-    backward.clear_slot(PromptSlot::Environment);
-    backward.add_contribution(PromptContribution::guidance("A", "a"));
-    let spec = |prompt| {
+fn a_spec_hash_is_canonical_over_option_key_order() {
+    let forward = serde_json::json!({ "a": 1, "b": 2 });
+    let backward: serde_json::Value = serde_json::from_str(r#"{ "b": 2, "a": 1 }"#).expect("json");
+    let spec = |options| {
         RunSpec::overrides(RunOverrides {
-            prompt: Some(prompt),
+            protocol_turn_options: Some(ProtocolTurnOptions::from_payload(options)),
             ..RunOverrides::default()
         })
     };
@@ -222,7 +215,7 @@ fn a_spec_hash_is_canonical_over_prompt_slot_order() {
     assert_eq!(
         Some(hash.clone()),
         spec(backward).hash().expect("hash"),
-        "slot insertion order must not name a different spec"
+        "key insertion order must not name a different spec"
     );
     assert!(hash.as_str().starts_with("run-spec:v1:blake3:"));
     assert_eq!(
@@ -314,7 +307,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     assert_eq!(
         spec.hash().expect("hash"),
         reordered.hash().expect("hash"),
-        "slot insertion order must not name a different spec"
+        "key insertion order must not name a different spec"
     );
 }
 
@@ -440,10 +433,6 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             protocol_turn_options: Some(ProtocolTurnOptions::from_payload(
                 serde_json::json!({ "replace": "explicit" }),
             )),
-            prompt: Some(
-                PromptLayer::new()
-                    .with_contribution(PromptContribution::guidance("Explicit", "explicit")),
-            ),
             ..RunOverrides::default()
         }),
         ..RunSpec::default()
@@ -453,10 +442,6 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         protocol_turn_options: Some(ProtocolTurnOptions::from_payload(
             serde_json::json!({ "replace": "definition", "added": true }),
         )),
-        prompt: Some(
-            PromptLayer::new()
-                .with_contribution(PromptContribution::guidance("Definition", "definition")),
-        ),
         ..RunOverrides::default()
     };
     let resolved = spec
@@ -480,40 +465,4 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             .payload,
         serde_json::json!({ "keep": 1, "replace": "explicit", "added": true })
     );
-    let prompt = lash_sansio::session_model::prompt::resolve_prompt_layers([resolved
-        .config()
-        .prompt
-        .as_ref()
-        .expect("prompt")]);
-    let bodies = prompt
-        .contributions
-        .iter()
-        .map(|contribution| contribution.content.as_ref())
-        .collect::<Vec<_>>();
-    assert_eq!(bodies, ["session", "definition", "explicit"]);
-}
-
-#[test]
-fn a_reset_slot_in_an_override_replaces_the_snapshot_slot() {
-    let spec = RunSpec::overrides(RunOverrides {
-        prompt: Some(PromptLayer::new().with_replaced_slot(
-            PromptSlot::Guidance,
-            [PromptContribution::guidance("Root", "root only")],
-        )),
-        ..RunOverrides::default()
-    });
-    let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default(), &catalog())
-        .expect("resolve");
-    let prompt = lash_sansio::session_model::prompt::resolve_prompt_layers([resolved
-        .config()
-        .prompt
-        .as_ref()
-        .expect("prompt")]);
-    let bodies = prompt
-        .contributions
-        .iter()
-        .map(|contribution| contribution.content.as_ref())
-        .collect::<Vec<_>>();
-    assert_eq!(bodies, ["root only"]);
 }

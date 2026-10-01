@@ -14,7 +14,6 @@ fn a_recorded_turn_config_round_trips_whole() {
             .build()
             .expect("a literal model spec builds"),
     )));
-    config.prompt = Some(crate::PromptLayer::default());
     config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
     config
         .plugin_config

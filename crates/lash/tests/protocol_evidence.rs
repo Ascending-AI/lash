@@ -1065,8 +1065,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::plugins::LlmToolSpec| {
         let _ = &value.output_schema;
     });
-    // W0308: lash::plugins::PromptFingerprint [struct]
-    type_witness::<lash::plugins::PromptFingerprint>();
     // W0309: lash::plugins::ProtocolDriverHandle [trait]
     fn trait_witness_0309<T: lash::plugins::ProtocolDriverHandle>() {}
     // W0310: lash::plugins::ProtocolDriverHandle::handle_exec_result [function]

@@ -66,8 +66,6 @@ pub(super) fn register_native_plugin(
         Box::pin(async move { normalize_projected_tool_args(ctx) })
     }));
 
-    register_projected_bindings_prompt_contributor(reg, Arc::clone(&protocol_session));
-
     let warn_session = protocol_session.clone();
     reg.turn().checkpoint(Arc::new(move |ctx| {
         let session = warn_session.clone();
@@ -104,16 +102,6 @@ pub(super) fn register_native_plugin(
         },
     ));
     Ok(())
-}
-
-fn register_projected_bindings_prompt_contributor(
-    reg: &mut PluginRegistrar,
-    protocol_session: Arc<RlmProtocolSession>,
-) {
-    reg.prompt().contribute(Arc::new(move |_ctx| {
-        let session = protocol_session.clone();
-        Box::pin(async move { Ok(session.projected_binding_prompt_contributions().await) })
-    }));
 }
 
 /// Provider-native RLM protocol session, selected by the RLM factory config.
@@ -162,7 +150,6 @@ impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
         super::projector::build_rlm_preamble_with_dialect(
             input,
             crate::driver::RlmPreambleConfig {
-                discovery: self.config.discovery.clone(),
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 prompt_features: self.config.prompt_features,

@@ -54,9 +54,6 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         max_unsafe_retries: 2,
         max_duplicate_cost_tokens: Some(4_096),
     };
-    request.config.core_prompt = crate::PromptLayer::new().with_contribution(
-        crate::PromptContribution::guidance("Core", "the creating core's recorded prompt"),
-    );
     let request = request;
     assert_eq!(
         factory
@@ -167,7 +164,6 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
             .expect("the created session has a window");
     assert_eq!(loaded.config, expected_config);
     assert_eq!(loaded.state.policy.model, request.config.model);
-    assert_eq!(loaded.state.policy.core_prompt, request.config.core_prompt);
 
     // `Root` declares no lineage, so it always rebinds and writes nothing.
     assert_eq!(

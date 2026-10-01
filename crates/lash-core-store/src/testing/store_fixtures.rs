@@ -105,9 +105,7 @@ pub fn session_store_request(
             turn_budget: crate::TurnBudget::Unbounded,
             no_progress_budget: Default::default(),
             charge_safety: Default::default(),
-            prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
-            core_prompt: crate::PromptLayer::new(),
         }
         .into(),
         head: SessionCreationHead::CommittedByCreator,

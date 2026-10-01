@@ -641,6 +641,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::SealDriveAdmission { .. }
             | RuntimeEffectCommand::ResolveTurnConfig { .. }
             | RuntimeEffectCommand::RecordCompactionBase { .. }
+            | RuntimeEffectCommand::RenderCompactionPrompt { .. }
             | RuntimeEffectCommand::ResolveConfigTransaction { .. }
             | RuntimeEffectCommand::IngestTriggerOccurrence { .. }
             | RuntimeEffectCommand::AdmitTriggerDelivery { .. }

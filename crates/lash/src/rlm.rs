@@ -91,9 +91,11 @@ impl RlmSessionReadViewExt for lash_core::SessionReadView {
 /// A session's RLM facts are baked in when it is created, from the creator's
 /// plugin options keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and neither a reopen
 /// nor a config command changes them (FIG-4099, FIG-4379): a turn restates
-/// them through its run's protocol turn options. The one RLM setting a
-/// session changes is its render preferences, through the config command
-/// [`SetRlmRender`]. A host that wants a fact *asserted* compares
+/// them through its run's protocol turn options. The RLM settings a session
+/// changes are its render preferences, through the config command
+/// [`SetRlmRender`], and its prompt config ([`RlmPrompt`]), through
+/// [`SetRlmPrompt`] and [`SetRlmPromptContext`]. A host that wants a fact
+/// *asserted* compares
 /// [`RlmSessionExt::rlm_config`] against what it requires and refuses
 /// loudly.
 ///
@@ -141,7 +143,8 @@ pub use lash_protocol_rlm::{
 /// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.
 pub use lash_protocol_rlm::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation, TypescriptDialect,
+    ExecutionSection, ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation,
+    TypescriptDialect,
 };
 /// The schema shapes a [`Dialect`] is handed to spell: one reading of a tool's
 /// JSON Schemas, shared by every prompt surface.
@@ -149,13 +152,18 @@ pub use lash_protocol_rlm::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
 };
+/// The code-mode system prompt: its recorded config and its renderer
+/// (FIG-4588).
+pub use lash_protocol_rlm::{
+    RLM_BUILTIN_INTRO, RlmProjectorConfig, RlmSystemPromptInput, render_rlm_system_prompt,
+};
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
-/// The RLM protocol's config owner and its one command (FIG-4379).
+/// The RLM protocol's config owner and its commands (FIG-4379, FIG-4588).
 pub use lash_protocol_rlm::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour, RlmRecordedConfig,
-    SetRlmRender,
+    SetRlmPrompt, SetRlmPromptContext, SetRlmRender,
 };
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`]. Session extensions are process-local
@@ -167,6 +175,7 @@ pub use lash_rlm_types::{
     RlmTurnOptions,
 };
 pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
+pub use lash_rlm_types::{RlmPrompt, RlmPromptIntro};
 pub use lashlang::LinkedModule;
 
 /// The Lashlang compile APIs are operations over an

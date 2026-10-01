@@ -88,7 +88,6 @@ pub(crate) struct PluginContributions {
     pub(crate) state_retaining_plugins: Vec<String>,
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
     pub(crate) triggers: Vec<crate::TriggerEvent>,
-    pub(crate) prompt_contributors: Vec<RegisteredHook<PromptContributor>>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     pub(crate) before_turn_hooks: Vec<RegisteredHook<BeforeTurnHook>>,
     pub(crate) before_tool_call_hooks: Vec<RegisteredHook<BeforeToolCallHook>>,
@@ -138,16 +137,6 @@ pub struct TriggerEventRegistrations<'a> {
 impl TriggerEventRegistrations<'_> {
     pub fn declare(self, event: crate::TriggerEvent) -> Result<(), PluginError> {
         self.reg.add_trigger(event)
-    }
-}
-
-pub struct PromptRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
-}
-
-impl PromptRegistrations<'_> {
-    pub fn contribute(self, contributor: PromptContributor) {
-        self.reg.add_prompt_contributor(contributor);
     }
 }
 
@@ -526,10 +515,6 @@ impl PluginRegistrar {
         TriggerEventRegistrations { reg: self }
     }
 
-    pub fn prompt(&mut self) -> PromptRegistrations<'_> {
-        PromptRegistrations { reg: self }
-    }
-
     pub fn tool_catalog(&mut self) -> ToolCatalogRegistrations<'_> {
         ToolCatalogRegistrations { reg: self }
     }
@@ -601,14 +586,6 @@ impl PluginRegistrar {
         }
         self.contributions.triggers.push(event);
         Ok(())
-    }
-
-    fn add_prompt_contributor(&mut self, contributor: PromptContributor) {
-        push_registered_hook(
-            &mut self.contributions.prompt_contributors,
-            &self.registering_plugin_id,
-            contributor,
-        );
     }
 
     fn add_tool_catalog_contributor(&mut self, contributor: ToolCatalogContributor) {

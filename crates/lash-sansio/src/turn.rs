@@ -3,7 +3,6 @@ use crate::TurnId;
 use std::sync::Arc;
 
 use crate::MessageSequence;
-use crate::prompt::PreparedPrompt;
 use crate::sansio::{
     ProjectorTurnInputs, TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol,
 };
@@ -25,7 +24,6 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub turn_causes: Vec<crate::TurnCause>,
     pub protocol_run_offset: usize,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
-    pub prepared_prompt: PreparedPrompt,
     /// The projector's recorded-state inputs for the upcoming iteration — see
     /// [`ProjectorTurnInputs`]. The host derives them from recorded turn
     /// state; later iterations refresh them through the journaled
@@ -47,7 +45,6 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
 
 pub struct PreparedTurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub machine: TurnMachine<M>,
-    pub prepared_prompt: PreparedPrompt,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
 }
 
@@ -73,7 +70,8 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             generation: input.generation,
             autonomous: input.autonomous,
             tool_specs: input.turn_driver_preamble.tool_specs.clone(),
-            system_prompt: Arc::clone(&input.prepared_prompt.system_prompt),
+            // The protocol-start sync installs the recorded system prompt.
+            system_prompt: Arc::from(""),
             projector_turn_inputs: input.projector_turn_inputs,
             session_id: input.session_id,
             agent_frame_id: input.agent_frame_id,
@@ -90,7 +88,6 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
 
     PreparedTurnMachine {
         machine,
-        prepared_prompt: input.prepared_prompt,
         turn_driver_preamble: input.turn_driver_preamble,
     }
 }
@@ -100,12 +97,9 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::ToolDefinition;
     use crate::sansio::{CompletedToolCall, DriverAction, DriverContextView, ProtocolDriverHandle};
     use crate::turn_driver::{TurnDriverConfig, TurnDriverPreamble};
-    use crate::{
-        PromptBuildInput, PromptContribution, PromptContributionSet, ToolDefinition, build_prompt,
-        default_prompt_template, prompt_template_fingerprint, prompt_text_fingerprint,
-    };
 
     fn tool(name: &str) -> ToolDefinition {
         ToolDefinition::raw(
@@ -162,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn build_turn_creates_machine_with_rendered_system_prompt() {
+    fn build_turn_creates_machine_at_the_run_offset() {
         let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![tool(
             "read_file",
         )]));
@@ -170,26 +164,7 @@ mod tests {
             config: TurnDriverConfig::chat(Arc::new(NoopDriver), false),
             tool_specs: tool_catalog.model_tool_specs(),
             tool_names: tool_catalog.tool_names(),
-            tool_names_fingerprint: tool_catalog.tool_names_fingerprint(),
-            execution_title: Arc::from("Execution"),
-            execution_prompt: Arc::from("test prompt"),
-            prompt_contributions: Vec::new(),
             writer_formats: crate::build_newest_writer_formats(),
-        });
-        let template = default_prompt_template();
-        let prompt_contributions =
-            PromptContributionSet::new(vec![PromptContribution::guidance("Guide", "Be precise.")]);
-        let prepared_prompt = build_prompt(PromptBuildInput {
-            template_fingerprint: prompt_template_fingerprint(&template),
-            template,
-            execution_title: Arc::clone(&turn_driver_preamble.execution_title),
-            execution_prompt_fingerprint: prompt_text_fingerprint(
-                &turn_driver_preamble.execution_prompt,
-            ),
-            execution_prompt: Arc::clone(&turn_driver_preamble.execution_prompt),
-            tool_names_fingerprint: turn_driver_preamble.tool_names_fingerprint,
-            tool_names: Arc::clone(&turn_driver_preamble.tool_names),
-            contributions: prompt_contributions,
         });
         let prepared = build_turn(SansIoTurnInput {
             session_id: SessionId::from("session".to_string()),
@@ -204,7 +179,6 @@ mod tests {
             turn_causes: Vec::new(),
             protocol_run_offset: 2,
             turn_driver_preamble,
-            prepared_prompt,
             projector_turn_inputs: ProjectorTurnInputs::default(),
             turn_budget: crate::TurnBudget::bounded(3),
             no_progress_budget: crate::NoProgressBudget::default(),
@@ -219,12 +193,6 @@ mod tests {
         });
 
         assert_eq!(prepared.machine.protocol_iteration(), 2);
-        assert!(
-            prepared
-                .prepared_prompt
-                .system_prompt
-                .contains("Be precise.")
-        );
         assert_eq!(prepared.turn_driver_preamble.tool_specs.len(), 1);
     }
 }
