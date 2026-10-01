@@ -280,7 +280,6 @@ case "${suite}" in
         --features synthetic-next
       cargo_test cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
     fi
-    run_uniform_store_suite pg-model-keys
     ;;
 
   s3-store)

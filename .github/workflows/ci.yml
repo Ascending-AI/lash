@@ -1616,6 +1616,11 @@ jobs:
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-attachment-referrers
 
+      - name: Test model-key laws on Postgres
+        run: |
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+            bash scripts/ci/store-tests.sh pg-model-keys
+
       - name: Test RLM frame-open replay and live reset on Postgres
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
