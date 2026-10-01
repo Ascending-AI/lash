@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 
 from service_policy import needs_local_uncached
 from invocation import regular_file, run_command
@@ -26,6 +27,29 @@ FORK_RECOVERY = (
     'use the current Kiln CLI to create a fresh fork '
     '(`kiln fork lash <name>`), or pass --local'
 )
+CONFIGS = ('judged', 'optimized')
+BAZEL_CONFIGS = {'local': 'use --local', 'shared': 'use --shared (the default)'}
+# Bazel spellings lanes still use, with the control that replaces each here.
+# Buck2 and driver flags are kebab-case; any other underscore flag is Bazel's.
+BAZEL_FLAGS = {
+    'build_tests_only': 'kiln test already builds only what the selected tests need',
+    'cache_test_results': 'use --no-test-cache (or --nocache_test_results) to execute instead of reusing a cached verdict',
+    'compilation_mode': 'use --config=optimized',
+    'flaky_test_attempts': 'the runner never retries; use --runs_per_test=N to reproduce a flake',
+    'keep_going': 'use Buck2 --keep-going',
+    'platforms': 'use --config=judged or --config=optimized',
+    'remote_accept_cached': 'use Buck2 --no-remote-cache for builds, --no-test-cache for test verdicts',
+    'remote_download_outputs': 'use --materializations final',
+    'spawn_strategy': 'use --local',
+    'strategy': 'use --local',
+    'test_keep_going': 'use Buck2 --keep-going, or --fail-fast to stop early',
+    'test_lang_filters': 'select test labels or package patterns explicitly',
+    'test_size_filters': 'select test labels or package patterns explicitly',
+    'test_strategy': 'use --local-test-execution',
+    'test_tag_filters': 'select test labels or package patterns explicitly; patterns already drop manual targets',
+    'test_timeout_filters': 'select test labels or package patterns explicitly',
+}
+DOCS = 'see docs/agents/hermetic-build.md'
 
 
 def validate_remote_configuration(path):
@@ -58,22 +82,56 @@ def arguments(argv):
     parser.add_argument('--jobs', type=int, default=32 if os.environ.get('CI') else 16)
     parser.add_argument('--isolation-dir', default='kiln')
     parser.add_argument('--materializations', choices=['final', 'none'])
-    parser.add_argument('--config', choices=['judged', 'optimized'])
+    parser.add_argument('--config')
     parser.add_argument('--test-report', type=Path)
     parser.add_argument('--test-output-dir', type=Path)
     parser.add_argument('--test_env', action='append', default=[])
     parser.add_argument('--test_arg', action='append', default=[])
     parser.add_argument('--test_timeout', type=int)
     parser.add_argument('--test_output', choices=['errors', 'all'], default='errors')
-    parser.add_argument('--no-test-cache', action='store_true')
+    parser.add_argument('--no-test-cache', '--nocache_test_results', action='store_true')
     parser.add_argument('--local-test-execution', action='store_true')
+    parser.add_argument('--runs_per_test')
+    parser.add_argument('--test_filter')
+    parser.add_argument('--test_sharding_strategy')
     options, remaining = parser.parse_known_args(argv)
     if options.jobs <= 0 or (options.test_timeout is not None and options.test_timeout <= 0):
         parser.error('Jobs and test timeout must be positive')
-    test_options = options.test_report or options.test_output_dir or options.test_env or options.test_arg or options.test_timeout or options.no_test_cache or options.local_test_execution
+    test_options = options.test_report or options.test_output_dir or options.test_env or options.test_arg or options.test_timeout or options.no_test_cache or options.local_test_execution or options.runs_per_test or options.test_filter or options.test_sharding_strategy
     if options.operation != 'test' and test_options:
         parser.error('Test controls require the test operation')
+    if options.config is not None and options.config not in CONFIGS:
+        hint = BAZEL_CONFIGS.get(options.config)
+        raise ValueError(f'Unknown --config={options.config}; Buck2 configurations are judged and optimized' + (f'; for the Bazel config, {hint}' if hint else ''))
+    if options.runs_per_test is not None:
+        if not re.fullmatch(r'[1-9][0-9]*', options.runs_per_test):
+            raise ValueError(f'--runs_per_test takes a positive run count, not {options.runs_per_test!r}; select the tests to repeat with labels and --test_arg')
+        options.runs_per_test = int(options.runs_per_test)
+        if options.test_report:
+            raise ValueError('--runs_per_test writes one report per run at <test-output-dir>/run-<k>/test-report.json; drop --test-report')
+    if options.test_sharding_strategy not in (None, 'disabled'):
+        raise ValueError(
+            f'--test_sharding_strategy={options.test_sharding_strategy} is not supported; only disabled is accepted, as a no-op. '
+            'The runner does not shard: tools/buck2/package-policy.toml alone splits a target into __shard_<k> tests, '
+            'and a filter selects across their union'
+        )
+    reject_bazel_flags(remaining)
     return options, remaining
+
+
+def reject_bazel_flags(tokens):
+    for index, token in enumerate(tokens):
+        if token == '--':
+            return
+        if token == '-c' and index + 1 < len(tokens) and tokens[index + 1] in ('opt', 'dbg', 'fastbuild'):
+            raise ValueError(f'-c {tokens[index + 1]} is a Bazel compilation mode; use --config=optimized or the default profile')
+        match = re.fullmatch(r'--([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?:=.*)?', token)
+        if match:
+            name = match[1]
+            if name not in BAZEL_FLAGS and name.startswith('no') and name[2:] in BAZEL_FLAGS:
+                name = name[2:]
+            hint = BAZEL_FLAGS.get(name)
+            raise ValueError(f'{token} is a Bazel flag the Buck2 driver does not accept; ' + (hint + '; ' if hint else '') + DOCS)
 
 
 def resolve_environment(entries, environment):
@@ -217,7 +275,7 @@ def command(options, remaining, executable, root, inventory=None):
             result.append('--no-test-cache')
         if options.local_test_execution or options.local or service:
             result.append('--local-test-execution')
-        result += ['--test-arg=' + arg for arg in options.test_arg]
+        result += ['--test-arg=' + arg for arg in options.test_arg + ([options.test_filter] if options.test_filter else [])]
     else:
         result += args
     return result
@@ -259,7 +317,74 @@ def main(argv=None):
     with tempfile.NamedTemporaryFile(mode='w', prefix='test-', suffix='.json', dir=state) as environment:
         json.dump(values, environment)
         environment.flush()
-        return run_command(ROOT, options.jobs, options.isolation_dir, argv + ['--test-env-file', environment.name], planner=lambda args: plan_test_command(args, ROOT))
+        extra = ['--test-env-file', environment.name]
+
+        def execute(args):
+            return run_command(ROOT, options.jobs, options.isolation_dir, args, planner=lambda args: plan_test_command(args, ROOT))
+        if options.runs_per_test is not None:
+            return repeat_tests(options, remaining, executable, ROOT, extra, execute)
+        return execute(argv + extra)
+
+
+def run_outcome(report_path):
+    """Return the executed and failed case counts of one run, with its problems."""
+    try:
+        report = json.loads(Path(report_path).read_text())
+    except (OSError, ValueError):
+        return 0, 0, ['no test report']
+    problems = [] if report.get('session_complete') is True else ['incomplete test report']
+    results = report.get('results') or {}
+    executed = failed = 0
+    for label, result in sorted(results.items()):
+        if result.get('status') != 'PASS':
+            problems.append(f'{label} {result.get("status")}')
+        if result.get('cache'):
+            problems.append(f'{label} reused a cached verdict')
+        xml = (result.get('outputs') or {}).get('junit_xml')
+        try:
+            cases = ET.parse(xml).getroot().iter('testcase') if xml else ()
+        except (ET.ParseError, OSError):
+            problems.append(f'{label} has an unreadable test.xml')
+            continue
+        for case in cases:
+            # A suite-named error records the binary's exit, not a test case:
+            # an unmatched selector or a crash before any case completed.
+            if case.find('skipped') is None and not (case.find('error') is not None and case.get('name') == case.get('classname')):
+                executed += 1
+                failed += case.find('failure') is not None or case.find('error') is not None
+    if not executed:
+        problems.append('executed zero test cases')
+    return executed, failed, problems
+
+
+def repeat_tests(options, remaining, executable, root, extra, execute):
+    """Execute the selection once per run, never from the verdict cache."""
+    runs = options.runs_per_test
+    base = (options.test_output_dir or root / '.buck2/test-results').absolute()
+    failed_runs = []
+    counts = set()
+    for run in range(1, runs + 1):
+        directory = base / f'run-{run}'
+        run_options = argparse.Namespace(**{**vars(options), 'test_output_dir': directory, 'test_report': directory / 'test-report.json', 'no_test_cache': True})
+        run_options.test_report.unlink(missing_ok=True)
+        code = execute(command(run_options, remaining, executable, root) + extra)
+        executed, failed, problems = run_outcome(run_options.test_report)
+        if code and not problems:
+            problems.append(f'exit code {code}')
+        counts.add(executed)
+        verdict = 'FAIL: ' + '; '.join(problems) if problems else 'PASS'
+        print(f'runs_per_test: run {run}/{runs}: {executed - failed} passed, {failed} failed - {verdict} ({directory})', flush=True)
+        if problems:
+            failed_runs.append(run)
+        if code not in (0, 32) or not executed:
+            # An incomplete run or an empty selection repeats deterministically.
+            print(f'runs_per_test: stopped after run {run}/{runs}', flush=True)
+            return code if code not in (0, 32) else 32
+    if failed_runs:
+        print(f'runs_per_test: {len(failed_runs)} of {runs} runs failed (runs {", ".join(map(str, failed_runs))})', flush=True)
+        return 32
+    print(f'runs_per_test: {runs}/{runs} runs passed, {" or ".join(map(str, sorted(counts)))} cases per run', flush=True)
+    return 0
 
 
 if __name__ == '__main__':

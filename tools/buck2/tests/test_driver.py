@@ -1,5 +1,8 @@
+from contextlib import redirect_stdout
 import importlib.util
+import io
 from pathlib import Path
+import re
 import tempfile
 import json
 import os
@@ -108,6 +111,142 @@ class DriverTests(unittest.TestCase):
         self.assertIn('--no-test-cache', runner)
         self.assertIn('--test-arg=--ignored', runner)
         self.assertEqual(runner[runner.index('--timeout') + 1], '1200')
+
+    def test_bazel_test_flags_map_to_runner_controls(self):
+        for args in (['--nocache_test_results'], ['--no-test-cache']):
+            with self.subTest(args=args):
+                command = self.command(['test', *args, '//pkg:test'])
+                self.assertIn('--no-test-cache', command[command.index('--') + 1:])
+        command = self.command(['test', '--test_arg=--exact', '--test_filter=store::tests::law', '--test_sharding_strategy=disabled', '//pkg:test'])
+        runner = command[command.index('--') + 1:]
+        self.assertEqual(runner[-2:], ['--test-arg=--exact', '--test-arg=store::tests::law'])
+        self.assertNotIn('--test_sharding_strategy=disabled', command)
+        self.assertEqual(command, self.command(['test', '--test_arg=--exact', '--test_arg=store::tests::law', '//pkg:test']))
+        with self.assertRaisesRegex(ValueError, 'only disabled is accepted.*package-policy.toml'):
+            self.command(['test', '--test_sharding_strategy=explicit', '//pkg:test'])
+        for flag in ('--runs_per_test=2', '--test_filter=law', '--test_sharding_strategy=disabled', '--nocache_test_results'):
+            with self.subTest(flag=flag), patch('sys.stderr'), self.assertRaises(SystemExit):
+                driver.arguments(['build', flag, '//pkg:lib'])
+
+    def test_runs_per_test_accepts_only_a_positive_count(self):
+        for args in (['--runs_per_test=20'], ['--runs_per_test', '20']):
+            with self.subTest(args=args):
+                self.assertEqual(driver.arguments(['test', *args, '//pkg:test'])[0].runs_per_test, 20)
+        for value in ('0', '-1', 'x', '//pkg:test@3'):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'positive run count'):
+                driver.arguments(['test', '--runs_per_test=' + value, '//pkg:test'])
+        with self.assertRaisesRegex(ValueError, 'run-<k>/test-report.json'):
+            driver.arguments(['test', '--runs_per_test=2', '--test-report=/report.json', '//pkg:test'])
+
+    def test_bazel_only_flags_fail_naming_the_equivalent(self):
+        cases = {
+            '--test_tag_filters=-manual': 'select test labels',
+            '--flaky_test_attempts=3': '--runs_per_test',
+            '--keep_going': 'Buck2 --keep-going',
+            '--nokeep_going': 'Buck2 --keep-going',
+            '--cache_test_results=no': '--no-test-cache',
+            '--test_strategy=exclusive': '--local-test-execution',
+            '--compilation_mode=opt': '--config=optimized',
+            '--test_verbose_timeout_warnings': 'Bazel flag the Buck2 driver does not accept; see docs',
+        }
+        for flag, hint in cases.items():
+            with self.subTest(flag=flag), self.assertRaisesRegex(ValueError, re.escape(flag) + '.*' + re.escape(hint)):
+                driver.arguments(['test', flag, '//pkg:test'])
+        with self.assertRaisesRegex(ValueError, 'Bazel compilation mode; use --config=optimized'):
+            driver.arguments(['build', '-c', 'opt', '//pkg:lib'])
+        self.assertEqual(driver.arguments(['build', '-c', 'kiln.x=1', '--no-remote-cache', '//pkg:lib'])[1], ['-c', 'kiln.x=1', '--no-remote-cache', '//pkg:lib'])
+        self.assertEqual(driver.arguments(['run', '//bin:bin', '--', '--keep_going'])[1], ['//bin:bin', '--', '--keep_going'])
+        with self.assertRaisesRegex(ValueError, r'Unknown --config=local; .*judged and optimized; for the Bazel config, use --local'):
+            driver.arguments(['test', '--config=local', '//pkg:test'])
+        with self.assertRaisesRegex(ValueError, r'Unknown --config=ci; .*judged and optimized$'):
+            driver.arguments(['build', '--config=ci'])
+
+    def repeat(self, outcomes, args=()):
+        """Run --runs_per_test over fake runs; each outcome is (exit code, cases, cache hit)."""
+        with tempfile.TemporaryDirectory() as work:
+            base = Path(work) / 'results'
+            options, remaining = driver.arguments(['test', f'--runs_per_test={len(outcomes)}', f'--test-output-dir={base}', *args, '//pkg:test'])
+            calls = []
+
+            def execute(argv):
+                runner = argv[argv.index('--') + 1:]
+                report = Path(runner[runner.index('--test-report') + 1])
+                output = Path(runner[runner.index('--test-output-dir') + 1])
+                calls.append((runner, output))
+                code, cases, cache = outcomes[len(calls) - 1]
+                output.mkdir(parents=True, exist_ok=True)
+                xml = output / 'test.xml'
+                body = ''.join(f'<testcase name="t{i}">' + ('<failure/>' if code else '') + '</testcase>' for i in range(cases))
+                xml.write_text(f'<testsuites><testsuite><testcase name="ignored"><skipped/></testcase>{body}</testsuite></testsuites>')
+                status = 'PASS' if code == 0 else 'FAIL'
+                report.write_text(json.dumps({'schema': 1, 'session_complete': True, 'results': {'root//pkg:test': {'status': status, 'cache': cache, 'outputs': {'junit_xml': str(xml)}}}}))
+                return code
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = driver.repeat_tests(options, remaining, Path('/buck2'), Path(work), ['--test-env-file', '/env'], execute)
+            return code, calls, output.getvalue(), base
+
+    def test_runs_per_test_executes_each_run_uncached_into_its_own_directory(self):
+        code, calls, output, base = self.repeat([(0, 1, False)] * 3)
+        self.assertEqual(code, 0)
+        self.assertEqual([directory for _, directory in calls], [base / f'run-{run}' for run in (1, 2, 3)])
+        for runner, directory in calls:
+            self.assertIn('--no-test-cache', runner)
+            self.assertEqual(runner[runner.index('--test-report') + 1], str(directory / 'test-report.json'))
+            self.assertEqual(runner[-2:], ['--test-env-file', '/env'])
+        self.assertEqual(output.count(' 1 passed, 0 failed - PASS'), 3)
+        self.assertIn('runs_per_test: 3/3 runs passed, 1 cases per run', output)
+
+    def test_runs_per_test_fails_when_any_run_fails(self):
+        code, calls, output, _ = self.repeat([(0, 1, False), (32, 1, False), (0, 1, False)])
+        self.assertEqual(code, 32)
+        self.assertEqual(len(calls), 3)
+        self.assertIn('run 2/3: 0 passed, 1 failed - FAIL: root//pkg:test FAIL', output)
+        self.assertIn('1 of 3 runs failed (runs 2)', output)
+
+    def test_runs_per_test_fails_and_stops_on_a_zero_case_run(self):
+        code, calls, output, _ = self.repeat([(0, 1, False), (0, 0, False), (0, 1, False)])
+        self.assertEqual(code, 32)
+        self.assertEqual(len(calls), 2)
+        self.assertIn('run 2/3: 0 passed, 0 failed - FAIL: executed zero test cases', output)
+        self.assertIn('stopped after run 2/3', output)
+
+    def test_runs_per_test_does_not_count_an_exit_record_as_a_case(self):
+        with tempfile.TemporaryDirectory() as work:
+            base = Path(work)
+            xml = base / 'test.xml'
+            xml.write_text('<testsuites><testsuite name="//pkg:test"><testcase name="//pkg:test" classname="//pkg:test"><error message="exited with error code 1"/></testcase></testsuite></testsuites>')
+            report = base / 'test-report.json'
+            report.write_text(json.dumps({'session_complete': True, 'results': {'root//pkg:test': {'status': 'FAIL', 'cache': False, 'outputs': {'junit_xml': str(xml)}}}}))
+            self.assertEqual(driver.run_outcome(report), (0, 0, ['root//pkg:test FAIL', 'executed zero test cases']))
+            xml.write_text('<testsuites><testsuite name="//pkg:tool"><testcase name="//pkg:tool" classname="//pkg:tool"/></testsuite></testsuites>')
+            report.write_text(json.dumps({'session_complete': True, 'results': {'root//pkg:tool': {'status': 'PASS', 'cache': False, 'outputs': {'junit_xml': str(xml)}}}}))
+            self.assertEqual(driver.run_outcome(report), (1, 0, []))
+
+    def test_runs_per_test_never_accepts_a_cached_verdict(self):
+        code, calls, output, _ = self.repeat([(0, 1, False), (0, 1, True)])
+        self.assertEqual(code, 32)
+        self.assertTrue(all('--no-test-cache' in runner for runner, _ in calls))
+        self.assertIn('run 2/2: 1 passed, 0 failed - FAIL: root//pkg:test reused a cached verdict', output)
+
+    def test_runs_per_test_stops_on_an_incomplete_run(self):
+        code, calls, output, _ = self.repeat([(3, 1, False), (0, 1, False)])
+        self.assertEqual(code, 3)
+        self.assertEqual(len(calls), 1)
+        self.assertIn('FAIL: root//pkg:test FAIL', output)
+
+    def test_runs_per_test_ignores_a_stale_report(self):
+        with tempfile.TemporaryDirectory() as work:
+            base = Path(work)
+            stale = base / 'run-1' / 'test-report.json'
+            stale.parent.mkdir()
+            stale.write_text(json.dumps({'session_complete': True, 'results': {}}))
+            options, remaining = driver.arguments(['test', '--runs_per_test=1', f'--test-output-dir={base}', '//pkg:test'])
+            with redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(driver.repeat_tests(options, remaining, Path('/buck2'), base, [], lambda argv: 1), 1)
+            self.assertFalse(stale.exists())
+            self.assertIn('FAIL: no test report', output.getvalue())
 
     def test_service_runtime_values_force_local_uncached_test_only(self):
         for name in ['DATABASE_URL', 'LASH_POSTGRES_DATABASE_URL', 'LASH_S3_ENDPOINT', 'LASH_REQUIRE_S3', 'PGHOST']:

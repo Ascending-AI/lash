@@ -277,6 +277,32 @@ outputs. Lint/compile-only CI can use
 `--materializations none`; executable, documentation and schema consumers need
 final outputs.
 
+## Repeating a test
+
+Prove a concurrency, timing, crash or replay law by executing one exact case
+repeatedly:
+
+```sh
+kiln test //crates/lash-store-sql:lash-store-sql__unit_test \
+  --test_arg=--exact \
+  --test_arg=render::tests::a_vocabulary_token_expands_once_for_both_backends \
+  --test_sharding_strategy=disabled --runs_per_test=20
+```
+
+`--runs_per_test=N` runs `buck2 test` N times with `--no-test-cache`, so every
+run executes instead of reusing a cached verdict. Run `k` writes its report,
+`test.xml` and `test.log` under `<test-output-dir>/run-<k>/`. The driver prints
+each run's passed and failed case counts. The invocation fails if any run fails,
+reuses a cached verdict or executes zero cases. A zero-case run stops the
+repetition: a bare name under `--exact` matches nothing. Use the full module
+path.
+
+The driver accepts these Bazel spellings. `--test_filter=<f>` is
+`--test_arg=<f>`. `--nocache_test_results` is `--no-test-cache`.
+`--test_sharding_strategy=disabled` is a no-op: only `package-policy.toml`
+shards, and a filter selects across the shards' union. Other Bazel flags fail
+and name the replacement where one exists.
+
 ## Service and Cargo-owned gates
 
 `scripts/ci/with-service.sh` starts the same private PostgreSQL/Garage containers
