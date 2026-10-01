@@ -1,6 +1,6 @@
 use super::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSection, ExecutionSectionRequest, ShapeNotation,
+    ExecutionSection, ExecutionSectionRequest,
 };
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
@@ -58,6 +58,10 @@ impl Dialect for TypescriptDialect {
 
     fn schema_type(&self, shape: &lash_sansio::SchemaShape) -> String {
         lash_typescript::render_schema_shape(shape)
+    }
+
+    fn schema_definition(&self, name: &str, shape: &lash_sansio::SchemaShape) -> String {
+        format!("type {name} = {}", self.schema_type(shape))
     }
 
     fn render_tool_example(&self, authored: &str) -> Option<String> {
@@ -126,28 +130,6 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     // record is small enough, in the `Schema:` block otherwise — so there is
     // never a reason to write one from memory.
     field_miss_rule: "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.",
-    shape_notation: TYPESCRIPT_SHAPE_NOTATION,
-};
-
-/// TypeScript's spelling of the shapes shared code infers from values.
-const TYPESCRIPT_SHAPE_NOTATION: ShapeNotation = ShapeNotation {
-    any: "unknown",
-    null: "null",
-    bool: "boolean",
-    int: "number",
-    float: "number",
-    str: "string",
-    record: "Record<string, unknown>",
-    list_open: "Array<",
-    list_close: ">",
-    union_separator: " | ",
-    definition_keyword: "type ",
-    definition_assign: " = ",
-    record_open: "{",
-    field_indent: "  ",
-    field_separator: ": ",
-    field_terminator: ";",
-    record_close: "}",
 };
 
 /// Lashlang's type syntax in TypeScript's spelling.

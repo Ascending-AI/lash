@@ -3,11 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::dialect::ShapeNotation;
+use crate::dialect::Dialect;
 use crate::render::CodeRenderer;
 use lash_core::TokenUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
+use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use lashlang::Value as FlowValue;
 
 pub(crate) fn decode_rlm_options(
@@ -117,7 +118,7 @@ struct BoundVariableRenderCacheEntry {
     /// Cheap structural hash of the variable's value. When it matches, the
     /// expensive rebuild (serialize / shape inference / preview) is skipped.
     value_hash: u64,
-    shape: Option<JsonShape>,
+    shape: Option<SchemaShape>,
     inline: Option<String>,
     size_hint: Option<String>,
     preview: Option<String>,
@@ -126,7 +127,7 @@ struct BoundVariableRenderCacheEntry {
 /// The expensive-to-compute parts of a variable's rendering.
 struct BuiltRow {
     inline: Option<String>,
-    shape: Option<JsonShape>,
+    shape: Option<SchemaShape>,
     size_hint: Option<String>,
     preview: Option<String>,
 }
@@ -137,7 +138,7 @@ struct BuiltRow {
 struct WorkRow {
     name: String,
     value_hash: u64,
-    shape: Option<JsonShape>,
+    shape: Option<SchemaShape>,
     inline: Option<String>,
     size_hint: Option<String>,
     preview: Option<String>,
@@ -174,13 +175,13 @@ impl ReadOnlyVariableDoc {
 
 pub(crate) fn render_read_only_variables(
     mut docs: Vec<ReadOnlyVariableDoc>,
-    vocabulary: crate::dialect::DialectPromptVocabulary,
+    dialect: &dyn Dialect,
 ) -> String {
+    let vocabulary = dialect.prompt_vocabulary();
     docs.sort_by(|left, right| left.name.cmp(&right.name));
-    let notation = vocabulary.shape_notation;
     let shapes = docs
         .iter()
-        .map(|doc| (doc.name.clone(), doc.value.as_ref().map(infer_json_shape)))
+        .map(|doc| (doc.name.clone(), doc.value.as_ref().map(infer_value_shape)))
         .collect::<BTreeMap<_, _>>();
     let mut registry = SchemaRegistry::default();
     for (name, shape) in &shapes {
@@ -201,16 +202,16 @@ pub(crate) fn render_read_only_variables(
         let type_text = shapes
             .get(&doc.name)
             .and_then(Option::as_ref)
-            .map(|shape| render_shape_inline(shape, &registry, notation))
-            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type, notation));
+            .map(|shape| dialect.schema_type(&registry.reference(shape)))
+            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type, dialect));
         lines.push(render_read_only_line(
             &doc.name,
             &type_text,
             &doc.descriptor_type,
-            notation,
+            dialect,
         ));
     }
-    append_schema_registry(&mut lines, &registry, notation);
+    append_schema_registry(&mut lines, &registry, dialect);
     lines.join("\n")
 }
 
@@ -222,10 +223,11 @@ pub(crate) fn render_bound_variables(
     cache: &mut BoundVariableRenderCache,
     globals: &[(String, FlowValue)],
     opaque: &[(String, String)],
-    vocabulary: crate::dialect::DialectPromptVocabulary,
+    dialect: &dyn Dialect,
     renderer: &dyn CodeRenderer,
     params: &RenderParams,
 ) -> Arc<str> {
+    let vocabulary = dialect.prompt_vocabulary();
     let mut lines = vec![
         format!(
             "These variables are already bound in {}. Access them directly in `{}` {}s; do not recreate them manually.",
@@ -236,7 +238,6 @@ pub(crate) fn render_bound_variables(
         // and the dialect states what its runtime does with a key that is not.
         vocabulary.field_miss_rule.to_string(),
     ];
-    let notation = vocabulary.shape_notation;
 
     // Drop cache slots for variables that no longer exist.
     cache
@@ -288,7 +289,7 @@ pub(crate) fn render_bound_variables(
     lines.push("Available variables:".to_string());
     let mut listed = Vec::with_capacity(rows.len() + opaque.len());
     for row in &rows {
-        let line = render_row_line(row, &registry, vocabulary);
+        let line = render_row_line(row, &registry, dialect);
         cache.entries.insert(
             row.name.clone(),
             BoundVariableRenderCacheEntry {
@@ -324,7 +325,7 @@ pub(crate) fn render_bound_variables(
         if idx > 0 {
             lines.push(String::new());
         }
-        lines.extend(render_type_definition(name, shape, &registry, notation));
+        lines.push(dialect.schema_definition(name, &registry.definition(shape)));
     }
 
     Arc::from(lines.join("\n"))
@@ -333,7 +334,7 @@ pub(crate) fn render_bound_variables(
 fn append_schema_registry(
     lines: &mut Vec<String>,
     registry: &SchemaRegistry,
-    notation: ShapeNotation,
+    dialect: &dyn Dialect,
 ) {
     if !registry.definitions.is_empty() {
         lines.push(String::new());
@@ -342,7 +343,7 @@ fn append_schema_registry(
             if idx > 0 {
                 lines.push(String::new());
             }
-            lines.extend(render_type_definition(name, shape, registry, notation));
+            lines.push(dialect.schema_definition(name, &registry.definition(shape)));
         }
     }
 }
@@ -351,27 +352,31 @@ fn render_read_only_line(
     name: &str,
     type_text: &str,
     descriptor_type: &str,
-    notation: ShapeNotation,
+    dialect: &dyn Dialect,
 ) -> String {
     format!(
         "- `{name}`: `{type_text}`, read-only (descriptor: `{}`)",
-        normalize_descriptor_type(descriptor_type, notation)
+        normalize_descriptor_type(descriptor_type, dialect)
     )
 }
 
-/// A value descriptor's type in the dialect's shape notation.
-fn normalize_descriptor_type(type_name: &str, notation: ShapeNotation) -> String {
-    match type_name {
-        "string" => notation.str.to_string(),
-        "number" => notation.float.to_string(),
-        "integer" => notation.int.to_string(),
-        "boolean" => notation.bool.to_string(),
-        "object" | "record" => notation.record.to_string(),
-        "array" | "list" => notation.list(notation.any),
-        "null" => notation.null.to_string(),
-        other if !other.trim().is_empty() => other.to_string(),
-        _ => notation.any.to_string(),
-    }
+/// A value descriptor's type through the same shape spelling as tool schemas.
+fn normalize_descriptor_type(type_name: &str, dialect: &dyn Dialect) -> String {
+    let kind = match type_name {
+        "string" => ShapeKind::Str,
+        "number" => ShapeKind::Float,
+        "integer" => ShapeKind::Int,
+        "boolean" => ShapeKind::Bool,
+        "object" | "record" => ShapeKind::Object(ObjectShape {
+            fields: Vec::new(),
+            extra_keys: ExtraKeys::Open(Box::new(SchemaShape::unknown())),
+        }),
+        "array" | "list" => ShapeKind::List(Box::new(SchemaShape::unknown())),
+        "null" => ShapeKind::Null,
+        other if !other.trim().is_empty() => return other.to_string(),
+        _ => ShapeKind::Unknown,
+    };
+    dialect.schema_type(&kind.into())
 }
 
 fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
@@ -396,11 +401,8 @@ fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
     clippy::expect_used,
     reason = "the inline arm above returns early, so only hinted rows reach this point and every hinted row carries an inferred shape"
 )]
-fn render_row_line(
-    row: &WorkRow,
-    registry: &SchemaRegistry,
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-) -> String {
+fn render_row_line(row: &WorkRow, registry: &SchemaRegistry, dialect: &dyn Dialect) -> String {
+    let vocabulary = dialect.prompt_vocabulary();
     if let Some(inline) = &row.inline {
         // Value shown explicitly; no type/size hint needed.
         return format!("- `{}` = {inline}", row.name);
@@ -409,7 +411,7 @@ fn render_row_line(
         .shape
         .as_ref()
         .expect("hinted variable has an inferred shape");
-    let type_text = render_shape_inline(shape, registry, vocabulary.shape_notation);
+    let type_text = dialect.schema_type(&registry.reference(shape));
     let mut line = match &row.size_hint {
         Some(size_hint) => format!("- `{}`: `{type_text}`, {size_hint}", row.name),
         None => format!("- `{}`: `{type_text}`", row.name),
@@ -446,7 +448,7 @@ fn build_bound_variable_row(
     let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
     BuiltRow {
         inline: None,
-        shape: Some(infer_json_shape(&json)),
+        shape: Some(infer_value_shape(&json)),
         size_hint: render_value_size_hint(&json),
         preview: Some(result.body),
     }
@@ -541,98 +543,56 @@ fn render_value_size_hint(value: &serde_json::Value) -> Option<String> {
 /// How many keys a row will name before deferring to the `Schema:` block.
 const MAX_INLINE_KEY_SET: usize = 12;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-enum JsonShape {
-    Any,
-    Null,
-    Bool,
-    Int,
-    Float,
-    Str,
-    List(Box<JsonShape>),
-    Record(BTreeMap<String, JsonShape>),
-    Union(Vec<JsonShape>),
-}
-
 #[derive(Default)]
 struct SchemaRegistry {
     names_by_key: BTreeMap<String, String>,
-    definitions: Vec<(String, JsonShape)>,
+    definitions: Vec<(String, SchemaShape)>,
     used_names: BTreeSet<String>,
 }
 
 impl SchemaRegistry {
-    fn register_root(&mut self, root_name: &str, shape: &JsonShape) {
+    fn register_root(&mut self, root_name: &str, shape: &SchemaShape) {
         self.register_shape(shape, &[root_name.to_string()]);
     }
 
-    fn register_shape(&mut self, shape: &JsonShape, hint_segments: &[String]) {
-        match shape {
-            JsonShape::Record(fields) => {
+    fn register_shape(&mut self, shape: &SchemaShape, hint_segments: &[String]) {
+        match &shape.kind {
+            ShapeKind::Object(object) => {
                 let key = canonical_shape_key(shape);
                 if self.names_by_key.contains_key(&key) {
                     return;
                 }
-                for (field, child) in fields {
-                    let child_segments = vec![singularize_segment(field)];
-                    self.register_nested_shape(child, &child_segments);
+                for field in &object.fields {
+                    self.register_shape(&field.shape, &[singularize_segment(&field.name)]);
                 }
                 let name = self.allocate_name(type_name_from_segments(hint_segments));
                 self.names_by_key.insert(key, name.clone());
                 self.definitions.push((name, shape.clone()));
             }
-            JsonShape::List(item) => self.register_nested_list_item(item, hint_segments),
-            JsonShape::Union(items) => {
+            ShapeKind::List(item) => self.register_list_item(item, hint_segments),
+            ShapeKind::Union(items) => {
                 for item in items {
                     self.register_shape(item, hint_segments);
                 }
             }
-            JsonShape::Any
-            | JsonShape::Null
-            | JsonShape::Bool
-            | JsonShape::Int
-            | JsonShape::Float
-            | JsonShape::Str => {}
+            _ => {}
         }
     }
 
-    fn register_nested_shape(&mut self, shape: &JsonShape, hint_segments: &[String]) {
-        match shape {
-            JsonShape::Record(_) => self.register_shape(shape, hint_segments),
-            JsonShape::List(item) => self.register_nested_list_item(item, hint_segments),
-            JsonShape::Union(items) => {
+    fn register_list_item(&mut self, item: &SchemaShape, hint_segments: &[String]) {
+        match &item.kind {
+            ShapeKind::Object(_) => {
+                let mut segments = hint_segments.to_vec();
+                segments.push("item".to_string());
+                self.register_shape(item, &segments);
+            }
+            ShapeKind::List(inner) => self.register_list_item(inner, hint_segments),
+            ShapeKind::Union(items) => {
                 for item in items {
-                    self.register_nested_shape(item, hint_segments);
+                    self.register_list_item(item, hint_segments);
                 }
             }
-            JsonShape::Any
-            | JsonShape::Null
-            | JsonShape::Bool
-            | JsonShape::Int
-            | JsonShape::Float
-            | JsonShape::Str => {}
-        }
-    }
-
-    fn register_nested_list_item(&mut self, item: &JsonShape, hint_segments: &[String]) {
-        match item {
-            JsonShape::Record(_) => {
-                let mut item_segments = hint_segments.to_vec();
-                item_segments.push("item".to_string());
-                self.register_shape(item, &item_segments);
-            }
-            JsonShape::List(inner) => self.register_nested_list_item(inner, hint_segments),
-            JsonShape::Union(items) => {
-                for item in items {
-                    self.register_nested_list_item(item, hint_segments);
-                }
-            }
-            JsonShape::Any
-            | JsonShape::Null
-            | JsonShape::Bool
-            | JsonShape::Int
-            | JsonShape::Float
-            | JsonShape::Str => {}
+            _ => {}
         }
     }
 
@@ -654,167 +614,136 @@ impl SchemaRegistry {
             suffix += 1;
         }
     }
+
+    fn reference(&self, shape: &SchemaShape) -> SchemaShape {
+        if let Some(name) = self.names_by_key.get(&canonical_shape_key(shape)) {
+            ShapeKind::Named(name.clone()).into()
+        } else {
+            self.definition(shape)
+        }
+    }
+
+    fn definition(&self, shape: &SchemaShape) -> SchemaShape {
+        let kind = match &shape.kind {
+            ShapeKind::Object(object) => ShapeKind::Object(ObjectShape {
+                fields: object
+                    .fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        shape: self.reference(&field.shape),
+                        ..field.clone()
+                    })
+                    .collect(),
+                extra_keys: object.extra_keys.clone(),
+            }),
+            ShapeKind::List(item) => ShapeKind::List(Box::new(self.reference(item))),
+            ShapeKind::Union(items) => {
+                ShapeKind::Union(items.iter().map(|item| self.reference(item)).collect())
+            }
+            other => other.clone(),
+        };
+        SchemaShape {
+            kind,
+            ..shape.clone()
+        }
+    }
 }
 
-fn infer_json_shape(value: &serde_json::Value) -> JsonShape {
-    match value {
-        serde_json::Value::Null => JsonShape::Null,
-        serde_json::Value::Bool(_) => JsonShape::Bool,
+fn infer_value_shape(value: &serde_json::Value) -> SchemaShape {
+    let kind = match value {
+        serde_json::Value::Null => ShapeKind::Null,
+        serde_json::Value::Bool(_) => ShapeKind::Bool,
         serde_json::Value::Number(n) => {
             if n.is_f64() && n.as_f64().is_some_and(|v| v.fract() != 0.0) {
-                JsonShape::Float
+                ShapeKind::Float
             } else {
-                JsonShape::Int
+                ShapeKind::Int
             }
         }
-        serde_json::Value::String(_) => JsonShape::Str,
-        serde_json::Value::Array(values) => {
-            let item_shape = values
+        serde_json::Value::String(_) => ShapeKind::Str,
+        serde_json::Value::Array(values) => ShapeKind::List(Box::new(
+            values
                 .iter()
-                .map(infer_json_shape)
+                .map(infer_value_shape)
                 .reduce(merge_shapes)
-                .unwrap_or(JsonShape::Any);
-            JsonShape::List(Box::new(item_shape))
-        }
-        serde_json::Value::Object(map) => JsonShape::Record(
-            map.iter()
-                .map(|(key, value)| (key.clone(), infer_json_shape(value)))
-                .collect(),
-        ),
-    }
-}
-
-fn merge_shapes(left: JsonShape, right: JsonShape) -> JsonShape {
-    use JsonShape as Shape;
-    match (left, right) {
-        (Shape::Any, _) | (_, Shape::Any) => Shape::Any,
-        (left, right) if left == right => left,
-        (Shape::Int, Shape::Float) | (Shape::Float, Shape::Int) => Shape::Float,
-        (Shape::List(left), Shape::List(right)) => {
-            Shape::List(Box::new(merge_shapes(*left, *right)))
-        }
-        (Shape::Record(left), Shape::Record(right)) if left.keys().eq(right.keys()) => {
-            let merged = left
-                .into_iter()
-                .map(|(key, left_shape)| {
-                    let right_shape = right.get(&key).cloned().unwrap_or(JsonShape::Any);
-                    (key, merge_shapes(left_shape, right_shape))
-                })
-                .collect();
-            Shape::Record(merged)
-        }
-        (Shape::Union(left), Shape::Union(right)) => {
-            flatten_union(left.into_iter().chain(right).collect())
-        }
-        (Shape::Union(mut union), other) | (other, Shape::Union(mut union)) => {
-            union.push(other);
-            flatten_union(union)
-        }
-        (left, right) => flatten_union(vec![left, right]),
-    }
-}
-
-fn flatten_union(shapes: Vec<JsonShape>) -> JsonShape {
-    let mut flattened = Vec::new();
-    for shape in shapes {
-        match shape {
-            JsonShape::Union(items) => flattened.extend(items),
-            other => flattened.push(other),
-        }
-    }
-    let mut by_key = BTreeMap::new();
-    for shape in flattened {
-        by_key.insert(canonical_shape_key(&shape), shape);
-    }
-    let deduped = by_key.into_values().collect::<Vec<_>>();
-    if deduped.len() == 1 {
-        deduped.into_iter().next().unwrap_or(JsonShape::Any)
-    } else {
-        JsonShape::Union(deduped)
-    }
-}
-
-fn canonical_shape_key(shape: &JsonShape) -> String {
-    match shape {
-        JsonShape::Any => "any".to_string(),
-        JsonShape::Null => "null".to_string(),
-        JsonShape::Bool => "bool".to_string(),
-        JsonShape::Int => "int".to_string(),
-        JsonShape::Float => "float".to_string(),
-        JsonShape::Str => "str".to_string(),
-        JsonShape::List(item) => format!("list[{}]", canonical_shape_key(item)),
-        JsonShape::Record(fields) => {
-            let body = fields
+                .unwrap_or_else(SchemaShape::unknown),
+        )),
+        serde_json::Value::Object(map) => ShapeKind::Object(ObjectShape {
+            fields: map
                 .iter()
-                .map(|(field, shape)| format!("{field}:{}", canonical_shape_key(shape)))
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("{{{body}}}")
+                .map(|(name, value)| ShapeField {
+                    name: name.clone(),
+                    required: true,
+                    shape: infer_value_shape(value),
+                })
+                .collect(),
+            extra_keys: ExtraKeys::Closed,
+        }),
+    };
+    kind.into()
+}
+
+fn merge_shapes(left: SchemaShape, right: SchemaShape) -> SchemaShape {
+    if left == right {
+        return left;
+    }
+    let kind = match (left.kind, right.kind) {
+        (ShapeKind::Unknown, _) | (_, ShapeKind::Unknown) => ShapeKind::Unknown,
+        (ShapeKind::Int, ShapeKind::Float) | (ShapeKind::Float, ShapeKind::Int) => ShapeKind::Float,
+        (ShapeKind::List(left), ShapeKind::List(right)) => {
+            ShapeKind::List(Box::new(merge_shapes(*left, *right)))
         }
-        JsonShape::Union(items) => {
-            let mut parts = items.iter().map(canonical_shape_key).collect::<Vec<_>>();
-            parts.sort();
-            format!("union({})", parts.join("|"))
+        (ShapeKind::Object(left), ShapeKind::Object(right))
+            if left
+                .fields
+                .iter()
+                .map(|field| &field.name)
+                .eq(right.fields.iter().map(|field| &field.name)) =>
+        {
+            ShapeKind::Object(ObjectShape {
+                fields: left
+                    .fields
+                    .into_iter()
+                    .zip(right.fields)
+                    .map(|(left, right)| ShapeField {
+                        shape: merge_shapes(left.shape, right.shape),
+                        name: left.name,
+                        required: true,
+                    })
+                    .collect(),
+                extra_keys: ExtraKeys::Closed,
+            })
         }
+        (left, right) => return flatten_union(vec![left.into(), right.into()]),
+    };
+    kind.into()
+}
+
+fn flatten_union(shapes: Vec<SchemaShape>) -> SchemaShape {
+    let mut by_key = BTreeMap::new();
+    for shape in shapes {
+        let items = match shape.kind {
+            ShapeKind::Union(items) => items,
+            _ => vec![shape],
+        };
+        for item in items {
+            by_key.insert(canonical_shape_key(&item), item);
+        }
+    }
+    if by_key.len() == 1 {
+        by_key
+            .into_values()
+            .next()
+            .unwrap_or_else(SchemaShape::unknown)
+    } else {
+        ShapeKind::Union(by_key.into_values().collect()).into()
     }
 }
 
-fn render_shape_inline(
-    shape: &JsonShape,
-    registry: &SchemaRegistry,
-    notation: ShapeNotation,
-) -> String {
-    match shape {
-        JsonShape::Any => notation.any.to_string(),
-        JsonShape::Null => notation.null.to_string(),
-        JsonShape::Bool => notation.bool.to_string(),
-        JsonShape::Int => notation.int.to_string(),
-        JsonShape::Float => notation.float.to_string(),
-        JsonShape::Str => notation.str.to_string(),
-        JsonShape::List(item) => notation.list(&render_shape_inline(item, registry, notation)),
-        JsonShape::Record(_) => registry
-            .names_by_key
-            .get(&canonical_shape_key(shape))
-            .cloned()
-            .unwrap_or_else(|| notation.record.to_string()),
-        JsonShape::Union(items) => items
-            .iter()
-            .map(|item| render_shape_inline(item, registry, notation))
-            .collect::<Vec<_>>()
-            .join(notation.union_separator),
-    }
-}
-
-fn render_type_definition(
-    name: &str,
-    shape: &JsonShape,
-    registry: &SchemaRegistry,
-    notation: ShapeNotation,
-) -> Vec<String> {
-    let head = format!(
-        "{}{name}{}",
-        notation.definition_keyword, notation.definition_assign
-    );
-    match shape {
-        JsonShape::Record(fields) => {
-            let mut lines = vec![format!("{head}{}", notation.record_open)];
-            for (field, shape) in fields {
-                lines.push(format!(
-                    "{}{field}{}{}{}",
-                    notation.field_indent,
-                    notation.field_separator,
-                    render_shape_inline(shape, registry, notation),
-                    notation.field_terminator,
-                ));
-            }
-            lines.push(notation.record_close.to_string());
-            lines
-        }
-        _ => vec![format!(
-            "{head}{}",
-            render_shape_inline(shape, registry, notation)
-        )],
-    }
+fn canonical_shape_key(shape: &SchemaShape) -> String {
+    // Inferred nodes have no annotations. Debug quotes field names, so keys
+    // containing punctuation cannot alias a different record's structure.
+    format!("{:?}", shape.kind)
 }
 
 fn type_name_from_segments(segments: &[String]) -> String {
@@ -862,6 +791,50 @@ mod bound_variable_tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn inferred_typescript_shapes_use_the_tool_schema_spelling() {
+        let value = json!({"payload": {
+            "two words": "x".repeat(2_000),
+            "numbers": [1, 1.5, null]
+        }});
+        let bound = render_with_cache(&mut BoundVariableRenderCache::default(), value.clone());
+        let read_only = render_read_only_variables(
+            vec![ReadOnlyVariableDoc {
+                name: "payload".to_string(),
+                descriptor_type: "object".to_string(),
+                value: Some(value["payload"].clone()),
+            }],
+            &crate::dialect::TypescriptDialect,
+        );
+        for prompt in [&*bound, &*read_only] {
+            assert!(prompt.contains(r#""two words": string"#), "{prompt}");
+            assert!(prompt.contains("Array<number | null>"), "{prompt}");
+            assert!(!prompt.contains("number | number"), "{prompt}");
+        }
+        let schemas = [&*bound, &*read_only]
+            .map(|prompt| {
+                let row = prompt
+                    .lines()
+                    .find(|line| line.starts_with("- `payload`"))
+                    .expect("binding row");
+                let row = row.split(" ≈ ").next().expect("binding type");
+                let schema = prompt
+                    .split("Schema:\n")
+                    .nth(1)
+                    .expect("named schema")
+                    .trim();
+                format!("{row}\n{schema}")
+            })
+            .join("\n\n");
+        insta::assert_snapshot!(schemas, @r###"
+        - `payload`: `Payload`, keys=2 (numbers, two words)
+        type Payload = { numbers: Array<number | null>; "two words": string }
+
+        - `payload`: `Payload`, read-only (descriptor: `Record<string, unknown>`)
+        type Payload = { numbers: Array<number | null>; "two words": string }
+        "###);
+    }
+
     fn globals(value: serde_json::Value) -> Vec<(String, FlowValue)> {
         value
             .as_object()
@@ -877,7 +850,7 @@ mod bound_variable_tests {
             cache,
             &globals,
             &[],
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+            &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )
@@ -892,7 +865,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+            &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );
@@ -937,7 +910,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+            &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );
@@ -960,7 +933,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+            &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )
@@ -981,7 +954,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+            &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )
@@ -1087,14 +1060,14 @@ mod bound_variable_tests {
             &mut cache,
             &[("payload".to_string(), value)],
             &[],
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+            &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         );
         assert!(
             rendered.contains("keys=2 (__projected__payload, body)")
                 && rendered.contains(r#"≈ {"__projected__payload":"#)
-                && rendered.contains("  __projected__payload: string;"),
+                && rendered.contains("__projected__payload: string;"),
             "reserved-prefix key must be verbatim in the row key set, inline preview, and Schema:\n{rendered}"
         );
     }

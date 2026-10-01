@@ -69,10 +69,12 @@ field and refuses one.
   itself, so an open object's fields, nested shapes, enums, unions and
   constraints reach every surface from the same import. Shared code builds the
   per-field rows and the required-output block from the same shapes through
-  `schema_type`.
+  `schema_type`. Inferred runtime values construct the same shape directly.
+- `schema_definition`: a named inferred record, with its fields spelled
+  through `schema_type`.
 - `prompt_vocabulary`: language name, execution title, `CellTags`, cell noun,
   history type, inspect and finish forms, continue-as forms, the field-miss
-  rule of its runtime, and a `ShapeNotation` for inferred value shapes.
+  rule of its runtime.
 - `history_item_definition` and `render_execution_section`: the history item
   schema and the whole execution section, given the transport, the rendered
   tool docs, the catalog, the host environment and the discovery operation.

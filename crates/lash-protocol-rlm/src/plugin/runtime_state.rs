@@ -83,7 +83,7 @@ impl RlmRuntimeState {
     #[cfg(test)]
     pub(crate) async fn read_only_variables_prompt(&self) -> Option<String> {
         let bindings = self.session_projected_bindings.lock().await;
-        crate::projection::read_only_variables_prompt(&bindings, self.dialect.prompt_vocabulary())
+        self.dialect.read_only_variables_prompt(&bindings)
     }
 
     /// Render the current bound-variables view on demand.

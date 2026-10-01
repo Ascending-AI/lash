@@ -328,7 +328,7 @@ async fn a_seam_proof_dialect_runs_a_real_turn_through_the_host() {
     let request = &requests[0];
     assert!(request.contains("<seam>"), "{request}");
     assert!(
-        request.contains("probe.echo WITH Rec GIVES Rec"),
+        request.contains("probe.echo WITH record{text: str} GIVES record{value: str}"),
         "{request}"
     );
     assert!(request.contains("Seam proof execution"), "{request}");
@@ -377,7 +377,7 @@ async fn a_suspended_session_keeps_its_selected_dialect(tier: Tier, seed: u64) {
         "{resumed_request}"
     );
     assert!(
-        resumed_request.contains("value -> Text;"),
+        resumed_request.contains("shape Kept is record{value: str}"),
         "{resumed_request}"
     );
     assert_no_typescript(resumed_request);

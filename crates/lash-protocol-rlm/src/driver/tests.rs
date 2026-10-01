@@ -109,7 +109,7 @@ fn rendered_bound_variables(
         cache,
         &globals,
         &[],
-        crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+        &crate::dialect::TypescriptDialect,
         &crate::render::BuiltinCodeRenderer,
         &lash_render::RenderParams::preview(),
     )

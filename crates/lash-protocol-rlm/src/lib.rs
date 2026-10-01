@@ -31,7 +31,7 @@ mod tool_catalog;
 pub use control_tools::continue_as_tool_definition;
 pub use dialect::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSection, ExecutionSectionRequest, ShapeNotation, TypescriptDialect,
+    ExecutionSection, ExecutionSectionRequest, TypescriptDialect,
 };
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::RLM_SNAPSHOT_VERSION;
@@ -42,7 +42,7 @@ pub use lash_lashlang_runtime::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
 /// The schema shapes a [`Dialect`] spells: the contract layer's reading of a
-/// tool's JSON Schemas.
+/// tool's JSON Schemas, also constructed directly by runtime-value inference.
 pub use lash_sansio::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,

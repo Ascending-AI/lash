@@ -146,10 +146,10 @@ pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
 /// binds none.
 pub(crate) fn read_only_variables_prompt(
     bindings: &RlmProjectedBindings,
-    vocabulary: crate::dialect::DialectPromptVocabulary,
+    dialect: &dyn crate::dialect::Dialect,
 ) -> Option<String> {
     let docs = bindings.prompt_docs();
-    (!docs.is_empty()).then(|| crate::rlm_support::render_read_only_variables(docs, vocabulary))
+    (!docs.is_empty()).then(|| crate::rlm_support::render_read_only_variables(docs, dialect))
 }
 
 impl ProtocolSessionExtension for RlmProjectionExtension {
@@ -242,11 +242,8 @@ mod tests {
                 }),
             )
             .expect("bind task payload");
-        let declaration = read_only_variables_prompt(
-            &bindings,
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
-        )
-        .expect("read-only variables declaration");
+        let declaration = read_only_variables_prompt(&bindings, &crate::dialect::TypescriptDialect)
+            .expect("read-only variables declaration");
 
         assert!(
             declaration
@@ -256,7 +253,7 @@ mod tests {
         );
         assert!(
             declaration.contains("type Input = {")
-                && declaration.contains("prompt: string;")
+                && declaration.contains("prompt: string")
                 && declaration.contains("constraints: Array<string>;"),
             "{}",
             declaration

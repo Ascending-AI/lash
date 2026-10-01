@@ -308,7 +308,7 @@ impl Session {
             &mut crate::rlm_support::BoundVariableRenderCache::default(),
             &self.state.bound_variable_values(&none),
             &self.state.opaque_bound_variables(&none),
-            crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+            &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
         )

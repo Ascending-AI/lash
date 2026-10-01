@@ -4,7 +4,8 @@
 //! show a model what they accept: the TypeScript dialect as a type, the
 //! compact contract as signature rows. [`SchemaShape`] is the one reading of a
 //! schema those surfaces share. It is imported once, here, and each surface
-//! only spells it; no surface reads the raw schema again.
+//! only spells it; no surface reads the raw schema again. Runtime-value
+//! inference constructs the same shape directly.
 //!
 //! The shape is a *view*, not a validator. It keeps what a reader needs: the
 //! fields of open objects and whether extra keys are allowed, which fields are
@@ -272,6 +273,11 @@ impl From<ShapeKind> for SchemaShape {
 }
 
 impl SchemaShape {
+    /// Spells this shape using the compact tool contract's type notation.
+    pub fn compact_type(&self) -> String {
+        super::schema_docs::compact_type(self)
+    }
+
     /// Reads a JSON Schema document as a shape. Local `#` references are
     /// resolved against `schema` itself.
     pub fn from_json_schema(schema: &Value) -> Self {

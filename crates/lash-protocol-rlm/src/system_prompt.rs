@@ -181,8 +181,7 @@ pub(crate) fn render_system_prompt(
             push_text(&mut execution, &prose);
         }
         push_text(&mut execution, &declarations);
-        if let Some(variables) = crate::projection::read_only_variables_prompt(bindings, vocabulary)
-        {
+        if let Some(variables) = dialect.read_only_variables_prompt(bindings) {
             execution.push(format!(
                 "### {}\n\n{}",
                 crate::projection::READ_ONLY_VARIABLES_TITLE,

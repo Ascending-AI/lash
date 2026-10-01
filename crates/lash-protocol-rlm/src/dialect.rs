@@ -59,6 +59,9 @@ pub trait Dialect: Send + Sync + 'static {
     /// it wherever a prompt shows the type of a field or of a required value.
     fn schema_type(&self, shape: &SchemaShape) -> String;
 
+    /// Defines a named inferred record using the same shape spelling as tools.
+    fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String;
+
     /// A tool's authored example in this dialect's syntax, or `None` when the
     /// dialect cannot spell it; an example it cannot spell is left out of the
     /// prompt.
@@ -182,8 +185,6 @@ pub struct DialectPromptVocabulary {
     /// The rule the bound-variable listing states about field names, in the
     /// terms of what this dialect's runtime does with a missing field.
     pub field_miss_rule: &'static str,
-    /// How the prompt spells the shapes shared code infers from values.
-    pub shape_notation: ShapeNotation,
 }
 
 impl DialectPromptVocabulary {
@@ -193,42 +194,6 @@ impl DialectPromptVocabulary {
             "{}{expression}{}",
             self.print_statement_prefix, self.print_statement_suffix
         )
-    }
-}
-
-/// The spelling of the language-neutral shapes shared code infers from
-/// values: bound variables, read-only values and their named record types.
-#[derive(Clone, Copy, Debug)]
-pub struct ShapeNotation {
-    pub any: &'static str,
-    pub null: &'static str,
-    pub bool: &'static str,
-    pub int: &'static str,
-    pub float: &'static str,
-    pub str: &'static str,
-    /// A record the listing does not name.
-    pub record: &'static str,
-    /// A list is `list_open`, its item's shape, then `list_close`.
-    pub list_open: &'static str,
-    pub list_close: &'static str,
-    pub union_separator: &'static str,
-    /// A named type is `definition_keyword`, its name, `definition_assign`
-    /// and its shape.
-    pub definition_keyword: &'static str,
-    pub definition_assign: &'static str,
-    /// A named record's fields, one per line between `record_open` and
-    /// `record_close`: `field_indent`, name, `field_separator`, shape,
-    /// `field_terminator`.
-    pub record_open: &'static str,
-    pub field_indent: &'static str,
-    pub field_separator: &'static str,
-    pub field_terminator: &'static str,
-    pub record_close: &'static str,
-}
-
-impl ShapeNotation {
-    pub(crate) fn list(&self, item: &str) -> String {
-        format!("{}{item}{}", self.list_open, self.list_close)
     }
 }
 
@@ -272,6 +237,13 @@ pub(crate) struct SessionDialect {
 }
 
 impl SessionDialect {
+    pub(crate) fn read_only_variables_prompt(
+        &self,
+        bindings: &crate::projection::RlmProjectedBindings,
+    ) -> Option<String> {
+        crate::projection::read_only_variables_prompt(bindings, self.dialect.as_ref())
+    }
+
     pub(crate) fn new(
         dialect: Arc<dyn Dialect>,
         surface: LashlangSurface,
@@ -844,7 +816,7 @@ impl DialectSession {
         let opaque = self.state.opaque_bound_variables(exclude);
         let cache = Arc::clone(&self.bound_variable_render_cache);
         let renderer = self.services.code_renderer.clone();
-        let vocabulary = self.dialect.prompt_vocabulary();
+        let dialect = Arc::clone(&self.dialect);
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache
                 .lock()
@@ -853,7 +825,7 @@ impl DialectSession {
                 &mut cache,
                 &globals,
                 &opaque,
-                vocabulary,
+                dialect.as_ref(),
                 renderer.0.as_ref(),
                 &params,
             )
@@ -907,8 +879,12 @@ mod tests {
             call_path.to_string()
         }
 
-        fn schema_type(&self, _shape: &SchemaShape) -> String {
-            "fixture".to_string()
+        fn schema_type(&self, shape: &SchemaShape) -> String {
+            shape.compact_type()
+        }
+
+        fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {
+            format!("shape {name} = {}", self.schema_type(shape))
         }
 
         fn render_tool_example(&self, _authored: &str) -> Option<String> {
@@ -951,6 +927,67 @@ mod tests {
         assert!(prompt.contains("bound in Extension fixture"), "{prompt}");
         assert!(prompt.contains("`<fixture>`"), "{prompt}");
         assert!(!prompt.contains("TypeScript"), "{prompt}");
+    }
+
+    #[test]
+    fn inferred_bound_and_read_only_shapes_use_the_dialect_schema_renderer() {
+        let value = serde_json::json!({
+            "body": "x".repeat(2_000),
+            "empty": [],
+            "numbers": [1, 1.5, null],
+            "rows": [{"ok": true}, {"ok": null}],
+        });
+        let bound = render_bound_variables(
+            &mut BoundVariableRenderCache::default(),
+            &[("payload".to_string(), lashlang::from_json(value.clone()))],
+            &[],
+            &ExtensionFixture,
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
+        );
+        let read_only = crate::rlm_support::render_read_only_variables(
+            vec![crate::rlm_support::ReadOnlyVariableDoc {
+                name: "payload".to_string(),
+                descriptor_type: "object".to_string(),
+                value: Some(value),
+            }],
+            &ExtensionFixture,
+        );
+        for prompt in [&*bound, &*read_only] {
+            assert!(
+                prompt.contains("shape Payload = record{body: str,"),
+                "{prompt}"
+            );
+            assert!(prompt.contains("numbers: list[float | null]"), "{prompt}");
+            assert!(prompt.contains("empty: list[any]"), "{prompt}");
+            assert!(!prompt.contains("body: string"), "{prompt}");
+        }
+        let schemas = [&*bound, &*read_only]
+            .map(|prompt| {
+                let row = prompt
+                    .lines()
+                    .find(|line| line.starts_with("- `payload`"))
+                    .expect("binding row");
+                let row = row.split(" ≈ ").next().expect("binding type");
+                let schema = prompt
+                    .split("Schema:\n")
+                    .nth(1)
+                    .expect("named schema")
+                    .trim();
+                format!("{row}\n{schema}")
+            })
+            .join("\n\n");
+        insta::assert_snapshot!(schemas, @r###"
+        - `payload`: `Payload`, keys=4 (body, empty, numbers, rows)
+        shape RowItem = record{ok: bool | null}
+
+        shape Payload = record{body: str, empty: list[any], numbers: list[float | null], rows: list[RowItem]}
+
+        - `payload`: `Payload`, read-only (descriptor: `record`)
+        shape RowItem = record{ok: bool | null}
+
+        shape Payload = record{body: str, empty: list[any], numbers: list[float | null], rows: list[RowItem]}
+        "###);
     }
 
     #[tokio::test]

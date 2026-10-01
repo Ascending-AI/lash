@@ -349,7 +349,9 @@ fn assembled_prompt_fragments_with_projection(
         .expect("seed one projected binding");
     fragments.push((
         "read-only variables",
-        crate::projection::read_only_variables_prompt(&projected, vocabulary).unwrap_or_default(),
+        dialect
+            .read_only_variables_prompt(&projected)
+            .unwrap_or_default(),
     ));
 
     // The budget escalation tails, at each of the three thresholds.

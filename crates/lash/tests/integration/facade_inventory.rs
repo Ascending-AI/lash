@@ -229,7 +229,6 @@ mod rlm_inventory {
     use lash::rlm::ShapeConstraints as _;
     use lash::rlm::ShapeField as _;
     use lash::rlm::ShapeKind as _;
-    use lash::rlm::ShapeNotation as _;
     use lash::rlm::TypeExpr as _;
     use lash::rlm::TypeField as _;
     use lash::rlm::TypescriptDialect as _;

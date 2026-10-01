@@ -13,7 +13,6 @@
 use lash::rlm::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
     ExecutionSection, ExecutionSectionRequest, ResolvedToolBinding, RlmChannel, SchemaShape,
-    ShapeKind, ShapeNotation,
 };
 
 pub const LANGUAGE_ID: &str = "seam-proof";
@@ -56,16 +55,11 @@ impl Dialect for SeamProofDialect {
     }
 
     fn schema_type(&self, shape: &SchemaShape) -> String {
-        match &shape.kind {
-            ShapeKind::Str => NOTATION.str,
-            ShapeKind::Int => NOTATION.int,
-            ShapeKind::Float => NOTATION.float,
-            ShapeKind::Bool => NOTATION.bool,
-            ShapeKind::Object(_) => NOTATION.record,
-            ShapeKind::Null => NOTATION.null,
-            _ => NOTATION.any,
-        }
-        .to_string()
+        shape.compact_type()
+    }
+
+    fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {
+        format!("shape {name} is {}", self.schema_type(shape))
     }
 
     fn render_tool_example(&self, _authored: &str) -> Option<String> {
@@ -88,12 +82,11 @@ impl Dialect for SeamProofDialect {
             continue_as_call: "take r from control.continue_as WITH {...}",
             continue_as_example: r#"take r from control.continue_as WITH {"task": "go on"}"#,
             field_miss_rule: "Use only the field names listed below.",
-            shape_notation: NOTATION,
         }
     }
 
     fn history_item_definition(&self, _images: bool) -> Vec<String> {
-        vec!["shape Log is seq of Rec".to_string()]
+        vec!["shape Log is list[record]".to_string()]
     }
 
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
@@ -111,26 +104,6 @@ impl Dialect for SeamProofDialect {
         }
     }
 }
-
-const NOTATION: ShapeNotation = ShapeNotation {
-    any: "Anything",
-    null: "Nothing",
-    bool: "Flag",
-    int: "Whole",
-    float: "Real",
-    str: "Text",
-    record: "Rec",
-    list_open: "seq of ",
-    list_close: "",
-    union_separator: " or ",
-    definition_keyword: "shape ",
-    definition_assign: " is ",
-    record_open: "(",
-    field_indent: "  ",
-    field_separator: " -> ",
-    field_terminator: ";",
-    record_close: ")",
-};
 
 fn is_name(text: &str) -> bool {
     text.chars()
