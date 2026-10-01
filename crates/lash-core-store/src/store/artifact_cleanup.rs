@@ -60,9 +60,7 @@ impl CleanupUpsert {
     pub fn decide(existing: Option<&ArtifactCleanup>, incoming: &ArtifactCleanup) -> Self {
         match existing {
             None => Self::Insert,
-            Some(existing) if incoming.plan.is_ended() && !existing.plan.is_ended() => {
-                Self::ReplaceGuard
-            }
+            Some(existing) if incoming.is_ended() && !existing.is_ended() => Self::ReplaceGuard,
             Some(_) => Self::Keep,
         }
     }
@@ -71,19 +69,19 @@ impl CleanupUpsert {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact_referrer::{ArtifactCleanupPlan, HostArtifactPin};
+    use crate::artifact_referrer::ReferrerGuard;
 
     #[test]
     fn ended_replaces_a_guard_and_nothing_else_replaces_a_row() {
-        let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+        let referrer =
+            ArtifactReferrer::Start(crate::process_identity::StartKey::for_host("upsert"));
         let journal = lash_sansio::ExecutionScope::runtime_operation("op")
             .journal_identity()
             .expect("journal");
-        let guard = ArtifactCleanup {
-            referrer: referrer.clone(),
-            plan: ArtifactCleanupPlan::AwaitStart { starter: journal },
-            gate: None,
-        };
+        let guard = ArtifactCleanup::Await(ReferrerGuard::Start {
+            start_key: crate::process_identity::StartKey::for_host("upsert"),
+            starter: journal,
+        });
         let ended = ArtifactCleanup::ended(referrer, Vec::new(), None);
         assert_eq!(CleanupUpsert::decide(None, &guard), CleanupUpsert::Insert);
         assert_eq!(CleanupUpsert::decide(None, &ended), CleanupUpsert::Insert);

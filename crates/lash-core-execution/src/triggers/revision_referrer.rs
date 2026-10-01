@@ -29,9 +29,8 @@ use super::{
 };
 use crate::plugin::PluginError;
 use crate::{
-    ArtifactCleanupPlan, ArtifactName, ArtifactReferrer, ArtifactStoreId, ProcessEngineRegistry,
-    ProcessExecutionEnvRef, ProcessId, ProcessInput, ReferrerClaim, SessionId,
-    SubscriptionRevisionId,
+    ArtifactName, ArtifactReferrer, ArtifactStoreId, ProcessEngineRegistry, ProcessExecutionEnvRef,
+    ProcessId, ProcessInput, ReferrerClaim, ReferrerGuard, SessionId, SubscriptionRevisionId,
 };
 
 /// A [`TriggerStore`] whose `execute_command` holds the revision a command
@@ -181,16 +180,13 @@ impl RevisionReferrerTriggerStore {
             return Err(PluginError::Session(format!(
                 "trigger revision `{}` names artifacts but the runtime's engine registry has no \
                  artifact stores to hold them",
-                revision.referrer
+                ArtifactReferrer::SubscriptionRevision(revision.referrer.clone())
             )));
         };
-        let claim = ReferrerClaim::guarded(
-            revision.referrer.clone(),
-            ArtifactCleanupPlan::AwaitSubscriptionRevision {
-                creator: self.creator.clone(),
-            },
-        )
-        .map_err(|error| PluginError::Session(error.to_string()))?;
+        let claim = ReferrerClaim::guarded(ReferrerGuard::SubscriptionRevision {
+            revision: revision.referrer.clone(),
+            creator: self.creator.clone(),
+        });
         let mut names = vec![ArtifactName {
             store: ArtifactStoreId::ProcessEnv,
             artifact_ref: revision.env_ref.as_str().to_owned(),
@@ -252,7 +248,7 @@ impl RevisionReferrerTriggerStore {
 
 /// One revision a command will commit if it wins its fence.
 struct PendingRevision {
-    referrer: ArtifactReferrer,
+    referrer: SubscriptionRevisionId,
     env_ref: ProcessExecutionEnvRef,
     target: ProcessInput,
 }
@@ -273,7 +269,7 @@ impl PendingRevision {
         )
         .map_err(|error| PluginError::Session(error.to_string()))?;
         Ok(Self {
-            referrer: ArtifactReferrer::SubscriptionRevision(id),
+            referrer: id,
             env_ref,
             target,
         })

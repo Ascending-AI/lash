@@ -163,7 +163,7 @@ impl ArtifactReferrerPorts {
             && self.acquire(engines, claim, &engine_names).await? == ReferrerAcquisition::Ended
         {
             return Err(ArtifactStoreError::ReferrerEnded {
-                referrer: claim.referrer().clone(),
+                referrer: claim.referrer(),
             }
             .into());
         }
@@ -207,9 +207,7 @@ impl ArtifactReferrerPorts {
             .await
         {
             Ok(()) => Ok(DefinitionAcquisition::Held(resolved)),
-            Err(ArtifactStoreError::ReferrerEnded { referrer })
-                if referrer == *claim.referrer() =>
-            {
+            Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == claim.referrer() => {
                 Ok(DefinitionAcquisition::Ended)
             }
             // Reclaimed after the read: the last holder let go first.

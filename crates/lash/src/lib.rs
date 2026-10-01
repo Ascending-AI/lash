@@ -518,8 +518,8 @@ pub mod persistence {
     };
     pub use lash_core_store::PersistedNodeIds;
     pub use lash_core_store::artifact_referrer::{
-        ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactReferrerError,
-        ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId, SubscriptionRevisionId,
+        ArtifactCarry, ArtifactCleanup, ArtifactReferrerError, ArtifactReferrerKind,
+        ArtifactStoreId, AttachmentUploadId, ReferrerGuard, ReferrerStore, SubscriptionRevisionId,
         UploadReferrerId,
     };
     pub use lash_core_store::attachments::{AttachmentExecutionBinding, AttachmentHolder};

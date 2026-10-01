@@ -21,11 +21,10 @@ pub async fn prune_and_late_transfer_fences(
         .journal_identity()
         .expect("starter journal");
     let start = crate::ArtifactReferrer::Start(key.clone());
-    let start_claim = crate::ReferrerClaim::guarded(
-        start.clone(),
-        crate::ArtifactCleanupPlan::AwaitStart { starter },
-    )
-    .expect("start claim");
+    let start_claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::Start {
+        start_key: key.clone(),
+        starter,
+    });
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
@@ -232,11 +231,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     for (starter, spec) in [(&starter_a, &spec_a), (&starter_b, &spec_b)] {
         crate::publish_process_execution_env(
             env_store.as_ref(),
-            &crate::ReferrerClaim::guarded(
-                crate::ArtifactReferrer::Execution(starter.clone()),
-                crate::ArtifactCleanupPlan::AwaitJournal,
-            )
-            .expect("declaration claim"),
+            &crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone())),
             spec,
         )
         .await
@@ -452,11 +447,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     for (starter, spec) in [(&starter_a, &spec_a), (&starter_b, &spec_b)] {
         crate::publish_process_execution_env(
             env_store.as_ref(),
-            &crate::ReferrerClaim::guarded(
-                crate::ArtifactReferrer::Execution(starter.clone()),
-                crate::ArtifactCleanupPlan::AwaitJournal,
-            )
-            .expect("declaration claim"),
+            &crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone())),
             spec,
         )
         .await
@@ -759,7 +750,7 @@ impl crate::ArtifactCleanupLedger for RelayOnEnd {
         now_ms: u64,
     ) -> Result<crate::ObligationId, crate::StoreError> {
         let id = self.inner.arm_cleanup(cleanup, now_ms).await?;
-        if cleanup.plan.is_ended() && cleanup.referrer == self.start {
+        if cleanup.is_ended() && cleanup.referrer() == self.start {
             let verdict =
                 crate::drive::relay::deliver_now(self.relay.as_ref(), &id, &crate::SystemClock)
                     .await?;
@@ -798,11 +789,7 @@ pub async fn two_starts_share_one_captured_environment(
         .journal_identity()
         .expect("starter");
     let declaration = crate::ArtifactReferrer::Execution(starter.clone());
-    let claim = crate::ReferrerClaim::guarded(
-        declaration.clone(),
-        crate::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .expect("declaration claim");
+    let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone()));
     // A captured environment as large as a session with 128 KiB of recorded
     // protocol prompt.
     let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));

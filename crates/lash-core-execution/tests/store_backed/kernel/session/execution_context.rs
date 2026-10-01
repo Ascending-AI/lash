@@ -123,7 +123,7 @@ mod tests {
         backend
             .process_env_store()
             .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
-                referrer: pin.referrer().clone(),
+                referrer: pin.referrer(),
                 carries: Vec::new(),
             })
             .await
@@ -184,7 +184,7 @@ mod tests {
 
         env_store
             .end_process_env_referrer(&crate::ResolvedArtifactCleanup {
-                referrer: claim.referrer().clone(),
+                referrer: claim.referrer(),
                 carries: Vec::new(),
             })
             .await
@@ -195,7 +195,7 @@ mod tests {
             .await
             .expect_err("a fenced durable owner must not resolve to a reclaimed reference");
         assert!(
-            crate::artifact_referrer_ended(&error) == Some(claim.referrer()),
+            crate::artifact_referrer_ended(&error) == Some(&claim.referrer()),
             "unexpected error: {error}"
         );
     }

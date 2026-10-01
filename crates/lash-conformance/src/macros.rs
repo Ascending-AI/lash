@@ -1425,6 +1425,7 @@ macro_rules! artifact_referrer_tests {
         $crate::artifact_referrer_tests!(@catalogue $fixture; [
             (publication_racing_frame_end_is_fenced, "artifact-referrer-publication-race"),
             (host_pins_reclaim_and_fence, "artifact-referrer-host-pins"),
+            (attachment_only_referrers_cannot_acquire_artifacts, "artifact-referrer-kind-refusal"),
             (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
             (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
@@ -2087,6 +2088,7 @@ macro_rules! attachment_referrer_tests {
         condemnation_needs_no_edge_and_no_pending_write,
         skipped_attachment_referrer_kind_cannot_authorize_delete,
         truncated_attachment_root_page_cannot_authorize_delete,
+        attachment_root_sources_partition_start_inputs,
         complete_attachment_roots_cover_every_kind_and_exhaust_pages,
     ]); };
     (@laws $fixture:block; [$($law:ident),* $(,)?]) => { $(

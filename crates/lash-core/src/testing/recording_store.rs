@@ -500,7 +500,8 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
         &self,
         intent: &crate::store::AttachmentWrite,
     ) -> Result<crate::store::AttachmentWriteFence, StoreError> {
-        let session = match intent.claim.referrer() {
+        let referrer = intent.claim.referrer();
+        let session = match &referrer {
             crate::ArtifactReferrer::Session(session) => Some(session),
             crate::ArtifactReferrer::Upload(upload) => Some(upload.session_id()),
             crate::ArtifactReferrer::Execution(journal) => journal.session_id(),

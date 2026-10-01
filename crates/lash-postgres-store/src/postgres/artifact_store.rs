@@ -186,15 +186,20 @@ impl PostgresLashlangArtifactStore {
         bytes: Option<&[u8]>,
         claim: &ReferrerClaim,
     ) -> Result<(), ArtifactStoreError> {
+        if !claim.referrer().kind().holds_artifacts() {
+            return Err(ArtifactStoreError::ReferrerKindRefused {
+                kind: claim.referrer().kind(),
+            });
+        }
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(ArtifactStoreError::from)?;
-        lock_referrer_tx(&mut tx, claim.referrer())
+        lock_referrer_tx(&mut tx, &claim.referrer())
             .await
             .map_err(backend)?;
-        if is_fenced_tx(&mut tx, claim.referrer()).await? {
+        if is_fenced_tx(&mut tx, &claim.referrer()).await? {
             return Err(ArtifactStoreError::ReferrerEnded {
-                referrer: claim.referrer().clone(),
+                referrer: claim.referrer(),
             });
         }
         lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
@@ -262,15 +267,20 @@ impl PostgresLashlangArtifactStore {
         descriptor: Option<&[u8]>,
         manifest: &[(&'static str, String)],
     ) -> Result<(), ArtifactStoreError> {
+        if !claim.referrer().kind().holds_artifacts() {
+            return Err(ArtifactStoreError::ReferrerKindRefused {
+                kind: claim.referrer().kind(),
+            });
+        }
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(ArtifactStoreError::from)?;
-        lock_referrer_tx(&mut tx, claim.referrer())
+        lock_referrer_tx(&mut tx, &claim.referrer())
             .await
             .map_err(backend)?;
-        if is_fenced_tx(&mut tx, claim.referrer()).await? {
+        if is_fenced_tx(&mut tx, &claim.referrer()).await? {
             return Err(ArtifactStoreError::ReferrerEnded {
-                referrer: claim.referrer().clone(),
+                referrer: claim.referrer(),
             });
         }
         let mut locked: Vec<(&str, &str)> = manifest
@@ -361,6 +371,13 @@ impl PostgresLashlangArtifactStore {
         namespace: &str,
         cleanup: &ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError> {
+        for carry in &cleanup.carries {
+            if !carry.to.kind().holds_artifacts() {
+                return Err(ArtifactStoreError::ReferrerKindRefused {
+                    kind: carry.to.kind(),
+                });
+            }
+        }
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(ArtifactStoreError::from)?;

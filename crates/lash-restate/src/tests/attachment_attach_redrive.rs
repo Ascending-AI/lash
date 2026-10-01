@@ -86,7 +86,7 @@ impl AttachmentReferrers for Acquisitions {
         claim: &ReferrerClaim,
         ids: &[lash_core::AttachmentId],
     ) -> Result<(), StoreError> {
-        let receiver = self.receiver.lock_recover().as_ref() == Some(claim.referrer());
+        let receiver = self.receiver.lock_recover().as_ref() == Some(&claim.referrer());
         if receiver {
             let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
             if attempt > 0 {

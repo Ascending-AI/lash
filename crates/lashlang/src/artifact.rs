@@ -815,7 +815,7 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
             pause.pause().await;
         }
         let mut state = self.state.lock_recover();
-        state.check_open(claim.referrer())?;
+        state.check_open(&claim.referrer())?;
         if let Some(existing) = state.modules.get(module_ref)
             && existing.as_slice() != bytes
         {
@@ -829,7 +829,7 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
             .or_insert_with(|| bytes.to_vec());
         state
             .edges
-            .insert((module_ref.to_string(), stored_pair(claim.referrer())));
+            .insert((module_ref.to_string(), stored_pair(&claim.referrer())));
         Ok(())
     }
 
@@ -839,7 +839,7 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
-        state.check_open(claim.referrer())?;
+        state.check_open(&claim.referrer())?;
         if !state.modules.contains_key(module_ref) {
             return Err(ArtifactStoreError::ArtifactMissing {
                 artifact_ref: module_ref.to_string(),
@@ -847,7 +847,7 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
         }
         state
             .edges
-            .insert((module_ref.to_string(), stored_pair(claim.referrer())));
+            .insert((module_ref.to_string(), stored_pair(&claim.referrer())));
         Ok(())
     }
 

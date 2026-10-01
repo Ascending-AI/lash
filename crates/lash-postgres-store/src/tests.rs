@@ -767,7 +767,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         if contains_ref {
             lash_core_execution::AttachmentReferrers::forget_attachment_ref(
                 &*store,
-                intent().claim.referrer(),
+                &intent().claim.referrer(),
                 &attachment_id,
             )
             .await

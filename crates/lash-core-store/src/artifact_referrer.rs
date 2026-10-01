@@ -59,8 +59,33 @@ pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 2;
 /// decode refuses it as `Incompatible(UnknownVocabulary)`.
 pub const SYNTHETIC_NEXT_REFERRER_KIND: &str = "synthetic_next";
 
+/// The byte family a referrer claims.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferrerStore {
+    Artifact,
+    Attachment,
+}
+impl ReferrerStore {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Artifact => "artifact",
+            Self::Attachment => "attachment",
+        }
+    }
+}
+impl fmt::Display for ReferrerStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// The referrer kinds, as the `referrer_kind` column stores them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ArtifactReferrerKind {
     FrameEnvironment,
     ProcessRecord,
@@ -116,11 +141,10 @@ impl ArtifactReferrerKind {
             .ok_or_else(|| ArtifactReferrerError::UnknownKind(text.to_owned()))
     }
 
-    /// Whether an edge of this kind is guarded (ADR 0113 §2.4): its first
-    /// acquisition arms a cleanup record, because the referrer's own record
-    /// may never commit.
+    /// Whether every acquisition requires a guard (ADR 0113 §2.4).
+    /// Frames permit both ordinary claims and guards for prepared successors.
     #[must_use]
-    pub const fn is_guarded(self) -> bool {
+    pub const fn requires_guard(self) -> bool {
         matches!(
             self,
             Self::Execution
@@ -130,6 +154,32 @@ impl ArtifactReferrerKind {
                 | Self::Upload
         )
     }
+    /// Whether this referrer may hold immutable artifacts.
+    #[must_use]
+    pub const fn holds_artifacts(self) -> bool {
+        matches!(
+            self,
+            Self::FrameEnvironment
+                | Self::ProcessRecord
+                | Self::SubscriptionRevision
+                | Self::Start
+                | Self::Execution
+                | Self::HostPin
+        )
+    }
+
+    /// SQL generated from the owning kind predicate.
+    #[must_use]
+    pub fn predicate_sql(column: &str, accepts: fn(Self) -> bool) -> String {
+        let labels = Self::ALL
+            .into_iter()
+            .filter(|kind| accepts(*kind))
+            .map(|kind| format!("'{}'", kind.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{column} IN ({labels})")
+    }
+
     /// Whether this referrer may hold external attachment bytes.
     #[must_use]
     pub const fn holds_attachments(self) -> bool {
@@ -620,105 +670,95 @@ impl ArtifactReferrerError {
     }
 }
 
-/// A write's referrer plus, for a guarded kind, the guard its first
-/// acquisition arms (ADR 0113 §2.4).
+/// A guard and the durable reader whose first acquisition it protects.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReferrerClaim {
-    referrer: ArtifactReferrer,
-    guard: Option<ArtifactCleanupPlan>,
+pub enum ReferrerGuard {
+    Frame {
+        frame: FrameEnvironmentId,
+        creator: EffectJournalIdentity,
+    },
+    Journal(EffectJournalIdentity),
+    Start {
+        start_key: StartKey,
+        starter: EffectJournalIdentity,
+    },
+    StartInput {
+        start_key: StartKey,
+        starter: EffectJournalIdentity,
+    },
+    SubscriptionRevision {
+        revision: SubscriptionRevisionId,
+        creator: EffectJournalIdentity,
+    },
+    Upload {
+        upload: UploadReferrerId,
+        expires_at_ms: u64,
+    },
+    SessionGraphRetired(SessionId),
+}
+
+impl ReferrerGuard {
+    #[must_use]
+    pub fn referrer(&self) -> ArtifactReferrer {
+        match self {
+            Self::Frame { frame, .. } => ArtifactReferrer::FrameEnvironment(frame.clone()),
+            Self::Journal(journal) => ArtifactReferrer::Execution(journal.clone()),
+            Self::Start { start_key, .. } => ArtifactReferrer::Start(start_key.clone()),
+            Self::StartInput { start_key, starter } => ArtifactReferrer::StartInput {
+                start_key: start_key.clone(),
+                starter: starter.clone(),
+            },
+            Self::SubscriptionRevision { revision, .. } => {
+                ArtifactReferrer::SubscriptionRevision(revision.clone())
+            }
+            Self::Upload { upload, .. } => ArtifactReferrer::Upload(upload.clone()),
+            Self::SessionGraphRetired(session) => ArtifactReferrer::Session(session.clone()),
+        }
+    }
+}
+
+/// A claim cannot name a guard belonging to another reader.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReferrerClaim(ReferrerClaimBody);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ReferrerClaimBody {
+    Unguarded(ArtifactReferrer),
+    Guarded(ReferrerGuard),
 }
 
 impl ReferrerClaim {
-    /// Unguarded kinds: `frame_environment`, `process_record`, `host_pin`, `session`.
-    ///
     /// # Errors
-    ///
-    /// [`ArtifactReferrerError::Malformed`] for a guarded kind.
+    /// Refuses a reader that requires a guard on acquisition.
     pub fn unguarded(referrer: ArtifactReferrer) -> Result<Self, ArtifactReferrerError> {
-        let kind = referrer.kind();
-        if kind.is_guarded() {
+        if referrer.kind().requires_guard() {
             return Err(malformed(
-                kind,
+                referrer.kind(),
                 "a guarded referrer is claimed with its guard",
             ));
         }
-        Ok(Self {
-            referrer,
-            guard: None,
-        })
+        Ok(Self(ReferrerClaimBody::Unguarded(referrer)))
     }
 
-    /// `Execution` with `AwaitJournal`, `Start` with `AwaitStart`,
-    /// `StartInput` with `AwaitStart` naming its own starter,
-    /// `SubscriptionRevision` with `AwaitSubscriptionRevision`, `Upload` with
-    /// `AwaitUploadExpiry`. Any other pairing,
-    /// and every `Ended` plan, is refused.
-    ///
-    /// # Errors
-    ///
-    /// [`ArtifactReferrerError::Malformed`] for a refused pairing.
-    pub fn guarded(
-        referrer: ArtifactReferrer,
-        guard: ArtifactCleanupPlan,
-    ) -> Result<Self, ArtifactReferrerError> {
-        let paired = if let (
-            ArtifactReferrer::StartInput { starter, .. },
-            ArtifactCleanupPlan::AwaitStart { starter: authority },
-        ) = (&referrer, &guard)
-        {
-            starter == authority
-        } else {
-            matches!(
-                (&referrer, &guard),
-                (
-                    ArtifactReferrer::FrameEnvironment(_),
-                    ArtifactCleanupPlan::AwaitFrame { .. }
-                ) | (
-                    ArtifactReferrer::Execution(_),
-                    ArtifactCleanupPlan::AwaitJournal
-                ) | (
-                    ArtifactReferrer::Start(_),
-                    ArtifactCleanupPlan::AwaitStart { .. }
-                ) | (
-                    ArtifactReferrer::SubscriptionRevision(_),
-                    ArtifactCleanupPlan::AwaitSubscriptionRevision { .. }
-                ) | (
-                    ArtifactReferrer::Upload(_),
-                    ArtifactCleanupPlan::AwaitUploadExpiry { .. }
-                )
-            )
-        };
-        if !paired {
-            return Err(malformed(
-                referrer.kind(),
-                format!("`{}` is not this referrer's guard", guard.label()),
-            ));
+    #[must_use]
+    pub fn guarded(guard: ReferrerGuard) -> Self {
+        Self(ReferrerClaimBody::Guarded(guard))
+    }
+
+    #[must_use]
+    pub fn referrer(&self) -> ArtifactReferrer {
+        match &self.0 {
+            ReferrerClaimBody::Unguarded(referrer) => referrer.clone(),
+            ReferrerClaimBody::Guarded(guard) => guard.referrer(),
         }
-        Ok(Self {
-            referrer,
-            guard: Some(guard),
-        })
     }
 
-    #[must_use]
-    pub fn referrer(&self) -> &ArtifactReferrer {
-        &self.referrer
-    }
-
-    #[must_use]
-    pub fn guard(&self) -> Option<&ArtifactCleanupPlan> {
-        self.guard.as_ref()
-    }
-
-    /// The cleanup record the claim's guard arms, if it has one: the
-    /// referrer, its guard plan, and no gate.
     #[must_use]
     pub fn guard_cleanup(&self) -> Option<ArtifactCleanup> {
-        self.guard.as_ref().map(|plan| ArtifactCleanup {
-            referrer: self.referrer.clone(),
-            plan: plan.clone(),
-            gate: None,
-        })
+        match &self.0 {
+            ReferrerClaimBody::Unguarded(_) => None,
+            ReferrerClaimBody::Guarded(guard) => Some(ArtifactCleanup::Await(guard.clone())),
+        }
     }
 }
 
@@ -763,104 +803,193 @@ pub struct ArtifactCarry {
 }
 
 /// The durable body of one cleanup obligation.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ArtifactCleanup {
-    pub referrer: ArtifactReferrer,
-    pub plan: ArtifactCleanupPlan,
-    /// Sever nothing while this journal may still replay: the one execution
-    /// that can still read the ended referrer's artifacts (ADR 0113 §4.1).
-    #[serde(default, with = "optional_journal_identity")]
-    pub gate: Option<EffectJournalIdentity>,
-}
-
-impl ArtifactCleanup {
-    /// The `Ended` record of `referrer`, carrying `carries`, gated on `gate`.
-    #[must_use]
-    pub fn ended(
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArtifactCleanup {
+    Ended {
         referrer: ArtifactReferrer,
         carries: Vec<ArtifactCarry>,
         gate: Option<EffectJournalIdentity>,
-    ) -> Self {
-        Self {
-            referrer,
-            plan: ArtifactCleanupPlan::Ended { carries },
-            gate,
-        }
-    }
-
-    /// The record's `cleanup_json`.
-    ///
-    /// # Errors
-    ///
-    /// Never for a record this module built; the error is `serde_json`'s.
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(self)
-    }
-
-    /// Decode a stored `cleanup_json`, and check it names `referrer`.
-    ///
-    /// # Errors
-    ///
-    /// The decode failure, or a body whose referrer is not the row's.
-    pub fn from_json(text: &str, referrer: &ArtifactReferrer) -> Result<Self, String> {
-        let cleanup: Self = serde_json::from_str(text).map_err(|error| error.to_string())?;
-        if cleanup.referrer != *referrer {
-            return Err(format!(
-                "cleanup body names referrer `{}`, not the row's `{referrer}`",
-                cleanup.referrer
-            ));
-        }
-        Ok(cleanup)
-    }
+    },
+    Await(ReferrerGuard),
 }
 
-/// How a cleanup record resolves to carries.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "plan", rename_all = "snake_case")]
-pub enum ArtifactCleanupPlan {
-    /// The referrer has ended. Carry, then fence and sever.
-    Ended { carries: Vec<ArtifactCarry> },
-    /// A successor prepared before its frame commit. Committed frames retain
-    /// their edges; an absent frame ends after the preparing journal settles.
+/// The row key supplies the reader; the JSON contains only the plan body.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "plan", rename_all = "snake_case", deny_unknown_fields)]
+enum StoredCleanupBody {
+    Ended {
+        carries: Vec<ArtifactCarry>,
+        #[serde(with = "optional_journal_identity")]
+        gate: Option<EffectJournalIdentity>,
+    },
     AwaitFrame {
         #[serde(with = "journal_identity")]
         creator: EffectJournalIdentity,
     },
-    /// Guard of an execution referrer: ends when its journal is settled.
     AwaitJournal,
-    /// Upload staging ends at this store-clock instant or when its session ends.
-    AwaitUploadExpiry { expires_at_ms: u64 },
-    /// A deleted session retains attachments until its graph has retired.
+    AwaitUploadExpiry {
+        expires_at_ms: u64,
+    },
     AwaitSessionGraphRetired,
-    /// Guard of a start referrer (ADR 0113 §3.3).
     AwaitStart {
         #[serde(with = "journal_identity")]
         starter: EffectJournalIdentity,
     },
-    /// Guard of a subscription revision acquired before its mutation commits.
+    AwaitStartInput,
     AwaitSubscriptionRevision {
         #[serde(with = "journal_identity")]
         creator: EffectJournalIdentity,
     },
 }
 
-impl ArtifactCleanupPlan {
-    /// Whether the referrer has ended; every other plan is a guard.
+impl ArtifactCleanup {
+    #[must_use]
+    pub fn ended(
+        referrer: ArtifactReferrer,
+        carries: Vec<ArtifactCarry>,
+        gate: Option<EffectJournalIdentity>,
+    ) -> Self {
+        Self::Ended {
+            referrer,
+            carries,
+            gate,
+        }
+    }
+
+    #[must_use]
+    pub fn referrer(&self) -> ArtifactReferrer {
+        match self {
+            Self::Ended { referrer, .. } => referrer.clone(),
+            Self::Await(guard) => guard.referrer(),
+        }
+    }
+
     #[must_use]
     pub const fn is_ended(&self) -> bool {
         matches!(self, Self::Ended { .. })
     }
 
-    /// The plan's stored tag.
     #[must_use]
-    pub const fn label(&self) -> &'static str {
+    pub fn gate(&self) -> Option<&EffectJournalIdentity> {
+        match self {
+            Self::Ended { gate, .. } => gate.as_ref(),
+            Self::Await(_) => None,
+        }
+    }
+
+    /// # Errors
+    /// Returns the JSON encoder's error.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        let body = match self {
+            Self::Ended { carries, gate, .. } => StoredCleanupBody::Ended {
+                carries: carries.clone(),
+                gate: gate.clone(),
+            },
+            Self::Await(guard) => match guard {
+                ReferrerGuard::Frame { creator, .. } => StoredCleanupBody::AwaitFrame {
+                    creator: creator.clone(),
+                },
+                ReferrerGuard::Journal(_) => StoredCleanupBody::AwaitJournal,
+                ReferrerGuard::Start { starter, .. } => StoredCleanupBody::AwaitStart {
+                    starter: starter.clone(),
+                },
+                ReferrerGuard::StartInput { .. } => StoredCleanupBody::AwaitStartInput,
+                ReferrerGuard::SubscriptionRevision { creator, .. } => {
+                    StoredCleanupBody::AwaitSubscriptionRevision {
+                        creator: creator.clone(),
+                    }
+                }
+                ReferrerGuard::Upload { expires_at_ms, .. } => {
+                    StoredCleanupBody::AwaitUploadExpiry {
+                        expires_at_ms: *expires_at_ms,
+                    }
+                }
+                ReferrerGuard::SessionGraphRetired(_) => {
+                    StoredCleanupBody::AwaitSessionGraphRetired
+                }
+            },
+        };
+        serde_json::to_string(&body)
+    }
+
+    /// # Errors
+    /// An invalid body or a guard incompatible with the row's reader is corrupt.
+    pub fn from_json(text: &str, referrer: &ArtifactReferrer) -> Result<Self, crate::StoreError> {
+        let corrupt = |message: String| crate::StoreError::StoredDataCorrupt {
+            record_kind: "artifact_cleanup_obligation",
+            message,
+        };
+        let body: StoredCleanupBody =
+            serde_json::from_str(text).map_err(|error| corrupt(error.to_string()))?;
+        let guard = match (body, referrer) {
+            (StoredCleanupBody::Ended { carries, gate }, _) => {
+                return Ok(Self::Ended {
+                    referrer: referrer.clone(),
+                    carries,
+                    gate,
+                });
+            }
+            (
+                StoredCleanupBody::AwaitFrame { creator },
+                ArtifactReferrer::FrameEnvironment(frame),
+            ) => ReferrerGuard::Frame {
+                frame: frame.clone(),
+                creator,
+            },
+            (StoredCleanupBody::AwaitJournal, ArtifactReferrer::Execution(journal)) => {
+                ReferrerGuard::Journal(journal.clone())
+            }
+            (StoredCleanupBody::AwaitStart { starter }, ArtifactReferrer::Start(start_key)) => {
+                ReferrerGuard::Start {
+                    start_key: start_key.clone(),
+                    starter,
+                }
+            }
+            (
+                StoredCleanupBody::AwaitStartInput,
+                ArtifactReferrer::StartInput { start_key, starter },
+            ) => ReferrerGuard::StartInput {
+                start_key: start_key.clone(),
+                starter: starter.clone(),
+            },
+            (
+                StoredCleanupBody::AwaitSubscriptionRevision { creator },
+                ArtifactReferrer::SubscriptionRevision(revision),
+            ) => ReferrerGuard::SubscriptionRevision {
+                revision: revision.clone(),
+                creator,
+            },
+            (
+                StoredCleanupBody::AwaitUploadExpiry { expires_at_ms },
+                ArtifactReferrer::Upload(upload),
+            ) => ReferrerGuard::Upload {
+                upload: upload.clone(),
+                expires_at_ms,
+            },
+            (StoredCleanupBody::AwaitSessionGraphRetired, ArtifactReferrer::Session(session)) => {
+                ReferrerGuard::SessionGraphRetired(session.clone())
+            }
+            (body, _) => {
+                return Err(corrupt(format!(
+                    "cleanup guard `{}` cannot protect `{referrer}`",
+                    body.label()
+                )));
+            }
+        };
+        Ok(Self::Await(guard))
+    }
+}
+
+impl StoredCleanupBody {
+    fn label(&self) -> &'static str {
         match self {
             Self::Ended { .. } => "ended",
+            Self::AwaitFrame { .. } => "await_frame",
             Self::AwaitJournal => "await_journal",
             Self::AwaitUploadExpiry { .. } => "await_upload_expiry",
             Self::AwaitSessionGraphRetired => "await_session_graph_retired",
-            Self::AwaitFrame { .. } => "await_frame",
             Self::AwaitStart { .. } => "await_start",
+            Self::AwaitStartInput => "await_start_input",
             Self::AwaitSubscriptionRevision { .. } => "await_subscription_revision",
         }
     }
@@ -1056,35 +1185,31 @@ mod tests {
 
     #[test]
     fn start_input_claim_is_tied_to_its_start_key_and_starter() {
-        let first = ArtifactReferrer::StartInput {
+        let first = ReferrerGuard::StartInput {
             start_key: start_key(),
             starter: journal(),
         };
-        let next_starter = ExecutionScope::turn("session", "next-turn")
-            .journal_identity()
-            .expect("next turn's journal");
-        let next = ArtifactReferrer::StartInput {
+        let next = ReferrerGuard::StartInput {
             start_key: start_key(),
-            starter: next_starter.clone(),
+            starter: ExecutionScope::turn("session", "next-turn")
+                .journal_identity()
+                .expect("journal"),
         };
-        assert_ne!(first.canonical_id(), next.canonical_id());
-        assert!(first.kind().holds_attachments());
-        assert!(!ArtifactReferrerKind::Start.holds_attachments());
-        ReferrerClaim::guarded(
-            first.clone(),
-            ArtifactCleanupPlan::AwaitStart { starter: journal() },
-        )
-        .expect("the starter guards its own input");
-        assert!(
-            ReferrerClaim::guarded(
-                first,
-                ArtifactCleanupPlan::AwaitStart {
-                    starter: next_starter
-                },
-            )
-            .is_err()
+        assert_ne!(
+            first.referrer().canonical_id(),
+            next.referrer().canonical_id()
         );
-        assert!(ReferrerClaim::unguarded(next).is_err());
+        assert!(first.referrer().kind().holds_attachments());
+        assert!(!first.referrer().kind().holds_artifacts());
+        assert_eq!(
+            ReferrerClaim::guarded(first.clone()).referrer(),
+            first.referrer()
+        );
+        let json = ArtifactCleanup::Await(first.clone())
+            .to_json()
+            .expect("body");
+        assert_eq!(json, r#"{"plan":"await_start_input"}"#);
+        assert!(ReferrerClaim::unguarded(next.referrer()).is_err());
     }
 
     #[test]
@@ -1190,51 +1315,84 @@ mod tests {
 
     #[test]
     fn claims_pair_each_guarded_kind_with_its_own_guard() {
-        let referrers = every_kind();
-        for referrer in &referrers {
-            let guarded = referrer.kind().is_guarded();
-            assert_eq!(ReferrerClaim::unguarded(referrer.clone()).is_ok(), !guarded);
+        for referrer in every_kind() {
+            assert_eq!(
+                ReferrerClaim::unguarded(referrer.clone()).is_ok(),
+                !referrer.kind().requires_guard()
+            );
         }
-        let execution = ArtifactReferrer::Execution(journal());
-        assert!(
-            ReferrerClaim::guarded(execution.clone(), ArtifactCleanupPlan::AwaitJournal).is_ok()
-        );
-        assert!(
-            ReferrerClaim::guarded(
-                execution.clone(),
-                ArtifactCleanupPlan::AwaitStart { starter: journal() }
-            )
-            .is_err()
-        );
-        assert!(
-            ReferrerClaim::guarded(execution, ArtifactCleanupPlan::Ended { carries: vec![] })
-                .is_err()
-        );
-        let start = ArtifactReferrer::Start(start_key());
-        let claim = ReferrerClaim::guarded(
-            start.clone(),
-            ArtifactCleanupPlan::AwaitStart { starter: journal() },
-        )
-        .expect("a start's guard");
-        assert_eq!(
-            claim.guard_cleanup(),
-            Some(ArtifactCleanup {
-                referrer: start,
-                plan: ArtifactCleanupPlan::AwaitStart { starter: journal() },
-                gate: None,
-            })
-        );
+        let guard = ReferrerGuard::Start {
+            start_key: start_key(),
+            starter: journal(),
+        };
+        let claim = ReferrerClaim::guarded(guard.clone());
+        assert_eq!(claim.referrer(), guard.referrer());
+        assert_eq!(claim.guard_cleanup(), Some(ArtifactCleanup::Await(guard)));
+    }
+
+    #[test]
+    fn cleanup_decoder_refuses_a_guard_for_another_referrer_kind() {
+        let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+        let text = serde_json::json!({
+            "referrer": referrer,
+            "plan": { "plan": "await_journal" },
+            "gate": null,
+        })
+        .to_string();
+        assert!(ArtifactCleanup::from_json(&text, &referrer).is_err());
     }
 
     #[test]
     fn cleanup_bodies_round_trip_and_check_their_row() {
         let referrers = every_kind();
+        let guards = [
+            ReferrerGuard::Frame {
+                frame: FrameEnvironmentId::new("s".into(), FrameNodeId::new("f").expect("frame")),
+                creator: journal(),
+            },
+            ReferrerGuard::Journal(journal()),
+            ReferrerGuard::Start {
+                start_key: start_key(),
+                starter: journal(),
+            },
+            ReferrerGuard::StartInput {
+                start_key: start_key(),
+                starter: journal(),
+            },
+            ReferrerGuard::SubscriptionRevision {
+                revision: SubscriptionRevisionId::new("sub".into(), "inc".into(), 1)
+                    .expect("revision"),
+                creator: journal(),
+            },
+            ReferrerGuard::Upload {
+                upload: UploadReferrerId::mint("s".into()),
+                expires_at_ms: 10,
+            },
+            ReferrerGuard::SessionGraphRetired("s".into()),
+        ];
+        for guard in guards {
+            let cleanup = ArtifactCleanup::Await(guard);
+            let json = cleanup.to_json().expect("encode");
+            let value: serde_json::Value = serde_json::from_str(&json).expect("JSON");
+            assert!(value.get("referrer").is_none());
+            assert!(value.get("gate").is_none());
+            assert_eq!(
+                ArtifactCleanup::from_json(&json, &cleanup.referrer()).expect("decode"),
+                cleanup
+            );
+            for referrer in &referrers {
+                assert_eq!(
+                    ArtifactCleanup::from_json(&json, referrer).is_ok(),
+                    referrer.kind() == cleanup.referrer().kind()
+                );
+            }
+        }
         let ended = ArtifactCleanup::ended(
             referrers[0].clone(),
             vec![ArtifactCarry {
                 artifact: ArtifactName {
-                    store: ArtifactStoreId::Engine("lashlang".to_owned()),
-                    artifact_ref: "mod-1".to_owned(),
+                    store: ArtifactStoreId::Engine("lashlang".into()),
+                    artifact_ref: "mod-1".into(),
                 },
                 to: referrers[1].clone(),
             }],
@@ -1242,26 +1400,21 @@ mod tests {
         );
         let json = ended.to_json().expect("encode");
         assert_eq!(
-            ArtifactCleanup::from_json(&json, &referrers[0]),
-            Ok(ended.clone())
+            ArtifactCleanup::from_json(&json, &ended.referrer()).expect("decode"),
+            ended
         );
-        assert!(ArtifactCleanup::from_json(&json, &referrers[1]).is_err());
-        for plan in [
-            ArtifactCleanupPlan::AwaitJournal,
-            ArtifactCleanupPlan::AwaitStart { starter: journal() },
-            ArtifactCleanupPlan::AwaitSubscriptionRevision { creator: journal() },
-        ] {
-            let cleanup = ArtifactCleanup {
-                referrer: referrers[4].clone(),
-                plan,
-                gate: None,
-            };
-            let json = cleanup.to_json().expect("encode");
-            assert_eq!(
-                ArtifactCleanup::from_json(&json, &referrers[4]),
-                Ok(cleanup)
-            );
-        }
+        assert_eq!(
+            ArtifactCleanup::from_json(&json, &referrers[1])
+                .expect("row owns identity")
+                .referrer(),
+            referrers[1]
+        );
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&json)
+                .expect("JSON")
+                .get("referrer")
+                .is_none()
+        );
     }
 
     #[test]

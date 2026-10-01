@@ -122,7 +122,7 @@ that record exists.
 The receiving claim is one function of the receiving scope,
 `receiving_claim(scope)`: a process receives through
 `unguarded(ProcessRecord(p))`, every other scope through
-`guarded(Execution(journal), AwaitJournal)`. A process never holds through
+`guarded(ReferrerGuard::Journal(journal))`. A process never holds through
 its journal: prune retires the journal before it removes the row, and the
 terminal output needs the row anyway.
 
@@ -159,7 +159,7 @@ terminal output needs the row anyway.
   `process_result_attachment_unavailable`; an external or host completion is
   refused with `ProcessOutputAttachmentUnavailable` and nothing is recorded.
 - **Start inputs.** Before registration, the journaled start step acquires
-  `guarded(StartInput(key, starter), AwaitStart { starter })` on the input's
+  `guarded(ReferrerGuard::StartInput { start_key: key, starter })` on the input's
   stored ids.
   Unavailable input refuses the start before any process row is published.
   Registration mints the id, and the step acquires `ProcessRecord(p)`.

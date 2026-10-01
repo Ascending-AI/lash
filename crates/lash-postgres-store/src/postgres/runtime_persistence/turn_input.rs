@@ -510,7 +510,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
         )
         .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
-        crate::artifact_store::lock_referrer_tx(&mut tx, claim.referrer())
+        crate::artifact_store::lock_referrer_tx(&mut tx, &claim.referrer())
             .await
             .map_err(store_sqlx_error)?;
         crate::attachments::acquire_attachment_refs_tx(&mut tx, &claim, &ids, now).await?;

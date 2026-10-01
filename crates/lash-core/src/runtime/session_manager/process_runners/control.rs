@@ -336,17 +336,13 @@ impl ProcessCapability {
         ),
         crate::PluginError,
     > {
-        let claim = crate::ReferrerClaim::guarded(
-            crate::ArtifactReferrer::Execution(
-                scope
-                    .effect_controller
-                    .execution_scope()
-                    .journal_identity()
-                    .map_err(|error| crate::PluginError::Session(error.to_string()))?,
-            ),
-            crate::ArtifactCleanupPlan::AwaitJournal,
-        )
-        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(
+            scope
+                .effect_controller
+                .execution_scope()
+                .journal_identity()
+                .map_err(|error| crate::PluginError::Session(error.to_string()))?,
+        ));
         if let Some(env_ref) = registration.env_ref.clone() {
             current
                 .host

@@ -339,11 +339,7 @@ impl World {
         .with_start_key(Some(key.clone()));
         let env_ref = crate::publish_process_execution_env(
             self.ports.env().as_ref(),
-            &crate::ReferrerClaim::guarded(
-                crate::ArtifactReferrer::Execution(starter.clone()),
-                crate::ArtifactCleanupPlan::AwaitJournal,
-            )
-            .map_err(|error| crate::PluginError::Session(error.to_string()))?,
+            &crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(starter.clone())),
             &env_spec(),
         )
         .await?;
@@ -404,27 +400,18 @@ fn pin() -> (crate::ArtifactReferrer, crate::ReferrerClaim) {
     (referrer.clone(), unguarded(referrer))
 }
 
-#[expect(clippy::expect_used, reason = "fixture builds valid claims")]
 fn execution(journal: &crate::EffectJournalIdentity) -> crate::ReferrerClaim {
-    crate::ReferrerClaim::guarded(
-        crate::ArtifactReferrer::Execution(journal.clone()),
-        crate::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .expect("an execution claim")
+    crate::ReferrerClaim::guarded(crate::ReferrerGuard::Journal(journal.clone()))
 }
 
-#[expect(clippy::expect_used, reason = "fixture builds valid claims")]
 fn start_claim(
     key: &crate::StartKey,
     starter: &crate::EffectJournalIdentity,
 ) -> crate::ReferrerClaim {
-    crate::ReferrerClaim::guarded(
-        crate::ArtifactReferrer::Start(key.clone()),
-        crate::ArtifactCleanupPlan::AwaitStart {
-            starter: starter.clone(),
-        },
-    )
-    .expect("a start claim")
+    crate::ReferrerClaim::guarded(crate::ReferrerGuard::Start {
+        start_key: key.clone(),
+        starter: starter.clone(),
+    })
 }
 
 fn assert_code(error: &crate::RuntimeEffectControllerError, code: crate::RuntimeErrorCode) {

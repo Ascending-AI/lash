@@ -876,15 +876,11 @@ impl ToolIntentIngress {
         intent: lash_core::ToolIntent,
     ) -> crate::Result<(RealizedIntent, bool)> {
         if let Some(env_ref) = intent.execution_env_ref() {
-            let claim = lash_core::ReferrerClaim::guarded(
-                lash_core::ArtifactReferrer::Execution(
-                    self.scope
-                        .journal_identity()
-                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
-                ),
-                lash_core::ArtifactCleanupPlan::AwaitJournal,
-            )
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
+                self.scope
+                    .journal_identity()
+                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+            ));
             self.core
                 .env
                 .core
@@ -1227,7 +1223,7 @@ impl ToolIntentIngress {
                 ),
                 if definition_command {
                     lash_core::RuntimeEffectLocalExecutor::definition_artifacts(self.core.host_process_engines.clone(),
-                        lash_core::ReferrerClaim::guarded(lash_core::ArtifactReferrer::Execution(self.scope.journal_identity().map_err(|e| lash_core::PluginError::Session(e.to_string()))?), lash_core::ArtifactCleanupPlan::AwaitJournal).map_err(|e| lash_core::PluginError::Session(e.to_string()))?)
+                        lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(self.scope.journal_identity().map_err(|e| lash_core::PluginError::Session(e.to_string()))?)))
                 } else {
                 lash_core::RuntimeEffectLocalExecutor::processes(
                     registry,

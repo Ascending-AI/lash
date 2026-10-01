@@ -33,6 +33,7 @@ first_party_codes! {
         Self::AttachmentSourcePolicyDenied,
         Self::ArtifactReferrerEnded,
         Self::ArtifactMissing,
+        Self::ReferrerKindRefused,
         Self::DefinitionMissing,
         Self::DefinitionRefused,
         Self::WorkerCheckoutTimedOut,

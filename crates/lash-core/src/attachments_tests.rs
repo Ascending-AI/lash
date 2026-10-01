@@ -71,7 +71,7 @@ impl AttachmentReferrers for RecordingReferrers {
                 .lock_recover()
                 .entry(write.attachment_id.clone())
                 .or_default(),
-            write.claim.referrer(),
+            &write.claim.referrer(),
         );
         Ok(crate::AttachmentWriteFence::Granted(
             crate::AttachmentWritePermit::new(crate::AttachmentWriteToken::new()),
@@ -95,7 +95,7 @@ impl AttachmentReferrers for RecordingReferrers {
         _permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
         if let Some(referrers) = self.edges.lock_recover().get_mut(&write.attachment_id) {
-            referrers.retain(|held| held != write.claim.referrer());
+            referrers.retain(|held| held != &write.claim.referrer());
         }
         Ok(())
     }
@@ -115,7 +115,7 @@ impl AttachmentReferrers for RecordingReferrers {
         for attachment_id in attachment_ids {
             hold(
                 edges.entry(attachment_id.clone()).or_default(),
-                claim.referrer(),
+                &claim.referrer(),
             );
         }
         Ok(())

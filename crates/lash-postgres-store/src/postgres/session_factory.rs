@@ -1126,12 +1126,10 @@ async fn fence_deleted_session_frames_tx(
             .map_err(store_sqlx_error)?;
     }
     for referrer in referrers {
-        let cleanup = if matches!(referrer, lash_core_execution::ArtifactReferrer::Session(_)) {
-            lash_core_execution::ArtifactCleanup {
-                referrer,
-                plan: lash_core_execution::ArtifactCleanupPlan::AwaitSessionGraphRetired,
-                gate: None,
-            }
+        let cleanup = if let lash_core_execution::ArtifactReferrer::Session(session) = referrer {
+            lash_core_execution::ArtifactCleanup::Await(
+                lash_core_execution::ReferrerGuard::SessionGraphRetired(session),
+            )
         } else {
             sqlx::query(
                 crate::artifact_store::artifact_sql()

@@ -143,8 +143,8 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
         .expect("decode first-frame cleanup");
     assert!(fenced, "first frame must be fenced in the commit");
     assert!(matches!(
-        cleanup.plan,
-        lash_core_execution::ArtifactCleanupPlan::Ended { .. }
+        cleanup,
+        lash_core_execution::ArtifactCleanup::Ended { .. }
     ));
     assert!(matches!(
         artifacts
@@ -709,4 +709,29 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
         error.to_string().contains("data is corrupt"),
         "wrong read error: {error}"
     );
+}
+
+#[tokio::test]
+async fn cleanup_kind_mismatch_is_stored_corruption() {
+    let Some((_fixture, storage)) = storage().await else {
+        panic!("PostgreSQL law requires a database");
+    };
+    let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let ledger = storage.artifact_cleanup();
+    let id = ledger
+        .arm_cleanup(&ArtifactCleanup::ended(referrer.clone(), vec![], None), 1)
+        .await
+        .expect("arm");
+    for body in [
+        serde_json::json!({"referrer": referrer, "plan": {"plan": "await_journal"}, "gate": null})
+            .to_string(),
+        r#"{"plan":"await_journal"}"#.to_owned(),
+    ] {
+        sqlx::query("UPDATE lash_artifact_cleanup_obligations SET cleanup_json = $1 WHERE obligation_id = $2").bind(body).bind(id.as_str()).execute(storage.pool()).await.expect("inject mismatched guard");
+        let result = ledger.load_cleanup(&id).await;
+        assert!(
+            matches!(result, Err(StoreError::StoredDataCorrupt { .. })),
+            "mismatched guard must be corrupt: {result:?}"
+        );
+    }
 }

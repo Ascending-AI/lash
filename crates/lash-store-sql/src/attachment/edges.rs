@@ -14,6 +14,6 @@ crate::statements! {
         select_live_root = "SELECT 1 WHERE EXISTS (SELECT 1 FROM attachment_referrer_edges WHERE attachment_id = ?1)
              OR EXISTS (SELECT 1 FROM attachment_pending_writes WHERE attachment_id = ?1)";
         select_root_page = "SELECT DISTINCT attachment_id FROM attachment_referrer_edges WHERE referrer_kind = ?1 AND attachment_id > ?2 ORDER BY attachment_id LIMIT ?3";
-        select_other_root_page = "SELECT DISTINCT attachment_id FROM attachment_referrer_edges WHERE referrer_kind NOT IN ('execution', 'process_record', 'session', 'upload') AND attachment_id > ?1 ORDER BY attachment_id LIMIT ?2";
+        select_other_root_page = "SELECT DISTINCT attachment_id FROM attachment_referrer_edges WHERE NOT {{attachment_referrer_kind(referrer_kind)}} AND attachment_id > ?1 ORDER BY attachment_id LIMIT ?2";
     }
 }

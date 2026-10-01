@@ -33,18 +33,18 @@ pub struct AttachmentReferrerHandles {
 }
 
 pub(super) fn claim(referrer: ArtifactReferrer) -> ReferrerClaim {
-    match &referrer {
-        ArtifactReferrer::Upload(_) => ReferrerClaim::guarded(
-            referrer,
-            ArtifactCleanupPlan::AwaitUploadExpiry {
-                expires_at_ms: 1000,
-            },
-        )
-        .unwrap(),
-        ArtifactReferrer::Execution(_) => {
-            ReferrerClaim::guarded(referrer, ArtifactCleanupPlan::AwaitJournal).unwrap()
+    match referrer {
+        ArtifactReferrer::Upload(upload) => ReferrerClaim::guarded(ReferrerGuard::Upload {
+            upload,
+            expires_at_ms: 1000,
+        }),
+        ArtifactReferrer::Execution(journal) => {
+            ReferrerClaim::guarded(ReferrerGuard::Journal(journal))
         }
-        _ => ReferrerClaim::unguarded(referrer).unwrap(),
+        ArtifactReferrer::StartInput { start_key, starter } => {
+            ReferrerClaim::guarded(ReferrerGuard::StartInput { start_key, starter })
+        }
+        referrer => ReferrerClaim::unguarded(referrer).unwrap(),
     }
 }
 
@@ -131,7 +131,7 @@ pub async fn ended_process_record_refuses_attachment_writes_and_acquisitions(
     assert!(matches!(
         store.begin_attachment_write(&refused).await,
         Err(StoreError::ReferrerKindRefused {
-            store: "attachment",
+            store: lash_core::ReferrerStore::Attachment,
             ..
         })
     ));
@@ -159,21 +159,24 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
     assert_ne!(a, b);
     for referrer in [&a[0], &b[0]] {
         assert!(matches!(referrer, ArtifactReferrer::Upload(_)));
-        let cleanup = ArtifactCleanup {
-            referrer: referrer.clone(),
-            plan: ArtifactCleanupPlan::AwaitUploadExpiry {
-                expires_at_ms: 9999,
+        let cleanup = ArtifactCleanup::Await(ReferrerGuard::Upload {
+            upload: {
+                let ArtifactReferrer::Upload(upload) = referrer.clone() else {
+                    panic!("fixture referrer kind")
+                };
+                upload
             },
-            gate: None,
-        };
+            expires_at_ms: 9999,
+        });
         let id = h.cleanup.arm_cleanup(&cleanup, 100).await.unwrap();
         let recorded = h.cleanup.load_cleanup(&id).await.unwrap().unwrap();
-        assert_eq!(
-            recorded.plan,
-            ArtifactCleanupPlan::AwaitUploadExpiry {
-                expires_at_ms: 1100
-            }
-        );
+        assert!(matches!(
+            recorded,
+            ArtifactCleanup::Await(ReferrerGuard::Upload {
+                expires_at_ms: 1100,
+                ..
+            })
+        ));
     }
     store.end_attachment_referrer(&a[0]).await.unwrap();
     assert!(
@@ -626,11 +629,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
         store.session_referrer_state(&session).await.unwrap(),
         SessionReferrerState::DeletedRetained
     );
-    let cleanup = ArtifactCleanup {
-        referrer: referrer.clone(),
-        plan: ArtifactCleanupPlan::AwaitSessionGraphRetired,
-        gate: None,
-    };
+    let cleanup = ArtifactCleanup::Await(ReferrerGuard::SessionGraphRetired(session.clone()));
     let claims = h
         .cleanup
         .claim_due(
@@ -962,7 +961,7 @@ pub async fn complete_attachment_roots_cover_every_kind_and_exhaust_pages(
     );
     let permit = permit(store.as_ref(), &attempt).await;
     store
-        .forget_attachment_ref(attempt.claim.referrer(), &pending)
+        .forget_attachment_ref(&attempt.claim.referrer(), &pending)
         .await
         .unwrap();
     expected.insert(pending);
@@ -976,4 +975,51 @@ pub async fn complete_attachment_roots_cover_every_kind_and_exhaust_pages(
         .abort_attachment_write(&attempt, permit)
         .await
         .unwrap();
+}
+
+pub async fn attachment_root_sources_partition_start_inputs(h: AttachmentReferrerHandles) {
+    use lash_core::attachments::AttachmentRootSource;
+    let id = AttachmentId::parse("start-input-root-partition").unwrap();
+    let starter = ExecutionScope::runtime_operation("start-input-root-partition")
+        .journal_identity()
+        .unwrap();
+    let referrer = ArtifactReferrer::StartInput {
+        start_key: lash_core::StartKey::for_host("root-partition"),
+        starter,
+    };
+    (h.insert_edge)(
+        id.clone(),
+        referrer.kind().as_str().into(),
+        referrer.canonical_id(),
+    )
+    .await
+    .unwrap();
+    let page = h
+        .factory
+        .attachment_root_page(
+            AttachmentRootSource::Referrer(ArtifactReferrerKind::StartInput),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        format!("{page:?}"),
+        format!(
+            "{:?}",
+            lash_core::attachments::AttachmentRootPage::from_rows(vec![id]).unwrap()
+        )
+    );
+    let other = h
+        .factory
+        .attachment_root_page(AttachmentRootSource::OtherReferrers, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        format!("{other:?}"),
+        format!(
+            "{:?}",
+            lash_core::attachments::AttachmentRootPage::from_rows(vec![]).unwrap()
+        ),
+        "a known attachment kind must not be enumerated as an unknown kind"
+    );
 }

@@ -924,8 +924,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
             .await
             .expect("read claimed cleanup")
             .expect("cleanup exists");
-        assert_eq!(cleanup.referrer.kind().to_string(), "process_record");
-        cleanup_process_ids.push(cleanup.referrer.canonical_id());
+        assert_eq!(cleanup.referrer().kind().to_string(), "process_record");
+        cleanup_process_ids.push(cleanup.referrer().canonical_id());
     }
     cleanup_process_ids.sort();
     assert_eq!(

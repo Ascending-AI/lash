@@ -24,10 +24,21 @@ pub(crate) struct AttachmentSql {
     pub(crate) postgres: AttachmentPostgresStatements,
     pub(crate) sweep_clock: SweepClockStatements,
 }
+const ATTACHMENT_REFERRER_KINDS: lash_store_sql::Vocabulary =
+    lash_store_sql::Vocabulary::new(&[lash_store_sql::VocabularyTerm::new(
+        "attachment_referrer_kind",
+        |column| {
+            lash_core_execution::ArtifactReferrerKind::predicate_sql(
+                column,
+                lash_core_execution::ArtifactReferrerKind::holds_attachments,
+            )
+        },
+    )]);
+
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
     AttachmentSql {
-        edges: AttachmentEdgeStatements::render(dialect),
+        edges: AttachmentEdgeStatements::render(dialect.with_vocabulary(ATTACHMENT_REFERRER_KINDS)),
         pending: PendingWriteStatements::render(dialect),
         uploads: UploadStatements::render(dialect),
         condemnation: CondemnationStatements::render(dialect),
@@ -42,7 +53,7 @@ fn check_kind(referrer: &ArtifactReferrer) -> Result<(), StoreError> {
     if !referrer.kind().holds_attachments() {
         return Err(StoreError::ReferrerKindRefused {
             kind: referrer.kind(),
-            store: "attachment",
+            store: lash_core_execution::ReferrerStore::Attachment,
         });
     }
     ArtifactReferrer::decode(referrer.kind().as_str(), &referrer.canonical_id())
@@ -87,8 +98,8 @@ pub(crate) async fn acquire_attachment_refs_tx(
     now: u64,
 ) -> Result<(), StoreError> {
     // The caller took every referrer lock before any artifact lock.
-    check_kind(claim.referrer())?;
-    check_fence_tx(tx, claim.referrer()).await?;
+    check_kind(&claim.referrer())?;
+    check_fence_tx(tx, &claim.referrer()).await?;
     let ids = ids.iter().collect::<std::collections::BTreeSet<_>>();
     for id in &ids {
         lock_attachment_fence_tx(tx, id.as_str()).await?;
@@ -122,7 +133,7 @@ pub(crate) async fn acquire_attachment_refs_tx(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        insert_edge_tx(tx, claim.referrer(), id).await?;
+        insert_edge_tx(tx, &claim.referrer(), id).await?;
     }
     if let Some(cleanup) = claim.guard_cleanup() {
         crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now).await?;
@@ -597,7 +608,7 @@ impl AttachmentReferrers for PostgresStore {
         &self,
         write: &AttachmentWrite,
     ) -> Result<lash_core_execution::AttachmentWriteFence, StoreError> {
-        let referrer = write.claim.referrer();
+        let referrer = &write.claim.referrer();
         let token = lash_core_execution::AttachmentWriteToken::new();
         let now = self.clock.timestamp_ms();
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
@@ -665,7 +676,7 @@ impl AttachmentReferrers for PostgresStore {
         write: &AttachmentWrite,
         permit: lash_core_execution::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let referrer = write.claim.referrer();
+        let referrer = &write.claim.referrer();
         let token = permit.write_id().as_hex();
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         lock_attachment_referrer_tx(&mut tx, referrer).await?;
@@ -704,13 +715,13 @@ impl AttachmentReferrers for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         let token = permit.write_id().as_hex();
-        lock_attachment_referrer_tx(&mut tx, write.claim.referrer()).await?;
+        lock_attachment_referrer_tx(&mut tx, &write.claim.referrer()).await?;
         lock_attachment_fence_tx(&mut tx, write.attachment_id.as_str()).await?;
         if has_permit_tx(&mut tx, write, &token).await? {
             abort_write_tx(
                 &mut tx,
                 &write.attachment_id,
-                write.claim.referrer(),
+                &write.claim.referrer(),
                 &token,
             )
             .await?;
@@ -723,7 +734,7 @@ impl AttachmentReferrers for PostgresStore {
         ids: &[AttachmentId],
     ) -> Result<(), StoreError> {
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
-        lock_attachment_referrer_tx(&mut tx, claim.referrer()).await?;
+        lock_attachment_referrer_tx(&mut tx, &claim.referrer()).await?;
         acquire_attachment_refs_tx(&mut tx, claim, ids, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)
     }

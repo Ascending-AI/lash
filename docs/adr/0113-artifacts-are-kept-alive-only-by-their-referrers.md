@@ -80,12 +80,14 @@ transaction (`crates/lash-core-execution/src/module_artifacts.rs:158-191`,
 `crates/lash-sqlite-store/src/artifact_store.rs:198-283`,
 `crates/lash-postgres-store/src/postgres/artifact_store.rs:182-254`).
 
-A claim is unguarded for a frame, process record or host pin. Guarded
-claims pair an execution with `AwaitJournal`, a start with `AwaitStart`,
-input staging with `AwaitStart` naming its own starter,
-a subscription revision with `AwaitSubscriptionRevision`, or a prepared
-successor frame with `AwaitFrame`. Invalid pairings and `Ended` guards
-are refused. Attachment upload guards belong to ADR 0124
+A claim is unguarded for a frame, process record or host pin. A guarded
+claim contains a `ReferrerGuard` whose typed identity determines its
+referrer: `Journal`, `Start`, `StartInput`, `SubscriptionRevision`, or an
+optionally guarded prepared successor `Frame`. `requires_guard` names
+kinds whose acquisitions must be guarded; frames also permit unguarded
+claims. A guard cannot name another kind or carry an `Ended` plan.
+`holds_artifacts` admits the six artifact kinds and refuses attachment-only
+kinds with typed `ReferrerKindRefused`. Attachment guards belong to ADR 0124
 (`crates/lash-core-store/src/artifact_referrer.rs:640-730`).
 
 A captured `ProcessExecutionEnvSpec` is a `ProcessEnv` artifact addressed by
@@ -114,7 +116,8 @@ write that ledger inside its own transaction
 `ArtifactName` identifies an artifact and its store: `ProcessEnv`,
 `LashlangModule`, `ProcessDefinition`, or `Engine(kind)`. `ArtifactCarry`
 names a destination referrer. `ArtifactCleanup` is the durable obligation
-body, with a referrer, plan and optional replay gate.
+body: `Ended { referrer, carries, gate }` or `Await(ReferrerGuard)`.
+Only an ended record can carry a replay gate.
 `ResolvedArtifactCleanup` contains only the receiving store's carries,
 ordered by artifact reference
 (`crates/lash-core-store/src/artifact_referrer.rs:739-782,886-905`).
@@ -147,8 +150,12 @@ the relay calls `end_attachment_referrer` for attachment-holding kinds
 
 #### 2.4 Where cleanup records live, and the two ways they arise
 
-`artifact_cleanup_obligations` holds one serialized `ArtifactCleanup` per
-referrer, with ADR 0109's due, claimed and stalled states. A row exists only
+`artifact_cleanup_obligations` holds one cleanup plan body per referrer,
+with ADR 0109's due, claimed and stalled states. The row's canonical
+`referrer_kind` and `referrer_id` own the identity; `cleanup_json` contains
+only a tagged plan body. `StartInput` takes its starter from the row id.
+Decoding checks the guard against the row's kind and reports mismatches as
+`StoredDataCorrupt`; the relay stalls the row before applying any cleanup. A row exists only
 while cleanup is owed. PostgreSQL has one ledger table. SQLite has a core
 table and a registry table, so prune can record an end in its own database;
 ids have `core:` or `registry:` prefixes and settlement routes by prefix.

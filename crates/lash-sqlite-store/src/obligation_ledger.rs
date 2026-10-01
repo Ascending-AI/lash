@@ -540,8 +540,8 @@ pub(crate) fn arm_cleanup_tx(
     prefix: &str,
 ) -> Result<ObligationId, StoreError> {
     use rusqlite::{OptionalExtension, params};
-    let kind = cleanup.referrer.kind().as_str();
-    let referrer_id = cleanup.referrer.canonical_id();
+    let kind = cleanup.referrer().kind().as_str();
+    let referrer_id = cleanup.referrer().canonical_id();
     let row: Option<(String, String, String, String, String)> = tx
         .query_row(
             CLEANUPS.select_by_referrer.sql(),
@@ -564,7 +564,6 @@ pub(crate) fn arm_cleanup_tx(
             let stored = ArtifactReferrer::decode(row_kind, row_id)
                 .map_err(|error| error.into_store_error("artifact cleanup"))?;
             ArtifactCleanup::from_json(body, &stored)
-                .map_err(|error| stored_data_corrupt("artifact cleanup", error))
         })
         .transpose()?;
     let id = row.as_ref().map_or_else(
@@ -592,8 +591,8 @@ pub(crate) fn arm_cleanup_tx(
         }
         CleanupUpsert::Keep => {}
     }
-    if prefix == "core" && cleanup.plan.is_ended() {
-        crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer, now_ms)
+    if prefix == "core" && cleanup.is_ended() {
+        crate::artifact_store::fence_artifact_referrer_tx(tx, &cleanup.referrer(), now_ms)
             .map_err(sqlite_error)?;
     }
     Ok(id)
@@ -792,7 +791,6 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
             let referrer = ArtifactReferrer::decode(&kind, &id)
                 .map_err(|error| error.into_store_error("artifact cleanup"))?;
             ArtifactCleanup::from_json(&body, &referrer)
-                .map_err(|error| stored_data_corrupt("artifact cleanup", error))
         })
         .transpose()
     }
@@ -801,8 +799,32 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
 #[cfg(test)]
 mod artifact_cleanup_tests {
     use super::*;
-    use lash_core_execution::ArtifactCleanupPlan;
+    use lash_core_execution::ReferrerGuard;
     use rusqlite::OptionalExtension;
+
+    #[tokio::test]
+    async fn cleanup_kind_mismatch_is_stored_corruption() {
+        use lash_core_execution::StoreSet as _;
+        let memory = crate::SqliteStoreSet::memory().await.expect("memory store");
+        let dir = tempfile::tempdir().expect("file root");
+        let file = crate::SqliteStoreSet::open(dir.path())
+            .await
+            .expect("file store");
+        for set in [&memory, &file] {
+            let referrer = ArtifactReferrer::HostPin(lash_core_execution::HostArtifactPin::mint());
+            let ledger = set.artifact_cleanup();
+            let id = ledger
+                .arm_cleanup(&ArtifactCleanup::ended(referrer.clone(), vec![], None), 1)
+                .await
+                .expect("arm");
+            for body in [serde_json::json!({"referrer": referrer, "plan": {"plan": "await_journal"}, "gate": null}).to_string(), r#"{"plan":"await_journal"}"#.to_owned()] {
+                let row_id = id.as_str().to_owned();
+                set.process_env_store().conn.call(move |conn| conn.execute("UPDATE artifact_cleanup_obligations SET cleanup_json = ?1 WHERE obligation_id = ?2", rusqlite::params![body, row_id])).await.expect("inject mismatched guard");
+                let result = ledger.load_cleanup(&id).await;
+                assert!(matches!(result, Err(StoreError::StoredDataCorrupt { .. })), "mismatched guard must be corrupt: {result:?}");
+            }
+        }
+    }
 
     /// The stored row of one referrer's cleanup obligation, compared whole
     /// across an aborted arm.
@@ -895,11 +917,12 @@ mod artifact_cleanup_tests {
         // A claimed guard: the state an `Ended` arm replaces, and the
         // claim, state and attempts a partial commit would reset.
         let referrer = execution("guarded");
-        let guard = ArtifactCleanup {
-            referrer: referrer.clone(),
-            plan: ArtifactCleanupPlan::AwaitJournal,
-            gate: None,
-        };
+        let guard = ArtifactCleanup::Await(ReferrerGuard::Journal({
+            let ArtifactReferrer::Execution(journal) = referrer.clone() else {
+                panic!("fixture referrer kind")
+            };
+            journal
+        }));
         let guard_id = ledger
             .arm_cleanup(&guard, 100)
             .await
@@ -1014,11 +1037,12 @@ mod artifact_cleanup_tests {
             .journal_identity()
             .expect("journal identity");
         let referrer = ArtifactReferrer::Execution(journal);
-        let guard = ArtifactCleanup {
-            referrer: referrer.clone(),
-            plan: ArtifactCleanupPlan::AwaitJournal,
-            gate: None,
-        };
+        let guard = ArtifactCleanup::Await(ReferrerGuard::Journal({
+            let ArtifactReferrer::Execution(journal) = referrer.clone() else {
+                panic!("fixture referrer kind")
+            };
+            journal
+        }));
         let first = arm_cleanup_tx(&conn, &guard, 100, "core").expect("arm guard");
         let again = arm_cleanup_tx(&conn, &guard, 101, "core").expect("repeat guard");
         assert_eq!(first, again);

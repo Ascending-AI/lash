@@ -32,6 +32,8 @@ pub enum DurabilityTier {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ArtifactStoreError {
+    #[error("referrer kind `{kind}` cannot hold artifact bytes")]
+    ReferrerKindRefused { kind: crate::ArtifactReferrerKind },
     #[error("failed to encode artifact: {0}")]
     Encode(String),
     #[error("failed to decode artifact: {0}")]
@@ -74,6 +76,10 @@ pub enum ArtifactStoreError {
 impl From<crate::StoreError> for ArtifactStoreError {
     fn from(error: crate::StoreError) -> Self {
         match error {
+            crate::StoreError::ReferrerKindRefused {
+                kind,
+                store: crate::ReferrerStore::Artifact,
+            } => Self::ReferrerKindRefused { kind },
             crate::StoreError::ArtifactReferrerEnded { referrer } => {
                 Self::ReferrerEnded { referrer }
             }
@@ -102,6 +108,12 @@ impl From<crate::StoreError> for ArtifactStoreError {
 impl From<ArtifactStoreError> for crate::PluginError {
     fn from(error: ArtifactStoreError) -> Self {
         match error {
+            ArtifactStoreError::ReferrerKindRefused { kind } => {
+                crate::PluginError::StoreRefusal(crate::store::StoreRefusal::ReferrerKindRefused {
+                    kind,
+                    store: crate::ReferrerStore::Artifact,
+                })
+            }
             ArtifactStoreError::WorkerCheckoutTimedOut => {
                 crate::PluginError::RuntimeEffectController(
                     crate::RuntimeEffectControllerError::new(

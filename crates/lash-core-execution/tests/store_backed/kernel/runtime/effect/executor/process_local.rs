@@ -38,7 +38,7 @@ mod tests {
             env_ref
         );
         store
-            .end_process_env_referrer(&end(pin.referrer().clone()))
+            .end_process_env_referrer(&end(pin.referrer()))
             .await
             .expect("source pin ends");
         assert_eq!(
@@ -117,15 +117,12 @@ mod tests {
     }
 
     fn start_claim(key: &crate::StartKey) -> crate::ReferrerClaim {
-        crate::ReferrerClaim::guarded(
-            crate::ArtifactReferrer::Start(key.clone()),
-            crate::ArtifactCleanupPlan::AwaitStart {
-                starter: crate::ExecutionScope::runtime_operation("runtime")
-                    .journal_identity()
-                    .expect("runtime journal"),
-            },
-        )
-        .expect("start claim")
+        crate::ReferrerClaim::guarded(crate::ReferrerGuard::Start {
+            start_key: key.clone(),
+            starter: crate::ExecutionScope::runtime_operation("runtime")
+                .journal_identity()
+                .expect("runtime journal"),
+        })
     }
 
     fn end(referrer: crate::ArtifactReferrer) -> crate::ResolvedArtifactCleanup {
@@ -161,11 +158,10 @@ mod tests {
         let starter = crate::ExecutionScope::runtime_operation("runtime")
             .journal_identity()
             .expect("starter journal");
-        let claim = crate::ReferrerClaim::guarded(
-            crate::ArtifactReferrer::Start(registration.start_key.clone().expect("start key")),
-            crate::ArtifactCleanupPlan::AwaitStart { starter },
-        )
-        .expect("start claim");
+        let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::Start {
+            start_key: registration.start_key.clone().expect("start key"),
+            starter,
+        });
         let env_ref = crate::publish_process_execution_env(env_store, &claim, &env_spec)
             .await
             .expect("publish referenced environment");

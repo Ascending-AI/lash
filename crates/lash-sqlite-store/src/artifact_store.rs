@@ -203,11 +203,16 @@ impl SqliteStore {
         bytes: Vec<u8>,
         claim: ReferrerClaim,
     ) -> Result<(), ArtifactStoreError> {
+        if !claim.referrer().kind().holds_artifacts() {
+            return Err(ArtifactStoreError::ReferrerKindRefused {
+                kind: claim.referrer().kind(),
+            });
+        }
         let blob_profile = self.options.blob_profile;
         let now_ms = self.clock.timestamp_ms();
         self.conn
             .write(move |tx| {
-                let referrer = claim.referrer();
+                let referrer = &claim.referrer();
                 if artifact_fenced_tx(tx, referrer)? {
                     return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
                         referrer: referrer.clone(),
@@ -261,9 +266,14 @@ impl SqliteStore {
         artifact_ref: String,
         claim: ReferrerClaim,
     ) -> Result<(), ArtifactStoreError> {
+        if !claim.referrer().kind().holds_artifacts() {
+            return Err(ArtifactStoreError::ReferrerKindRefused {
+                kind: claim.referrer().kind(),
+            });
+        }
         let now_ms = self.clock.timestamp_ms();
         self.conn.write(move |tx| {
-            let referrer = claim.referrer();
+            let referrer = &claim.referrer();
             if artifact_fenced_tx(tx, referrer)? {
                 return Err(artifact_failure(ArtifactStoreError::ReferrerEnded { referrer: referrer.clone() }));
             }
@@ -359,6 +369,13 @@ impl SqliteStore {
         namespace: &'static str,
         cleanup: ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError> {
+        for carry in &cleanup.carries {
+            if !carry.to.kind().holds_artifacts() {
+                return Err(ArtifactStoreError::ReferrerKindRefused {
+                    kind: carry.to.kind(),
+                });
+            }
+        }
         let now_ms = self.clock.timestamp_ms();
         let expected_store = match namespace {
             MODULE_ARTIFACT_NAMESPACE => ArtifactStoreId::LashlangModule,
@@ -431,11 +448,16 @@ impl SqliteStore {
         descriptor: Option<Vec<u8>>,
         manifest: Vec<(&'static str, String)>,
     ) -> Result<(), ArtifactStoreError> {
+        if !claim.referrer().kind().holds_artifacts() {
+            return Err(ArtifactStoreError::ReferrerKindRefused {
+                kind: claim.referrer().kind(),
+            });
+        }
         let blob_profile = self.options.blob_profile;
         let now_ms = self.clock.timestamp_ms();
         self.conn
             .write(move |tx| {
-                let referrer = claim.referrer();
+                let referrer = &claim.referrer();
                 if artifact_fenced_tx(tx, referrer)? {
                     return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
                         referrer: referrer.clone(),
@@ -890,11 +912,7 @@ mod tests {
         let journal = lash_sansio::ExecutionScope::runtime_operation("guarded-publication")
             .journal_identity()
             .expect("journal identity");
-        let claim = ReferrerClaim::guarded(
-            ArtifactReferrer::Execution(journal),
-            lash_core_execution::ArtifactCleanupPlan::AwaitJournal,
-        )
-        .expect("execution claim");
+        let claim = ReferrerClaim::guarded(lash_core_execution::ReferrerGuard::Journal(journal));
         store
             .publish_module_artifact(&claim, "guarded-module", b"guarded")
             .await

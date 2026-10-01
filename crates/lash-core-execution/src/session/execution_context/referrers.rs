@@ -104,9 +104,10 @@ fn execution_referrer_of(
 pub(crate) fn execution_claim_of(
     scope: &crate::ExecutionScope,
 ) -> Result<crate::ReferrerClaim, crate::PluginError> {
-    crate::ReferrerClaim::guarded(
-        execution_referrer_of(scope)?,
-        crate::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .map_err(|error| crate::PluginError::Session(error.to_string()))
+    let journal = scope
+        .journal_identity()
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    Ok(crate::ReferrerClaim::guarded(
+        crate::ReferrerGuard::Journal(journal),
+    ))
 }

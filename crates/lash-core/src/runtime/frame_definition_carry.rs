@@ -1,8 +1,8 @@
 //! Prepare the engine-store share before a successor frame activates in SQL.
 
 use crate::{
-    ArtifactCleanupPlan, ArtifactReferrer, ArtifactStoreId, ProcessDefinitionId,
-    ProcessEngineRegistry, ReferrerAcquisition, ReferrerClaim, StoreError,
+    ArtifactStoreId, ProcessDefinitionId, ProcessEngineRegistry, ReferrerAcquisition,
+    ReferrerClaim, ReferrerGuard, StoreError,
 };
 
 pub(super) async fn prepare(
@@ -22,13 +22,10 @@ pub(super) async fn prepare(
     let ports = engines.artifact_ports().ok_or_else(|| {
         StoreError::Backend("definition frame carry has no artifact ports".into())
     })?;
-    let claim = ReferrerClaim::guarded(
-        ArtifactReferrer::FrameEnvironment(transition.successor.clone()),
-        ArtifactCleanupPlan::AwaitFrame {
-            creator: transition.gate.clone(),
-        },
-    )
-    .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let claim = ReferrerClaim::guarded(ReferrerGuard::Frame {
+        frame: transition.successor.clone(),
+        creator: transition.gate.clone(),
+    });
     let mut names = std::collections::BTreeSet::new();
     for name in &transition.carries {
         if name.store != ArtifactStoreId::ProcessDefinition {
@@ -42,7 +39,7 @@ pub(super) async fn prepare(
             .map_err(|error| StoreError::Backend(error.to_string()))?
             .ok_or_else(|| StoreError::ArtifactCarryMissing {
                 artifact_ref: name.artifact_ref.clone(),
-                to: claim.referrer().clone(),
+                to: claim.referrer(),
             })?;
         names.extend(
             resolved
@@ -60,7 +57,7 @@ pub(super) async fn prepare(
     {
         ReferrerAcquisition::Held => Ok(()),
         ReferrerAcquisition::Ended => Err(StoreError::ArtifactReferrerEnded {
-            referrer: claim.referrer().clone(),
+            referrer: claim.referrer(),
         }),
     }
 }

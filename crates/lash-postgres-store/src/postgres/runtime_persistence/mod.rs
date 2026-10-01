@@ -201,7 +201,7 @@ async fn enqueue_queued_work_with_outcome_tx(
         lash_core_execution::ArtifactReferrer::Session(batch.session_id.clone()),
     )
     .map_err(|error| error.into_store_error("queued attachment referrer"))?;
-    crate::artifact_store::lock_referrer_tx(tx, claim.referrer())
+    crate::artifact_store::lock_referrer_tx(tx, &claim.referrer())
         .await
         .map_err(store_sqlx_error)?;
     crate::attachments::acquire_attachment_refs_tx(tx, &claim, &batch.stored_attachment_ids(), now)

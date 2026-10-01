@@ -176,9 +176,9 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
     let cleanup = lash_core_execution::ArtifactCleanup::from_json(&body, &referrer)
         .expect("decode cleanup body");
     assert!(
-        matches!(cleanup.plan, lash_core_execution::ArtifactCleanupPlan::Ended { carries } if carries.is_empty())
+        matches!(cleanup, lash_core_execution::ArtifactCleanup::Ended { ref carries, .. } if carries.is_empty())
     );
-    assert!(cleanup.gate.is_none());
+    assert!(cleanup.gate().is_none());
 }
 
 /// Lexical half of the retention contract: every `status IN`/`status NOT IN`

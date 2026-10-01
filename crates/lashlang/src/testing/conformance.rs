@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use lash_core_execution::{
-    ArtifactCarry, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer, ArtifactStoreError,
-    ArtifactStoreId, DurabilityTier, HostArtifactPin, ModuleArtifactStore, ReferrerClaim,
+    ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreError, ArtifactStoreId,
+    DurabilityTier, HostArtifactPin, ModuleArtifactStore, ReferrerClaim, ReferrerGuard,
     ResolvedArtifactCleanup,
 };
 
@@ -115,12 +115,11 @@ pub async fn abandoned_start_reclaims_module(store: Arc<dyn ModuleArtifactStore>
     let journal = lash_core_execution::ExecutionScope::runtime_operation("abandoned-module")
         .journal_identity()
         .expect("starter journal");
-    let referrer = ArtifactReferrer::Start(start);
-    let claim = ReferrerClaim::guarded(
-        referrer.clone(),
-        ArtifactCleanupPlan::AwaitStart { starter: journal },
-    )
-    .expect("start claim");
+    let referrer = ArtifactReferrer::Start(start.clone());
+    let claim = ReferrerClaim::guarded(ReferrerGuard::Start {
+        start_key: start.clone(),
+        starter: journal,
+    });
     store
         .publish_module_artifact(&claim, key, &bytes)
         .await

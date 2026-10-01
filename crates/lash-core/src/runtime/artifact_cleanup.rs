@@ -16,13 +16,13 @@ use std::sync::Arc;
 use super::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy};
 use crate::store::{ArtifactCleanupLedger, ObligationKey, ObligationLedger};
 use crate::{
-    ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactStoreError, ArtifactStoreId, EffectHost, JournalReplay, ModuleArtifactStore,
-    PluginError, ProcessDefinitionDraft, ProcessDefinitionId, ProcessDefinitionStore,
-    ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId,
-    ProcessInput, ProcessRegistry, ReferrerClaim, ResolvedArtifactCleanup, RuntimeErrorCode,
-    StartKey, SubscriptionRevisionId, TriggerStore, TriggerSubscriptionFilter,
-    TriggerSubscriptionLifecycle, artifact_referrer_ended,
+    ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreError,
+    ArtifactStoreId, EffectHost, JournalReplay, ModuleArtifactStore, PluginError,
+    ProcessDefinitionDraft, ProcessDefinitionId, ProcessDefinitionStore, ProcessEngineRegistry,
+    ProcessExecutionEnvRef, ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry,
+    ReferrerClaim, ReferrerGuard, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey,
+    SubscriptionRevisionId, TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle,
+    artifact_referrer_ended,
 };
 
 /// The record a start key registered, as a start's guard carries onto it.
@@ -225,95 +225,89 @@ impl ArtifactCleanupRelay {
             }
         };
         let authorities = &self.ports.authorities;
-        match (&cleanup.plan, &cleanup.referrer) {
-            (ArtifactCleanupPlan::Ended { carries }, ArtifactReferrer::Start(key)) => {
-                self.hold_retained_start(key).await?;
+        match cleanup {
+            ArtifactCleanup::Ended {
+                referrer, carries, ..
+            } => {
+                match referrer {
+                    ArtifactReferrer::Start(key) => self.hold_retained_start(key).await?,
+                    ArtifactReferrer::StartInput { start_key, .. } => {
+                        self.hold_start_input(start_key).await?;
+                    }
+                    ArtifactReferrer::FrameEnvironment(_)
+                    | ArtifactReferrer::ProcessRecord(_)
+                    | ArtifactReferrer::SubscriptionRevision(_)
+                    | ArtifactReferrer::Execution(_)
+                    | ArtifactReferrer::HostPin(_)
+                    | ArtifactReferrer::Session(_)
+                    | ArtifactReferrer::Upload(_) => {}
+                }
                 Ok(Resolution::Carry(carries.clone()))
             }
-            (
-                ArtifactCleanupPlan::Ended { carries },
-                ArtifactReferrer::StartInput { start_key, .. },
-            ) => {
-                self.hold_start_input(start_key).await?;
-                Ok(Resolution::Carry(carries.clone()))
-            }
-            (ArtifactCleanupPlan::Ended { carries }, _) => Ok(Resolution::Carry(carries.clone())),
-            (
-                ArtifactCleanupPlan::AwaitFrame { creator },
-                ArtifactReferrer::FrameEnvironment(frame),
-            ) => {
-                if authorities
-                    .frame_is_retained(frame)
-                    .await
-                    .map_err(retryable_text("frame root read"))?
-                {
-                    return Ok(Resolution::NotYet);
+            ArtifactCleanup::Await(guard) => match guard {
+                ReferrerGuard::Frame { frame, creator } => {
+                    if authorities
+                        .frame_is_retained(frame)
+                        .await
+                        .map_err(retryable_text("frame root read"))?
+                    {
+                        return Ok(Resolution::NotYet);
+                    }
+                    Ok(settled_or_not_yet(self.journal_settled(creator).await?))
                 }
-                Ok(settled_or_not_yet(self.journal_settled(creator).await?))
-            }
-            (ArtifactCleanupPlan::AwaitJournal, ArtifactReferrer::Execution(journal)) => {
-                Ok(settled_or_not_yet(self.journal_settled(journal).await?))
-            }
-            (ArtifactCleanupPlan::AwaitStart { starter }, ArtifactReferrer::Start(key)) => {
-                match authorities
-                    .retained_start(key)
-                    .await
-                    .map_err(retryable_text("start-key read"))?
-                {
-                    Some(retained) => Ok(Resolution::Carry(self.start_carries(&retained).await?)),
-                    None => Ok(settled_or_not_yet(self.journal_settled(starter).await?)),
+                ReferrerGuard::Journal(journal) => {
+                    Ok(settled_or_not_yet(self.journal_settled(journal).await?))
                 }
-            }
-            (
-                ArtifactCleanupPlan::AwaitStart { starter },
-                ArtifactReferrer::StartInput {
-                    start_key,
-                    starter: authority,
-                },
-            ) if starter == authority => {
-                if self.hold_start_input(start_key).await? {
-                    Ok(Resolution::Carry(Vec::new()))
-                } else {
-                    Ok(settled_or_not_yet(self.journal_settled(starter).await?))
+                ReferrerGuard::Start { start_key, starter } => {
+                    match authorities
+                        .retained_start(start_key)
+                        .await
+                        .map_err(retryable_text("start-key read"))?
+                    {
+                        Some(retained) => {
+                            Ok(Resolution::Carry(self.start_carries(&retained).await?))
+                        }
+                        None => Ok(settled_or_not_yet(self.journal_settled(starter).await?)),
+                    }
                 }
-            }
-            (
-                ArtifactCleanupPlan::AwaitSubscriptionRevision { creator },
-                ArtifactReferrer::SubscriptionRevision(revision),
-            ) => {
-                let standing = authorities
-                    .subscription_revision(revision)
-                    .await
-                    .map_err(retryable_text("subscription read"))?;
-                if standing.current || standing.unbound_deliveries {
-                    return Ok(Resolution::NotYet);
+                ReferrerGuard::StartInput { start_key, starter } => {
+                    if self.hold_start_input(start_key).await? {
+                        Ok(Resolution::Carry(Vec::new()))
+                    } else {
+                        Ok(settled_or_not_yet(self.journal_settled(starter).await?))
+                    }
                 }
-                Ok(settled_or_not_yet(self.journal_settled(creator).await?))
-            }
-            (
-                ArtifactCleanupPlan::AwaitUploadExpiry { expires_at_ms },
-                ArtifactReferrer::Upload(upload),
-            ) => {
-                if self.ports.clock.timestamp_ms() >= *expires_at_ms {
-                    return Ok(Resolution::Carry(Vec::new()));
+                ReferrerGuard::SubscriptionRevision { revision, creator } => {
+                    let standing = authorities
+                        .subscription_revision(revision)
+                        .await
+                        .map_err(retryable_text("subscription read"))?;
+                    if standing.current || standing.unbound_deliveries {
+                        return Ok(Resolution::NotYet);
+                    }
+                    Ok(settled_or_not_yet(self.journal_settled(creator).await?))
                 }
-                let state = self.session_state(upload.session_id()).await?;
-                Ok(if state == crate::SessionReferrerState::Live {
-                    Resolution::NotBefore(*expires_at_ms)
-                } else {
-                    Resolution::Carry(Vec::new())
-                })
-            }
-            (ArtifactCleanupPlan::AwaitSessionGraphRetired, ArtifactReferrer::Session(session)) => {
-                let state = self.session_state(session).await?;
-                Ok(settled_or_not_yet(
-                    state == crate::SessionReferrerState::DeletedRetired,
-                ))
-            }
-            (plan, referrer) => Err(DeliveryFailure::Undecodable(format!(
-                "`{}` is not a guard of referrer `{referrer}`",
-                plan.label()
-            ))),
+                ReferrerGuard::Upload {
+                    upload,
+                    expires_at_ms,
+                } => {
+                    if self.ports.clock.timestamp_ms() >= *expires_at_ms {
+                        return Ok(Resolution::Carry(Vec::new()));
+                    }
+                    let state = self.session_state(upload.session_id()).await?;
+                    Ok(if state == crate::SessionReferrerState::Live {
+                        Resolution::NotBefore(*expires_at_ms)
+                    } else {
+                        Resolution::Carry(Vec::new())
+                    })
+                }
+                ReferrerGuard::SessionGraphRetired(session) => {
+                    let state = self.session_state(session).await?;
+                    Ok(settled_or_not_yet(
+                        state == crate::SessionReferrerState::DeletedRetired,
+                    ))
+                }
+            },
         }
     }
 
@@ -326,7 +320,7 @@ impl ArtifactCleanupRelay {
             .attachments
             .session_referrer_state(session)
             .await
-            .map_err(attachment_store_failure)
+            .map_err(durable_store_failure("attachment store"))
     }
 
     /// A registered start's carries: the retained record's environment and
@@ -468,7 +462,7 @@ impl ArtifactCleanupRelay {
             {
                 Ok(true)
             }
-            Err(error) => Err(attachment_store_failure(error)),
+            Err(error) => Err(durable_store_failure("attachment store")(error)),
         }
     }
 
@@ -575,7 +569,7 @@ impl ArtifactCleanupRelay {
                 .attachments
                 .end_attachment_referrer(referrer)
                 .await
-                .map_err(attachment_store_failure)?;
+                .map_err(durable_store_failure("attachment store"))?;
         }
         Ok(())
     }
@@ -593,7 +587,8 @@ fn retryable(context: &'static str) -> impl Fn(PluginError) -> DeliveryFailure {
 /// store failure is retried.
 fn store_failure(context: &'static str) -> impl Fn(ArtifactStoreError) -> DeliveryFailure {
     move |error| match error {
-        ArtifactStoreError::CarryArtifactMissing { .. } => {
+        ArtifactStoreError::CarryArtifactMissing { .. }
+        | ArtifactStoreError::ReferrerKindRefused { .. } => {
             DeliveryFailure::Refused(format!("{context}: {error}"))
         }
         ArtifactStoreError::Incompatible { .. } | ArtifactStoreError::StoredDataCorrupt { .. } => {
@@ -605,12 +600,12 @@ fn store_failure(context: &'static str) -> impl Fn(ArtifactStoreError) -> Delive
 
 /// An attachment-store fault is retried, except a row this build cannot read,
 /// which no retry repairs.
-fn attachment_store_failure(error: crate::StoreError) -> DeliveryFailure {
-    match error {
+fn durable_store_failure(context: &'static str) -> impl Fn(crate::StoreError) -> DeliveryFailure {
+    move |error| match error {
         crate::StoreError::Incompatible { .. } | crate::StoreError::StoredDataCorrupt { .. } => {
-            DeliveryFailure::Undecodable(format!("attachment store: {error}"))
+            DeliveryFailure::Undecodable(format!("{context}: {error}"))
         }
-        other => DeliveryFailure::Retryable(format!("attachment store: {other}")),
+        other => DeliveryFailure::Retryable(format!("{context}: {other}")),
     }
 }
 
@@ -638,18 +633,18 @@ impl ObligationRelay for ArtifactCleanupRelay {
             .ledger
             .load_cleanup(id)
             .await
-            .map_err(|error| DeliveryFailure::Retryable(format!("cleanup read: {error}")))?
+            .map_err(durable_store_failure("cleanup ledger"))?
         else {
             return Ok(());
         };
-        if cleanup.referrer != *referrer {
+        if cleanup.referrer() != *referrer {
             return Err(DeliveryFailure::Undecodable(format!(
                 "cleanup `{id}` names referrer `{}`, not its row's `{referrer}`",
-                cleanup.referrer
+                cleanup.referrer()
             )));
         }
         // 2. Sever nothing while the gate's journal may still replay.
-        if let Some(gate) = &cleanup.gate
+        if let Some(gate) = cleanup.gate()
             && !self.journal_settled(gate).await?
         {
             return Err(DeliveryFailure::NotYet);
@@ -663,7 +658,7 @@ impl ObligationRelay for ArtifactCleanupRelay {
             }
         };
         // 4 and 5. Every store applies its share; only then is it delivered.
-        self.apply(&cleanup.referrer, &carries).await
+        self.apply(&cleanup.referrer(), &carries).await
     }
 }
 

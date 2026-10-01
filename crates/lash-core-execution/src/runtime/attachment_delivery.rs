@@ -10,7 +10,7 @@
 
 use crate::AttachmentReferrers;
 use crate::{AttachmentId, ExecutionScope, PluginError, ProcessAwaitOutput};
-use lash_core_store::artifact_referrer::{ArtifactCleanupPlan, ArtifactReferrer, ReferrerClaim};
+use lash_core_store::artifact_referrer::{ArtifactReferrer, ReferrerClaim, ReferrerGuard};
 use serde::{Deserialize, Serialize};
 
 /// Stored attachment ids of a process terminal output, sorted and
@@ -45,10 +45,7 @@ pub fn receiving_claim(scope: &ExecutionScope) -> Result<ReferrerClaim, PluginEr
                     "a delivery into `{scope:?}` names no journal to hold its attachments: {error}"
                 ))
             })?;
-            ReferrerClaim::guarded(
-                ArtifactReferrer::Execution(journal),
-                ArtifactCleanupPlan::AwaitJournal,
-            )
+            Ok(ReferrerClaim::guarded(ReferrerGuard::Journal(journal)))
         }
     };
     claim.map_err(|error| PluginError::Session(error.to_string()))
@@ -259,12 +256,12 @@ mod tests {
             process_id: process.clone(),
         })
         .expect("a process scope claims through its record");
-        assert_eq!(claim.referrer(), &ArtifactReferrer::ProcessRecord(process));
+        assert_eq!(&claim.referrer(), &ArtifactReferrer::ProcessRecord(process));
 
         let turn = ExecutionScope::turn("session", "turn");
         let claim = receiving_claim(&turn).expect("a turn scope claims through its journal");
         assert_eq!(
-            claim.referrer(),
+            &claim.referrer(),
             &ArtifactReferrer::Execution(turn.journal_identity().expect("a valid turn scope"))
         );
     }

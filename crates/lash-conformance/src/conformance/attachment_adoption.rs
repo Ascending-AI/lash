@@ -284,7 +284,7 @@ pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn Deployme
     );
     let token = permit(store.as_ref(), &attempt).await;
     assert!(
-        matches!(&f.list_condemnations().await.unwrap()[0].provenance, AttachmentCondemnationProvenance::RestoringWrite { referrer } if referrer == attempt.claim.referrer())
+        matches!(&f.list_condemnations().await.unwrap()[0].provenance, AttachmentCondemnationProvenance::RestoringWrite { referrer } if referrer == &attempt.claim.referrer())
     );
     store.abort_attachment_write(&attempt, token).await.unwrap();
     assert!(matches!(

@@ -36,6 +36,10 @@ pub enum AnchorUnavailable {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum StoreRefusal {
+    ReferrerKindRefused {
+        kind: crate::artifact_referrer::ArtifactReferrerKind,
+        store: crate::artifact_referrer::ReferrerStore,
+    },
     Incompatible {
         refusal: crate::compat::CompatRefusal,
     },
@@ -73,6 +77,10 @@ impl StoreRefusal {
     /// Copy the structured refusal, if this store error is one.
     pub fn of_store_error(error: &StoreError) -> Option<Self> {
         match error {
+            StoreError::ReferrerKindRefused { kind, store } => Some(Self::ReferrerKindRefused {
+                kind: *kind,
+                store: *store,
+            }),
             StoreError::Incompatible { refusal } => Some(Self::Incompatible {
                 refusal: refusal.clone(),
             }),
@@ -119,6 +127,7 @@ impl StoreRefusal {
     /// The runtime and remote code for this refusal.
     pub fn code(&self) -> crate::RuntimeErrorCode {
         match self {
+            Self::ReferrerKindRefused { .. } => crate::RuntimeErrorCode::ReferrerKindRefused,
             Self::Incompatible { .. } => crate::RuntimeErrorCode::StoreIncompatible,
             Self::WriterFenced { .. } => crate::RuntimeErrorCode::WriterFenced,
             Self::StoreSessionMismatch { .. } => crate::RuntimeErrorCode::StoreSessionMismatch,
@@ -140,6 +149,9 @@ impl StoreRefusal {
     /// Recover the exact store error this refusal represents.
     pub fn into_store_error(self) -> StoreError {
         match self {
+            Self::ReferrerKindRefused { kind, store } => {
+                StoreError::ReferrerKindRefused { kind, store }
+            }
             Self::Incompatible { refusal } => StoreError::Incompatible { refusal },
             Self::WriterFenced { recorded, writable } => {
                 StoreError::WriterFenced { recorded, writable }
@@ -457,7 +469,7 @@ pub enum StoreError {
     #[error("referrer kind `{kind}` cannot hold {store} bytes")]
     ReferrerKindRefused {
         kind: crate::artifact_referrer::ArtifactReferrerKind,
-        store: &'static str,
+        store: crate::artifact_referrer::ReferrerStore,
     },
     /// An attachment write permit was settled after its attempt had been
     /// superseded by a newer `begin_attachment_write` for the same row. A stale

@@ -617,16 +617,12 @@ impl Processes {
         };
         let mut session_turn_admission = None;
         if registration.env_ref.is_some() || host_session_turn_environment.is_some() {
-            let claim = lash_core::ReferrerClaim::guarded(
-                lash_core::ArtifactReferrer::Execution(
-                    scoped_effect_controller
-                        .execution_scope()
-                        .journal_identity()
-                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
-                ),
-                lash_core::ArtifactCleanupPlan::AwaitJournal,
-            )
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
+                scoped_effect_controller
+                    .execution_scope()
+                    .journal_identity()
+                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+            ));
             if let lash_core::ProcessInput::SessionTurn { create_request, .. } =
                 registration.input.as_ref()
             {

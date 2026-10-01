@@ -1755,23 +1755,18 @@ impl RuntimeAttachmentStore {
             }
             AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Session(id)) => {
                 match &execution {
-                    Some(bound) => crate::artifact_referrer::ReferrerClaim::guarded(
-                        crate::artifact_referrer::ArtifactReferrer::Execution(
-                            bound.journal.clone(),
-                        ),
-                        crate::artifact_referrer::ArtifactCleanupPlan::AwaitJournal,
-                    ),
-                    None => crate::artifact_referrer::ReferrerClaim::guarded(
-                        crate::artifact_referrer::ArtifactReferrer::Upload(
-                            crate::artifact_referrer::UploadReferrerId::mint(id.clone()),
-                        ),
-                        crate::artifact_referrer::ArtifactCleanupPlan::AwaitUploadExpiry {
+                    Some(bound) => Ok(crate::artifact_referrer::ReferrerClaim::guarded(
+                        crate::artifact_referrer::ReferrerGuard::Journal(bound.journal.clone()),
+                    )),
+                    None => Ok(crate::artifact_referrer::ReferrerClaim::guarded(
+                        crate::artifact_referrer::ReferrerGuard::Upload {
+                            upload: crate::artifact_referrer::UploadReferrerId::mint(id.clone()),
                             expires_at_ms: self
                                 .clock
                                 .timestamp_ms()
                                 .saturating_add(self.upload_expiry_ms),
                         },
-                    ),
+                    )),
                 }
             }
             AttachmentHolder::Ephemeral => crate::artifact_referrer::ReferrerClaim::unguarded(

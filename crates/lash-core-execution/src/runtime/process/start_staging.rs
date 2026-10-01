@@ -31,8 +31,8 @@ use super::{
     SessionId, StoreRealization, artifact_referrer_ended,
 };
 use crate::{
-    ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer, ArtifactStoreId,
-    ModuleArtifactStore, ReferrerClaim, RuntimeEffectControllerError, StartKey, TurnFailureCause,
+    ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreId, ModuleArtifactStore,
+    ReferrerClaim, ReferrerGuard, RuntimeEffectControllerError, StartKey, TurnFailureCause,
     runtime::Clock, store::ArtifactCleanupLedger,
 };
 
@@ -235,7 +235,7 @@ fn held_or_ended(
 ) -> Result<Option<ReferrerAcquisition>, crate::PluginError> {
     match acquired {
         Ok(()) => Ok(None),
-        Err(error) if artifact_referrer_ended(&error) == Some(claim.referrer()) => {
+        Err(error) if artifact_referrer_ended(&error) == Some(&claim.referrer()) => {
             Ok(Some(ReferrerAcquisition::Ended))
         }
         Err(error) => Err(error),
@@ -590,13 +590,10 @@ async fn stage_and_register(
     mut registration: ProcessRegistration,
     observers: &[SessionId],
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
-    let claim = ReferrerClaim::guarded(
-        ArtifactReferrer::Start(start_key.clone()),
-        ArtifactCleanupPlan::AwaitStart {
-            starter: stores.starter.clone(),
-        },
-    )
-    .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let claim = ReferrerClaim::guarded(ReferrerGuard::Start {
+        start_key: start_key.clone(),
+        starter: stores.starter.clone(),
+    });
     let env = stage_env(stores, &claim, &registration).await?;
     let env_spec = match env.as_ref() {
         Some(env) => Some(
@@ -725,13 +722,10 @@ async fn stage_input(
             ),
         )
     })?;
-    let claim = ReferrerClaim::guarded(
-        start_input_referrer(stores, start_key),
-        ArtifactCleanupPlan::AwaitStart {
-            starter: stores.starter.clone(),
-        },
-    )
-    .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let claim = ReferrerClaim::guarded(ReferrerGuard::StartInput {
+        start_key: start_key.clone(),
+        starter: stores.starter.clone(),
+    });
     let acquired = ports
         .attachments()
         .acquire_attachment_refs(&claim, &ids)
@@ -739,7 +733,7 @@ async fn stage_input(
     match acquired {
         Ok(()) => return Ok(()),
         Err(crate::StoreError::ArtifactReferrerEnded { referrer })
-            if &referrer == claim.referrer() => {}
+            if referrer == claim.referrer() => {}
         Err(crate::StoreError::UnknownAttachment { digest }) => {
             return Err(RuntimeEffectControllerError::foreign(
                 "process_start_input_attachment_unavailable",
@@ -755,7 +749,7 @@ async fn stage_input(
     let retained = stores.registry.get_process_by_start_key(start_key).await?;
     let Some(retained) = retained else {
         return Err(crate::StoreError::ArtifactReferrerEnded {
-            referrer: claim.referrer().clone(),
+            referrer: claim.referrer(),
         }
         .into());
     };

@@ -31,3 +31,48 @@ fn every_rendered_statement_set_renders() {
     let _ = crate::trigger_store::trigger_sql();
     let _ = crate::turn_ingress::turn_ingress_sql();
 }
+
+#[test]
+fn ddl_referrer_kind_checks_match_typed_predicates() {
+    use lash_core_execution::ArtifactReferrerKind;
+    use std::collections::BTreeSet;
+    let ddl = crate::PostgresStorage::schema_ddl();
+    for (constraint, accepts) in [
+        (
+            "ck_attachment_referrer_edges_kind",
+            ArtifactReferrerKind::holds_attachments as fn(ArtifactReferrerKind) -> bool,
+        ),
+        (
+            "ck_attachment_pending_writes_kind",
+            ArtifactReferrerKind::holds_attachments,
+        ),
+        (
+            "ck_artifact_referrer_edges_kind",
+            ArtifactReferrerKind::holds_artifacts,
+        ),
+        ("ck_referrer_fences_kind", |_| true),
+        ("ck_artifact_cleanup_obligations_kind", |_| true),
+    ] {
+        let line = ddl
+            .lines()
+            .find(|line| line.contains(constraint))
+            .expect("constraint exists");
+        let list = line
+            .split(" IN (")
+            .nth(1)
+            .expect("kind list")
+            .split(')')
+            .next()
+            .expect("end of list");
+        let actual: BTreeSet<_> = list
+            .split(',')
+            .map(|label| label.trim().trim_matches('\''))
+            .collect();
+        let expected: BTreeSet<_> = ArtifactReferrerKind::ALL
+            .into_iter()
+            .filter(|kind| accepts(*kind))
+            .map(ArtifactReferrerKind::as_str)
+            .collect();
+        assert_eq!(actual, expected, "{constraint}");
+    }
+}

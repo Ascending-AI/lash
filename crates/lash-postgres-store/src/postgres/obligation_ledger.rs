@@ -150,13 +150,6 @@ fn corrupt(message: &'static str) -> StoreError {
     }
 }
 
-fn corrupt_cleanup(message: impl ToString) -> StoreError {
-    StoreError::StoredDataCorrupt {
-        record_kind: "artifact_cleanup_obligation",
-        message: message.to_string(),
-    }
-}
-
 /// One cleanup row. A referrer kind a newer build wrote is refused
 /// `Incompatible(UnknownVocabulary)`, never read as corrupt or absent.
 fn cleanup_row(row: &PgRow) -> Result<(ObligationId, ArtifactCleanup), StoreError> {
@@ -166,7 +159,7 @@ fn cleanup_row(row: &PgRow) -> Result<(ObligationId, ArtifactCleanup), StoreErro
     let referrer = ArtifactReferrer::decode(&kind, &referrer_id)
         .map_err(|error| error.into_store_error("artifact_cleanup_obligation"))?;
     let json: String = row.try_get(4).map_err(store_sqlx_error)?;
-    let cleanup = ArtifactCleanup::from_json(&json, &referrer).map_err(corrupt_cleanup)?;
+    let cleanup = ArtifactCleanup::from_json(&json, &referrer)?;
     Ok((id, cleanup))
 }
 
@@ -175,11 +168,11 @@ pub(crate) async fn arm_cleanup_tx(
     cleanup: &ArtifactCleanup,
     now_ms: u64,
 ) -> Result<ObligationId, StoreError> {
-    crate::artifact_store::lock_referrer_tx(conn, &cleanup.referrer)
+    crate::artifact_store::lock_referrer_tx(conn, &cleanup.referrer())
         .await
         .map_err(store_sqlx_error)?;
-    let kind = cleanup.referrer.kind().as_str();
-    let referrer_id = cleanup.referrer.canonical_id();
+    let kind = cleanup.referrer().kind().as_str();
+    let referrer_id = cleanup.referrer().canonical_id();
     let existing = sqlx::query(CLEANUP.select_by_referrer.sql())
         .bind(kind)
         .bind(&referrer_id)
@@ -219,7 +212,7 @@ pub(crate) async fn arm_cleanup_tx(
         }
         CleanupUpsert::Keep => {}
     }
-    if cleanup.plan.is_ended() {
+    if cleanup.is_ended() {
         sqlx::query(
             crate::artifact_store::artifact_sql()
                 .fences

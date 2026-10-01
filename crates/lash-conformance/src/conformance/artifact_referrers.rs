@@ -6,7 +6,8 @@
 use crate::fused_artifact_store::ReopenableArtifactStore;
 use lash_core::{
     ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactReferrerKind, ArtifactStoreError,
-    ArtifactStoreId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
+    ArtifactStoreId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ReferrerGuard,
+    ResolvedArtifactCleanup,
 };
 use lashlang::testing::ast_builders as b;
 use lashlang::{ModuleArtifact, TypeExpr};
@@ -93,11 +94,7 @@ where
     let journal = lash_core::ExecutionScope::runtime_operation("artifact-race")
         .journal_identity()
         .expect("execution journal");
-    let execution = ReferrerClaim::guarded(
-        ArtifactReferrer::Execution(journal),
-        lash_core::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .expect("execution claim");
+    let execution = ReferrerClaim::guarded(ReferrerGuard::Journal(journal));
     handles
         .artifacts
         .publish_module_artifact(&execution, &key, &bytes)
@@ -447,12 +444,8 @@ where
     ))
     .journal_identity()
     .expect("journal");
-    let declaration = ArtifactReferrer::Execution(journal);
-    let claim = ReferrerClaim::guarded(
-        declaration.clone(),
-        lash_core::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .expect("declaration claim");
+    let declaration = ArtifactReferrer::Execution(journal.clone());
+    let claim = ReferrerClaim::guarded(ReferrerGuard::Journal(journal.clone()));
     let bytes = spec.to_store_bytes().expect("environment bytes");
     for env_ref in [&first_ref, &second_ref] {
         store
@@ -524,5 +517,132 @@ where
     assert!(
         matches!(store.publish_process_execution_env(&ended_claim, &first_ref, &spec.to_store_bytes().expect("bytes")).await,
         Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == second)
+    );
+}
+
+/// Artifact kinds are refused before byte lookup, without changing the catalog,
+/// and retain their typed cause through the plugin and host boundaries.
+#[expect(clippy::expect_used, reason = "law validates each store operation")]
+pub async fn attachment_only_referrers_cannot_acquire_artifacts<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let handles = make().open;
+    let env = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::default(),
+        lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ),
+    );
+    let env_ref = env.stable_ref().expect("environment reference");
+    let env_bytes = env.to_store_bytes().expect("environment bytes");
+    let claims = [
+        ReferrerClaim::unguarded(ArtifactReferrer::Session("artifact-kind-refusal".into()))
+            .expect("session claim"),
+        ReferrerClaim::guarded(ReferrerGuard::Upload {
+            upload: lash_core::UploadReferrerId::mint("artifact-kind-refusal".into()),
+            expires_at_ms: 10,
+        }),
+        ReferrerClaim::guarded(ReferrerGuard::StartInput {
+            start_key: lash_core::StartKey::for_host("artifact-kind-refusal"),
+            starter: lash_core::ExecutionScope::runtime_operation("artifact-kind-refusal")
+                .journal_identity()
+                .expect("starter"),
+        }),
+    ];
+    for claim in claims {
+        let kind = claim.referrer().kind();
+        for result in [
+            handles
+                .artifacts
+                .publish_module_artifact(&claim, "refused-module", b"bytes")
+                .await,
+            handles
+                .artifacts
+                .acquire_module_artifact(&claim, "missing-module")
+                .await,
+            handles
+                .process_env
+                .publish_process_execution_env(&claim, &env_ref, &env_bytes)
+                .await,
+            handles
+                .process_env
+                .acquire_process_execution_env(
+                    &claim,
+                    &lash_core::ProcessExecutionEnvRef::new("missing-env"),
+                )
+                .await,
+            handles
+                .artifacts
+                .end_module_referrer(&ResolvedArtifactCleanup {
+                    referrer: ArtifactReferrer::HostPin(HostArtifactPin::mint()),
+                    carries: vec![ArtifactCarry {
+                        artifact: ArtifactName {
+                            store: ArtifactStoreId::module(),
+                            artifact_ref: "missing-module".into(),
+                        },
+                        to: claim.referrer(),
+                    }],
+                })
+                .await,
+            handles
+                .process_env
+                .end_process_env_referrer(&ResolvedArtifactCleanup {
+                    referrer: ArtifactReferrer::HostPin(HostArtifactPin::mint()),
+                    carries: vec![ArtifactCarry {
+                        artifact: ArtifactName {
+                            store: ArtifactStoreId::ProcessEnv,
+                            artifact_ref: "missing-env".into(),
+                        },
+                        to: claim.referrer(),
+                    }],
+                })
+                .await,
+        ] {
+            let error = result
+                .expect_err("attachment-only referrer must be refused before looking up bytes");
+            assert!(
+                matches!(error, ArtifactStoreError::ReferrerKindRefused { kind: found } if found == kind),
+                "{kind} refusal must be typed: {error:?}"
+            );
+            let plugin = lash_core::PluginError::from(error);
+            let refusal = lash_core::store::StoreRefusal::ReferrerKindRefused {
+                kind,
+                store: lash_core::ReferrerStore::Artifact,
+            };
+            assert!(
+                matches!(&plugin, lash_core::PluginError::StoreRefusal(found) if *found == refusal)
+            );
+            let plugin: lash_core::PluginError = serde_json::from_value(
+                serde_json::to_value(plugin).expect("encode plugin refusal"),
+            )
+            .expect("decode plugin refusal");
+            assert!(
+                matches!(&plugin, lash_core::PluginError::StoreRefusal(found) if *found == refusal)
+            );
+            let host = lash_core::RuntimeEffectControllerError::from(plugin).into_runtime_error();
+            assert!(host.is_terminal());
+            let decoded: lash_core::RuntimeError =
+                serde_json::from_value(serde_json::to_value(host).expect("encode host refusal"))
+                    .expect("decode host refusal");
+            assert_eq!(decoded.store_refusal(), Some(&refusal));
+        }
+    }
+    assert_eq!(
+        handles
+            .artifacts
+            .get_module_artifact("refused-module")
+            .await
+            .expect("read"),
+        None
+    );
+    assert_eq!(
+        handles
+            .process_env
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("read"),
+        None
     );
 }

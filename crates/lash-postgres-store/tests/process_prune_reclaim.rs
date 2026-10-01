@@ -193,8 +193,8 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
     .await
     .expect("load cleanup body")
     .expect("prune owes a cleanup");
-    assert_eq!(cleanup.referrer, referrer);
+    assert_eq!(cleanup.referrer(), referrer);
     assert!(
-        matches!(cleanup.plan, lash_core_execution::ArtifactCleanupPlan::Ended { carries } if carries.is_empty())
+        matches!(cleanup, lash_core_execution::ArtifactCleanup::Ended { ref carries, .. } if carries.is_empty())
     );
 }

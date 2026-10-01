@@ -130,7 +130,7 @@ async fn end_guard(backend: &lash_core::Backend, claim: lash_core::ReferrerClaim
         .unwrap();
     backend
         .artifact_cleanup()
-        .nudge(claim.referrer(), backend.clock().timestamp_ms())
+        .nudge(&claim.referrer(), backend.clock().timestamp_ms())
         .await
         .unwrap();
     let verdict = deliver_now(&cleanup(backend), &id, backend.clock().as_ref())
@@ -347,13 +347,15 @@ async fn law(kind: StorageKind, live: bool, abandon: bool) {
     clock.advance(1001);
     end_guard(
         &backend,
-        lash_core::ReferrerClaim::guarded(
-            upload.clone(),
-            lash_core::ArtifactCleanupPlan::AwaitUploadExpiry {
-                expires_at_ms: 11_000,
+        lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Upload {
+            upload: {
+                let lash_core::ArtifactReferrer::Upload(upload) = upload.clone() else {
+                    panic!("fixture referrer kind")
+                };
+                upload
             },
-        )
-        .unwrap(),
+            expires_at_ms: 11000,
+        }),
     )
     .await;
     assert!(
@@ -385,7 +387,7 @@ async fn law(kind: StorageKind, live: bool, abandon: bool) {
         .unwrap();
     assert_eq!(staged.len(), 1, "only input staging remains");
     let staging = staged[0].clone();
-    assert!(staging.kind().is_guarded());
+    assert!(staging.kind().requires_guard());
     if let Engine::Live(engine) = &first {
         engine.stop_serving(true);
     }
@@ -402,16 +404,13 @@ async fn law(kind: StorageKind, live: bool, abandon: bool) {
     // Input staging's cleanup finishes the record acquisition even when the caller left.
     end_guard(
         &backend,
-        lash_core::ReferrerClaim::guarded(
-            staging.clone(),
-            lash_core::ArtifactCleanupPlan::AwaitStart {
-                starter: lash_core::AdmittedScope::runtime_operation("uploaded-start-crash")
-                    .scope()
-                    .journal_identity()
-                    .unwrap(),
-            },
-        )
-        .unwrap(),
+        lash_core::ReferrerClaim::guarded({
+            let lash_core::ArtifactReferrer::StartInput { start_key, starter } = staging.clone()
+            else {
+                panic!("input staging referrer")
+            };
+            lash_core::ReferrerGuard::StartInput { start_key, starter }
+        }),
     )
     .await;
     let refs = backend
@@ -649,13 +648,15 @@ async fn unavailable_input_is_refused(kind: StorageKind, live: bool) {
     clock.advance(1001);
     end_guard(
         &backend,
-        lash_core::ReferrerClaim::guarded(
-            upload,
-            lash_core::ArtifactCleanupPlan::AwaitUploadExpiry {
-                expires_at_ms: 11_000,
+        lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Upload {
+            upload: {
+                let lash_core::ArtifactReferrer::Upload(upload) = upload else {
+                    panic!("fixture referrer kind")
+                };
+                upload
             },
-        )
-        .unwrap(),
+            expires_at_ms: 11000,
+        }),
     )
     .await;
     sweep(&backend).await;

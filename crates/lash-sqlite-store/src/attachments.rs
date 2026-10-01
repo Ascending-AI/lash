@@ -26,10 +26,21 @@ pub(crate) struct AttachmentSql {
     pub(crate) sqlite: AttachmentSqliteStatements,
     pub(crate) sweep_clock: SweepClockStatements,
 }
+const ATTACHMENT_REFERRER_KINDS: lash_store_sql::Vocabulary =
+    lash_store_sql::Vocabulary::new(&[lash_store_sql::VocabularyTerm::new(
+        "attachment_referrer_kind",
+        |column| {
+            lash_core_execution::ArtifactReferrerKind::predicate_sql(
+                column,
+                lash_core_execution::ArtifactReferrerKind::holds_attachments,
+            )
+        },
+    )]);
+
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
     let dialect = Schema::Main.dialect();
     AttachmentSql {
-        edges: AttachmentEdgeStatements::render(dialect),
+        edges: AttachmentEdgeStatements::render(dialect.with_vocabulary(ATTACHMENT_REFERRER_KINDS)),
         pending: PendingWriteStatements::render(dialect),
         uploads: UploadStatements::render(dialect),
         condemnation: CondemnationStatements::render(dialect),
@@ -44,7 +55,7 @@ fn check_kind(referrer: &ArtifactReferrer) -> Result<(), StoreError> {
     if !referrer.kind().holds_attachments() {
         return Err(StoreError::ReferrerKindRefused {
             kind: referrer.kind(),
-            store: "attachment",
+            store: lash_core_execution::ReferrerStore::Attachment,
         });
     }
     ArtifactReferrer::decode(referrer.kind().as_str(), &referrer.canonical_id())
@@ -83,7 +94,7 @@ pub(crate) fn acquire_attachment_refs_conn(
     ids: &[AttachmentId],
     now: u64,
 ) -> Result<(), StoreError> {
-    let referrer = claim.referrer();
+    let referrer = &claim.referrer();
     check_fence(tx, referrer)?;
     let ids = ids.iter().collect::<std::collections::BTreeSet<_>>();
     for id in &ids {
@@ -155,7 +166,7 @@ fn abort_write_conn(
     if !has_permit(tx, write, token)? {
         return Ok(());
     }
-    let referrer = write.claim.referrer();
+    let referrer = &write.claim.referrer();
     crate::conn::cached_execute(
         tx,
         attachment_sql().condemnation.delete_superseded_claim.sql(),
@@ -602,20 +613,25 @@ impl SqliteStore {
                         let referrer = ArtifactReferrer::decode(&kind, &referrer)
                             .map_err(|error| error.into_store_error("attachment pending write"))?;
                         // Abort needs only the referrer; the claim's guard has already been armed.
-                        let cleanup = match &referrer {
-                            ArtifactReferrer::Execution(_) => {
-                                Some(lash_core_execution::ArtifactCleanupPlan::AwaitJournal)
-                            }
-                            ArtifactReferrer::Upload(_) => Some(
-                                lash_core_execution::ArtifactCleanupPlan::AwaitUploadExpiry {
+                        let claim = match referrer {
+                            ArtifactReferrer::Execution(journal) => Ok(ReferrerClaim::guarded(
+                                lash_core_execution::ReferrerGuard::Journal(journal),
+                            )),
+                            ArtifactReferrer::Upload(upload) => Ok(ReferrerClaim::guarded(
+                                lash_core_execution::ReferrerGuard::Upload {
+                                    upload,
                                     expires_at_ms: 0,
                                 },
-                            ),
-                            _ => None,
-                        };
-                        let claim = match cleanup {
-                            Some(guard) => ReferrerClaim::guarded(referrer, guard),
-                            None => ReferrerClaim::unguarded(referrer),
+                            )),
+                            ArtifactReferrer::StartInput { start_key, starter } => {
+                                Ok(ReferrerClaim::guarded(
+                                    lash_core_execution::ReferrerGuard::StartInput {
+                                        start_key,
+                                        starter,
+                                    },
+                                ))
+                            }
+                            referrer => ReferrerClaim::unguarded(referrer),
                         }
                         .map_err(|error| error.into_store_error("attachment pending write"))?;
                         abort_write_conn(
@@ -727,7 +743,7 @@ impl AttachmentReferrers for SqliteStore {
         self.conn
             .write_flow(move |tx| {
                 outcome((|| {
-                    let referrer = write.claim.referrer();
+                    let referrer = &write.claim.referrer();
                     check_fence(tx, referrer)?;
                     let condemnation = tx
                         .query_row(

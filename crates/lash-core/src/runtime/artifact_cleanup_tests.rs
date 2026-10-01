@@ -8,7 +8,7 @@ use crate::store::{
     ClaimToken, ClaimedObligation, ObligationId, ObligationKind, ObligationSettlement,
     ObligationStanding, SettleOutcome, StalledObligation, StoreError,
 };
-use crate::{ArtifactCleanupPlan, ExecutionScope, HostArtifactPin, ReferrerClaim};
+use crate::{ExecutionScope, HostArtifactPin, ReferrerClaim, ReferrerGuard};
 
 fn journal(id: &str) -> lash_sansio::EffectJournalIdentity {
     ExecutionScope::runtime_operation(id)
@@ -35,6 +35,7 @@ fn name(store: ArtifactStoreId, artifact_ref: &str) -> ArtifactName {
 /// A ledger holding one cleanup body per obligation id.
 #[derive(Default)]
 struct Ledger {
+    corrupt_reads: std::sync::atomic::AtomicBool,
     rows: Mutex<BTreeMap<ObligationId, ArtifactCleanup>>,
 }
 
@@ -109,7 +110,7 @@ impl ArtifactCleanupLedger for Ledger {
         cleanup: &ArtifactCleanup,
         _now_ms: u64,
     ) -> Result<ObligationId, StoreError> {
-        let id = ObligationId::new(format!("core:{}", cleanup.referrer.canonical_id()));
+        let id = ObligationId::new(format!("core:{}", cleanup.referrer().canonical_id()));
         self.rows
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -122,6 +123,12 @@ impl ArtifactCleanupLedger for Ledger {
     }
 
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {
+        if self.corrupt_reads.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind: "artifact_cleanup_obligation",
+                message: "guard does not match row kind".into(),
+            });
+        }
         Ok(self
             .rows
             .lock()
@@ -226,9 +233,9 @@ impl Applied {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        if fenced.as_ref() == Some(claim.referrer()) {
+        if fenced.as_ref() == Some(&claim.referrer()) {
             return Err(ArtifactStoreError::ReferrerEnded {
-                referrer: claim.referrer().clone(),
+                referrer: claim.referrer(),
             });
         }
         if self
@@ -245,7 +252,7 @@ impl Applied {
         self.acquired
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push((claim.referrer().clone(), artifact_ref.to_owned()));
+            .push((claim.referrer(), artifact_ref.to_owned()));
         Ok(())
     }
 }
@@ -482,9 +489,9 @@ fn harness() -> Harness {
 
 impl Harness {
     fn arm(&self, cleanup: ArtifactCleanup) -> (ObligationId, ObligationKey) {
-        let id = ObligationId::new(format!("core:{}", cleanup.referrer.canonical_id()));
+        let id = ObligationId::new(format!("core:{}", cleanup.referrer().canonical_id()));
         let key = ObligationKey::ArtifactCleanup {
-            referrer: cleanup.referrer.clone(),
+            referrer: cleanup.referrer(),
         };
         self.ledger
             .rows
@@ -625,8 +632,7 @@ async fn an_execution_guard_ends_when_its_journal_settles() {
     let harness = harness();
     let scope = journal("cell");
     let referrer = ArtifactReferrer::Execution(scope.clone());
-    let guard = ReferrerClaim::guarded(referrer.clone(), ArtifactCleanupPlan::AwaitJournal)
-        .expect("an execution guard")
+    let guard = ReferrerClaim::guarded(ReferrerGuard::Journal(scope.clone()))
         .guard_cleanup()
         .expect("a guarded claim arms a cleanup");
     assert_eq!(
@@ -661,13 +667,10 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
         definition_id: None,
     });
     let start = ArtifactReferrer::Start(start_key());
-    let guard = ArtifactCleanup {
-        referrer: start.clone(),
-        plan: ArtifactCleanupPlan::AwaitStart {
-            starter: journal("starter"),
-        },
-        gate: None,
-    };
+    let guard = ArtifactCleanup::Await(ReferrerGuard::Start {
+        start_key: start_key(),
+        starter: journal("starter"),
+    });
     assert_eq!(harness.deliver(guard).await, Ok(()));
     let to = ArtifactReferrer::ProcessRecord(process_id);
     let carry = |artifact: ArtifactName| ArtifactCarry {
@@ -738,13 +741,10 @@ async fn a_start_by_id_carries_its_descriptor_and_manifest_onto_its_record() {
         definition_id: Some(id.clone()),
     });
     let start = ArtifactReferrer::Start(start_key());
-    let guard = ArtifactCleanup {
-        referrer: start.clone(),
-        plan: ArtifactCleanupPlan::AwaitStart {
-            starter: journal("starter"),
-        },
-        gate: None,
-    };
+    let guard = ArtifactCleanup::Await(ReferrerGuard::Start {
+        start_key: start_key(),
+        starter: journal("starter"),
+    });
     assert_eq!(harness.deliver(guard).await, Ok(()));
     let to = ArtifactReferrer::ProcessRecord(process_id);
     let carry = |artifact: ArtifactName| ArtifactCarry {
@@ -877,13 +877,10 @@ async fn a_start_that_never_registered_ends_when_its_starter_settles() {
     let harness = harness();
     let starter = journal("starter");
     let start = ArtifactReferrer::Start(start_key());
-    let guard = ArtifactCleanup {
-        referrer: start.clone(),
-        plan: ArtifactCleanupPlan::AwaitStart {
-            starter: starter.clone(),
-        },
-        gate: None,
-    };
+    let guard = ArtifactCleanup::Await(ReferrerGuard::Start {
+        start_key: start_key(),
+        starter: starter.clone(),
+    });
     assert_eq!(
         harness.deliver(guard.clone()).await,
         Err(DeliveryFailure::NotYet)
@@ -903,16 +900,12 @@ async fn a_start_that_never_registered_ends_when_its_starter_settles() {
 async fn a_subscription_revision_waits_for_currency_bindings_and_its_creator() {
     let harness = harness();
     let creator = journal("register");
-    let revision = ArtifactReferrer::SubscriptionRevision(
-        SubscriptionRevisionId::new("sub".to_owned(), "inc".to_owned(), 2).expect("revision"),
-    );
-    let guard = ArtifactCleanup {
-        referrer: revision,
-        plan: ArtifactCleanupPlan::AwaitSubscriptionRevision {
-            creator: creator.clone(),
-        },
-        gate: None,
-    };
+    let revision =
+        SubscriptionRevisionId::new("sub".to_owned(), "inc".to_owned(), 2).expect("revision");
+    let guard = ArtifactCleanup::Await(ReferrerGuard::SubscriptionRevision {
+        revision,
+        creator: creator.clone(),
+    });
     harness.authorities.settle(&creator);
     for standing in [
         SubscriptionRevisionStanding {
@@ -1026,21 +1019,6 @@ async fn cleanup_never_counts_an_undecodable_edge_as_absent() {
 }
 
 #[tokio::test]
-async fn a_guard_that_does_not_fit_its_referrer_is_undecodable() {
-    let harness = harness();
-    let mismatched = ArtifactCleanup {
-        referrer: host_pin(),
-        plan: ArtifactCleanupPlan::AwaitJournal,
-        gate: None,
-    };
-    assert!(matches!(
-        harness.deliver(mismatched).await,
-        Err(DeliveryFailure::Undecodable(_))
-    ));
-    assert!(harness.nothing_applied());
-}
-
-#[tokio::test]
 async fn a_prepared_frame_is_reclaimed_only_after_its_failed_commit_cannot_replay() {
     let harness = harness();
     let scope = journal("failed-frame-prepare");
@@ -1048,17 +1026,15 @@ async fn a_prepared_frame_is_reclaimed_only_after_its_failed_commit_cannot_repla
         crate::SessionId::from("carry"),
         crate::FrameNodeId::new("old").unwrap(),
     ));
-    let successor = ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
+    let successor_frame = crate::FrameEnvironmentId::new(
         crate::SessionId::from("carry"),
         crate::FrameNodeId::new("never-committed").unwrap(),
-    ));
-    let claim = ReferrerClaim::guarded(
-        successor.clone(),
-        ArtifactCleanupPlan::AwaitFrame {
-            creator: scope.clone(),
-        },
-    )
-    .unwrap();
+    );
+    let successor = ArtifactReferrer::FrameEnvironment(successor_frame.clone());
+    let claim = ReferrerClaim::guarded(ReferrerGuard::Frame {
+        frame: successor_frame,
+        creator: scope.clone(),
+    });
     let ports = crate::ArtifactReferrerPorts::new(
         Arc::new(Modules(harness.applied.clone())),
         Arc::new(EnvStore(harness.applied.clone())),
@@ -1131,17 +1107,15 @@ async fn a_prepared_frame_is_reclaimed_only_after_its_failed_commit_cannot_repla
 async fn a_committed_prepared_frame_retains_its_engine_share_until_ended_without_a_carry() {
     let harness = harness();
     let scope = journal("committed-frame-prepare");
-    let frame = ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
+    let frame_id = crate::FrameEnvironmentId::new(
         crate::SessionId::from("carry"),
         crate::FrameNodeId::new("committed").unwrap(),
-    ));
-    let guard = ReferrerClaim::guarded(
-        frame.clone(),
-        ArtifactCleanupPlan::AwaitFrame {
-            creator: scope.clone(),
-        },
-    )
-    .unwrap()
+    );
+    let frame = ArtifactReferrer::FrameEnvironment(frame_id.clone());
+    let guard = ReferrerClaim::guarded(ReferrerGuard::Frame {
+        frame: frame_id,
+        creator: scope.clone(),
+    })
     .guard_cleanup()
     .unwrap();
     *harness.authorities.frame_retained.lock().unwrap() = true;
@@ -1154,4 +1128,21 @@ async fn a_committed_prepared_frame_retains_its_engine_share_until_ended_without
         .unwrap();
     let (_, _, engine) = harness.applied();
     assert_eq!(engine, vec![resolved(&frame, vec![])]);
+}
+
+#[tokio::test]
+async fn corrupt_cleanup_read_stalls_without_applying() {
+    let harness = harness();
+    harness
+        .ledger
+        .corrupt_reads
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let result = harness
+        .deliver(ArtifactCleanup::ended(host_pin(), vec![], None))
+        .await;
+    assert!(
+        matches!(result, Err(DeliveryFailure::Undecodable(_))),
+        "corruption cannot retry: {result:?}"
+    );
+    assert!(harness.nothing_applied());
 }

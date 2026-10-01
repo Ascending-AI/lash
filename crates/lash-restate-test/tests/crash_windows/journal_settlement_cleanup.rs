@@ -264,13 +264,9 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
             Vec::new(),
             Some(journal.clone()),
         ),
-        lash_core::ReferrerClaim::guarded(
-            ArtifactReferrer::Execution(journal.clone()),
-            lash_core::ArtifactCleanupPlan::AwaitJournal,
-        )
-        .unwrap()
-        .guard_cleanup()
-        .unwrap(),
+        lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(journal.clone()))
+            .guard_cleanup()
+            .unwrap(),
     ];
     let relay = cleanup_relay(&backend);
     let mut ids: Vec<ObligationId> = Vec::new();

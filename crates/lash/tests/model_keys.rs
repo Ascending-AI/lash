@@ -2358,15 +2358,11 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
         lash_core::AdmittedPluginConfig::default(),
         policy.clone(),
     );
-    let claim = lash_core::ReferrerClaim::guarded(
-        lash_core::ArtifactReferrer::Execution(
-            lash_core::ExecutionScope::runtime_operation("host-reasoning-fixture")
-                .journal_identity()
-                .expect("fixture journal"),
-        ),
-        lash_core::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .expect("fixture claim");
+    let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
+        lash_core::ExecutionScope::runtime_operation("host-reasoning-fixture")
+            .journal_identity()
+            .expect("fixture journal"),
+    ));
     let env_ref = lash_core::publish_process_execution_env(
         double.double.stores().process_env_store().as_ref(),
         &claim,

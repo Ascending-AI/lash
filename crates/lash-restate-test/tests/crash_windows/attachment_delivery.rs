@@ -91,9 +91,9 @@ impl AttachmentReferrers for FaultingAttachments {
         let fault = {
             let mut selected = self.trace.fault.lock().unwrap();
             let matches = selected.as_ref().is_some_and(|(target, _)| {
-                target == claim.referrer()
+                target == &claim.referrer()
                     || matches!(target, ArtifactReferrer::ProcessRecord(id) if id == ProcessId::fixture("start-input"))
-                        && matches!(claim.referrer(), ArtifactReferrer::ProcessRecord(_))
+                        && matches!(&claim.referrer(), ArtifactReferrer::ProcessRecord(_))
             });
             matches.then(|| selected.take().unwrap().1)
         };
@@ -103,7 +103,7 @@ impl AttachmentReferrers for FaultingAttachments {
             .unwrap()
             .push(claim.referrer().clone());
         if self.trace.start
-            && let ArtifactReferrer::ProcessRecord(id) = claim.referrer()
+            && let ArtifactReferrer::ProcessRecord(id) = &claim.referrer()
         {
             assert!(
                 self.registry.get_process(id).await.unwrap().is_some(),
@@ -753,7 +753,7 @@ async fn delivery_law(storage: Storage, live: bool) {
             harness
                 .backend()
                 .attachment_referrers()
-                .end_attachment_referrer(claim.referrer())
+                .end_attachment_referrer(&claim.referrer())
                 .await
                 .unwrap();
         } else {
@@ -811,7 +811,7 @@ async fn delivery_law(storage: Storage, live: bool) {
             .await
             .unwrap();
         assert_eq!(
-            edges.contains(claim.referrer()),
+            edges.contains(&claim.referrer()),
             case == 2,
             "ended receivers gain no edge"
         );
@@ -820,7 +820,7 @@ async fn delivery_law(storage: Storage, live: bool) {
             .lock()
             .unwrap()
             .iter()
-            .filter(|r| *r == claim.referrer())
+            .filter(|r| *r == &claim.referrer())
             .count();
         assert_eq!(
             attempts,

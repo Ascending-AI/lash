@@ -114,7 +114,7 @@ impl lash_core::ProcessEngine for Engine {
         artifact_ref: &str,
     ) -> Result<(), lash_core::PluginError> {
         let fences = self.0.fences.lock_recover();
-        if fences.contains(claim.referrer()) {
+        if fences.contains(&claim.referrer()) {
             return Err(ArtifactStoreError::ReferrerEnded {
                 referrer: claim.referrer().clone(),
             }
@@ -127,7 +127,7 @@ impl lash_core::ProcessEngine for Engine {
                 .ok_or_else(|| ArtifactStoreError::ArtifactMissing {
                     artifact_ref: artifact_ref.into(),
                 })?;
-        if !held.contains(claim.referrer()) {
+        if !held.contains(&claim.referrer()) {
             held.push(claim.referrer().clone());
         }
         Ok(())

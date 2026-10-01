@@ -33,6 +33,7 @@ pub enum RuntimeErrorCode {
     ArtifactReferrerEnded,
     /// An artifact acquire named bytes that are not stored.
     ArtifactMissing,
+    ReferrerKindRefused,
     /// A process definition id names no stored descriptor: nothing holds it
     /// (ADR 0113 §3.6). A missing definition is never an empty success.
     DefinitionMissing,
@@ -689,6 +690,7 @@ impl RuntimeErrorCode {
             Self::AttachmentSourcePolicyDenied => "attachment_source_policy_denied",
             Self::ArtifactReferrerEnded => "artifact_referrer_ended",
             Self::ArtifactMissing => "artifact_missing",
+            Self::ReferrerKindRefused => "referrer_kind_refused",
             Self::DefinitionMissing => "definition_missing",
             Self::DefinitionRefused => "definition_refused",
             Self::WorkerCheckoutTimedOut => "worker_checkout_timed_out",
@@ -971,6 +973,7 @@ impl RuntimeErrorCode {
             "attachment_source_policy_denied" => Self::AttachmentSourcePolicyDenied,
             "artifact_referrer_ended" => Self::ArtifactReferrerEnded,
             "artifact_missing" => Self::ArtifactMissing,
+            "referrer_kind_refused" => Self::ReferrerKindRefused,
             "definition_missing" => Self::DefinitionMissing,
             "definition_refused" => Self::DefinitionRefused,
             "worker_checkout_timed_out" => Self::WorkerCheckoutTimedOut,

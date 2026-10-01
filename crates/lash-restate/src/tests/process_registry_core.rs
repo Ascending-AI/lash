@@ -1252,16 +1252,12 @@ pub(super) async fn start_recovery_effect(
     spec: &lash_core::ProcessExecutionEnvSpec,
 ) -> RuntimeEffectEnvelope {
     let key = lash_core::StartKey::for_host(start_key);
-    let claim = lash_core::ReferrerClaim::guarded(
-        lash_core::ArtifactReferrer::Execution(
-            runtime_invocation(RuntimeEffectKind::Process, start_key)
-                .execution_scope()
-                .journal_identity()
-                .expect("starter journal"),
-        ),
-        lash_core::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .expect("start claim");
+    let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
+        runtime_invocation(RuntimeEffectKind::Process, start_key)
+            .execution_scope()
+            .journal_identity()
+            .expect("starter journal"),
+    ));
     let env_ref = lash_core::publish_process_execution_env(env_store, &claim, spec)
         .await
         .expect("publish start environment");

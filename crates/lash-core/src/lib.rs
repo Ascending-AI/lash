@@ -580,9 +580,9 @@ pub use triggers::{
 
 pub(crate) mod facade_ops {}
 pub use lash_core_execution::{
-    ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
-    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup, RuntimeOwner,
+    ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactReferrerError,
+    ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId, FrameEnvironmentId, HostArtifactPin,
+    ReferrerClaim, ReferrerGuard, ReferrerStore, ResolvedArtifactCleanup, RuntimeOwner,
     SubscriptionRevisionId, UploadReferrerId, artifact_referrer_ended, trigger_incarnation,
 };
 pub use lash_core_execution::{

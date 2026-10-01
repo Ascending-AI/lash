@@ -22,9 +22,9 @@ pub use tokio_util::sync::CancellationToken;
 
 pub use lash_core_store::admitted_scope::wire as admitted_scope_wire;
 pub use lash_core_store::artifact_referrer::{
-    ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
-    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId,
-    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
+    ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactReferrerError,
+    ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId, FrameEnvironmentId, HostArtifactPin,
+    ReferrerClaim, ReferrerGuard, ReferrerStore, ResolvedArtifactCleanup,
     SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId, UploadReferrerId,
 };
 pub use lash_core_store::attachments;

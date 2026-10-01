@@ -145,13 +145,9 @@ pub(super) async fn delete_session_from_catalog(
             if existed {
                 crate::obligation_ledger::arm_cleanup_tx(
                     tx,
-                    &lash_core_execution::ArtifactCleanup {
-                        referrer: lash_core_execution::ArtifactReferrer::Session(
-                            session_id.clone(),
-                        ),
-                        plan: lash_core_execution::ArtifactCleanupPlan::AwaitSessionGraphRetired,
-                        gate: None,
-                    },
+                    &lash_core_execution::ArtifactCleanup::Await(
+                        lash_core_execution::ReferrerGuard::SessionGraphRetired(session_id.clone()),
+                    ),
                     now_ms,
                     "core",
                 )?;

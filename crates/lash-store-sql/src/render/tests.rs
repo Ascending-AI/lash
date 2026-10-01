@@ -443,6 +443,7 @@ fn every_owned_statement_renders_for_both_backends() {
         VocabularyTerm::new("terminal_turn_input_state", stub_predicate),
         VocabularyTerm::new("undelivered_turn_input_state", stub_predicate),
         VocabularyTerm::new("ingress_turn_id", stub_predicate),
+        VocabularyTerm::new("attachment_referrer_kind", stub_predicate),
     ]);
 
     for statement in crate::all_statements() {

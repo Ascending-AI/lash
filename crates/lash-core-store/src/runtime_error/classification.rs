@@ -75,7 +75,7 @@ impl RuntimeErrorCode {
             // a permanent fence already ended the referrer.
             Self::ArtifactReferrerEnded => Terminal,
             // the bytes are not stored; a redrive reads the same state.
-            Self::ArtifactMissing => Terminal,
+            Self::ArtifactMissing | Self::ReferrerKindRefused => Terminal,
             // no referrer holds the descriptor; a redrive reads the same state.
             Self::DefinitionMissing => Terminal,
             // the engine judges the immutable descriptor, so it refuses it again.
