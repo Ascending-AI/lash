@@ -103,8 +103,13 @@ The external test runner uses Buck2's Execute2 API. Its Python wheels and
 upstream protocol definitions are checksum-pinned and private to the checkout.
 `--test-report PATH` records actual verdicts and action/cache metadata.
 `--test-output-dir DIR` contains `<cell>/<package>/<target>/test.xml`, `test.log`
-and the complete `undeclared` receipt tree. Timeouts, cancellation and malformed
-reports preserve failure evidence. Service inputs force local uncached test
+and the complete `undeclared` receipt tree. Without those flags each invocation
+writes under `.buck2/test-invocations/<id>/` and links the default paths to it
+when it ends. Each test stage carries a variant derived from its selection, so
+[concurrent invocations](../../docs/agents/hermetic-build.md#concurrent-invocations)
+of one target never share Buck2's declared-output directory, and a report that
+does not match its selection is an infrastructure failure. Timeouts,
+cancellation and malformed reports preserve failure evidence. Service inputs force local uncached test
 execution while compilation remains remote and cacheable.
 
 Callers that execute build outputs request `--materializations final` and use

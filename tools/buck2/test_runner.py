@@ -2,6 +2,9 @@
 """Lash external test runner for Buck2's documented v2 test protocol."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,7 +17,9 @@ import tempfile
 import threading
 import xml.etree.ElementTree as ET
 
-from runner_bootstrap import activate, safe_directory
+from junit_xml import libtest_cases
+from libtest_selection import ARGUMENT_MARKER, VALUE_FLAGS
+from runner_bootstrap import ROOT, activate, safe_directory
 from service_policy import needs_local_uncached
 
 activate()
@@ -126,6 +131,99 @@ def copy_outputs(root, spec, result, stdout, stderr):
     return outputs
 
 
+def selection_variant(test_args, runtime_env, timeout, local, uncached):
+    """Name the Buck2 output root after everything this runner adds to a test.
+
+    Buck2 places a test's declared outputs under a directory named by its
+    target and by the stage's variant, never by its command. Without a variant,
+    every execution of one target shares that directory, so two invocations
+    with different filters read each other's `test.xml`. The name is a
+    function of the selection alone, which keeps the remote action, and so the
+    cached verdict, the same for the same selection in every checkout.
+    """
+    selection = json.dumps([test_args, sorted(runtime_env.items()), timeout, local, uncached])
+    return 'lash-' + hashlib.sha256(selection.encode()).hexdigest()[:16]
+
+
+@contextmanager
+def output_lease(directory, label, configuration, variant):
+    """Hold one target's output root for one selection across invocations.
+
+    Invocations that run the same selection of the same target still share an
+    output root. The lease runs them one after another, from execution until
+    the outputs are copied out. It ends with the process that holds it.
+    """
+    name = hashlib.sha256('\0'.join((label, configuration, variant)).encode()).hexdigest()
+    fd = os.open(directory / (name + '.lock'), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def libtest_arguments(spec, test_args):
+    """Return the libtest arguments this runner can read, and whether that is all of them."""
+    baked = []
+    complete = True
+    marker = False
+    for arg in spec.command:
+        if marker:
+            if arg.WhichOneof('value') == 'verbatim':
+                baked.append(arg.verbatim)
+            else:
+                complete = False
+        elif arg.WhichOneof('value') == 'verbatim' and arg.verbatim == ARGUMENT_MARKER:
+            marker = True
+    return baked + list(test_args), complete
+
+
+def selection_filters(args):
+    """Split libtest arguments into positional filters and skipped patterns."""
+    filters, skips = [], []
+    arguments = iter(args)
+    for arg in arguments:
+        if arg == '--skip':
+            skips.append(next(arguments, ''))
+        elif arg.startswith('--skip='):
+            skips.append(arg.removeprefix('--skip='))
+        elif arg in VALUE_FLAGS:
+            next(arguments, None)
+        elif arg and not arg.startswith('-'):
+            filters.append(arg)
+    return filters, skips
+
+
+def report_mismatch(xml, stdout, args, complete):
+    """Say how a JUnit report differs from the selection that was executed.
+
+    A report belongs to its execution when it names the cases that execution
+    printed and no case outside the requested filters. Anything else is another
+    execution's report, whatever put it there, and must not pass.
+    """
+    reported = {
+        case.get('name') for case in ET.parse(xml).getroot().iter('testcase')
+        # A suite-named case records the binary's exit, not a test.
+        if case.get('name') != case.get('classname')
+    }
+    printed = set(libtest_cases(stdout)[0])
+    if printed and printed != reported:
+        strays = sorted(printed ^ reported)
+        return f'the report and the test output disagree on {len(strays)} cases, e.g. {strays[0]}'
+    filters, skips = selection_filters(args)
+    exact = '--exact' in args
+
+    def matches(pattern, name):
+        return name == pattern if exact else pattern in name
+
+    for name in sorted(reported):
+        if any(matches(skip, name) for skip in skips):
+            return f'the report names {name}, which the selection skips'
+        if filters and complete and not any(matches(selector, name) for selector in filters):
+            return f'the report names {name}, which is outside the selection {" ".join(filters)}'
+    return None
+
+
 def execute_test(client, spec, options, runtime_env):
     label = f'{spec.target.cell}//{spec.target.package}:{spec.target.target}'
     target_timeouts = [int(label.split('=', 1)[1]) for label in spec.labels if label.startswith('lash.timeout_seconds=')]
@@ -139,22 +237,30 @@ def execute_test(client, spec, options, runtime_env):
     env['LASH_TEST_TIMEOUT_SECONDS'] = value(pb.ExternalRunnerSpecValue(verbatim=str(timeout)))
     env['XML_OUTPUT_FILE'] = declared('junit', '{}/test.xml')
     env['TEST_UNDECLARED_OUTPUTS_DIR'] = declared('undeclared')
+    service = needs_local_uncached(set(spec.env) | set(runtime_env), spec.labels)
+    local = bool(options.local_test_execution or service)
+    uncached = bool(options.no_test_cache or service)
+    variant = selection_variant(options.test_arg, runtime_env, timeout, local, uncached)
     executable = pb.TestExecutable(
         target=spec.target.handle,
-        stage=pb.TestStage(testing=pb.Testing(suite=spec.target.target)),
+        stage=pb.TestStage(testing=pb.Testing(suite=spec.target.target, variant=variant)),
         cmd=command,
         env=[pb.EnvironmentVariable(key=key, value=val) for key, val in sorted(env.items())],
         pre_create_dirs=[pb.DeclaredOutput(name=name, supports_remote=False) for name in ('junit', 'undeclared')],
     )
-    service = needs_local_uncached(set(spec.env) | set(runtime_env), spec.labels)
     request = pb.ExecuteRequest2(
         test_executable=executable,
         host_sharing_requirements=host.HostSharingRequirements(shared=host.HostSharingRequirements.Shared(weight_class=host.WeightClass(permits=1))),
-        disable_test_execution_caching=options.no_test_cache or service,
+        disable_test_execution_caching=uncached,
     )
     request.timeout.seconds = timeout + 15
-    if options.local_test_execution or service:
+    if local:
         request.executor_override.name = 'local'
+    with output_lease(options.leases, label, spec.target.configuration, variant):
+        return report_execution(client, spec, options, label, request, service)
+
+
+def report_execution(client, spec, options, label, request, service):
     response = client.Execute2(request)
     if response.WhichOneof('response') == 'cancelled':
         report = {'label': label, 'status': 'OMITTED', 'exit_code': None, 'outputs': {}, 'cache': None, 'stdout': '', 'stderr': '', 'configuration': spec.target.configuration}
@@ -171,7 +277,9 @@ def execute_test(client, spec, options, runtime_env):
     xml = outputs.get('junit_xml')
     if xml:
         try:
-            ET.parse(xml)
+            mismatch = report_mismatch(xml, stdout, *libtest_arguments(spec, options.test_arg))
+            if mismatch:
+                output_errors.append(f'Test report does not match its selection: {mismatch}')
         except (ET.ParseError, OSError) as error:
             output_errors.append(f'Invalid per-case XML report: {error}')
     else:
@@ -257,6 +365,7 @@ def arguments():
     run.test_report = run.test_report.absolute()
     run.test_output_dir = safe_directory(run.test_output_dir.absolute(), private=False)
     safe_directory(run.test_report.parent, private=False)
+    run.leases = safe_directory(ROOT / '.buck2' / 'test-leases')
     return transport, run
 
 

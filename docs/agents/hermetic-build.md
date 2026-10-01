@@ -332,6 +332,10 @@ Tests use a separate repository runner through Buck2's documented
 interface. It asks Buck2 to execute actual test actions with declared outputs.
 Passing cache hits retain their verdict and reports; failures remain failed
 tests. Batches preserve one XML suite per member and a case per libtest result.
+A result is read even when the test's own output separates it from its name,
+as under `--nocapture`. The cases must add up to libtest's `test result:`
+summary; a report that does not is an error in its suite and fails the test.
+Output that names no test, as under `--format terse`, is not checked.
 Arguments reach every member; a filter matching no member fails. Use a direct
 member label for a narrow filter.
 
@@ -341,11 +345,45 @@ kiln test //crates/lash-sansio:lash-sansio__unit_test \
   --test-output-dir /tmp/lash-test-results
 ```
 
-The default stable directory is `.buck2/test-results`. Each target has a
+The default stable paths are `.buck2/test-report.json` and
+`.buck2/test-results`. Each target has a
 `<cell>/<package>/<target>` directory containing `test.xml`, `test.log` and
 an undeclared-output directory for law receipts and
 similar witnesses. Consumers resolve these through the structured test report
 instead of guessing configuration hashes under `buck-out`.
+
+An invocation that names neither path writes under its own
+`.buck2/test-invocations/<id>/`. When it ends, the two default paths become
+links to what it wrote, and it prints both link targets. The default paths
+therefore show the invocation that finished last, whole. When invocations
+overlap, read the printed paths or name your own. A finished invocation's
+directory is kept for an hour, and for as long as a default path points to it.
+
+### Concurrent invocations
+
+Concurrent `kiln` commands in one fork are safe, including two `kiln test`
+commands on the same test binary with different filters.
+
+- **Selection.** Buck2 names a test's declared-output directory after its
+  target and the stage variant, not its command. The runner sets the variant
+  to a digest of the test arguments, runtime environment, timeout and
+  execution mode, so two selections of one binary never share a `test.xml`.
+  The digest depends on the selection alone, which keeps cached verdicts
+  shared between checkouts. Invocations that run the same selection of the
+  same target take turns on a lease under `.buck2/test-leases`.
+- **Reports.** The report, the per-target directories and the `run-<k>`
+  repetition directories are private to each invocation, as above.
+- **Mismatch guard.** A report must name the cases its own execution printed
+  and no case outside the requested filters or behind a requested `--skip`.
+  Otherwise the test is an `INFRA_FAILURE` whose message starts
+  `Test report does not match its selection`. It never passes.
+- **`--jobs`.** A command whose `--jobs` differs from the running daemon's
+  waits for every running command to finish before it restarts the daemon. It
+  never restarts the daemon under another command. Overlapping loops with
+  different `--jobs` restart the daemon at every handoff, so give them one
+  value.
+- **Build and test together.** Both hold a shared lease on the daemon and run
+  at once. Buck2 itself orders commands whose configuration differs.
 
 Artifact consumers request final materialization and use the native build report:
 
@@ -378,7 +416,8 @@ kiln test //crates/lash-store-sql:lash-store-sql__unit_test \
 
 `--runs_per_test=N` runs `buck2 test` N times with `--no-test-cache`, so every
 run executes instead of reusing a cached verdict. Run `k` writes its report,
-`test.xml` and `test.log` under `<test-output-dir>/run-<k>/`. The driver prints
+`test.xml` and `test.log` under `<test-output-dir>/run-<k>/`. Repetitions of
+different cases may [run at once](#concurrent-invocations). The driver prints
 each run's passed and failed case counts. The invocation fails if any run fails,
 reuses a cached verdict or executes zero cases. A zero-case run stops the
 repetition: a bare name under `--exact` matches nothing. Use the full module

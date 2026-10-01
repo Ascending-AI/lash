@@ -2,17 +2,21 @@
 """Repository build entrypoint using the pinned, unmodified Buck2 release."""
 import argparse
 import configparser
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 
 from service_policy import needs_local_uncached
-from invocation import regular_file, run_command
+from invocation import lock, regular_file, run_command
 from test_selection import skipped_line
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +63,10 @@ CARGO_ONLY = {
     'cargo-trybuild': 'trybuild runs Cargo, which the Buck2 sandbox does not provide; test {package}:ui_fixtures, which seals the same .stderr pins, or run `just seal` (cargo test --workspace --locked --test ui)',
 }
 FEATURE_VARIANT = re.compile(r'__fv_[0-9a-f]+$')
+# Where a test invocation that names no report or output directory leaves them.
+TEST_DEFAULTS = {'test_report': '.buck2/test-report.json', 'test_output_dir': '.buck2/test-results'}
+# How long a finished invocation's private outputs outlive it unpublished.
+TEST_OUTPUT_RETENTION_SECONDS = 3600
 
 
 def validate_remote_configuration(path):
@@ -309,7 +317,7 @@ def command(options, remaining, executable, root, inventory=None, skipped=None):
         result += ['-c', f'test.v2_test_executor={root / "tools/buck2/test_runner.py"}']
         if '--' in args:
             raise ValueError('Use --test_arg for test arguments')
-        result += args + ['--', '--test-report', str((options.test_report or root / '.buck2/test-report.json').absolute()), '--test-output-dir', str((options.test_output_dir or root / '.buck2/test-results').absolute()), '--max-concurrency', str(options.jobs), '--test-output', options.test_output]
+        result += args + ['--', '--test-report', str((options.test_report or root / TEST_DEFAULTS['test_report']).absolute()), '--test-output-dir', str((options.test_output_dir or root / TEST_DEFAULTS['test_output_dir']).absolute()), '--max-concurrency', str(options.jobs), '--test-output', options.test_output]
         if options.test_timeout is not None:
             result += ['--timeout', str(options.test_timeout)]
         service = needs_local_uncached(entry.partition('=')[0] for entry in options.test_env)
@@ -344,6 +352,13 @@ def main(argv=None):
     inventory = None
     if options.operation in ('analyze', 'build', 'check', 'clippy', 'doc', 'test'):
         inventory = json.loads((ROOT / 'tools/buck2/target-inventory.json').read_text())
+    if options.operation == 'test':
+        with private_test_outputs(ROOT, options):
+            return operate(options, remaining, executable, inventory, invocation_directory)
+    return operate(options, remaining, executable, inventory, invocation_directory)
+
+
+def operate(options, remaining, executable, inventory, invocation_directory):
     skipped = []
     argv = command(options, remaining, executable, ROOT, inventory, skipped)
     if skipped:
@@ -369,6 +384,101 @@ def main(argv=None):
         if options.runs_per_test is not None:
             return repeat_tests(options, remaining, executable, ROOT, extra, execute)
         return execute(argv + extra)
+
+
+def published_invocations(root):
+    """Return the invocation directories the default report and output paths point into."""
+    kept = set()
+    for default in TEST_DEFAULTS.values():
+        link = root / default
+        if link.is_symlink():
+            kept.add((link.parent / os.readlink(link)).parent)
+    return kept
+
+
+def prune_test_invocations(state, kept, now):
+    """Delete finished invocations that are neither published nor recent."""
+    for entry in state.iterdir():
+        if entry.is_symlink() or not entry.is_dir() or entry in kept:
+            continue
+        lease = Path(str(entry) + '.lock')
+        try:
+            fd = os.open(lease, os.O_RDWR | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            # A directory gains its lease under the registry lock that this caller holds.
+            shutil.rmtree(entry, ignore_errors=True)
+            continue
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                continue
+            if now - os.fstat(fd).st_mtime >= TEST_OUTPUT_RETENTION_SECONDS:
+                shutil.rmtree(entry, ignore_errors=True)
+                lease.unlink(missing_ok=True)
+        finally:
+            os.close(fd)
+
+
+def publish(private, default):
+    """Point the default path at one invocation's output, replacing it in one step."""
+    if default.is_dir() and not default.is_symlink():
+        shutil.rmtree(default)
+    temporary = default.with_name(f'.{default.name}.{os.getpid()}')
+    temporary.unlink(missing_ok=True)
+    os.symlink(private, temporary)
+    os.replace(temporary, default)
+
+
+@contextmanager
+def private_test_outputs(root, options):
+    """Give a test invocation its own report and output directory.
+
+    The default paths are one per checkout, so concurrent invocations would
+    overwrite each other's report, per-target directories and `run-<k>`
+    repetitions. Each invocation instead writes under
+    `.buck2/test-invocations/<id>/` and, when it ends, the default paths
+    become links to what it wrote. A reader of the default paths sees the
+    invocation that finished last, whole. Paths the caller names are used as
+    given.
+    """
+    from runner_bootstrap import safe_directory
+    defaults = {field: root / default for field, default in TEST_DEFAULTS.items()}
+    for field, default in defaults.items():
+        value = getattr(options, field)
+        if value is not None and os.path.abspath(value) == str(default):
+            setattr(options, field, None)
+    pending = [field for field in defaults if getattr(options, field) is None]
+    if options.runs_per_test is not None:
+        # Each repetition reports under its run directory.
+        pending.remove('test_report')
+    if not pending:
+        yield
+        return
+    state = safe_directory(root / '.buck2/test-invocations')
+    with lock(state / 'registry.lock') as registry:
+        fcntl.flock(registry, fcntl.LOCK_EX)
+        prune_test_invocations(state, published_invocations(root), time.time())
+        directory = Path(tempfile.mkdtemp(prefix=time.strftime('%Y%m%dT%H%M%S-'), dir=state))
+        lease = os.open(str(directory) + '.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        fcntl.flock(lease, fcntl.LOCK_EX)
+    private = {'test_report': directory / 'test-report.json', 'test_output_dir': directory / 'test-results'}
+    for field in pending:
+        setattr(options, field, private[field])
+    try:
+        yield
+    finally:
+        with lock(state / 'registry.lock') as registry:
+            fcntl.flock(registry, fcntl.LOCK_EX)
+            written = [field for field in pending if private[field].exists()]
+            for field in written:
+                publish(private[field], defaults[field])
+                print(f'hermetic-build: {TEST_DEFAULTS[field]} -> {private[field]}', file=sys.stderr, flush=True)
+            os.utime(lease)
+            if not written:
+                shutil.rmtree(directory, ignore_errors=True)
+                Path(str(directory) + '.lock').unlink(missing_ok=True)
+        os.close(lease)
 
 
 def run_outcome(report_path):
@@ -405,7 +515,7 @@ def run_outcome(report_path):
 def repeat_tests(options, remaining, executable, root, extra, execute):
     """Execute the selection once per run, never from the verdict cache."""
     runs = options.runs_per_test
-    base = (options.test_output_dir or root / '.buck2/test-results').absolute()
+    base = (options.test_output_dir or root / TEST_DEFAULTS['test_output_dir']).absolute()
     failed_runs = []
     counts = set()
     for run in range(1, runs + 1):

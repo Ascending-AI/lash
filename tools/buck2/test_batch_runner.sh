@@ -111,7 +111,9 @@ for rloc in "${names[@]}"; do
     fi
     report+=("${rloc#_main/}" "$code" "$seconds" "$logs/$(basename "$rloc").log")
 done
-python3 "$junit_xml" "$xml" "${report[@]}"
+# The writer refuses a report that does not account for every test.
+accounted=1
+python3 "$junit_xml" "$xml" "${report[@]}" || accounted=0
 
 # A member that never wrote a status line died before its exit was recorded
 # (kill -9, harness abort). Count it as failed.
@@ -122,7 +124,7 @@ if [ "$ran" -lt "$total" ]; then
     done
 fi
 
-if [ "${#failures[@]}" -eq 0 ]; then
+if [ "${#failures[@]}" -eq 0 ] && ((accounted)); then
     # Explicit libtest arguments request observable output, especially --list
     # and --nocapture. Print after joining to avoid interleaved member output.
     if [ "${#args[@]}" -gt 0 ]; then
@@ -147,6 +149,11 @@ if [ "${#failures[@]}" -eq 0 ]; then
     fi
     echo "PASS: $total test binaries in batch"
     exit 0
+fi
+
+if [ "${#failures[@]}" -eq 0 ]; then
+    echo "FAIL: the JUnit report does not account for every test in the batch" >&2
+    exit 1
 fi
 
 echo "FAIL: ${#failures[@]} of $total test binaries failed:" >&2

@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
 from pathlib import Path
@@ -437,6 +437,128 @@ class DriverTests(unittest.TestCase):
             ) as error:
                 driver.validate_remote_configuration(missing)
             self.assertNotIn('refresh', str(error.exception))
+
+
+class PrivateOutputTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        (self.root / '.buck2').mkdir()
+        self.report = self.root / '.buck2/test-report.json'
+        self.results = self.root / '.buck2/test-results'
+
+    def options(self, *args):
+        return driver.arguments(['test', *args, '//pkg:test'])[0]
+
+    def enter(self, options):
+        with redirect_stderr(io.StringIO()):
+            context = driver.private_test_outputs(self.root, options)
+            context.__enter__()
+
+        def leave():
+            with redirect_stderr(io.StringIO()):
+                context.__exit__(None, None, None)
+        return leave
+
+    def write(self, options, text):
+        options.test_output_dir.mkdir(parents=True)
+        (options.test_output_dir / 'marker').write_text(text)
+        if options.test_report is not None:
+            options.test_report.write_text(text)
+
+    def test_overlapping_invocations_write_apart_and_the_last_to_finish_is_published(self):
+        first, second = self.options(), self.options()
+        leave_first, leave_second = self.enter(first), self.enter(second)
+        self.assertNotEqual(first.test_output_dir, second.test_output_dir)
+        self.assertNotEqual(first.test_report, second.test_report)
+        for options in (first, second):
+            self.assertEqual(options.test_report.parent, options.test_output_dir.parent)
+            self.assertEqual(options.test_report.parent.parent, self.root / '.buck2/test-invocations')
+        self.write(first, 'first')
+        self.write(second, 'second')
+        leave_second()
+        self.assertEqual((self.report.read_text(), (self.results / 'marker').read_text()), ('second', 'second'))
+        leave_first()
+        self.assertEqual((self.report.read_text(), (self.results / 'marker').read_text()), ('first', 'first'))
+        self.assertEqual(self.results.resolve(), first.test_output_dir)
+        self.assertEqual((second.test_output_dir / 'marker').read_text(), 'second')
+
+    def test_named_paths_are_used_as_given(self):
+        options = self.options('--test-report', str(self.root / 'report.json'), '--test-output-dir', str(self.root / 'results'))
+        with driver.private_test_outputs(self.root, options):
+            self.assertEqual((options.test_report, options.test_output_dir), (self.root / 'report.json', self.root / 'results'))
+        self.assertFalse((self.root / '.buck2/test-invocations').exists())
+
+    def test_the_default_paths_named_explicitly_are_still_private(self):
+        options = self.options('--test-report', str(self.report), '--test-output-dir', str(self.results))
+        leave = self.enter(options)
+        self.assertEqual(options.test_output_dir.parent.parent, self.root / '.buck2/test-invocations')
+        self.write(options, 'named')
+        leave()
+        self.assertTrue(self.results.is_symlink() and self.report.is_symlink())
+
+    def test_a_directory_left_by_an_older_driver_gives_way_to_the_link(self):
+        self.results.mkdir()
+        (self.results / 'old').write_text('old')
+        self.report.write_text('old')
+        options = self.options()
+        leave = self.enter(options)
+        self.write(options, 'new')
+        leave()
+        self.assertEqual((self.report.read_text(), sorted(path.name for path in self.results.iterdir())), ('new', ['marker']))
+
+    def test_overlapping_repetitions_keep_their_run_directories_apart(self):
+        loops = [self.options('--runs_per_test=2'), self.options('--runs_per_test=2')]
+        leaves = [self.enter(options) for options in loops]
+        seen = []
+
+        def execute(argv):
+            runner_arguments = argv[argv.index('--') + 1:]
+            report = Path(runner_arguments[runner_arguments.index('--test-report') + 1])
+            report.parent.mkdir(parents=True, exist_ok=True)
+            xml = report.parent / 'test.xml'
+            xml.write_text('<testsuites><testsuite><testcase name="case"/></testsuite></testsuites>')
+            report.write_text(json.dumps({'session_complete': True, 'results': {'root//pkg:test': {'status': 'PASS', 'cache': False, 'outputs': {'junit_xml': str(xml)}}}}))
+            seen.append(report.parent)
+            return 0
+
+        with redirect_stdout(io.StringIO()):
+            for options in loops:
+                self.assertIsNone(options.test_report)
+                self.assertEqual(driver.repeat_tests(options, ['//pkg:test'], Path('/buck2'), self.root, [], execute), 0)
+        self.assertEqual(len(set(seen)), 4)
+        for leave in leaves:
+            leave()
+        self.assertEqual(sorted(path.name for path in self.results.iterdir()), ['run-1', 'run-2'])
+        self.assertFalse(self.report.exists())
+
+    def test_an_invocation_that_wrote_nothing_leaves_nothing(self):
+        self.enter(self.options())()
+        self.assertEqual(sorted(path.name for path in (self.root / '.buck2/test-invocations').iterdir()), ['registry.lock'])
+        self.assertFalse(self.results.is_symlink() or self.report.is_symlink())
+
+    def test_only_finished_unpublished_old_invocations_are_pruned(self):
+        state = self.root / '.buck2/test-invocations'
+        names = ['running', 'published', 'recent', 'old']
+        invocations = {}
+        for name in names:
+            options = self.options()
+            leave = self.enter(options)
+            self.write(options, name)
+            invocations[name] = (options.test_output_dir.parent, leave)
+        for name in ('old', 'recent', 'published'):
+            invocations[name][1]()
+        old = invocations['old'][0]
+        os.utime(str(old) + '.lock', (1, 1))
+        os.utime(str(invocations['published'][0]) + '.lock', (1, 1))
+        self.enter(self.options())()
+        remaining = {name for name, (directory, _) in invocations.items() if directory.exists()}
+        self.assertEqual(remaining, {'running', 'published', 'recent'})
+        self.assertFalse(Path(str(old) + '.lock').exists())
+        invocations['running'][1]()
+        self.assertEqual(self.report.read_text(), 'running')
+        self.assertTrue((state / 'registry.lock').exists())
 
 
 if __name__ == '__main__':

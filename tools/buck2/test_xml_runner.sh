@@ -52,6 +52,7 @@ if [[ ! -e "$xml" ]]; then
         name+="_shard_$((TEST_SHARD_INDEX + 1))/$TEST_TOTAL_SHARDS"
     fi
     seconds=$(printf '%d.%03d' $((elapsed / 1000000)) $((elapsed % 1000000 / 1000)))
-    python3 "${BASH_SOURCE[0]%/*}/junit_xml.py" "$xml" "$name" "$code" "$seconds" "$log"
+    # The writer refuses a report that does not account for every test.
+    python3 "${BASH_SOURCE[0]%/*}/junit_xml.py" "$xml" "$name" "$code" "$seconds" "$log" || { ((code)) || code=1; }
 fi
 exit "$code"
