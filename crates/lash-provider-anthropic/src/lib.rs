@@ -37,8 +37,8 @@ mod tests {
         ReasoningRetentionPolicy, ReasoningRetentionSelection,
     };
     use lash_core::provider::{
-        CacheRetention, ModelCapability, Provider, ProviderOptions, ReasoningCapability,
-        ReasoningEncoding, StreamTermination,
+        CacheRetention, ModelCapability, Provider, ReasoningCapability, ReasoningEncoding,
+        StreamTermination,
     };
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
@@ -345,19 +345,16 @@ mod tests {
             "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
             "data: {\"type\":\"message_stop\",\"billing\":{\"cost\":2},\"private\":\"hidden\"}\n\n",
         );
-        let mut provider = AnthropicProvider::new("key")
-            .with_options(ProviderOptions {
-                response_metadata_headers: vec!["X-Request-Cost".to_string()],
-                response_metadata_body_paths: vec!["/billing/cost".to_string()],
-                ..ProviderOptions::default()
-            })
-            .with_transport(Arc::new(MetadataSseTransport(body)));
+        let mut provider =
+            AnthropicProvider::new("key").with_transport(Arc::new(MetadataSseTransport(body)));
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         req.stream_events = Some(LlmEventSender::new(move |event| {
             event_sink.lock_recover().push(event);
         }));
+        req.request_defaults.response_metadata_headers = vec!["X-Request-Cost".to_string()];
+        req.request_defaults.response_metadata_body_paths = vec!["/billing/cost".to_string()];
 
         let response = provider
             .complete(req)

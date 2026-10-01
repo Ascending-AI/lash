@@ -60,6 +60,7 @@ fn process_execution_env_identity_golden_corpus() {
             parallel_tool_calls: None,
             projection_provenance: Default::default(),
         },
+        core_prompt: crate::PromptLayer::new(),
     };
     let specs = [
         ProcessExecutionEnvSpec::new(

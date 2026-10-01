@@ -55,6 +55,13 @@ so a worker with another policy assembles the same terminal for a turn whose
 stream ended without `Done`. The policy stays host configuration: a change
 reaches roots that start after it.
 
+The core's prompt is recorded the same way as the rest of the configuration.
+The session records the creating core's prompt layer (`core_prompt`) and
+renders it beneath its own `prompt`. The core builder's prompt setters only
+seed creation, and a child inherits its parent's recorded layer. A prompt
+sync that runs after a worker change therefore builds what the root recorded
+(FIG-4397).
+
 The opener owns only the session binding: the store and the worker wiring
 it runs on. An open, including the engine's own reopen, overrides no recorded
 fact. A session-turn process's child is created from its starter's recorded
@@ -86,7 +93,8 @@ Reopening a session uses its durable configuration, including before its
 first turn. One engine runs sessions with different turn budgets or other
 execution controls, each as it recorded them. Hosts that need different
 configurations create distinct sessions or submit typed `ConfigTransaction`s.
-A frame's
+One engine likewise runs sessions created with different prompts, and a
+redeployed core's prompt reaches only the sessions it creates. A frame's
 recorded model explains its history; it does not override the session's
 current model.
 

@@ -8,7 +8,10 @@ use super::*;
 /// and never at open. The execution controls — turn budget, autonomy,
 /// no-progress budget, charge safety — are session config like the model
 /// (FIG-4376): state them per session in its creation spec. The core's
-/// default turn budget is the one [`LashCore::builder`] takes.
+/// default turn budget is the one [`LashCore::builder`] takes. So is the
+/// core's prompt layer (the [`PromptLayerSink`](crate::PromptLayerSink)
+/// setters on this builder) (FIG-4397): a session records the core's at
+/// creation and keeps it on every worker, whatever that worker's core states.
 impl LashCoreBuilder {
     /// The model a session is created with when its creation names none, by
     /// the host's key. Required: [`build`](Self::build) refuses a core with

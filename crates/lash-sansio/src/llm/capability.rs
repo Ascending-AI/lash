@@ -314,7 +314,7 @@ impl CacheRetention {
 /// host intent recorded with the model's metadata when a registry mints its
 /// binding, and carried on every request that model serves. A transport
 /// keeps only live concerns: its client, credentials, endpoint and limits.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ModelRequestDefaults {
     /// Surface the reasoning the provider streams in responses.
@@ -329,6 +329,18 @@ pub struct ModelRequestDefaults {
     /// Prompt-cache lifetime hint; see [`CacheRetention`].
     #[serde(default, skip_serializing_if = "CacheRetention::is_default")]
     pub cache_retention: CacheRetention,
+    /// Response header names (case-insensitive) captured into
+    /// `LlmResponse.response_metadata` as `header:<lowercased-name>` entries.
+    /// Headers not named here are never retained. Recorded with the model
+    /// like the rest (FIG-4397): what a session's calls capture does not
+    /// depend on the worker that serves them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_metadata_headers: Vec<String>,
+    /// JSON pointers probed against buffered response bodies and every SSE
+    /// event. Captured values use `body:<pointer>` keys; unlisted body fields
+    /// are never retained.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_metadata_body_paths: Vec<String>,
 }
 
 impl ModelRequestDefaults {

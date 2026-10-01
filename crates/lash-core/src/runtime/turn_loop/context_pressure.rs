@@ -157,7 +157,7 @@ impl LashRuntime {
             let session_id = self.state.session_id.clone();
             let read_view = read_view.clone();
             let protocol_turn_options = self.protocol_turn_options().clone();
-            let core_prompt = self.host.core.prompt.prompt.clone();
+            let core_prompt = self.state.effective_policy().core_prompt.clone();
             let policy_prompt = self.state.effective_policy().prompt.clone();
             Arc::new(move || {
                 let context_contributions = context_contributions.clone();

@@ -1769,12 +1769,12 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
     .with_options(ProviderOptions {
         reliability: ProviderReliability::codex()
             .request_timeout(Some(RequestTimeout::Millis(5_000))),
-        response_metadata_headers: vec!["X-Request-Cost".to_string()],
         ..ProviderOptions::default()
     });
     let events = Arc::new(Mutex::new(Vec::new()));
     let event_sink = Arc::clone(&events);
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.request_defaults.response_metadata_headers = vec!["X-Request-Cost".to_string()];
     req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(move |event| {
         event_sink.lock_recover().push(event);
     }));

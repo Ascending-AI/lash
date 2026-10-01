@@ -83,8 +83,11 @@ fn rendered_system_prompt(request: &lash_core::LlmRequest) -> String {
         .to_owned()
 }
 
+/// FIG-4397: a session records its creating core's prompt layer; a
+/// redeployed core's prompt is a creation default for the sessions it
+/// creates and never reaches one created before it.
 #[tokio::test]
-async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt() -> Result<()> {
+async fn a_core_prompt_redeploy_never_reaches_a_created_session() -> Result<()> {
     use crate::PromptLayerSink as _;
 
     let backend = double_backend().await;
@@ -137,8 +140,14 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
     let requests = captures.lock_recover();
     assert_eq!(requests.len(), 2);
     let rendered = rendered_system_prompt(&requests[1]);
-    assert!(rendered.contains("CORE PROMPT V2"));
-    assert!(!rendered.contains("CORE PROMPT V1"));
+    assert!(
+        rendered.contains("CORE PROMPT V1"),
+        "the session renders the core prompt it recorded: {rendered}"
+    );
+    assert!(
+        !rendered.contains("CORE PROMPT V2"),
+        "the redeployed core's prompt never reaches it: {rendered}"
+    );
     Ok(())
 }
 
@@ -305,8 +314,10 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_on_sqlite
     Ok(())
 }
 
+/// FIG-4397: a head that recorded no core prompt renders none; the opening
+/// core's prompt is a creation default, not a live layer.
 #[tokio::test]
-async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_on_sqlite_memory()
+async fn a_head_without_a_recorded_core_prompt_renders_no_opening_core_prompt_on_sqlite_memory()
 -> Result<()> {
     use crate::PromptLayerSink as _;
 
@@ -337,8 +348,8 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_on_s
 
     let requests = captures.lock_recover();
     assert!(
-        rendered_system_prompt(&requests[0]).contains("INHERITED CORE DEFAULT"),
-        "durable session state must not erase the live core prompt"
+        !rendered_system_prompt(&requests[0]).contains("INHERITED CORE DEFAULT"),
+        "the opening core's prompt is not a live layer over the recorded config"
     );
     Ok(())
 }
@@ -594,8 +605,11 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
     Ok(())
 }
 
+/// FIG-4397: [`a_head_without_a_recorded_core_prompt_renders_no_opening_core_prompt_on_sqlite_memory`]
+/// over a SQLite store committed before any core opens it.
 #[tokio::test]
-async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqlite() -> Result<()> {
+async fn a_head_without_a_recorded_core_prompt_renders_no_opening_core_prompt_sqlite() -> Result<()>
+{
     use crate::PromptLayerSink as _;
 
     let (_stores, backend, _) = sqlite_prompt_probe_store(
@@ -623,7 +637,8 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqli
         .output()
         .await?;
     assert!(
-        rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE INHERITED DEFAULT")
+        !rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE INHERITED DEFAULT"),
+        "the opening core's prompt is not a live layer over the recorded config"
     );
     Ok(())
 }

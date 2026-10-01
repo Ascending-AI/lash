@@ -28,11 +28,6 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
             };
             // The fixture needs owned bytes without a leaked static lifetime.
             let transport = OwnedFailedMetadataStream(format!("{prefix}{suffix}"));
-            let options = ProviderOptions {
-                response_metadata_headers: vec!["X-Request-Cost".into()],
-                response_metadata_body_paths: vec!["/cost".into(), "/missing".into()],
-                ..Default::default()
-            };
             let transport: Arc<dyn LlmHttpTransport> = Arc::new(transport);
             let mut provider: Box<dyn Provider> = match endpoint {
                 CompletionEndpoint::ChatCompletions => Box::new(
@@ -41,17 +36,19 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
                             stream_termination: Some(StreamTermination::RequireTerminalEvidence),
                             ..Default::default()
                         })
-                        .with_options(options)
                         .with_transport(transport),
                 ),
                 CompletionEndpoint::Responses => Box::new(
                     OpenAiProvider::new("key")
-                        .with_options(options)
                         .with_transport(transport),
                 ),
             };
             let failure = provider
-                .complete(streamed_request(Arc::new(std::sync::Mutex::new(vec![]))))
+                .complete(capturing(
+                    streamed_request(Arc::new(std::sync::Mutex::new(vec![]))),
+                    &["X-Request-Cost"],
+                    &["/cost", "/missing"],
+                ))
                 .await
                 .expect_err("truncated and error streams fail");
             if explicit_error {

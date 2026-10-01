@@ -362,6 +362,18 @@
             "integer",
             "null"
           ]
+        },
+        "response_metadata_body_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "response_metadata_headers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -437,6 +449,10 @@
         },
         "charge_safety": {
           "$ref": "#/$defs/RemoteChargeSafetyPolicy"
+        },
+        "core_prompt": {
+          "$ref": "#/$defs/RemotePromptLayer",
+          "description": "The creating core's prompt layer the session recorded (FIG-4397),\nrendered beneath `prompt`."
         },
         "generation": {
           "$ref": "#/$defs/RemoteGenerationOptions",

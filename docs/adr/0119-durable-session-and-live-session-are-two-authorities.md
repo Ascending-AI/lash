@@ -50,6 +50,18 @@ dialect and code or output renderer implementations, the worker service, the
 artifact store, deferred-grant resolvers and trace sinks. Each serves the
 identity the session recorded or refuses.
 
+The same holds for the core. No open-time option and no core setting is a
+behaviour layer over a created session: the core prompt layer is recorded at
+creation (ADR 0030), and what a call asks for and captures — reasoning
+publication, the fallback output cap, the cache hint and the
+response-metadata allowlists — is recorded with the session's model binding
+and carried on every request (ADR 0074). The transport an open resolves keeps
+only its connection, retry and byte guards. The host's attachment source
+policy and process-tool visibility filter stay live services: they are
+host-implemented authority, lash keeps no access or visibility default of its
+own beyond open and unfiltered, and it records no access policy for them
+because lash makes no authorization decision.
+
 An open session's `session.durable()` reuses the Session Binding's store and
 owner-issued ports. Catalog-derived and binding-derived handles share
 `DurableSessionOps`, which also implements the runtime's durable queue work.

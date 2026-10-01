@@ -519,7 +519,7 @@ pub struct RemoteModelIntent {
 
 /// Mirror of the core `ModelRequestDefaults`: what a model's requests do
 /// where a request states nothing, recorded with the model.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteModelRequestDefaults {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -528,6 +528,10 @@ pub struct RemoteModelRequestDefaults {
     pub max_output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "RemoteCacheRetention::is_short")]
     pub cache_retention: RemoteCacheRetention,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_metadata_headers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_metadata_body_paths: Vec<String>,
 }
 
 impl RemoteModelRequestDefaults {

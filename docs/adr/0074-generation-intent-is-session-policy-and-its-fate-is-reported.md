@@ -21,10 +21,13 @@ to creation, child-policy resolution, and `SetGeneration`. A child that
 sets only its cap therefore keeps an inherited temperature and seed unless it
 explicitly replaces them.
 
-The durable config includes the generation controls and session prompt. The
-live core prompt remains a separate base layer rendered on each request. A
-legacy absent session prompt reconstructs as an empty session layer; explicit
-emptiness also remains empty. On open, the recorded model binds back to its
+The durable config includes the generation controls, the session prompt and
+the creating core's prompt layer (`core_prompt`), which renders beneath the
+session prompt. A core's prompt is a creation default: a session records it at
+creation and renders the recorded layer on every worker, and a child inherits
+its parent's (FIG-4397). A legacy absent session prompt reconstructs as an
+empty session layer; explicit emptiness also remains empty. A head with no
+recorded core prompt renders none. On open, the recorded model binds back to its
 transport by its recorded key and cannot be silently replaced.
 
 Every request taken from session policy pairs its generation options with the
@@ -39,11 +42,12 @@ pairing.
 Provider resolution layers the recorded model's default cap
 (`ModelRequestDefaults::max_output_tokens`) beneath request intent exactly
 once. It invents no cap or temperature. The model's other behavioural defaults,
-thinking visibility and prompt-cache retention, are recorded with the model in
-the same `ModelRequestDefaults` and ride every `LlmRequest`, so a replay sends
-what was recorded rather than whatever the provider handle is configured with
-now (FIG-4374). `ProviderOptions` keeps only transport concerns: reliability,
-response budgets and response-metadata allowlists. Unsupported explicit controls are typed,
+thinking visibility, prompt-cache retention and the response-metadata
+allowlists, are recorded with the model in the same `ModelRequestDefaults` and
+ride every `LlmRequest`, so a replay sends and captures what was recorded
+rather than whatever the provider handle is configured with now (FIG-4374,
+FIG-4397). `ProviderOptions` keeps only transport concerns: reliability and
+response budgets. Unsupported explicit controls are typed,
 non-retryable refusals before I/O under
 [ADR 0121](0121-host-generation-settings-are-sent-or-refused.md). A mixed-model
 session uses an explicit replacement or update to clear incompatible intent.

@@ -1337,8 +1337,8 @@ pub mod runtime {
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeNamedPhase, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
-        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        RuntimeNamedPhase, RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase,
+        RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
         SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext, TurnControlBinding,
         WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
     };

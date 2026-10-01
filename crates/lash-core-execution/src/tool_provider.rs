@@ -65,7 +65,7 @@ impl AttemptSessionReads {
             model_capability: metadata.capability.clone(),
             attachment_acceptance: policy.attachment_acceptance,
             extra_body: metadata.extra_body.clone(),
-            request_defaults: metadata.request_defaults,
+            request_defaults: metadata.request_defaults.clone(),
             generation,
         })
     }

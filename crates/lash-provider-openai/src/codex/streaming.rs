@@ -811,7 +811,7 @@ impl Provider for CodexProvider {
                 ));
             }
             let mut response_metadata =
-                ResponseMetadataCapture::from_response(&provider.options, &response_headers);
+                ResponseMetadataCapture::from_response(&req.request_defaults, &response_headers);
             if let Some(tx) = &stream_events {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     response_started: true,

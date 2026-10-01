@@ -47,6 +47,10 @@ pub struct RemoteProcessExecutionPolicy {
     pub turn_budget: RemoteTurnBudget,
     pub no_progress_budget: RemoteNoProgressBudget,
     pub charge_safety: RemoteChargeSafetyPolicy,
+    /// The creating core's prompt layer the session recorded (FIG-4397),
+    /// rendered beneath `prompt`.
+    #[serde(default, skip_serializing_if = "RemotePromptLayer::is_empty")]
+    pub core_prompt: RemotePromptLayer,
     #[serde(default, skip_serializing_if = "RemotePromptLayer::is_empty")]
     pub prompt: RemotePromptLayer,
     /// Session-wide generation intent, mirroring `SessionPolicy.generation`.
@@ -90,6 +94,7 @@ impl RemoteProcessExecutionPolicy {
                 lash_sansio::NoProgressBudget::Unbounded => RemoteNoProgressBudget::Unbounded,
             },
             charge_safety: RemoteChargeSafetyPolicy::default(),
+            core_prompt: RemotePromptLayer::default(),
             prompt: RemotePromptLayer::default(),
             generation: crate::llm::RemoteGenerationOptions::default(),
         }

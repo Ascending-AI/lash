@@ -416,6 +416,7 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             turn_budget,
             no_progress_budget,
             charge_safety,
+            core_prompt,
             prompt,
             generation,
         } = value;
@@ -427,6 +428,7 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             turn_budget: turn_budget.into(),
             no_progress_budget: no_progress_budget.into(),
             charge_safety: charge_safety.into(),
+            core_prompt: core_prompt.into(),
             prompt: prompt.into(),
             generation: generation.into(),
         }
@@ -511,6 +513,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             turn_budget,
             no_progress_budget,
             charge_safety,
+            core_prompt,
             prompt,
             generation,
         } = value;
@@ -522,6 +525,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             turn_budget: turn_budget.into(),
             no_progress_budget: no_progress_budget.into(),
             charge_safety: charge_safety.into(),
+            core_prompt: core_prompt.into(),
             prompt: prompt.into(),
             generation: generation.try_into()?,
         })

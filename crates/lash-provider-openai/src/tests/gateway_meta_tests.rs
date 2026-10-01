@@ -10,11 +10,9 @@
 
 use super::*;
 
-fn meta_allowlist() -> ProviderOptions {
-    ProviderOptions {
-        response_metadata_body_paths: vec!["/meta".to_string(), "/meta/routing".to_string()],
-        ..ProviderOptions::default()
-    }
+/// `request` whose recorded model captures the gateway `meta` block.
+fn with_meta_allowlist(request: LlmRequest) -> LlmRequest {
+    capturing(request, &[], &["/meta", "/meta/routing"])
 }
 
 fn assert_meta_block(metadata: &BTreeMap<String, Value>, served: &str) {
@@ -51,12 +49,14 @@ async fn allowlisted_meta_is_captured_on_a_buffered_chat_completion() {
         Vec::new(),
         r#"{"id":"gen-123","model":"test-model","choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"meta":{"routing":{"requested":"auto","served":"deepinfra","attempts":2,"strategy":"fallback"}}}"#,
     ));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_options(meta_allowlist())
-        .with_transport(transport);
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
+            LlmRole::User,
+            "hello",
+        )])))
         .await
         .expect("request succeeds");
 
@@ -88,12 +88,14 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_buffered_sse_chat_completion
         Vec::new(),
         chat_meta_stream(),
     ));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_options(meta_allowlist())
-        .with_transport(transport);
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
+            LlmRole::User,
+            "hello",
+        )])))
         .await
         .expect("buffered SSE-shaped response succeeds");
 
@@ -106,14 +108,13 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_streaming_chat_completion() 
         vec![("content-type".to_string(), "text/event-stream".to_string())],
         chat_meta_stream(),
     ));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_options(meta_allowlist())
-        .with_transport(transport);
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(streamed_request(Arc::new(
+        .complete(with_meta_allowlist(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        )))
+        ))))
         .await
         .expect("terminal stream succeeds");
 
@@ -126,12 +127,13 @@ async fn allowlisted_meta_is_captured_on_a_buffered_responses_request() {
         Vec::new(),
         r#"{"id":"resp-123","model":"test-model","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],"meta":{"routing":{"requested":"auto","served":"deepinfra","attempts":2,"strategy":"fallback"}}}"#,
     ));
-    let mut provider = OpenAiProvider::new("key")
-        .with_options(meta_allowlist())
-        .with_transport(transport);
+    let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
+            LlmRole::User,
+            "hello",
+        )])))
         .await
         .expect("Responses request succeeds");
 
@@ -163,12 +165,13 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_buffered_sse_responses_reque
         Vec::new(),
         responses_meta_stream(),
     ));
-    let mut provider = OpenAiProvider::new("key")
-        .with_options(meta_allowlist())
-        .with_transport(transport);
+    let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(with_meta_allowlist(request(vec![LlmMessage::text(
+            LlmRole::User,
+            "hello",
+        )])))
         .await
         .expect("buffered SSE-shaped Responses body succeeds");
 
@@ -181,14 +184,12 @@ async fn allowlisted_meta_capture_is_last_wins_on_a_streaming_responses_request(
         vec![("content-type".to_string(), "text/event-stream".to_string())],
         responses_meta_stream(),
     ));
-    let mut provider = OpenAiProvider::new("key")
-        .with_options(meta_allowlist())
-        .with_transport(transport);
+    let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(streamed_request(Arc::new(
+        .complete(with_meta_allowlist(streamed_request(Arc::new(
             std::sync::Mutex::new(Vec::new()),
-        )))
+        ))))
         .await
         .expect("terminal stream succeeds");
 

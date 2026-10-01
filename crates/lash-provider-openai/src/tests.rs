@@ -527,12 +527,8 @@ async fn response_metadata_captures_only_allowlisted_headers() {
         ],
         DEFAULT_RECORDING_RESPONSE_BODY,
     ));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_options(ProviderOptions {
-            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let event_sink = Arc::clone(&events);
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
@@ -540,7 +536,10 @@ async fn response_metadata_captures_only_allowlisted_headers() {
         event_sink.lock_recover().push(event);
     }));
 
-    let response = provider.complete(req).await.expect("request succeeds");
+    let response = provider
+        .complete(capturing(req, &["X-Opper-Cost"], &[]))
+        .await
+        .expect("request succeeds");
 
     assert_eq!(
         response.response_metadata["header:x-opper-cost"],
@@ -581,15 +580,15 @@ async fn response_metadata_captures_buffered_body_json_pointers() {
         Vec::new(),
         r#"{"id":"gen-123","model":"test-model","choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"cost":0.000063}"#,
     ));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_options(ProviderOptions {
-            response_metadata_body_paths: vec!["/cost".to_string(), "/missing".to_string()],
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(capturing(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &[],
+            &["/cost", "/missing"],
+        ))
         .await
         .expect("request succeeds");
 
@@ -603,16 +602,14 @@ async fn response_metadata_captures_buffered_responses_endpoint_observations() {
         vec![("x-opper-cost".to_string(), "0.000008".to_string())],
         r#"{"id":"resp-123","model":"test-model","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],"cost":0.000063}"#,
     ));
-    let mut provider = OpenAiProvider::new("key")
-        .with_options(ProviderOptions {
-            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
-            response_metadata_body_paths: vec!["/cost".to_string()],
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let mut provider = OpenAiProvider::new("key").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(capturing(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &["X-Opper-Cost"],
+            &["/cost"],
+        ))
         .await
         .expect("Responses request succeeds");
 
@@ -1490,21 +1487,15 @@ fn responses_none_cache_retention_omits_prompt_cache_fields() {
 
 #[test]
 fn openai_compat_config_serializes_when_non_default() {
-    let provider = openrouter_provider()
-        .with_compat(OpenAiCompat {
-            max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
-            streaming_usage: Some(false),
-            provider_routing: Some(ProviderRoutingPrefs {
-                require_parameters: true,
-                ..ProviderRoutingPrefs::default()
-            }),
-            ..OpenAiCompat::default()
-        })
-        .with_options(ProviderOptions {
-            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
-            response_metadata_body_paths: vec!["/cost".to_string()],
-            ..ProviderOptions::default()
-        });
+    let provider = openrouter_provider().with_compat(OpenAiCompat {
+        max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
+        streaming_usage: Some(false),
+        provider_routing: Some(ProviderRoutingPrefs {
+            require_parameters: true,
+            ..ProviderRoutingPrefs::default()
+        }),
+        ..OpenAiCompat::default()
+    });
 
     let config = provider.serialize_config();
 
@@ -1517,13 +1508,13 @@ fn openai_compat_config_serializes_when_non_default() {
         config["compat"]["provider_routing"],
         json!({ "require_parameters": true })
     );
-    assert_eq!(
-        config["options"]["response_metadata_headers"],
-        json!(["X-Opper-Cost"])
-    );
-    assert_eq!(
-        config["options"]["response_metadata_body_paths"],
-        json!(["/cost"])
+    // Response-metadata capture is recorded model metadata carried on each
+    // request (FIG-4397), never a provider option.
+    assert!(config["options"].get("response_metadata_headers").is_none());
+    assert!(
+        config["options"]
+            .get("response_metadata_body_paths")
+            .is_none()
     );
 }
 
@@ -1575,10 +1566,10 @@ fn openai_compat_resolver_covers_openrouter_and_session_affinity() {
     );
     assert!(openrouter_caps.streaming_usage);
     assert!(openrouter_caps.cache_session_affinity);
-    // Endpoint facts only: restricted routing and response-metadata capture
-    // are host decisions, so the preset resolves neither.
+    // Endpoint facts only: restricted routing is a host decision, so the
+    // preset leaves it unresolved. Response-metadata capture is recorded
+    // model metadata carried on each request, never a preset fact.
     assert_eq!(openrouter_caps.provider_routing, None);
-    assert!(openrouter.options.response_metadata_body_paths.is_empty());
 }
 
 #[test]
@@ -2093,6 +2084,16 @@ fn openrouter_stream_wire_fences_all_evidence_on_served_model_conflict() {
     assert_eq!(state.execution_evidence, initial_evidence);
 }
 
+/// `request` asking for the response metadata its recorded model captures:
+/// the allowlisted header names and body pointers.
+fn capturing(mut request: LlmRequest, headers: &[&str], body_paths: &[&str]) -> LlmRequest {
+    request.request_defaults.response_metadata_headers =
+        headers.iter().map(ToString::to_string).collect();
+    request.request_defaults.response_metadata_body_paths =
+        body_paths.iter().map(ToString::to_string).collect();
+    request
+}
+
 fn streamed_request(events: Arc<std::sync::Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.stream_events = Some(LlmEventSender::new(move |event| {
@@ -2223,17 +2224,15 @@ async fn response_metadata_streaming_body_capture_is_last_wins() {
         vec![("content-type".to_string(), "text/event-stream".to_string())],
         body,
     ));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_options(ProviderOptions {
-            response_metadata_body_paths: vec!["/cost".to_string()],
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(capturing(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &[],
+            &["/cost"],
+        ))
         .await
         .expect("terminal stream succeeds and [DONE] is tolerated");
 
@@ -2248,15 +2247,15 @@ async fn response_metadata_buffered_sse_body_capture_is_last_wins() {
         "data: [DONE]\n\n"
     );
     let transport = Arc::new(RecordingHttpTransport::responding_with(Vec::new(), body));
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_options(ProviderOptions {
-            response_metadata_body_paths: vec!["/cost".to_string()],
-            ..ProviderOptions::default()
-        })
-        .with_transport(transport);
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
 
     let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .complete(capturing(
+            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            &[],
+            &["/cost"],
+        ))
         .await
         .expect("buffered SSE-shaped response succeeds and [DONE] is tolerated");
 
@@ -2281,16 +2280,14 @@ async fn response_metadata_headers_are_preserved_on_partial_stream_responses() {
             stream_termination: Some(StreamTermination::RequireTerminalEvidence),
             ..OpenAiCompat::default()
         })
-        .with_options(ProviderOptions {
-            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
-            ..ProviderOptions::default()
-        })
         .with_transport(transport);
 
     let error = provider
-        .complete(streamed_request(Arc::new(
-            std::sync::Mutex::new(Vec::new()),
-        )))
+        .complete(capturing(
+            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            &["X-Opper-Cost"],
+            &[],
+        ))
         .await
         .expect_err("missing terminal evidence returns a partial response");
     let partial = error.partial_response.expect("partial response");

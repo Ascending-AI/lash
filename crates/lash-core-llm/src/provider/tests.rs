@@ -1097,31 +1097,49 @@ fn provider_reliability_without_response_start_timeout_preserves_derived_bound()
 }
 
 #[test]
-fn model_request_defaults_roundtrip_output_limit_retention_and_thinking() {
+fn model_request_defaults_roundtrip_output_limit_retention_thinking_and_capture() {
     let defaults = ModelRequestDefaults {
         expose_thinking: true,
         max_output_tokens: Some(16_384),
         cache_retention: CacheRetention::Long,
+        response_metadata_headers: vec!["X-Request-Cost".to_string()],
+        response_metadata_body_paths: vec!["/usage/cost".to_string()],
     };
 
-    let value = serde_json::to_value(defaults).expect("serialize");
+    let value = serde_json::to_value(&defaults).expect("serialize");
     assert_eq!(value["expose_thinking"], serde_json::json!(true));
     assert_eq!(value["max_output_tokens"], serde_json::json!(16_384));
     assert_eq!(value["cache_retention"], serde_json::json!("long"));
+    assert_eq!(
+        value["response_metadata_headers"],
+        serde_json::json!(["X-Request-Cost"])
+    );
+    assert_eq!(
+        value["response_metadata_body_paths"],
+        serde_json::json!(["/usage/cost"])
+    );
 
     let roundtripped: ModelRequestDefaults = serde_json::from_value(value).expect("deserialize");
     assert_eq!(roundtripped, defaults);
 }
 
-/// Request behaviour is recorded with the model (FIG-4374): provider options
-/// hold only a transport's live concerns and refuse the retired fields.
+/// Request behaviour is recorded with the model (FIG-4374), response-metadata
+/// capture included (FIG-4397): provider options hold only a transport's live
+/// concerns and refuse the retired fields.
 #[test]
 fn provider_options_refuse_request_behaviour() {
-    for field in ["expose_thinking", "max_output_tokens", "cache_retention"] {
+    for field in [
+        "expose_thinking",
+        "max_output_tokens",
+        "cache_retention",
+        "response_metadata_headers",
+        "response_metadata_body_paths",
+    ] {
         let value = match field {
             "expose_thinking" => serde_json::json!(true),
             "max_output_tokens" => serde_json::json!(1_024),
-            _ => serde_json::json!("long"),
+            "cache_retention" => serde_json::json!("long"),
+            _ => serde_json::json!(["captured"]),
         };
         let mut options = serde_json::Map::new();
         options.insert(field.to_string(), value);
@@ -1169,6 +1187,8 @@ fn model_request_defaults_default_omits_and_restores_every_field() {
     assert!(!restored.expose_thinking);
     assert_eq!(restored.max_output_tokens, None);
     assert_eq!(restored.cache_retention, CacheRetention::Short);
+    assert!(restored.response_metadata_headers.is_empty());
+    assert!(restored.response_metadata_body_paths.is_empty());
     assert!(restored.is_default());
 }
 

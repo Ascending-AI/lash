@@ -179,39 +179,6 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    pub fn with_prompt_template(mut self, template: crate::PromptTemplate) -> Self {
-        self.env.core.prompt.prompt.template = Some(template);
-        self
-    }
-
-    pub fn with_prompt_contribution(mut self, contribution: crate::PromptContribution) -> Self {
-        self.env.core.prompt.prompt.add_contribution(contribution);
-        self
-    }
-
-    pub fn with_replaced_prompt_slot(
-        mut self,
-        slot: crate::PromptSlot,
-        contributions: impl IntoIterator<Item = crate::PromptContribution>,
-    ) -> Self {
-        self.env
-            .core
-            .prompt
-            .prompt
-            .replace_slot(slot, contributions);
-        self
-    }
-
-    pub fn with_cleared_prompt_slot(mut self, slot: crate::PromptSlot) -> Self {
-        self.env.core.prompt.prompt.clear_slot(slot);
-        self
-    }
-
-    pub fn with_prompt_layer(mut self, prompt: crate::PromptLayer) -> Self {
-        self.env.core.prompt.prompt = prompt;
-        self
-    }
-
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn TraceSink>>) -> Self {
         self.env.core.tracing.trace_sink = sink;
         self
@@ -296,7 +263,6 @@ mod tests {
         };
 
         let env = RuntimeEnvironment::builder(core_over(&backend))
-            .with_prompt_template(crate::default_prompt_template())
             .with_trace_sink(Some(Arc::new(lash_trace::JsonlTraceSink::new(
                 std::env::temp_dir().join("lash-runtime-environment-builder-test.jsonl"),
             ))))
@@ -305,7 +271,6 @@ mod tests {
             .with_termination(termination.clone())
             .build();
 
-        assert!(env.core.prompt.prompt.template.is_some());
         assert!(env.core.tracing.trace_sink.is_some());
         assert_eq!(env.core.tracing.trace_level, TraceLevel::Extended);
         assert_eq!(env.core.tracing.trace_context, trace_context);

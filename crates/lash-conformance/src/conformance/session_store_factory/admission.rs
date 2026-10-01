@@ -33,8 +33,9 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
     ));
 
     // The host API's creating verb bakes its config in (FIG-4099, FIG-4112),
-    // the execution controls with the rest (FIG-4376): every one is stated
-    // off its default so the round trip below proves each is recorded.
+    // the execution controls with the rest (FIG-4376), and the creating
+    // core's prompt layer (FIG-4397): every one is stated off its default so
+    // the round trip below proves each is recorded.
     let mut request = crate::SessionStoreCreateRequest {
         head: crate::SessionCreationHead::Config,
         ..session_store_request(
@@ -53,6 +54,9 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         max_unsafe_retries: 2,
         max_duplicate_cost_tokens: Some(4_096),
     };
+    request.config.core_prompt = crate::PromptLayer::new().with_contribution(
+        crate::PromptContribution::guidance("Core", "the creating core's recorded prompt"),
+    );
     let request = request;
     assert_eq!(
         factory
@@ -163,6 +167,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
             .expect("the created session has a window");
     assert_eq!(loaded.config, expected_config);
     assert_eq!(loaded.state.policy.model, request.config.model);
+    assert_eq!(loaded.state.policy.core_prompt, request.config.core_prompt);
 
     // `Root` declares no lineage, so it always rebinds and writes nothing.
     assert_eq!(

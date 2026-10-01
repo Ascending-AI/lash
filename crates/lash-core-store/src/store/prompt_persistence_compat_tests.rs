@@ -22,6 +22,7 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         subagent: None,
         config_revision: 0,
         plugin_config: crate::PluginConfig::default(),
+        core_prompt: crate::PromptLayer::new(),
     };
     let mut old_writer_value = serde_json::to_value(config).expect("serialize current config");
     let old_writer_object = old_writer_value
@@ -177,6 +178,7 @@ fn current_config_serializes_default_authority_explicitly() {
         subagent: None,
         config_revision: 0,
         plugin_config: crate::PluginConfig::default(),
+        core_prompt: crate::PromptLayer::new(),
     })
     .expect("serialize current config");
 
@@ -202,6 +204,7 @@ fn explicit_empty_prompt_is_serialized_as_present() {
         subagent: None,
         config_revision: 0,
         plugin_config: crate::PluginConfig::default(),
+        core_prompt: crate::PromptLayer::new(),
     })
     .expect("serialize explicit empty prompt");
 
@@ -231,6 +234,7 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
             subagent: None,
             config_revision: 0,
             plugin_config: crate::PluginConfig::default(),
+            core_prompt: crate::PromptLayer::new(),
         },
         current_frame_node_id: None,
         published_by_drive: false,
@@ -271,6 +275,7 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
             subagent: None,
             config_revision: 0,
             plugin_config: crate::PluginConfig::default(),
+            core_prompt: crate::PromptLayer::new(),
         },
         current_frame_node_id: None,
         published_by_drive: false,

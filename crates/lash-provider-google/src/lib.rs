@@ -42,8 +42,7 @@ mod tests {
         ProviderRouteIdentity, ResponseTextMeta,
     };
     use lash_core::provider::{
-        ModelCapability, Provider, ProviderOptions, ReasoningCapability, ReasoningEncoding,
-        StreamTermination,
+        ModelCapability, Provider, ReasoningCapability, ReasoningEncoding, StreamTermination,
     };
     use lash_core::{Message, MessageRole, Part};
     use serde_json::{Value, json};
@@ -120,7 +119,10 @@ mod tests {
     fn hidden_thinking(stream_termination: StreamTermination) -> crate::provider::ResponseReading {
         crate::provider::ResponseReading {
             stream_termination,
-            expose_thinking: false,
+            defaults: lash_core::provider::ModelRequestDefaults {
+                expose_thinking: false,
+                ..Default::default()
+            },
         }
     }
 
@@ -144,11 +146,6 @@ mod tests {
                 secret: "oauth-client-secret".into(),
             },
         )
-        .with_options(ProviderOptions {
-            response_metadata_headers: vec!["X-Request-Cost".to_string()],
-            response_metadata_body_paths: vec!["/response/billing/cost".to_string()],
-            ..ProviderOptions::default()
-        })
         .with_transport(Arc::new(StaticSseTransport::with_headers(
             body,
             vec![
@@ -167,7 +164,7 @@ mod tests {
                     event_sink.lock_recover().push(event);
                 })),
                 None,
-                hidden_thinking(StreamTermination::RequireTerminalEvidence),
+                capturing_reading(&["X-Request-Cost"], &["/response/billing/cost"]),
                 None,
             )
             .await
@@ -541,7 +538,10 @@ mod tests {
                 None,
                 crate::provider::ResponseReading {
                     stream_termination: StreamTermination::RequireTerminalEvidence,
-                    expose_thinking,
+                    defaults: lash_core::provider::ModelRequestDefaults {
+                        expose_thinking,
+                        ..Default::default()
+                    },
                 },
                 None,
             )

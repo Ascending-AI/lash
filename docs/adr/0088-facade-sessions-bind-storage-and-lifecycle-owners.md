@@ -31,9 +31,12 @@ to a receiving core environment restores the owning backend, effect host,
 attachment store, process-environment store, and work ports. The receiving core
 supplies only physical binding: live provider resolution, the implementations
 of its one plugin set, and tracing. Behaviour is recorded config. The durable
-session config, including session prompt, generation, the execution controls
-of ADR 0030 and every installed plugin's namespace (ADR 0126), remains
-recorded config under ADR 0074; the live core prompt is separate.
+session config, including the creating core's prompt layer, the session
+prompt, generation, the recorded model with its request defaults, the
+execution controls of ADR 0030 and every installed plugin's namespace
+(ADR 0126), remains recorded config under ADR 0074. The receiving core's own
+prompt layer is a creation default for the sessions it creates; it never
+reaches a resumed session.
 
 ### Behaviour is recorded config; live is physical only
 

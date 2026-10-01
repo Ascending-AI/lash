@@ -453,7 +453,7 @@ impl LashCore {
     ///
     /// The returned handle keeps the catalog, effect host, process services,
     /// and trigger store chosen by this core together. Provider, plugin,
-    /// prompt, tracing, and other live turn policy are deliberately excluded.
+    /// tracing, and other live turn wiring are deliberately excluded.
     pub async fn session_administration(&self) -> lash_core::SessionAdministration {
         self.administration_source()
             .administration_over(&self.substrate_slot)
@@ -764,8 +764,10 @@ pub struct LashCoreBuilder {
     attachment_upload_expiry: Option<std::time::Duration>,
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
-    // Core fields applied over the config the backend's ports assemble.
+    /// The core's prompt layer: a creation default every session this core
+    /// creates records as its `core_prompt` (FIG-4397).
     prompt: Option<PromptLayer>,
+    // Core fields applied over the config the backend's ports assemble.
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
@@ -1058,7 +1060,7 @@ impl LashCoreBuilder {
                 .map_err(EmbedError::ModelUnknown)?;
         }
         // With the model fields taken, resolving the spec mints nothing.
-        let policy = session_spec
+        let mut policy = session_spec
             .resolve_against(&SessionPolicy::new(turn_budget), &lash_core::EmptyModels)
             .map_err(|error| match error {
                 lash_core::facade_support::SpecResolveError::Model(error) => {
@@ -1068,6 +1070,9 @@ impl LashCoreBuilder {
                     EmbedError::MissingModel
                 }
             })?;
+        // The core's prompt layer is a creation default like the rest of the
+        // spec (FIG-4397): every session this core creates records it.
+        policy.core_prompt = self.prompt.take().unwrap_or_default();
 
         let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();

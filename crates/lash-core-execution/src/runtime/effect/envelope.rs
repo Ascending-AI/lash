@@ -1461,7 +1461,7 @@ impl LlmRequestSpec {
             model_capability: request.model_capability.clone(),
             attachment_acceptance: Arc::clone(&request.attachment_acceptance),
             extra_body: request.extra_body.clone(),
-            request_defaults: request.request_defaults,
+            request_defaults: request.request_defaults.clone(),
             generation: request.generation.clone(),
             scope: request.scope.clone(),
             output_spec: request.output_spec.clone(),

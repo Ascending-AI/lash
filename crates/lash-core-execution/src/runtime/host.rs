@@ -23,7 +23,6 @@ pub struct RuntimeHostConfig {
     pub durability: RuntimeDurabilityConfig,
     pub process_engines: ProcessEngineRegistry,
     pub providers: RuntimeProviderConfig,
-    pub prompt: RuntimePromptConfig,
     pub control: RuntimeControlConfig,
     pub tracing: RuntimeTracingConfig,
     process_observation_sink: Option<Arc<dyn TraceSink>>,
@@ -62,11 +61,6 @@ pub struct RuntimeProviderConfig {
     /// The run definitions this deployment registers (FIG-3838): a root
     /// whose spec names a definition resolves it here, by exact reference.
     pub run_definitions: crate::RunDefinitions,
-}
-
-#[derive(Clone)]
-pub struct RuntimePromptConfig {
-    pub prompt: crate::PromptLayer,
 }
 
 /// Default [`RuntimeControlConfig::abort_drain_grace`].
@@ -230,9 +224,6 @@ impl RuntimeHostConfig {
             providers: RuntimeProviderConfig {
                 models: Arc::new(crate::EmptyModels),
                 run_definitions: crate::RunDefinitions::default(),
-            },
-            prompt: RuntimePromptConfig {
-                prompt: crate::PromptLayer::new(),
             },
             control: RuntimeControlConfig {
                 termination: TerminationPolicy::default(),

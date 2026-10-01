@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_core::provider::ProviderOptions;
+use lash_core::provider::ModelRequestDefaults;
 use serde_json::Value;
 
 /// Accumulates wire observations for one provider request.
@@ -20,14 +20,19 @@ pub struct ResponseMetadataCapture {
 }
 
 impl ResponseMetadataCapture {
-    pub fn from_response(options: &ProviderOptions, response_headers: &[(String, String)]) -> Self {
+    /// The capture the request's recorded model defaults ask for, with the
+    /// allowlisted response headers already taken.
+    pub fn from_response(
+        defaults: &ModelRequestDefaults,
+        response_headers: &[(String, String)],
+    ) -> Self {
         let mut capture = Self {
-            headers: options
+            headers: defaults
                 .response_metadata_headers
                 .iter()
                 .map(|name| name.to_ascii_lowercase())
                 .collect(),
-            body_paths: options.response_metadata_body_paths.clone(),
+            body_paths: defaults.response_metadata_body_paths.clone(),
             captured: BTreeMap::new(),
         };
         capture.capture_headers(response_headers);
@@ -107,10 +112,10 @@ mod tests {
 
     #[test]
     fn allowlists_headers_and_last_sse_body_value() {
-        let options = ProviderOptions {
+        let options = ModelRequestDefaults {
             response_metadata_headers: vec!["X-Request-Cost".to_string()],
             response_metadata_body_paths: vec!["/usage/cost".to_string()],
-            ..ProviderOptions::default()
+            ..ModelRequestDefaults::default()
         };
         let mut capture = ResponseMetadataCapture::from_response(
             &options,
@@ -133,9 +138,9 @@ mod tests {
 
     #[test]
     fn allowlisted_body_paths_capture_a_gateway_meta_block() {
-        let options = ProviderOptions {
+        let options = ModelRequestDefaults {
             response_metadata_body_paths: vec!["/meta".to_string(), "/meta/routing".to_string()],
-            ..ProviderOptions::default()
+            ..ModelRequestDefaults::default()
         };
         let mut capture = ResponseMetadataCapture::from_response(&options, &[]);
         capture.capture_body_text(
@@ -155,9 +160,9 @@ mod tests {
 
     #[test]
     fn allowlisted_body_paths_are_last_wins_across_sse_events() {
-        let options = ProviderOptions {
+        let options = ModelRequestDefaults {
             response_metadata_body_paths: vec!["/meta".to_string()],
-            ..ProviderOptions::default()
+            ..ModelRequestDefaults::default()
         };
         let mut capture = ResponseMetadataCapture::from_response(&options, &[]);
         capture.capture_body_text(concat!(

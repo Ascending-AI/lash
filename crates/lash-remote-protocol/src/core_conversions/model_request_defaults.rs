@@ -6,6 +6,8 @@ impl From<lash_core::provider::ModelRequestDefaults> for RemoteModelRequestDefau
             expose_thinking,
             max_output_tokens,
             cache_retention,
+            response_metadata_headers,
+            response_metadata_body_paths,
         } = value;
         Self {
             expose_thinking,
@@ -15,6 +17,8 @@ impl From<lash_core::provider::ModelRequestDefaults> for RemoteModelRequestDefau
                 lash_core::provider::CacheRetention::Short => RemoteCacheRetention::Short,
                 lash_core::provider::CacheRetention::Long => RemoteCacheRetention::Long,
             },
+            response_metadata_headers,
+            response_metadata_body_paths,
         }
     }
 }
@@ -25,6 +29,8 @@ impl From<RemoteModelRequestDefaults> for lash_core::provider::ModelRequestDefau
             expose_thinking,
             max_output_tokens,
             cache_retention,
+            response_metadata_headers,
+            response_metadata_body_paths,
         } = value;
         Self {
             expose_thinking,
@@ -34,6 +40,8 @@ impl From<RemoteModelRequestDefaults> for lash_core::provider::ModelRequestDefau
                 RemoteCacheRetention::Short => lash_core::provider::CacheRetention::Short,
                 RemoteCacheRetention::Long => lash_core::provider::CacheRetention::Long,
             },
+            response_metadata_headers,
+            response_metadata_body_paths,
         }
     }
 }

@@ -171,7 +171,7 @@ impl Provider for AnthropicProvider {
             .or_else(|| first_header_value(&resp.headers, "x-request-id"))
             .map(str::to_string);
         let mut response_metadata =
-            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
+            ResponseMetadataCapture::from_response(&req.request_defaults, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 response_started: true,

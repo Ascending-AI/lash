@@ -41,6 +41,7 @@ fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
         max_output_tokens: Some(8_192),
         cache_retention: CacheRetention::Long,
         expose_thinking: true,
+        ..ModelRequestDefaults::default()
     };
     let unset = resolve_generation_policy(&empty_request(), "test", &open_wire())
         .expect("nothing to refuse");
@@ -53,7 +54,7 @@ fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
     assert_eq!(unset.reasoning, None);
 
     let default_limited = resolve_generation_policy(
-        &with_defaults(empty_request(), model_defaults),
+        &with_defaults(empty_request(), model_defaults.clone()),
         "test",
         &open_wire(),
     )
@@ -267,9 +268,12 @@ fn expose_thinking_is_local_visibility_and_a_wire_flag_only_where_one_exists() {
             thinking_summary: summary,
             ..open_wire()
         };
-        let policy =
-            resolve_generation_policy(&with_defaults(empty_request(), options), "test", &wire)
-                .expect("expose_thinking is never refused");
+        let policy = resolve_generation_policy(
+            &with_defaults(empty_request(), options.clone()),
+            "test",
+            &wire,
+        )
+        .expect("expose_thinking is never refused");
         assert!(policy.expose_thinking);
         assert_eq!(policy.request_thinking_summary, expected, "{summary:?}");
         let receipt = policy.receipt(

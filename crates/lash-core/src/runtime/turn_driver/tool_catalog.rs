@@ -125,7 +125,11 @@ impl RuntimeTurnDriver<'_> {
             model_capability: session_policy.model_config().metadata().capability.clone(),
             attachment_acceptance: Arc::clone(&session_policy.attachment_acceptance),
             extra_body: session_policy.model_config().metadata().extra_body.clone(),
-            request_defaults: session_policy.model_config().metadata().request_defaults,
+            request_defaults: session_policy
+                .model_config()
+                .metadata()
+                .request_defaults
+                .clone(),
             generation: session_policy.generation.clone(),
             emit_llm_trace: false,
             termination: self.protocol_turn_options.clone(),
@@ -156,8 +160,10 @@ impl RuntimeTurnDriver<'_> {
             .prepare_execution_environment(&policy, self.turn_index, messages)
             .await
             .map_err(SyncFailure::of_plugin_error)?;
+        // Both prompt layers are the root's recorded config (FIG-4397): a
+        // sync redriven after a core redeploy builds what the root recorded.
         let prepared_prompt = execution_environment.build_prompt(
-            &self.host.core.prompt.prompt,
+            &policy.core_prompt,
             &policy.prompt,
             Some(self.session.prompt_cache()),
         );

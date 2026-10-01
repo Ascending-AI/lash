@@ -122,6 +122,12 @@ mod recorded_execution_controls_under_replay {
     lash_conformance::turn_config_tests!(@law [] {
         always_replay_harness("recorded-controls-redrive").await
     }; (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
+
+    // FIG-4397: the root's recorded core prompt is served from the journal
+    // the same way.
+    lash_conformance::turn_config_tests!(@law [] {
+        always_replay_harness("recorded-core-prompt-redrive").await
+    }; (a_redrive_builds_the_core_prompt_its_root_recorded, "turn-config-recorded-core-prompt-redrive"));
 }
 
 // FIG-4389's recorded termination law on the double's other legs: under

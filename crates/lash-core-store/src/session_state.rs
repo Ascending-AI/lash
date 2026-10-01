@@ -1400,6 +1400,7 @@ pub(crate) fn apply_persisted_config_to_policy(
     policy.autonomous = config.autonomous;
     policy.no_progress_budget = config.no_progress_budget;
     policy.charge_safety = config.charge_safety.clone();
+    policy.core_prompt = config.core_prompt.clone();
     if let Some(prompt) = config.prompt.as_ref() {
         policy.prompt = prompt.clone();
     }

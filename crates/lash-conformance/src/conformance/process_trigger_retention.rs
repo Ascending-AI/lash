@@ -2083,7 +2083,7 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
         )
     };
     assert!(matches!(
-        recover().await,
+        Box::pin(recover()).await,
         Err(lash_core::triggers::TriggerDeliveryRecoveryError::Retryable(_))
     ));
     let start_key = lash_core::facade_support::trigger_delivery_start_key(first);
@@ -2096,8 +2096,11 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
             .is_none()
     );
     *restorer.refusal.lock().expect("probe lock") = None;
-    let started = recover().await.expect("retry captured delivery");
-    assert_eq!(recover().await.expect("repeat captured delivery"), started);
+    let started = Box::pin(recover()).await.expect("retry captured delivery");
+    assert_eq!(
+        Box::pin(recover()).await.expect("repeat captured delivery"),
+        started
+    );
     let record = handles
         .registry
         .get_process(&started)
@@ -2159,12 +2162,11 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
     });
     let revoked = &reserved[3];
     assert!(matches!(
-        router
-            .recover_delivery(
-                &revoked.occurrence.occurrence_id,
-                &revoked.subscription.subscription_id
-            )
-            .await,
+        Box::pin(router.recover_delivery(
+            &revoked.occurrence.occurrence_id,
+            &revoked.subscription.subscription_id
+        ))
+        .await,
         Err(lash_core::triggers::TriggerDeliveryRecoveryError::Refused(
             _
         ))

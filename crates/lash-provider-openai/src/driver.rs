@@ -257,6 +257,7 @@ pub(crate) async fn complete(
     });
     let provider_trace = req.provider_trace.clone();
     let expose_thinking = req.request_defaults.expose_thinking;
+    let request_defaults = req.request_defaults.clone();
     let timeouts = provider.options.llm_timeouts();
     let stream = stream_events.is_some();
     let compat = provider.resolved_compat(endpoint);
@@ -504,7 +505,7 @@ pub(crate) async fn complete(
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
-    let mut capture = ResponseMetadataCapture::from_response(&provider.options, &resp.headers);
+    let mut capture = ResponseMetadataCapture::from_response(&request_defaults, &resp.headers);
     // Reattachment is another HTTP request for the same logical generation.
     // Its transport request id belongs in the per-attempt record, but sending
     // a second response-start Evidence event would conflict with the live

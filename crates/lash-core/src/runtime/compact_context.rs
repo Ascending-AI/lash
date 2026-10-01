@@ -180,7 +180,7 @@ impl LashRuntime {
             self.state.session_id.clone(),
             state.clone(),
             self.protocol_turn_options().clone(),
-            self.host.core.prompt.prompt.clone(),
+            self.state.effective_policy().core_prompt.clone(),
             self.state.effective_policy().prompt.clone(),
         )
         .await

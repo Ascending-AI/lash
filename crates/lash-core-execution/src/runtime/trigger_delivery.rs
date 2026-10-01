@@ -68,11 +68,7 @@ impl ObligationRelay for TriggerDeliveryRelay {
                 key.kind()
             )));
         };
-        match self
-            .router
-            .recover_delivery(occurrence_id, subscription_id)
-            .await
-        {
+        match Box::pin(self.router.recover_delivery(occurrence_id, subscription_id)).await {
             Ok(_) => Ok(()),
             Err(TriggerDeliveryRecoveryError::Refused(error)) => {
                 Err(DeliveryFailure::Refused(error.to_string()))

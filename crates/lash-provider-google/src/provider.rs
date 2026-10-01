@@ -11,12 +11,13 @@ struct GoogleCredentialCallContext<'a> {
 }
 
 /// How to read one response, fixed by the request before any I/O: whether
-/// the stream must end with terminal evidence, and whether the recorded model
-/// surfaces thinking.
-#[derive(Clone, Copy, Debug)]
+/// the stream must end with terminal evidence, and the recorded model's
+/// request defaults, which say whether it surfaces thinking and which
+/// response metadata it captures.
+#[derive(Clone, Debug)]
 pub(crate) struct ResponseReading {
     pub(crate) stream_termination: StreamTermination,
-    pub(crate) expose_thinking: bool,
+    pub(crate) defaults: lash_core::provider::ModelRequestDefaults,
 }
 
 impl GoogleOAuthProvider {
@@ -38,8 +39,9 @@ impl GoogleOAuthProvider {
     ) -> Result<LlmResponse, LlmTransportError> {
         let ResponseReading {
             stream_termination,
-            expose_thinking,
+            defaults,
         } = reading;
+        let expose_thinking = defaults.expose_thinking;
         let request_body_bytes = serde_json::to_vec(&request).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Cloud Code body: {err}"))
                 .with_kind(lash_core::ProviderFailureKind::Validation)
@@ -101,7 +103,7 @@ impl GoogleOAuthProvider {
         let provider_request_id =
             first_header_value(&resp.headers, "x-request-id").map(str::to_string);
         let mut response_metadata =
-            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
+            ResponseMetadataCapture::from_response(&defaults, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 response_started: true,
@@ -421,7 +423,7 @@ impl GoogleOAuthProvider {
                 .model_capability
                 .stream_termination
                 .unwrap_or(self.stream_termination),
-            expose_thinking: req.request_defaults.expose_thinking,
+            defaults: req.request_defaults.clone(),
         };
         let GoogleCredential {
             access_token,
@@ -478,7 +480,7 @@ impl GoogleOAuthProvider {
                 request,
                 stream_events.clone(),
                 provider_trace.clone(),
-                reading,
+                reading.clone(),
                 generation_disposition,
             )
             .await
@@ -747,7 +749,10 @@ mod error_detail_tests {
                 None,
                 ResponseReading {
                     stream_termination: StreamTermination::EofTolerated,
-                    expose_thinking: false,
+                    defaults: lash_core::provider::ModelRequestDefaults {
+                        expose_thinking: false,
+                        ..Default::default()
+                    },
                 },
                 None,
             )

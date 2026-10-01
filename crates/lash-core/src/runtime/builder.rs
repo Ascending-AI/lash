@@ -82,35 +82,6 @@ impl EmbeddedRuntimeBuilder {
         self.with_plugin_factories(stack.into_factories())
     }
 
-    pub fn with_prompt_template(mut self, prompt_template: crate::PromptTemplate) -> Self {
-        self.core.prompt.prompt.template = Some(prompt_template);
-        self
-    }
-
-    pub fn with_prompt_contribution(mut self, contribution: crate::PromptContribution) -> Self {
-        self.core.prompt.prompt.add_contribution(contribution);
-        self
-    }
-
-    pub fn with_replaced_prompt_slot(
-        mut self,
-        slot: crate::PromptSlot,
-        contributions: impl IntoIterator<Item = crate::PromptContribution>,
-    ) -> Self {
-        self.core.prompt.prompt.replace_slot(slot, contributions);
-        self
-    }
-
-    pub fn with_cleared_prompt_slot(mut self, slot: crate::PromptSlot) -> Self {
-        self.core.prompt.prompt.clear_slot(slot);
-        self
-    }
-
-    pub fn with_prompt_layer(mut self, prompt: crate::PromptLayer) -> Self {
-        self.core.prompt.prompt = prompt;
-        self
-    }
-
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn lash_trace::TraceSink>>) -> Self {
         self.core.tracing.trace_sink = sink;
         self

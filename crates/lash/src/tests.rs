@@ -1194,6 +1194,7 @@ mod output_retention;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;
+mod recorded_core_prompt;
 mod recorded_execution_controls;
 #[cfg(feature = "rlm")]
 mod redrive_residue;

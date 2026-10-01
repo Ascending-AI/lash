@@ -1,3 +1,16 @@
+/// How a stream test reads a response whose recorded model captures the
+/// allowlisted `headers` and `body_paths`; thinking stays hidden.
+fn capturing_reading(headers: &[&str], body_paths: &[&str]) -> crate::provider::ResponseReading {
+    crate::provider::ResponseReading {
+        stream_termination: StreamTermination::RequireTerminalEvidence,
+        defaults: lash_core::provider::ModelRequestDefaults {
+            response_metadata_headers: headers.iter().map(ToString::to_string).collect(),
+            response_metadata_body_paths: body_paths.iter().map(ToString::to_string).collect(),
+            ..Default::default()
+        },
+    }
+}
+
 #[tokio::test]
 async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
     let prefix = concat!(
@@ -20,14 +33,6 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
                 secret: "fixture".into(),
             },
         )
-        .with_options(ProviderOptions {
-            response_metadata_headers: vec!["X-Request-Cost".into()],
-            response_metadata_body_paths: vec![
-                "/response/billing/cost".into(),
-                "/missing".into(),
-            ],
-            ..Default::default()
-        })
         .with_transport(Arc::new(StaticSseTransport::with_headers(
             body,
             vec![
@@ -42,10 +47,7 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
                 json!({"model": "gemini-test"}),
                 Some(LlmEventSender::new(|_| {})),
                 None,
-                crate::provider::ResponseReading {
-                    stream_termination: StreamTermination::RequireTerminalEvidence,
-                    expose_thinking: false,
-                },
+                capturing_reading(&["X-Request-Cost"], &["/response/billing/cost", "/missing"]),
                 None,
             )
             .await

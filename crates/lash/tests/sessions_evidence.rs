@@ -1387,12 +1387,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::RuntimeDurabilityConfig| {
         let _ = &value.process_env_store;
     });
-    // W0441: lash::runtime::RuntimePromptConfig [struct]
-    type_witness::<lash::runtime::RuntimePromptConfig>();
-    // W0442: lash::runtime::RuntimePromptConfig::prompt [field]
-    field_witness(|value: &lash::runtime::RuntimePromptConfig| {
-        let _ = &value.prompt;
-    });
     // W0443: lash::runtime::RuntimeProviderConfig [struct]
     type_witness::<lash::runtime::RuntimeProviderConfig>();
     // W0444: lash::runtime::RuntimeProviderConfig::models [field]

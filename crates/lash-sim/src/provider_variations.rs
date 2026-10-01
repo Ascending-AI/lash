@@ -623,7 +623,7 @@ mod tests {
             model_variant: Default::default(),
             model_capability: Default::default(),
             extra_body: Default::default(),
-            request_defaults: model.request_defaults,
+            request_defaults: model.request_defaults.clone(),
             generation: GenerationOptions {
                 stop_sequences: (variation == ProviderStopVariation::StopConsumed)
                     .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())

@@ -493,11 +493,13 @@ mod tests {
                 seen: Arc::new(Mutex::new(Vec::new())),
             };
 
-            let failed = router(stub(Some(refusal.clone())))
-                .await
-                .recover_delivery(&occurrence_id, &subscription_id)
-                .await
-                .expect_err("a refused route starts nothing");
+            let failed = Box::pin(
+                router(stub(Some(refusal.clone())))
+                    .await
+                    .recover_delivery(&occurrence_id, &subscription_id),
+            )
+            .await
+            .expect_err("a refused route starts nothing");
             assert_eq!(
                 matches!(failed, TriggerDeliveryRecoveryError::Retryable(_)),
                 retryable,
@@ -514,11 +516,13 @@ mod tests {
                 "a refused route registers no process"
             );
 
-            let process_id = router(stub(None))
-                .await
-                .recover_delivery(&occurrence_id, &subscription_id)
-                .await
-                .expect("a restored route recovers the delivery");
+            let process_id = Box::pin(
+                router(stub(None))
+                    .await
+                    .recover_delivery(&occurrence_id, &subscription_id),
+            )
+            .await
+            .expect("a restored route recovers the delivery");
             assert_eq!(
                 world
                     .registry
@@ -540,11 +544,13 @@ mod tests {
                 "recovery bound the delivery"
             );
             assert_eq!(
-                router(stub(None))
-                    .await
-                    .recover_delivery(&occurrence_id, &subscription_id)
-                    .await
-                    .expect("a bound delivery answers at once"),
+                Box::pin(
+                    router(stub(None))
+                        .await
+                        .recover_delivery(&occurrence_id, &subscription_id)
+                )
+                .await
+                .expect("a bound delivery answers at once"),
                 process_id,
                 "recovering a bound delivery again answers its process"
             );
@@ -820,10 +826,10 @@ mod tests {
         assert_eq!(report_prune.pruned_processes, 0, "the pinned child stays");
 
         // Recovery binds the child the emit registered and releases the pin.
-        let recovered = router
-            .recover_delivery(&report.occurrence_id, &subscription.subscription_id)
-            .await
-            .expect("recover the delivery");
+        let recovered =
+            Box::pin(router.recover_delivery(&report.occurrence_id, &subscription.subscription_id))
+                .await
+                .expect("recover the delivery");
         assert_eq!(recovered, child.id);
         assert_eq!(
             registry

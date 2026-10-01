@@ -197,6 +197,20 @@ impl ModelMetadataBuilder {
         self
     }
 
+    /// The response header names (case-insensitive) this model's calls
+    /// capture into `LlmResponse.response_metadata`.
+    pub fn response_metadata_headers(mut self, headers: Vec<String>) -> Self {
+        self.request_defaults.response_metadata_headers = headers;
+        self
+    }
+
+    /// The JSON pointers this model's calls capture from response bodies and
+    /// SSE events into `LlmResponse.response_metadata`.
+    pub fn response_metadata_body_paths(mut self, body_paths: Vec<String>) -> Self {
+        self.request_defaults.response_metadata_body_paths = body_paths;
+        self
+    }
+
     pub fn build(self) -> Result<ModelMetadata, ModelLimitsError> {
         let context_window_tokens = self
             .context_window_tokens

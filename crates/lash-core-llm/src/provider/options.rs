@@ -105,21 +105,17 @@ impl<'de> Deserialize<'de> for RequestTimeout {
     }
 }
 
+/// A provider route's operational options: its reliability policy and its
+/// transport byte guards. They govern an attempt and never what a call asks
+/// for or captures: publication, the fallback output cap, the cache hint and
+/// response-metadata capture are the recorded model's
+/// [`ModelRequestDefaults`](lash_sansio::llm::capability::ModelRequestDefaults),
+/// carried by each request.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderOptions {
     #[serde(default)]
     pub reliability: ProviderReliability,
-    /// Response header names (case-insensitive) captured into
-    /// `LlmResponse.response_metadata` as `header:<lowercased-name>` entries.
-    /// Headers not named here are never retained.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub response_metadata_headers: Vec<String>,
-    /// JSON pointers probed against buffered response bodies and every SSE
-    /// event. Captured values use `body:<pointer>` keys; unlisted body fields
-    /// are never retained.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub response_metadata_body_paths: Vec<String>,
     /// Maximum bytes retained for one SSE event or an unterminated SSE line.
     /// `None` (or `0`) applies the transport default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,8 +138,6 @@ impl ProviderOptions {
 
     pub fn is_default(&self) -> bool {
         self.reliability == ProviderReliability::default()
-            && self.response_metadata_headers.is_empty()
-            && self.response_metadata_body_paths.is_empty()
             && self.sse_event_bytes.is_none_or(|bytes| bytes == 0)
             && self.sse_total_bytes.is_none_or(|bytes| bytes == 0)
             && self.response_body_bytes.is_none()

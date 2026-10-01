@@ -567,7 +567,7 @@ async fn summarize_compaction_prefix(
         model_variant: model.reasoning.clone(),
         model_capability: model.metadata().capability.clone(),
         extra_body: Default::default(),
-        request_defaults: model.metadata().request_defaults,
+        request_defaults: model.metadata().request_defaults.clone(),
         generation: snapshot.policy.generation.clone(),
         scope: lash_core::LlmRequestScope::new(
             session_id.clone(),
