@@ -281,7 +281,7 @@ mod tests {
         assert!(
             contributions[0]
                 .content
-                .contains("`current_query`: `str`, read-only")
+                .contains("`current_query`: `string`, read-only")
         );
     }
 

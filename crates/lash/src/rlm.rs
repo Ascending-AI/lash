@@ -143,6 +143,12 @@ pub use lash_protocol_rlm::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
     ExecutionSectionRequest, ResolvedToolBinding, ShapeNotation, TypescriptDialect,
 };
+/// The schema shapes a [`Dialect`] is handed to spell: one reading of a tool's
+/// JSON Schemas, shared by every prompt surface.
+pub use lash_protocol_rlm::{
+    ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
+    ShapeField, ShapeKind,
+};
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};

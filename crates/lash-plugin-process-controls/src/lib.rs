@@ -684,7 +684,7 @@ mod tests {
         assert!(rendered.contains("definition"), "{rendered}");
         assert!(rendered.contains("status: enum["), "{rendered}");
         assert!(
-            rendered.contains("status?: any | record{in: list[enum["),
+            rendered.contains("status?: enum[\"any\"] | record{in: list[enum["),
             "{rendered}"
         );
         // A Lashlang cell passes the process itself, whose `Process<...>` type

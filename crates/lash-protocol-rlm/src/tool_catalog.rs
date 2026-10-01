@@ -42,26 +42,35 @@ pub(crate) fn rlm_prompt_tool_docs(
         let call_path = dialect
             .tool_call_path(&tool.manifest)
             .expect("RLM tool catalog registration validates the session dialect's binding");
-        let mut compact = contract.compact_contract_with_signature_name(&tool.manifest, &call_path);
+        let input = contract.input_shape();
+        let output = contract.output_shape();
+        let signature = dialect
+            .language()
+            .tool_signature(&call_path, &input, &output);
+        // The signature carries every field's name and type. The rows under
+        // it add what a type cannot say, for the fields that say it.
+        let mut sections = vec![format!("`{signature}`")];
+        let description = tool.manifest.description.trim();
+        if !description.is_empty() {
+            sections.push(description.to_string());
+        }
+        for (title, shape) in [("Parameters", &input), ("Return fields", &output)] {
+            let rows = dialect.noted_field_rows(shape);
+            if !rows.is_empty() {
+                sections.push(format!("{title}:\n{}", rows.join("\n")));
+            }
+        }
         // Authored examples are Lashlang source; the dialect spells them,
         // and leaves out the ones it cannot.
-        compact.examples = compact
-            .examples
+        let examples = contract
+            .compact_examples()
             .iter()
             .filter_map(|example| dialect.render_tool_example(example))
-            .collect();
-        compact.parameters.retain(has_field_description);
-        if !schema_nests(contract.output_schema.canonical(), 0) {
-            compact.return_fields.retain(has_field_description);
+            .collect::<Vec<_>>();
+        if !examples.is_empty() {
+            sections.push(format!("Examples: {}", examples.join("; ")));
         }
-        let markdown = compact.render_markdown();
-        let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
-        let signature = dialect.language().tool_signature(
-            &call_path,
-            contract.input_schema.canonical(),
-            contract.output_schema.canonical(),
-        );
-        let doc = format!("`{signature}`\n{notes}");
+        let doc = sections.join("\n");
         if let Some(module) = tool.manifest.module.as_deref() {
             modules
                 .entry(module.name.as_str())
@@ -78,42 +87,6 @@ pub(crate) fn rlm_prompt_tool_docs(
         }),
     );
     entries.join("\n\n")
-}
-
-fn has_field_description(row: &serde_json::Value) -> bool {
-    row.get("description")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|description| !description.trim().is_empty())
-}
-
-fn schema_nests(schema: &serde_json::Value, depth: usize) -> bool {
-    let container = schema.get("properties").is_some() || schema.get("items").is_some();
-    if container && depth >= 1 {
-        return true;
-    }
-    if schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .is_some_and(|properties| {
-            properties
-                .values()
-                .any(|field| schema_nests(field, depth + 1))
-        })
-    {
-        return true;
-    }
-    if schema
-        .get("items")
-        .is_some_and(|items| schema_nests(items, depth + 1))
-    {
-        return true;
-    }
-    ["anyOf", "oneOf", "allOf"].iter().any(|key| {
-        schema
-            .get(key)
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|variants| variants.iter().any(|variant| schema_nests(variant, depth)))
-    })
 }
 
 fn validate_rlm_language_bindings(
@@ -491,7 +464,7 @@ mod tests {
         assert!(docs.len() <= 768, "plan.update docs exceeded budget");
         assert!(docs.contains("plan.update("), "{docs}");
         assert!(
-            docs.contains("plan: Array<Record<string, unknown>>"),
+            docs.contains("plan: Array<{ step: string; status: string }>"),
             "{docs}"
         );
         assert!(!docs.contains("update_plan("), "{docs}");
@@ -505,6 +478,90 @@ mod tests {
         .expect("module call lowers");
         lashlang::LinkedModule::link(program, host_environment).expect("module call links");
     }
+
+    /// FIG-4544. An MCP server hands its schemas through as written, and
+    /// almost none of them say `additionalProperties: false`. The tool docs
+    /// must still show every field's name and type, nested ones included,
+    /// whether or not the field has a description.
+    #[test]
+    fn an_mcp_style_open_schema_renders_every_field_name_and_type() {
+        let search = ToolDefinition::raw(
+            "tool:mcp/issues_search",
+            "mcp__tracker__issues_search",
+            "[MCP tracker] Search issues.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "minLength": 1 },
+                    "filter": {
+                        "type": "object",
+                        "properties": {
+                            "state": { "enum": ["open", "closed"] },
+                            "labels": { "type": "array", "items": { "type": "string" } }
+                        }
+                    },
+                    "sort": {
+                        "type": "array",
+                        "description": "Sort keys, most significant first.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": { "type": "string" },
+                                "descending": { "type": "boolean", "default": false }
+                            },
+                            "required": ["field"]
+                        }
+                    },
+                    "page": { "type": ["integer", "null"], "minimum": 1 }
+                },
+                "required": ["query"]
+            }),
+            json!({
+                "type": "object",
+                "properties": {
+                    "issues": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "integer", "description": "Stable issue id." },
+                                "title": { "type": "string" }
+                            },
+                            "required": ["id", "title"]
+                        }
+                    }
+                },
+                "required": ["issues"]
+            }),
+        )
+        .with_tool_binding(ToolBinding::new(["tracker"], "issues_search"));
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![search]);
+
+        let docs = rlm_prompt_tool_docs(
+            &catalog,
+            &typescript_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
+        assert_eq!(
+            docs,
+            concat!(
+                "`tracker.issues_search({ query: string; ",
+                "filter?: { labels?: Array<string>; state?: \"open\" | \"closed\" }; ",
+                "page?: number | null; ",
+                "sort?: Array<{ field: string; descending?: boolean }> }): ",
+                "Promise<{ issues: Array<{ id: number; title: string }> }>`\n",
+                "[MCP tracker] Search issues.\n",
+                "Parameters:\n",
+                "- `query: string` (min length 1)\n",
+                "- `page?: number | null` (>= 1)\n",
+                "- `sort?: Array<Record<string, unknown>>` — Sort keys, most significant first.\n",
+                "- `sort[].descending?: boolean` (default false)\n",
+                "Return fields:\n",
+                "- `issues[].id: number` — Stable issue id."
+            )
+        );
+    }
+
     fn tool_with_prose(description: &str, schema_description: &str) -> ToolDefinition {
         ToolDefinition::raw(
             "tool:test/spawn_agent",

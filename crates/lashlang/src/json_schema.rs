@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::ast::{ProcessParam, ProcessSignature, ProcessSignatureError, ProcessType};
@@ -8,43 +7,9 @@ use crate::{TypeExpr, TypeField};
 
 const MAX_SCHEMA_DEPTH: usize = 32;
 
-/// The JSON Schema keyword that carries the types JSON Schema cannot say.
-///
-/// JSON Schema has no vocabulary for a callable process or for a trigger
-/// handle, so a tool contract that traffics in them used to lose them at the
-/// boundary: the exporter erased both to `{}` and the importer widened the
-/// `{}` back to [`TypeExpr::Any`]. `x-lash` is the one place those types are
-/// spelled, and it is an extension keyword, so a contract that does not carry
-/// it reads exactly as it did before.
-pub const X_LASH_KEYWORD: &str = "x-lash";
-
-/// The lash-only half of a type, as it rides inside a JSON Schema.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum XLashType {
-    /// A process with an authoritative call signature.
-    Process { signature: XLashSignature },
-    /// A process the host can only describe as callable.
-    ProcessUnknown,
-    /// A trigger handle over the payload the trigger delivers.
-    Handle { payload: Box<Value> },
-}
-
-/// An ordered process-call signature in schema form.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct XLashSignature {
-    pub params: Vec<XLashParam>,
-    pub output: Box<Value>,
-}
-
-/// One named process parameter in schema form.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct XLashParam {
-    pub name: String,
-    pub schema: Value,
-}
+/// The `x-lash` declarations are part of the tool contract, so the contract
+/// layer owns their wire form; this module reads them as lash types.
+pub use lash_sansio::{X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType};
 
 /// Why a host-declared schema cannot be read as a lash type.
 ///
@@ -78,6 +43,11 @@ pub enum JsonSchemaError {
 /// malformed [`X_LASH_KEYWORD`]: that keyword exists only because the host
 /// meant a specific lash type, so guessing at a broken one would hide the
 /// mistake behind a widened `Any`.
+///
+/// This is the type the linker checks and the runtime validates against, not
+/// what a prompt shows: an open object is a `Dict` here because the runtime
+/// accepts any keys for it. A prompt surface reads the schema's fields from
+/// [`lash_sansio::SchemaShape`] instead.
 pub fn json_schema_to_type_expr(schema: &Value) -> Result<TypeExpr, JsonSchemaError> {
     SchemaImporter { root: schema }.import(schema, 0, String::from("#"))
 }
@@ -206,7 +176,7 @@ impl SchemaImporter<'_> {
             // Anything else that reads as a plain name is a named data type the
             // linker resolves; a URL or any other spelling still widens.
             let Some(pointer) = reference.strip_prefix('#') else {
-                return Ok(if is_named_type_reference(reference) {
+                return Ok(if lash_sansio::is_named_type_reference(reference) {
                     TypeExpr::Ref(reference.into())
                 } else {
                     TypeExpr::Any
@@ -402,24 +372,6 @@ impl SchemaImporter<'_> {
 
 fn child(path: &str, segment: &str) -> String {
     format!("{path}/{segment}")
-}
-
-/// Named data types are dotted identifiers (`lash.TriggerRegistration`). A URL
-/// or a relative file reference is a JSON Schema construct lash cannot resolve,
-/// and keeps widening rather than inventing a name the linker would reject.
-fn is_named_type_reference(reference: &str) -> bool {
-    !reference.is_empty()
-        && reference
-            .split('.')
-            .all(|segment| !segment.is_empty() && segment.chars().all(is_name_char))
-        && reference
-            .chars()
-            .next()
-            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-}
-
-fn is_name_char(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == '_'
 }
 
 fn has_object_keywords(schema: &Map<String, Value>) -> bool {

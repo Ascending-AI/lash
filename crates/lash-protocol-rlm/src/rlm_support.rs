@@ -1094,7 +1094,7 @@ mod bound_variable_tests {
         assert!(
             rendered.contains("keys=2 (__projected__payload, body)")
                 && rendered.contains(r#"≈ {"__projected__payload":"#)
-                && rendered.contains("  __projected__payload: str,"),
+                && rendered.contains("  __projected__payload: string;"),
             "reserved-prefix key must be verbatim in the row key set, inline preview, and Schema:\n{rendered}"
         );
     }
@@ -1161,7 +1161,7 @@ mod bound_variable_tests {
             json!({ "big": (0..41).collect::<Vec<_>>(), "steady": "same" }),
         );
 
-        let big_idx = s.find("- `big`: `list[int]`, len=41").expect("big row");
+        let big_idx = s.find("- `big`: `Array<number>`, len=41").expect("big row");
         let steady_idx = s.find(r#"- `steady` = "same""#).expect("steady row");
         assert!(big_idx < steady_idx, "{s}");
     }

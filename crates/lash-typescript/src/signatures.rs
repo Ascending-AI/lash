@@ -1,6 +1,5 @@
 use crate::{Diagnostic, DiagnosticCode};
-use lashlang::{TypeExpr, TypeField, json_schema_to_type_expr};
-use serde_json::Value;
+use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind};
 
 /// The dialect contract lives with the runtime that implements it:
 /// `lashlang` owns the signature rows and derives the VM's normalization
@@ -36,13 +35,62 @@ pub fn stdlib_name_count() -> usize {
     STATIC_STDLIB_SIGNATURES.len() + INSTANCE_STDLIB_SIGNATURES.len()
 }
 
-/// Spells a JSON schema as a TypeScript type using the shared type engine.
+/// Spells a schema shape as a TypeScript type.
 ///
-/// A schema the importer refuses is rendered as the widest type rather than
-/// failing: this is prompt-facing documentation, and the same schema is
-/// refused with a typed diagnostic where it actually enters the catalog.
-pub fn render_schema_type(schema: &Value) -> String {
-    render_type(&json_schema_to_type_expr(schema).unwrap_or(lashlang::TypeExpr::Any))
+/// The shape is the contract layer's one reading of a JSON Schema; this is
+/// TypeScript's spelling of it and reads no schema itself. An object keeps
+/// its fields whether or not it is closed, and gains an index signature only
+/// when the schema says extra keys are allowed.
+pub fn render_schema_shape(shape: &SchemaShape) -> String {
+    match &shape.kind {
+        ShapeKind::Unknown => "unknown".to_string(),
+        ShapeKind::Null => "null".to_string(),
+        ShapeKind::Bool => "boolean".to_string(),
+        ShapeKind::Int | ShapeKind::Float => "number".to_string(),
+        ShapeKind::Str => "string".to_string(),
+        ShapeKind::Literals(values) => {
+            render_union(values.iter().map(serde_json::Value::to_string))
+        }
+        ShapeKind::List(item) => format!("Array<{}>", render_schema_shape(item)),
+        ShapeKind::Tuple(items) => format!(
+            "[{}]",
+            items
+                .iter()
+                .map(render_schema_shape)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        ShapeKind::Object(object) => render_object(object),
+        ShapeKind::Union(members) => render_union(members.iter().map(render_schema_shape)),
+        ShapeKind::Named(name) => render_identifier(name),
+        ShapeKind::Process(None) => "Process".to_string(),
+        ShapeKind::Process(Some(signature)) => format!(
+            "Process<[{}], {}>",
+            signature
+                .params
+                .iter()
+                .map(|param| format!("{}: {}", param.name, render_schema_shape(&param.shape)))
+                .collect::<Vec<_>>()
+                .join(", "),
+            render_schema_shape(&signature.output)
+        ),
+        ShapeKind::Handle(payload) => format!("TriggerHandle<{}>", render_schema_shape(payload)),
+        // `ShapeKind` is non-exhaustive: a kind this dialect has no spelling
+        // for yet is shown as the widest type rather than guessed at.
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Alternatives joined with `|`. `int` and `float` are both `number`, so
+/// members that spell the same are shown once.
+fn render_union(members: impl Iterator<Item = String>) -> String {
+    let mut spelled = Vec::<String>::new();
+    for member in members {
+        if !spelled.contains(&member) {
+            spelled.push(member);
+        }
+    }
+    spelled.join(" | ")
 }
 
 /// Confirms a TypeScript cell can address `call_path` verbatim as a tool call.
@@ -113,65 +161,38 @@ fn addresses_tool(expr: &lashlang::Expr, modules: &[&str], operation: &str) -> b
     }
 }
 
-fn render_type(ty: &TypeExpr) -> String {
-    match ty {
-        TypeExpr::Any => "unknown".to_string(),
-        TypeExpr::Str => "string".to_string(),
-        TypeExpr::Int | TypeExpr::Float => "number".to_string(),
-        TypeExpr::Bool => "boolean".to_string(),
-        TypeExpr::Dict => "Record<string, unknown>".to_string(),
-        TypeExpr::Null => "null".to_string(),
-        #[expect(
-            clippy::expect_used,
-            reason = "the values are `str`s, and `serde_json` never fails to encode one"
-        )]
-        TypeExpr::Enum(values) => values
-            .iter()
-            .map(|value| serde_json::to_string(value.as_str()).expect("strings serialize"))
-            .collect::<Vec<_>>()
-            .join(" | "),
-        TypeExpr::List(item) => format!("Array<{}>", render_type(item)),
-        TypeExpr::Object(fields) => render_object(fields),
-        TypeExpr::Ref(name) => render_identifier(name),
-        TypeExpr::Process(process) => match process.as_signature() {
-            Some(signature) => format!(
-                "Process<[{}], {}>",
-                signature
-                    .params()
-                    .iter()
-                    .map(|param| format!("{}: {}", param.name, render_type(&param.ty)))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                render_type(signature.output())
-            ),
-            None => "Process".to_string(),
-        },
-        TypeExpr::TriggerHandle(event) => format!("TriggerHandle<{}>", render_type(event)),
-        TypeExpr::Union(items) => items
-            .iter()
-            .map(render_type)
-            .collect::<Vec<_>>()
-            .join(" | "),
+fn render_object(object: &ObjectShape) -> String {
+    let extra = match &object.extra_keys {
+        ExtraKeys::Closed => None,
+        // A schema that names its fields and says nothing about other keys
+        // is shown as those fields; one that names none accepts anything.
+        ExtraKeys::Unstated if object.fields.is_empty() => Some("unknown".to_string()),
+        ExtraKeys::Unstated => None,
+        ExtraKeys::Open(extra) => Some(render_schema_shape(extra)),
+        _ => Some("unknown".to_string()),
+    };
+    if object.fields.is_empty() {
+        return match extra {
+            Some(extra) => format!("Record<string, {extra}>"),
+            None => "Record<string, never>".to_string(),
+        };
     }
-}
-
-fn render_object(fields: &[TypeField]) -> String {
-    if fields.is_empty() {
-        return "Record<string, never>".to_string();
-    }
-    format!(
-        "{{ {} }}",
-        fields
-            .iter()
-            .map(|field| format!(
+    let mut members = object
+        .fields
+        .iter()
+        .map(|field| {
+            format!(
                 "{}{}: {}",
-                render_property_name(field.name.as_str()),
-                if field.optional { "?" } else { "" },
-                render_type(&field.ty)
-            ))
-            .collect::<Vec<_>>()
-            .join("; ")
-    )
+                render_property_name(&field.name),
+                if field.required { "" } else { "?" },
+                render_schema_shape(&field.shape)
+            )
+        })
+        .collect::<Vec<_>>();
+    if let Some(extra) = extra {
+        members.push(format!("[key: string]: {extra}"));
+    }
+    format!("{{ {} }}", members.join("; "))
 }
 
 fn render_identifier(name: &str) -> String {
@@ -316,6 +337,16 @@ mod tests {
     use super::LiteralReceivers as On;
 
     use super::*;
+    use lashlang::{TypeExpr, TypeField};
+    use serde_json::Value;
+
+    fn render_schema(schema: &Value) -> String {
+        render_schema_shape(&SchemaShape::from_json_schema(schema))
+    }
+
+    fn render_type(ty: &TypeExpr) -> String {
+        render_schema(&lashlang::type_expr_to_json_schema(ty))
+    }
 
     #[test]
     fn inferred_process_signature_matches_schema_typescript_and_artifact() {
@@ -363,7 +394,7 @@ mod tests {
             expected
         );
         assert_eq!(
-            render_schema_type(&schema),
+            render_schema(&schema),
             "Process<[query: string, retries: number], boolean>"
         );
         let retained = lashlang::ModuleArtifact::from_store_bytes(
@@ -630,13 +661,62 @@ mod tests {
     }
 
     #[test]
-    fn renders_schema_through_shared_type_engine() {
-        let ty = render_schema_type(&json!({
+    fn a_closed_object_renders_its_fields_required_first() {
+        let ty = render_schema(&json!({
             "type": "object", "additionalProperties": false,
             "properties": { "query": { "type": "string" }, "limit": { "type": "integer" } },
             "required": ["query"]
         }));
-        assert_eq!(ty, "{ limit?: number; query: string }");
+        assert_eq!(ty, "{ query: string; limit?: number }");
+    }
+
+    /// FIG-4544: an MCP schema almost never sets `additionalProperties:
+    /// false`. Its fields are still its fields, and an index signature
+    /// appears only where the schema says extra keys are allowed.
+    #[test]
+    fn an_open_object_keeps_every_field_name_and_type() {
+        assert_eq!(
+            render_schema(&json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "minLength": 1 },
+                    "filter": {
+                        "type": "object",
+                        "properties": {
+                            "tags": { "type": "array", "items": { "type": "string" } },
+                            "mode": { "enum": ["any", "all"] }
+                        }
+                    },
+                    "page": { "type": ["integer", "null"] }
+                },
+                "required": ["query"]
+            })),
+            r#"{ query: string; filter?: { mode?: "any" | "all"; tags?: Array<string> }; page?: number | null }"#
+        );
+        assert_eq!(
+            render_schema(&json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "additionalProperties": { "type": "integer" }
+            })),
+            "{ name?: string; [key: string]: number }"
+        );
+        assert_eq!(
+            render_schema(&json!({ "type": "object" })),
+            "Record<string, unknown>"
+        );
+        assert_eq!(
+            render_schema(&json!({ "type": "object", "additionalProperties": false })),
+            "Record<string, never>"
+        );
+        assert_eq!(
+            render_schema(&json!({ "anyOf": [{ "type": "integer" }, { "type": "number" }] })),
+            "number"
+        );
+        assert_eq!(
+            render_schema(&json!({ "type": "array", "prefixItems": [{ "type": "string" }, {}] })),
+            "[string, unknown]"
+        );
     }
 
     #[test]
@@ -665,7 +745,7 @@ mod tests {
                     optional: false,
                 }]),
             )])),
-            "Process<[payload: { value: string }], boolean>"
+            "Process<[payload: { value: string; [key: string]: unknown }], boolean>"
         );
         assert_eq!(
             render_type(&process(vec![

@@ -213,19 +213,19 @@ fn typed_tool_definition_generates_input_and_output_schema() {
     assert!(metadata.iter().any(|param| {
         param["name"] == "page_limit"
             && param["type"] == "int"
-            && param["maximum"].as_f64() == Some(20.0)
+            && param["signature"] == "page_limit: int >= 0 <= 20"
     }));
     assert!(metadata.iter().any(|param| {
         param["name"] == "tags"
             && param["type"] == "list[str]"
-            && param["min_items"] == 1
-            && param["max_items"] == 3
+            && param["signature"] == "tags: list[str] min items 1 max items 3"
     }));
-    assert!(
-        metadata
-            .iter()
-            .any(|param| { param["name"] == "mode" && param["nullable"] == true })
-    );
+    assert!(metadata.iter().any(|param| {
+        param["name"] == "mode"
+            && param["type"]
+                .as_str()
+                .is_some_and(|ty| ty.ends_with(" | null"))
+    }));
     assert_eq!(
         tool.contract.output_schema.canonical["properties"]["answer"]["type"],
         "string"
@@ -321,8 +321,6 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
                 "name": "limit",
                 "type": "int",
                 "required": false,
-                "default": 5,
-                "maximum": 10,
                 "signature": "limit?: int <= 10 = 5"
             }),
         ]
@@ -380,7 +378,7 @@ fn compact_tool_contract_resolves_local_refs_in_string_or_list_parameters() {
     let signature = tool.compact_contract().render_signature();
 
     assert!(
-        signature.contains("module?: list[str] | str | null"),
+        signature.contains("module?: str | list[str] | null"),
         "{signature}"
     );
     assert!(!signature.contains("module?: any"), "{signature}");
@@ -619,9 +617,7 @@ fn json_schema_loaded_contract_matches_hardcoded_renderer() {
                     "name": "genre",
                     "type": "str | null",
                     "required": false,
-                    "nullable": true,
                     "description": "Only include songs from this genre.",
-                    "default": null,
                     "signature": "genre?: str | null = null"
                 },
                 {
@@ -629,18 +625,13 @@ fn json_schema_loaded_contract_matches_hardcoded_renderer() {
                     "type": "int",
                     "required": false,
                     "description": "Maximum number of songs to return.",
-                    "default": 5,
-                    "minimum": 1,
-                    "maximum": 20,
                     "signature": "page_limit?: int >= 1 <= 20 = 5"
                 },
                 {
                     "name": "sort_by",
                     "type": "str | null",
                     "required": false,
-                    "nullable": true,
                     "description": "Field to sort by. Prefix with '-' for descending order.",
-                    "default": null,
                     "signature": "sort_by?: str | null = null"
                 }
             ],
@@ -650,14 +641,12 @@ fn json_schema_loaded_contract_matches_hardcoded_renderer() {
                     "type": "list[record]",
                     "required": true,
                     "description": "Matched songs.",
-                    "items": "record",
                     "signature": "response: list[record]"
                 },
                 {
                     "path": "response[].album_id",
                     "type": "int | null",
                     "required": true,
-                    "nullable": true,
                     "description": "Album identifier when the song belongs to an album.",
                     "signature": "response[].album_id: int | null"
                 },
@@ -665,7 +654,6 @@ fn json_schema_loaded_contract_matches_hardcoded_renderer() {
                     "path": "response[].album_title",
                     "type": "str | null",
                     "required": true,
-                    "nullable": true,
                     "signature": "response[].album_title: str | null"
                 },
                 {
@@ -703,7 +691,6 @@ fn json_schema_loaded_contract_matches_hardcoded_renderer() {
                     "type": "int",
                     "required": true,
                     "description": "Number of times the song was played.",
-                    "minimum": 0,
                     "signature": "response[].play_count: int >= 0"
                 },
                 {
@@ -858,7 +845,7 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
         serde_json::json!({
             "name": "mcp__appworld__spotify_show_album_library",
             "signature": "mcp__appworld__spotify_show_album_library({ access_token: str, page_index?: int >= 0 = 0, page_limit?: int >= 1 <= 20 = 5 })",
-            "returns": "record{response: list[record{added_at: null | str, album_id: int, genre: str, song_ids: list[int], title: str}] | record{message: str}}",
+            "returns": "record{response: list[record{added_at: str | null, album_id: int, genre: str, song_ids: list[int], title: str}] | record{message: str}}",
             "parameters": [
                 {
                     "name": "access_token",
@@ -872,8 +859,6 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
                     "type": "int",
                     "required": false,
                     "description": "The index of the page to return.",
-                    "default": 0,
-                    "minimum": 0,
                     "signature": "page_index?: int >= 0 = 0"
                 },
                 {
@@ -881,9 +866,6 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
                     "type": "int",
                     "required": false,
                     "description": "The maximum number of results to return per page.",
-                    "default": 5,
-                    "minimum": 1,
-                    "maximum": 20,
                     "signature": "page_limit?: int >= 1 <= 20 = 5"
                 }
             ],
@@ -893,14 +875,12 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
                     "type": "list[record]",
                     "required": true,
                     "description": "Albums in the user's library.",
-                    "items": "record",
                     "signature": "response: list[record]"
                 },
                 {
                     "path": "response[].added_at",
                     "type": "str | null",
                     "required": true,
-                    "nullable": true,
                     "description": "When the album was added to the library.",
                     "signature": "response[].added_at: str | null"
                 },
@@ -915,21 +895,19 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
                     "type": "str",
                     "required": true,
                     "description": "Album genre.",
-                    "min_length": 1,
-                    "signature": "response[].genre: str min_len 1"
+                    "signature": "response[].genre: str min length 1"
                 },
                 {
-                    "path": "response[].song_ids[]",
-                    "type": "int",
+                    "path": "response[].song_ids",
+                    "type": "list[int]",
                     "required": true,
-                    "signature": "response[].song_ids[]: int"
+                    "signature": "response[].song_ids: list[int]"
                 },
                 {
                     "path": "response[].title",
                     "type": "str",
                     "required": true,
-                    "min_length": 1,
-                    "signature": "response[].title: str min_len 1"
+                    "signature": "response[].title: str min length 1"
                 },
                 {
                     "path": "response.message",
@@ -945,7 +923,7 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
     );
     assert_eq!(
         contract.render_markdown(),
-        "### mcp__appworld__spotify_show_album_library({ access_token: str, page_index?: int >= 0 = 0, page_limit?: int >= 1 <= 20 = 5 }) -> record{response: list[record{added_at: null | str, album_id: int, genre: str, song_ids: list[int], title: str}] | record{message: str}}\n[MCP appworld] Search or show a list of albums in your album library.\nParameters:\n- `access_token: str` — Access token obtained from spotify app login.\n- `page_index?: int >= 0 = 0` — The index of the page to return.\n- `page_limit?: int >= 1 <= 20 = 5` — The maximum number of results to return per page.\nReturn fields:\n- `response: list[record]` — Albums in the user's library.\n- `response[].added_at: str | null` — When the album was added to the library.\n- `response[].album_id: int`\n- `response[].genre: str min_len 1` — Album genre.\n- `response[].song_ids[]: int`\n- `response[].title: str min_len 1`\n- `response.message: str` — Failure or status message.\nExamples: show album library"
+        "### mcp__appworld__spotify_show_album_library({ access_token: str, page_index?: int >= 0 = 0, page_limit?: int >= 1 <= 20 = 5 }) -> record{response: list[record{added_at: str | null, album_id: int, genre: str, song_ids: list[int], title: str}] | record{message: str}}\n[MCP appworld] Search or show a list of albums in your album library.\nParameters:\n- `access_token: str` — Access token obtained from spotify app login.\n- `page_index?: int >= 0 = 0` — The index of the page to return.\n- `page_limit?: int >= 1 <= 20 = 5` — The maximum number of results to return per page.\nReturn fields:\n- `response: list[record]` — Albums in the user's library.\n- `response[].added_at: str | null` — When the album was added to the library.\n- `response[].album_id: int`\n- `response[].genre: str min length 1` — Album genre.\n- `response[].song_ids: list[int]`\n- `response[].title: str min length 1`\n- `response.message: str` — Failure or status message.\nExamples: show album library"
     );
 }
 
@@ -1063,4 +1041,71 @@ fn arc_compact_contract_serializes_identically_and_round_trips() {
     let bytes = serde_json::to_vec(&manifest).expect("manifest bytes");
     let decoded: ToolManifest = serde_json::from_slice(&bytes).expect("decode");
     assert_eq!(decoded, manifest);
+}
+
+/// FIG-4544. The compact contract is the schema docs every non-dialect
+/// surface shows: catalog projections, discovery results, the manifest. An
+/// MCP-style schema — no `additionalProperties`, nested objects and arrays, a
+/// field without a description — keeps every field, its notes, and what the
+/// schema says about extra keys.
+#[test]
+fn compact_contract_renders_an_open_nested_schema_with_full_fidelity() {
+    let tool = ToolDefinition::raw(
+        "tool:mcp/issues_search",
+        "issues_search",
+        "Search issues.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "minLength": 1 },
+                "filter": {
+                    "type": "object",
+                    "properties": {
+                        "state": { "enum": ["open", "closed"], "description": "Issue state." },
+                        "labels": { "type": "array", "items": { "type": "string" }, "maxItems": 5 }
+                    },
+                    "additionalProperties": { "type": "string" }
+                },
+                "sort": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "field": { "type": "string" },
+                            "descending": { "type": "boolean", "default": false }
+                        },
+                        "required": ["field"]
+                    }
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": true
+        }),
+        serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": { "id": { "type": "integer", "exclusiveMinimum": 0 } },
+                "required": ["id"]
+            }
+        }),
+    );
+
+    assert_eq!(
+        tool.compact_contract().render_markdown(),
+        concat!(
+            "### issues_search({ query: str min length 1, ",
+            "filter?: record{labels?: list[str], state?: enum[\"open\", \"closed\"], ...: str}, ",
+            "sort?: list[record{field: str, descending?: bool}], ... }) -> list[record{id: int}]\n",
+            "Search issues.\n",
+            "Parameters:\n",
+            "- `query: str min length 1`\n",
+            "- `filter.labels?: list[str] max items 5`\n",
+            "- `filter.state?: enum[\"open\", \"closed\"]` — Issue state.\n",
+            "- `sort[].field: str`\n",
+            "- `sort[].descending?: bool = false`\n",
+            "Return fields:\n",
+            "- `[].id: int > 0`"
+        )
+    );
 }

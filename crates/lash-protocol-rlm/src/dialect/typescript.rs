@@ -43,17 +43,21 @@ impl Dialect for TypescriptDialect {
     fn tool_signature(
         &self,
         call_path: &str,
-        input_schema: &serde_json::Value,
-        output_schema: &serde_json::Value,
+        input: &lash_sansio::SchemaShape,
+        output: &lash_sansio::SchemaShape,
     ) -> String {
-        let input = lash_typescript::render_schema_type(input_schema);
+        let input = lash_typescript::render_schema_shape(input);
         let input = if input == "Record<string, never>" {
             "{}"
         } else {
             &input
         };
-        let output = lash_typescript::render_schema_type(output_schema);
+        let output = lash_typescript::render_schema_shape(output);
         format!("{call_path}({input}): Promise<{output}>")
+    }
+
+    fn schema_type(&self, shape: &lash_sansio::SchemaShape) -> String {
+        lash_typescript::render_schema_shape(shape)
     }
 
     fn render_tool_example(&self, authored: &str) -> Option<String> {
@@ -66,18 +70,18 @@ impl Dialect for TypescriptDialect {
 
     fn history_item_definition(&self, images: bool) -> Vec<String> {
         let image_field = if images {
-            ", images?: list[HistoryImage]"
+            "; images?: Array<HistoryImage>"
         } else {
             ""
         };
         let mut lines = vec![
             "type HistoryItem =".to_string(),
-            "  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }".to_string(),
-            format!("  | {{ kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[any]{image_field}, error?: str | null, final_output?: any | null }}"),
-            "type HistoryAttachment = { id: str, media_type?: str | null, label?: str | null, source: str, reference: str }".to_string(),
+            "  | { kind: \"message\"; id: string; role: \"user\" | \"system\" | \"assistant\" | \"event\"; content: string; attachments?: Array<HistoryAttachment> }".to_string(),
+            format!("  | {{ kind: \"lashlang_step\"; id: string; protocol_iteration: number; code: string; output: Array<unknown>{image_field}; error?: string | null; final_output?: unknown }}"),
+            "type HistoryAttachment = { id: string; media_type?: string | null; label?: string | null; source: string; reference: string }".to_string(),
         ];
         if images {
-            lines.push("type HistoryImage = { id: str, media_type: str, width?: int | null, height?: int | null, bytes: int, label?: str | null }".to_string());
+            lines.push("type HistoryImage = { id: string; media_type: string; width?: number | null; height?: number | null; bytes: number; label?: string | null }".to_string());
         }
         lines
     }
@@ -125,25 +129,24 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     shape_notation: TYPESCRIPT_SHAPE_NOTATION,
 };
 
-/// The shape notation TypeScript prompts have always shown for inferred
-/// values.
+/// TypeScript's spelling of the shapes shared code infers from values.
 const TYPESCRIPT_SHAPE_NOTATION: ShapeNotation = ShapeNotation {
-    any: "any",
+    any: "unknown",
     null: "null",
-    bool: "bool",
-    int: "int",
-    float: "float",
-    str: "str",
-    record: "record",
-    list_open: "list[",
-    list_close: "]",
+    bool: "boolean",
+    int: "number",
+    float: "number",
+    str: "string",
+    record: "Record<string, unknown>",
+    list_open: "Array<",
+    list_close: ">",
     union_separator: " | ",
     definition_keyword: "type ",
     definition_assign: " = ",
     record_open: "{",
     field_indent: "  ",
     field_separator: ": ",
-    field_terminator: ",",
+    field_terminator: ";",
     record_close: "}",
 };
 

@@ -183,9 +183,12 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    CompactToolContract, LashSchema, ModelTool, TOOL_BINDING_KEY, ToolArgumentProjectionPolicy,
-    ToolBinding, ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolId,
-    ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy, schema_for,
+    CompactToolContract, ExtraKeys, LashSchema, ModelTool, ObjectShape, ProcessParamShape,
+    ProcessShape, SchemaShape, ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
+    ToolArgumentProjectionPolicy, ToolBinding, ToolContract, ToolDefinition,
+    ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule, ToolOutputContract,
+    ToolRetryPolicy, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
+    is_named_type_reference, schema_for,
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,

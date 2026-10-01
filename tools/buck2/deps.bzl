@@ -922,6 +922,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lashlang": "//crates/lashlang:lashlang",
             "ryu_js": "//third-party/rust:p0318",
             "serde_json": "//third-party/rust:p0338",

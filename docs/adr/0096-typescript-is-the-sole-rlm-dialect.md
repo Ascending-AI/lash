@@ -62,8 +62,14 @@ field and refuses one.
 - `tool_call_path`: the call path a cell writes for a front-end-neutral
   `ResolvedToolBinding`, or a typed `DialectRefusal` when no cell can address
   it. Registration refuses a catalog member the selected dialect cannot call.
-- `tool_signature` and `render_tool_example`: catalog tool docs in its syntax;
-  an authored example it cannot spell is left out.
+- `tool_signature`, `schema_type` and `render_tool_example`: catalog tool docs
+  in its syntax; an authored example it cannot spell is left out. A dialect
+  is handed `SchemaShape`s, the contract layer's one reading of a tool's JSON
+  Schemas (`lash-sansio`), and only spells them. It reads no JSON Schema
+  itself, so an open object's fields, nested shapes, enums, unions and
+  constraints reach every surface from the same import. Shared code builds the
+  per-field rows and the required-output block from the same shapes through
+  `schema_type`.
 - `prompt_vocabulary`: language name, execution title, `CellTags`, cell noun,
   history type, inspect and finish forms, continue-as forms, the field-miss
   rule of its runtime, and a `ShapeNotation` for inferred value shapes.

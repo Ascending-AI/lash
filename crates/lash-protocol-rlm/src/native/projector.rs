@@ -73,7 +73,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             .expect("RLM turn options are validated before prompt projection");
         let termination = options.effective_termination();
         let finalization = super::prompt::finalization(self.dialect.as_ref(), &termination);
-        let required_output = required_output_block(&termination);
+        let required_output = required_output_block(&self.dialect, &termination);
         let vocabulary = self.dialect.prompt_vocabulary();
         let final_answer_format = final_answer_format_prompt(&options, vocabulary);
         let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
@@ -141,11 +141,11 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
     }
 }
 
-fn required_output_block(termination: &RlmTermination) -> Option<String> {
+fn required_output_block(dialect: &SessionDialect, termination: &RlmTermination) -> Option<String> {
     match termination {
         RlmTermination::FinishRequired {
             schema: Some(schema),
-        } => Some(render_value_schema_contract(schema)),
+        } => Some(dialect.required_output_contract(schema)),
         _ => None,
     }
 }
@@ -179,64 +179,4 @@ fn final_answer_format_prompt(
         }
         RlmFinalAnswerFormat::RawFinalValue => None,
     }
-}
-
-fn render_value_schema_contract(schema: &serde_json::Value) -> String {
-    let input_contract = lash_core::ToolDefinition::raw(
-        "tool:finish",
-        "finish",
-        "",
-        schema.clone(),
-        serde_json::json!({}),
-    )
-    .compact_contract();
-
-    if input_contract.parameters.is_empty() {
-        return lash_core::ToolDefinition::raw(
-            "tool:finish",
-            "finish",
-            "",
-            lash_core::ToolDefinition::default_input_schema(),
-            schema.clone(),
-        )
-        .compact_contract()
-        .returns;
-    }
-
-    let head = format!(
-        "{{ {} }}",
-        input_contract
-            .parameters
-            .iter()
-            .filter_map(|value| value.get("signature").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    let lines = input_contract
-        .parameters
-        .iter()
-        .filter_map(compact_doc_line)
-        .collect::<Vec<_>>();
-
-    if lines.is_empty() {
-        head
-    } else {
-        format!("{head}\nFields:\n{}", lines.join("\n"))
-    }
-}
-
-fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
-    let signature = value.get("signature")?.as_str()?.trim();
-    if signature.is_empty() {
-        return None;
-    }
-    let description = value
-        .get("description")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    Some(match description {
-        Some(description) => format!("- `{signature}` — {description}"),
-        None => format!("- `{signature}`"),
-    })
 }

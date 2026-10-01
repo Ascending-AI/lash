@@ -9,6 +9,7 @@ use lash_lashlang_runtime::{
     SharedDeferredToolResolver, SharedDeferredTriggerResolver,
 };
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
+use lash_sansio::{SchemaShape, ShapeRow};
 
 pub use typescript::TypescriptDialect;
 
@@ -49,13 +50,14 @@ pub trait Dialect: Send + Sync + 'static {
     /// the refusal when no cell in this dialect can address it.
     fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal>;
 
-    /// A catalog tool's callable signature, in this dialect's syntax.
-    fn tool_signature(
-        &self,
-        call_path: &str,
-        input_schema: &serde_json::Value,
-        output_schema: &serde_json::Value,
-    ) -> String;
+    /// A catalog tool's callable signature, in this dialect's syntax. The
+    /// shapes are the contract layer's reading of the tool's schemas; a
+    /// dialect spells them and reads no JSON Schema itself.
+    fn tool_signature(&self, call_path: &str, input: &SchemaShape, output: &SchemaShape) -> String;
+
+    /// A schema shape as a type, in this dialect's syntax. Shared code calls
+    /// it wherever a prompt shows the type of a field or of a required value.
+    fn schema_type(&self, shape: &SchemaShape) -> String;
 
     /// A tool's authored example in this dialect's syntax, or `None` when the
     /// dialect cannot spell it; an example it cannot spell is left out of the
@@ -363,6 +365,51 @@ impl SessionDialect {
 
     pub(crate) fn history_item_definition(&self, images: bool) -> Vec<String> {
         self.dialect.history_item_definition(images)
+    }
+
+    /// The fields of `shape` that say more than their type — a description,
+    /// a constraint or a default — one prompt row each. Every field's name
+    /// and type is already in the signature the rows sit under.
+    pub(crate) fn noted_field_rows(&self, shape: &SchemaShape) -> Vec<String> {
+        shape
+            .rows()
+            .iter()
+            .filter(|row| row.shape.has_notes())
+            .map(|row| self.field_row(row))
+            .collect()
+    }
+
+    fn field_row(&self, row: &ShapeRow) -> String {
+        let mut line = format!(
+            "- `{}{}: {}`",
+            row.path,
+            if row.required { "" } else { "?" },
+            self.dialect.schema_type(&row.shape)
+        );
+        let mut notes = row.shape.constraints.notes();
+        if let Some(default) = &row.shape.default {
+            notes.push(format!("default {default}"));
+        }
+        if !notes.is_empty() {
+            line.push_str(&format!(" ({})", notes.join(", ")));
+        }
+        if let Some(description) = &row.shape.description {
+            line.push_str(&format!(" — {description}"));
+        }
+        line
+    }
+
+    /// The value a turn must finish with, as its type and the rows of the
+    /// fields that carry notes.
+    pub(crate) fn required_output_contract(&self, schema: &serde_json::Value) -> String {
+        let shape = SchemaShape::from_json_schema(schema);
+        let head = self.dialect.schema_type(&shape);
+        let rows = self.noted_field_rows(&shape);
+        if rows.is_empty() {
+            head
+        } else {
+            format!("{head}\nFields:\n{}", rows.join("\n"))
+        }
     }
 
     pub(crate) fn finalization_copy(
@@ -813,10 +860,14 @@ mod tests {
         fn tool_signature(
             &self,
             call_path: &str,
-            _input_schema: &serde_json::Value,
-            _output_schema: &serde_json::Value,
+            _input: &SchemaShape,
+            _output: &SchemaShape,
         ) -> String {
             call_path.to_string()
+        }
+
+        fn schema_type(&self, _shape: &SchemaShape) -> String {
+            "fixture".to_string()
         }
 
         fn render_tool_example(&self, _authored: &str) -> Option<String> {

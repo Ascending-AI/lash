@@ -534,15 +534,20 @@ fn typescript_capabilities_gate_in_both_assembled_channels() {
 }
 
 #[test]
-fn wrapup_nested_return_rows_and_plain_signatures() {
+fn nested_return_shapes_ride_in_plain_signatures() {
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![lash_core::ToolDefinition::raw("get", "get", "Read a nested record.", serde_json::json!({"type":"object","properties":{},"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"outer":{"type":"object","properties":{"inner":{"type":"string"}},"required":["inner"]}},"required":["outer"]})).with_tool_binding(ToolBinding::new(["kv"], "get"))]);
     {
         let dialect = dialect(false);
         let docs =
             crate::tool_catalog::rlm_prompt_tool_docs(&catalog, &dialect, Default::default());
-        assert!(docs.contains("Return fields:"), "{docs}");
-        assert!(docs.contains("outer.inner"), "{docs}");
+        // The open nested record keeps its field in the signature, so no row
+        // has to repeat a field that carries no notes (FIG-4544).
+        assert!(
+            docs.contains("Promise<{ outer: { inner: string } }>"),
+            "{docs}"
+        );
+        assert!(!docs.contains("Return fields:"), "{docs}");
         assert_eq!(docs.matches("Read a nested record.").count(), 1);
         assert!(docs.starts_with("`kv.get({}): Promise<"), "{docs}");
         for forbidden in [

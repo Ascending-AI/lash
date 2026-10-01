@@ -63,7 +63,7 @@ pub use diagnostics::{
     CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan, format_diagnostic,
 };
 pub use signatures::{
-    ensure_tool_call_path_addressable, render_schema_type, render_stdlib_contract, reserved_words,
+    ensure_tool_call_path_addressable, render_schema_shape, render_stdlib_contract, reserved_words,
     stdlib_name_count,
 };
 

@@ -203,7 +203,53 @@ fn assembled_prompt_fragments_with_projection(
         ["processes"],
         "list",
     ));
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool, listing]);
+    // A third member shaped like an MCP import (FIG-4544): no
+    // `additionalProperties`, nested object and array properties, constraints
+    // and a field without a description. Every fixture above is a closed
+    // object, which is the one shape the retired signature rows and the
+    // widened `Record<string, unknown>` never showed up in.
+    let imported = lash_core::ToolDefinition::raw(
+        "tool:test/issues_search",
+        "mcp__tracker__issues_search",
+        "[MCP tracker] Search issues.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "minLength": 1, "description": "Search text." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+                "filter": {
+                    "type": "object",
+                    "properties": {
+                        "state": { "enum": ["open", "closed"] },
+                        "labels": { "type": "array", "items": { "type": "string" } }
+                    }
+                }
+            },
+            "required": ["query"]
+        }),
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "Stable issue id." },
+                            "score": { "type": "number" }
+                        },
+                        "required": ["id"]
+                    }
+                }
+            },
+            "required": ["issues"]
+        }),
+    )
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
+        ["tracker"],
+        "issues_search",
+    ));
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool, listing, imported]);
 
     let mut fragments = vec![(
         "execution section",
@@ -255,10 +301,31 @@ fn assembled_prompt_fragments_with_projection(
     session
         .patch_globals(
             &lash_rlm_types::RlmGlobalsPatchPluginBody {
-                set_default: [(
-                    "findings".to_string(),
-                    serde_json::json!("summary of findings"),
-                )]
+                // The second variable is too large to show inline, so its
+                // row and its `Schema:` block render inferred shapes: a list,
+                // a record and each scalar.
+                set_default: [
+                    (
+                        "findings".to_string(),
+                        serde_json::json!("summary of findings"),
+                    ),
+                    (
+                        "samples".to_string(),
+                        serde_json::Value::Array(
+                            (0..40)
+                                .map(|index| {
+                                    serde_json::json!({
+                                        "name": format!("sample-{index}"),
+                                        "count": index,
+                                        "ratio": 0.5,
+                                        "ok": true,
+                                        "tags": ["a"]
+                                    })
+                                })
+                                .collect(),
+                        ),
+                    ),
+                ]
                 .into_iter()
                 .collect(),
             },
@@ -336,6 +403,22 @@ fn assembled_prompt_fragments_with_projection(
         ),
     ));
     fragments.push((
+        "required output",
+        dialect.required_output_contract(&serde_json::json!({
+            "type": "object",
+            "properties": {
+                "verdict": { "type": "string", "enum": ["pass", "fail"] },
+                "notes": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+                "score": { "type": "integer", "minimum": 0 }
+            },
+            "required": ["verdict"]
+        })),
+    ));
+    fragments.push((
+        "history definition",
+        dialect.history_item_definition(true).join("\n"),
+    ));
+    fragments.push((
         "finish required",
         dialect.finish_required_copy(false, crate::plugin::RlmChannel::Cell),
     ));
@@ -386,6 +469,11 @@ fn no_assembled_prompt_fragment_carries_the_retired_surfaces_words() {
                 violations.push(format!("prompt fragment `{name}` contains `{marker}`"));
             }
         }
+        for word in retired_type_words(&fragment) {
+            violations.push(format!(
+                "prompt fragment `{name}` spells a type as `{word}`"
+            ));
+        }
     }
     violations.sort();
     let residuals = KNOWN_TYPE_SYNTAX_RESIDUALS
@@ -399,10 +487,56 @@ fn no_assembled_prompt_fragment_carries_the_retired_surfaces_words() {
     );
 }
 
-// FIG-2750 closes the fixture's tool-signature and always-rendered history
-// residuals. Structured history and large projected shapes still use the shared
-// schema vocabulary; this simple-global fixture must have no dialect leaks.
+// FIG-4544 closes the last of them: tool rows, the required-output block, the
+// history definition and inferred value shapes are all spelled by the dialect.
 const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[];
+
+/// The retired surface's type words, where a fragment uses one as a type.
+///
+/// `RETIRED_SURFACE_MARKERS` pins a few whole tokens (`list[`, `: str,`). A
+/// type can follow any of `:`, `|`, `<`, `[` or `=`, and end at any
+/// punctuation, so this reads the word after each of those instead. None of
+/// these words is a TypeScript type, so a match is the retired spelling.
+fn retired_type_words(text: &str) -> Vec<String> {
+    const WORDS: &[&str] = &[
+        "str", "int", "float", "bool", "record", "list", "enum", "dict",
+    ];
+    let mut found = Vec::new();
+    for (index, opener) in text.char_indices() {
+        if !matches!(opener, ':' | '|' | '<' | '[' | '=') {
+            continue;
+        }
+        let rest = text[index + opener.len_utf8()..].trim_start_matches(' ');
+        let word = rest
+            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .next()
+            .unwrap_or_default();
+        if WORDS.contains(&word) && !found.iter().any(|seen| seen == word) {
+            found.push(word.to_string());
+        }
+    }
+    found
+}
+
+/// Non-vacuity for the type-word walk, and its one boundary: TypeScript's own
+/// `string`, `number` and `boolean` start with a retired word and are not one.
+#[test]
+fn the_type_word_walk_tells_the_retired_spelling_from_typescript() {
+    assert_eq!(
+        retired_type_words("- `q: str` — `items?: list[int] | null`, `mode: enum[\"a\"]`"),
+        ["str", "list", "int", "enum"]
+    );
+    assert_eq!(
+        retired_type_words("x: record{a: bool, b: float}"),
+        ["record", "bool", "float"]
+    );
+    assert!(
+        retired_type_words(
+            "q: string; n?: number | null; ok: boolean; xs: Array<string>; r: Record<string, unknown>"
+        )
+        .is_empty()
+    );
+}
 
 /// The walker only measures if its marker list can fire, and only proves
 /// anything if a rendered example is *parseable* TypeScript.

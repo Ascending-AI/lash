@@ -12,7 +12,8 @@
 
 use lash::rlm::{
     CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSectionRequest, ResolvedToolBinding, RlmChannel, ShapeNotation,
+    ExecutionSectionRequest, ResolvedToolBinding, RlmChannel, SchemaShape, ShapeKind,
+    ShapeNotation,
 };
 
 pub const LANGUAGE_ID: &str = "seam-proof";
@@ -46,17 +47,25 @@ impl Dialect for SeamProofDialect {
         }
     }
 
-    fn tool_signature(
-        &self,
-        call_path: &str,
-        input_schema: &serde_json::Value,
-        output_schema: &serde_json::Value,
-    ) -> String {
+    fn tool_signature(&self, call_path: &str, input: &SchemaShape, output: &SchemaShape) -> String {
         format!(
             "{call_path} WITH {} GIVES {}",
-            schema_notation(input_schema),
-            schema_notation(output_schema)
+            self.schema_type(input),
+            self.schema_type(output)
         )
+    }
+
+    fn schema_type(&self, shape: &SchemaShape) -> String {
+        match &shape.kind {
+            ShapeKind::Str => NOTATION.str,
+            ShapeKind::Int => NOTATION.int,
+            ShapeKind::Float => NOTATION.float,
+            ShapeKind::Bool => NOTATION.bool,
+            ShapeKind::Object(_) => NOTATION.record,
+            ShapeKind::Null => NOTATION.null,
+            _ => NOTATION.any,
+        }
+        .to_string()
     }
 
     fn render_tool_example(&self, _authored: &str) -> Option<String> {
@@ -128,16 +137,4 @@ fn is_name(text: &str) -> bool {
         && text
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '_')
-}
-
-fn schema_notation(schema: &serde_json::Value) -> &'static str {
-    match schema.get("type").and_then(serde_json::Value::as_str) {
-        Some("string") => NOTATION.str,
-        Some("integer") => NOTATION.int,
-        Some("number") => NOTATION.float,
-        Some("boolean") => NOTATION.bool,
-        Some("object") => NOTATION.record,
-        Some("null") => NOTATION.null,
-        _ => NOTATION.any,
-    }
 }

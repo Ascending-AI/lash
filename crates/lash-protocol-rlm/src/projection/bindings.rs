@@ -253,14 +253,14 @@ mod tests {
         assert!(
             contribution
                 .content
-                .contains("`input`: `Input`, read-only (descriptor: `record`)"),
+                .contains("`input`: `Input`, read-only (descriptor: `Record<string, unknown>`)"),
             "{}",
             contribution.content
         );
         assert!(
             contribution.content.contains("type Input = {")
-                && contribution.content.contains("prompt: str,")
-                && contribution.content.contains("constraints: list[str],"),
+                && contribution.content.contains("prompt: string;")
+                && contribution.content.contains("constraints: Array<string>;"),
             "{}",
             contribution.content
         );

@@ -950,7 +950,7 @@ fn rlm_prompt_renders_required_output_block_when_schema_present() {
         "required": ["action"]
     });
 
-    let schema_contract = render_value_schema_contract(&schema);
+    let schema_contract = projector.dialect.required_output_contract(&schema);
     let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
         images: true,
         dialect: projector.dialect.as_ref(),
@@ -975,8 +975,8 @@ fn rlm_prompt_renders_required_output_block_when_schema_present() {
         })
         .expect("tail block");
     assert!(tail.contains("=== REQUIRED OUTPUT ==="));
-    assert!(tail.contains("{ action: enum[\"call\", \"fold\"], amount?: int >= 0 }"));
-    assert!(tail.contains("Fields:"));
+    assert!(tail.contains("{ action: \"call\" | \"fold\"; amount?: number }"));
+    assert!(tail.contains("Fields:\n- `amount?: number` (>= 0)"));
 }
 
 #[test]
@@ -1027,38 +1027,45 @@ fn required_output_schema_suppresses_final_answer_format_guidance() {
     assert!(guidance.is_none());
 }
 
-#[test]
-fn render_value_schema_contract_renders_object_shape_with_field_table() {
-    let schema = serde_json::json!({
-        "type": "object",
-        "properties": {
-            "action": { "type": "string", "enum": ["call", "fold"] },
-            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
-        },
-        "required": ["action"]
-    });
-
-    let rendered = render_value_schema_contract(&schema);
-    let head = rendered.lines().next().expect("at least one line");
-    assert_eq!(
-        head,
-        "{ action: enum[\"call\", \"fold\"], confidence?: float >= 0 <= 1 }"
-    );
-    assert!(rendered.contains("Fields:"));
-    assert!(rendered.contains("- `action: enum[\"call\", \"fold\"]`"));
-    assert!(rendered.contains("- `confidence?: float >= 0 <= 1`"));
+fn required_output_contract(schema: serde_json::Value) -> String {
+    crate::dialect::typescript_test_dialect().required_output_contract(&schema)
 }
 
 #[test]
-fn render_value_schema_contract_falls_back_to_compact_label_for_scalars() {
-    let scalar = serde_json::json!({ "type": "string" });
-    assert_eq!(render_value_schema_contract(&scalar), "str");
+fn required_output_contract_renders_the_type_and_a_row_per_noted_field() {
+    let rendered = required_output_contract(serde_json::json!({
+        "type": "object",
+        "properties": {
+            "action": { "type": "string", "enum": ["call", "fold"] },
+            "confidence": {
+                "type": "number", "minimum": 0, "maximum": 1,
+                "description": "How sure the call is."
+            }
+        },
+        "required": ["action"]
+    }));
+    assert_eq!(
+        rendered,
+        "{ action: \"call\" | \"fold\"; confidence?: number }\nFields:\n- `confidence?: number` (>= 0, <= 1) — How sure the call is."
+    );
+}
 
-    let array = serde_json::json!({ "type": "array", "items": { "type": "integer" } });
-    assert_eq!(render_value_schema_contract(&array), "list[int]");
-
-    let nullable_string = serde_json::json!({ "type": ["string", "null"] });
-    assert_eq!(render_value_schema_contract(&nullable_string), "str | null");
+#[test]
+fn required_output_contract_is_the_bare_type_when_no_field_carries_notes() {
+    assert_eq!(
+        required_output_contract(serde_json::json!({ "type": "string" })),
+        "string"
+    );
+    assert_eq!(
+        required_output_contract(
+            serde_json::json!({ "type": "array", "items": { "type": "integer" } })
+        ),
+        "Array<number>"
+    );
+    assert_eq!(
+        required_output_contract(serde_json::json!({ "type": ["string", "null"] })),
+        "string | null"
+    );
 }
 
 #[test]

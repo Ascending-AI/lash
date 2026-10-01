@@ -39,6 +39,12 @@ pub use lash_lashlang_runtime::ResolvedToolBinding;
 pub use lash_lashlang_runtime::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
+/// The schema shapes a [`Dialect`] spells: the contract layer's reading of a
+/// tool's JSON Schemas.
+pub use lash_sansio::{
+    ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
+    ShapeField, ShapeKind,
+};
 pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{
     ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,

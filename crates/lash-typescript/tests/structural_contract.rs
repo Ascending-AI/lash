@@ -64,9 +64,10 @@ fn console_methods_accept_zero_and_multiple_arguments_with_observation_rendering
 
 #[test]
 fn tool_schema_uses_typescript_field_spelling() {
-    let ty = lash_typescript::render_schema_type(&json!({
-        "type": "object", "additionalProperties": false,
-        "properties": { "delete": { "type": "string" } }, "required": ["delete"]
-    }));
+    let ty =
+        lash_typescript::render_schema_shape(&lash_sansio::SchemaShape::from_json_schema(&json!({
+            "type": "object", "additionalProperties": false,
+            "properties": { "delete": { "type": "string" } }, "required": ["delete"]
+        })));
     assert_eq!(ty, r#"{ "delete": string }"#);
 }

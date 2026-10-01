@@ -32,6 +32,7 @@ workspace = true
 
 [dependencies]
 lash-core-execution = { workspace = true }
+lash-sansio = { workspace = true }
 lashlang = { workspace = true }
 ryu-js = { workspace = true }
 serde_json = { workspace = true }

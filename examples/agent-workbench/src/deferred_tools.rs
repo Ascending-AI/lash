@@ -272,19 +272,25 @@ struct DeferredSearchResult {
 }
 
 impl DeferredSearchResult {
+    /// A catalogued tool as the session's dialect shows it: the same
+    /// signature and examples its resident tool docs would carry.
     fn new(call_path: &str, definition: &ToolDefinition) -> Self {
-        let compact = definition
-            .contract()
-            .compact_contract_with_signature_name_and_example_limit(
-                &definition.manifest(),
-                call_path,
-                2,
-            );
+        use lash::rlm::Dialect as _;
+        let dialect = lash::rlm::TypescriptDialect;
+        let contract = definition.contract();
         Self {
             call_path: call_path.to_string(),
-            signature: compact.signature,
-            description: compact.description,
-            examples: compact.examples,
+            signature: dialect.tool_signature(
+                call_path,
+                &contract.input_shape(),
+                &contract.output_shape(),
+            ),
+            description: definition.description().trim().to_string(),
+            examples: contract
+                .compact_examples()
+                .iter()
+                .filter_map(|example| dialect.render_tool_example(example))
+                .collect(),
         }
     }
 }
