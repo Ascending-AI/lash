@@ -43,6 +43,17 @@
         },
         "message": {
           "type": "string"
+        },
+        "worker_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkerLimit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The measured run limit, kept typed through the plugin and host result."
         }
       },
       "required": [
@@ -4671,6 +4682,134 @@
           "required": [
             "status",
             "done_reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkerFrameKind": {
+      "description": "The worker message an encoder refused, without its guest data.",
+      "enum": [
+        "refused",
+        "progress",
+        "limit_exceeded",
+        "ready",
+        "effect_request",
+        "observations",
+        "suspended",
+        "complete",
+        "guest_error",
+        "cancelled",
+        "reset_done",
+        "prepared"
+      ],
+      "type": "string"
+    },
+    "WorkerLimit": {
+      "description": "The VM or worker limit a run exhausted.",
+      "oneOf": [
+        {
+          "enum": [
+            "fuel",
+            "heap",
+            "depth",
+            "deadline"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "observations",
+          "description": "A step's execution observations outgrew the run's heap budget, which\nbounds the stream a worker holds and hands its parent, or a single\nobservation outgrew what one frame carries (FIG-4458).",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The encoded effect request or result exceeds its configured bound.",
+          "properties": {
+            "effect_value": {
+              "properties": {
+                "bound": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "size": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "size",
+                "bound"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect_value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A snapshot or continuation exceeds its configured bound.",
+          "properties": {
+            "vm_state": {
+              "properties": {
+                "bound": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "size": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "size",
+                "bound"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "vm_state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A worker message cannot fit in one transport frame.",
+          "properties": {
+            "frame": {
+              "properties": {
+                "bound": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "$ref": "#/$defs/WorkerFrameKind"
+                },
+                "size": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "size",
+                "bound"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "frame"
           ],
           "type": "object"
         }
