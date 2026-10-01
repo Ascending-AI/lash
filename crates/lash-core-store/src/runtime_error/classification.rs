@@ -235,6 +235,7 @@ impl RuntimeErrorCode {
             Self::DurableIdentityConflict => Terminal,
             // the host key is durably bound to another start.
             Self::ProcessStartKeyConflict => Terminal,
+            Self::MissingRecordedProcessConfig => Terminal,
             // the key's family is fixed by how it was derived.
             Self::StartKeyFamilyRefused => Terminal,
             // a delivery's binding is written once.

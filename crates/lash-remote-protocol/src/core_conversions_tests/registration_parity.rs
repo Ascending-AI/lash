@@ -58,7 +58,7 @@ fn peer_record(
         wake_session_id: _,
         consumer_hold: _,
         trigger_delivery_pin: _,
-        engine_config: _,
+        engine_config,
     } = registration;
     Ok(RemoteProcessRecord {
         process_id: lash_sansio::ProcessId::fixture("registration-parity"),
@@ -74,6 +74,7 @@ fn peer_record(
         env_ref: env_ref
             .map(|env_ref| env_ref.as_str().parse())
             .transpose()?,
+        engine_config,
         created_at_ms: 10,
         updated_at_ms: 10,
         external_ref: None,

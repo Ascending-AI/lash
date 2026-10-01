@@ -751,15 +751,24 @@ fn process_start_requests_round_trip_core_values() {
 #[test]
 fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let mut record = process_record(&lash_sansio::ProcessId::fixture("process:record"));
+    record.engine_config = Some(serde_json::json!({
+        "instruction_limit": { "bounded": 1000000 },
+        "memory_limit": { "bounded": 67108864 }
+    }));
     record.status = lash_core::ProcessStatus::Completed;
     record.outcome = Some(lash_core::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!({ "done": true })),
     ));
     let remote = RemoteProcessRecord::try_from(record.clone()).expect("remote record");
+    let wire = serde_json::to_value(&remote).expect("remote wire record");
+    assert_eq!(wire.get("engine_config"), record.engine_config.as_ref());
+    let remote: RemoteProcessRecord =
+        serde_json::from_value(wire).expect("remote wire record decodes");
     remote
         .validate("RemoteProcessRecord")
         .expect("valid remote record");
     let core = lash_core::ProcessRecord::try_from(remote).expect("core record");
+    assert_eq!(core.engine_config, record.engine_config);
     assert_eq!(core.id, record.id);
     assert_eq!(core.status.label(), record.status.label());
     assert_eq!(

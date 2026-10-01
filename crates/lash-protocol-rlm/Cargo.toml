@@ -51,6 +51,7 @@ jsonschema = { workspace = true, default-features = false }
 tokio = { workspace = true, features = ["rt", "sync"] }
 
 [dev-dependencies]
+lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-vm-client = { workspace = true, features = ["testing"] }
 # Kernel tests whose effects need an engine run on the Restate server double
 # (FIG-3668, D1 PR-S2). A dev-dependency cycle where the double links this

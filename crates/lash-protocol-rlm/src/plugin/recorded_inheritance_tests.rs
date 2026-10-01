@@ -32,6 +32,39 @@ use crate::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginFactory};
 
 type Double = lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>;
 
+enum ProcessHost {
+    Double(Double),
+    Live(lash_restate_test::live::LiveRestateBackend),
+}
+
+impl ProcessHost {
+    fn backend(&self) -> lash_core::Backend {
+        match self {
+            Self::Double(host) => host.lash_backend(),
+            Self::Live(host) => host.lash_backend(),
+        }
+    }
+
+    fn install_worker(&self, worker: lash_core_worker::DurableProcessWorker) {
+        match self {
+            Self::Double(host) => host.install_process_worker(worker),
+            Self::Live(host) => host.install_process_worker(worker),
+        }
+    }
+
+    async fn in_handler(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempt: lash_restate_test::HandlerAttempt,
+    ) {
+        match self {
+            Self::Double(host) => host.run_in_handler(admitted, attempt).await,
+            Self::Live(host) => host.run_in_handler(admitted, attempt).await,
+        }
+        .expect("the registered Restate handler completes");
+    }
+}
+
 /// The process body: the same loop the session law's cell runs, far past the
 /// redeployed instruction bound and far inside the recorded one.
 fn looping_process() -> String {
@@ -83,33 +116,86 @@ fn host_pin_claim() -> lash_core::ReferrerClaim {
     .expect("a host pin is an unguarded referrer")
 }
 
-/// Register `registration` on `deployment`, as its start's one recorded
-/// registration step does.
+/// Start through the handler's journaled registration, including its engine
+/// configuration, rather than calling the registrar outside a handler.
 async fn register_on(
+    host: &ProcessHost,
     deployment: &Deployment,
-    backend: &lash_core::Backend,
     registration: lash_core::ProcessRegistration,
     starter: &str,
-) -> lash_core::runtime::RegisteredProcessStart {
-    let starter = lash_core::ExecutionScope::runtime_operation(starter)
-        .journal_identity()
-        .expect("the starter's journal");
-    let env_store = backend.process_env_store();
-    lash_core::runtime::register_process_start(
-        &lash_core::runtime::ProcessStartStores {
-            registry: backend.process_registry().as_ref(),
-            env_store: Some(&env_store),
-            engines: Some(&deployment.runtime_host.process_engines),
-            engines_required: true,
-            session_catalog: None,
-            executor: "the recorded-behaviour law",
-            starter: &starter,
-        },
-        registration,
-        &[],
+) -> (
+    lash_core::ProcessRecord,
+    lash_core::ProcessRegistrationOutcome,
+) {
+    let backend = host.backend();
+    let engines = deployment.runtime_host.process_engines.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let attempt: lash_restate_test::HandlerAttempt = Arc::new(move |scoped| {
+        let backend = backend.clone();
+        let engines = engines.clone();
+        let registration = registration.clone();
+        let tx = tx.clone();
+        Box::pin(async move {
+            let command = lash_core::ProcessCommand::Start {
+                registration,
+                observers: Vec::new(),
+                execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
+            };
+            let effect_id = command.effect_id();
+            let envelope = lash_core::RuntimeEffectEnvelope::new(
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(
+                        scoped.execution_scope().clone(),
+                        effect_id.clone(),
+                    )
+                    .unwrap(),
+                    lash_core::RuntimeAttribution::none(),
+                    effect_id,
+                ),
+                lash_core::RuntimeEffectCommand::process(command),
+            );
+            let outcome = scoped
+                .execute_effect(
+                    envelope,
+                    lash_core::RuntimeEffectLocalExecutor::processes(
+                        backend.process_registry(),
+                        Arc::clone(backend.process_work().port()),
+                    )
+                    .with_process_env_store(backend.process_env_store())
+                    .with_process_engines(engines),
+                )
+                .await
+                .expect("the process start runs through its Restate registration");
+            let lash_core::RuntimeEffectOutcome::Process {
+                result:
+                    lash_core::ProcessEffectOutcome::Start {
+                        record,
+                        disposition,
+                    },
+            } = outcome
+            else {
+                panic!("a start returns its recorded process")
+            };
+            tx.send((*record, disposition)).unwrap();
+        })
+    });
+    host.in_handler(
+        lash_core::AdmittedScope::turn("recorded-process-behaviour", starter),
+        attempt,
     )
-    .await
-    .expect("the start registers")
+    .await;
+    let mut result = rx
+        .recv()
+        .await
+        .expect("the completed handler returned its record");
+    while let Ok(replayed) = rx.try_recv() {
+        assert_eq!(
+            replayed.0.engine_config, result.0.engine_config,
+            "replay keeps the recorded configuration"
+        );
+        result = replayed;
+    }
+    result
 }
 
 /// A host starts a Lashlang process on one deployment under an environment
@@ -119,10 +205,10 @@ async fn register_on(
 /// deployment's worker under the recorded behaviour: its loop finishes where
 /// the running deployment's instruction bound would stop it.
 async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
-    double: Double,
+    host: ProcessHost,
     name: &str,
 ) {
-    let backend = double.lash_backend();
+    let backend = host.backend();
     let creating = Deployment::new(creating_config(), &backend);
     let env_spec =
         ProcessExecutionEnvSpec::new(lash_core::AdmittedPluginConfig::default(), policy());
@@ -185,44 +271,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
     .with_execution_env_ref(Some(env_ref))
     .with_admitted_identity(identity);
 
-    let created = register_on(
-        &creating,
-        &backend,
-        registration.clone(),
-        &format!("{name}-create"),
-    )
-    .await;
-    assert_eq!(
-        created.disposition,
-        lash_core::ProcessRegistrationOutcome::Created
-    );
-    let recorded = serde_json::to_value(creating_config().recorded_behaviour(false))
-        .expect("the creating behaviour encodes");
-    assert_eq!(
-        created.record.engine_config.as_ref(),
-        Some(&recorded),
-        "the row records the creating deployment's behaviour"
-    );
-
     let redeployed = Deployment::new(redeploying_config(), &backend);
-    let retained = register_on(
-        &redeployed,
-        &backend,
-        registration,
-        &format!("{name}-redrive"),
-    )
-    .await;
-    assert_eq!(
-        retained.disposition,
-        lash_core::ProcessRegistrationOutcome::Existing
-    );
-    assert_eq!(retained.record.id, created.record.id);
-    assert_eq!(
-        retained.record.engine_config.as_ref(),
-        Some(&recorded),
-        "a start redriven on another deployment keeps what its creation recorded"
-    );
-
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::clone(&redeployed.plugin_host),
@@ -233,24 +282,50 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
         ),
     )
     .expect("the redeployed process worker");
-    double.install_process_worker(worker);
-    let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
-        backend.obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-        backend.process_registry(),
-        Arc::clone(backend.process_work().port()),
-        Arc::new(lash_core::facade_support::SystemClock),
-    );
-    lash_core::runtime::drive::relay::relay_due(
-        &relay,
-        &lash_core::facade_support::SystemClock,
-        std::num::NonZeroUsize::new(1024).expect("nonzero"),
+    host.install_worker(worker);
+
+    let (created, disposition) = register_on(
+        &host,
+        &creating,
+        registration.clone(),
+        &format!("{name}-create"),
     )
-    .await
-    .expect("the start is delivered");
+    .await;
+    assert_eq!(disposition, lash_core::ProcessRegistrationOutcome::Created);
+    let recorded = serde_json::to_value(creating_config().recorded_behaviour(false))
+        .expect("the creating behaviour encodes");
+    assert_eq!(
+        created.engine_config.as_ref(),
+        Some(&recorded),
+        "the row records the creating deployment's behaviour"
+    );
+
+    let remote = lash_remote_protocol::RemoteProcessRecord::try_from(created.clone()).unwrap();
+    let wire = serde_json::to_vec(&remote).unwrap();
+    let received = lash_core::ProcessRecord::try_from(
+        serde_json::from_slice::<lash_remote_protocol::RemoteProcessRecord>(&wire).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        received.engine_config.as_ref(),
+        Some(&recorded),
+        "the remote host receives the creating behaviour"
+    );
+
+    let (retained, disposition) =
+        register_on(&host, &redeployed, registration, &format!("{name}-redrive")).await;
+    assert_eq!(disposition, lash_core::ProcessRegistrationOutcome::Existing);
+    assert_eq!(retained.id, created.id);
+    assert_eq!(
+        retained.engine_config.as_ref(),
+        Some(&recorded),
+        "a start redriven on another deployment keeps what its creation recorded"
+    );
+
     let terminal = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         lash_core::NoProcessWork::for_registry(backend.process_registry())
-            .await_terminal(&created.record.id),
+            .await_terminal(&created.id),
     )
     .await
     .expect("the process reaches its terminal on the redeployed worker")
@@ -449,8 +524,16 @@ macro_rules! on_every_store {
     };
 }
 
+async fn process_law_on_double(double: Double, name: &str) {
+    a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
+        ProcessHost::Double(double),
+        name,
+    )
+    .await;
+}
+
 on_every_store!(
-    a_host_started_process_runs_under_the_behaviour_its_creation_recorded,
+    process_law_on_double,
     "recorded-process-behaviour",
     a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_sqlite_file,
     a_host_started_process_runs_under_the_behaviour_its_creation_recorded_on_sqlite_file_always_replay,
@@ -470,3 +553,29 @@ on_every_store!(
     a_child_session_runs_under_its_parents_recorded_behaviour_on_postgres,
     a_child_session_runs_under_its_parents_recorded_behaviour_on_postgres_always_replay
 );
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a live Restate server; recorded-process-behaviour suite"]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the live suite supplies isolated server endpoints"
+)]
+async fn live_restate_process_runs_under_the_behaviour_its_creation_recorded() {
+    let env = |key: &str| std::env::var(key).unwrap_or_else(|_| panic!("{key} is required"));
+    let host =
+        lash_restate_test::live::LiveRestateBackend::start(lash_restate_test::live::LiveConfig {
+            ingress_url: env("RESTATE_INGRESS_URL"),
+            admin_url: env("RESTATE_ADMIN_URL"),
+            endpoint_bind: env("RPB_BIND").parse().unwrap(),
+            endpoint_url: env("RPB_URL"),
+            run_tag: format!("recorded-process-{}", nonce()),
+            namespace: Default::default(),
+        })
+        .await
+        .expect("serve and register the live Restate handlers");
+    a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
+        ProcessHost::Live(host),
+        &format!("recorded-process-live-{}", nonce()),
+    )
+    .await;
+}

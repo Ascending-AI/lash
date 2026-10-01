@@ -27,6 +27,7 @@ target runs all of them:
 | `remote-config-transaction-request` | `RemoteConfigTransactionRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-config-transaction-outcome` | `RemoteConfigTransactionOutcome` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-config-command-catalog` | `RemoteConfigCommandCatalog` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
+| `remote-process-record` | `RemoteProcessRecord` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-process-events-request` | `RemoteProcessEventsRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-process-events-response` | `RemoteProcessEventsResponse` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |
 | `remote-process-observation-request` | `RemoteProcessObservationRequest` | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/bin/remote_schema_generator.rs` |

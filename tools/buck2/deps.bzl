@@ -511,6 +511,7 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "lash_remote_protocol": "//crates/lash-remote-protocol:lash-remote-protocol",
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",

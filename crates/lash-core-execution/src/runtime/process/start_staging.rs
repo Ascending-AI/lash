@@ -294,9 +294,13 @@ impl RegisteredProcessStart {
     /// submitted. A start by id is resolved at realization (ADR 0113 §3.6):
     /// the process runs the engine input, identity and event types its
     /// record holds, never the unresolved id. Any other start runs what it
-    /// submitted.
+    /// submitted. Every start runs under the configuration its record holds.
     #[must_use]
-    pub fn running_registration(&self, registration: ProcessRegistration) -> ProcessRegistration {
+    pub fn running_registration(
+        &self,
+        mut registration: ProcessRegistration,
+    ) -> ProcessRegistration {
+        registration.engine_config = self.record.engine_config.clone();
         if !matches!(registration.input.as_ref(), ProcessInput::Definition { .. }) {
             return registration;
         }

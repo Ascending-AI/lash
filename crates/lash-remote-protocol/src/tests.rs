@@ -2171,6 +2171,7 @@ fn remote_process_record() -> RemoteProcessRecord {
                 .parse()
                 .expect("canonical env ref"),
         ),
+        engine_config: None,
         created_at_ms: 1,
         updated_at_ms: 2,
         external_ref: Some(RemoteProcessExternalRef {

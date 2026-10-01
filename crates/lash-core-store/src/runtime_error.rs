@@ -291,6 +291,8 @@ pub enum RuntimeErrorCode {
     /// names the key and nothing else, since the key is global and the
     /// retained process may be another originator's.
     ProcessStartKeyConflict,
+    /// A process cannot run without the configuration recorded at creation.
+    MissingRecordedProcessConfig,
     /// A host rail was handed a start key of a family lash derives for its
     /// own start paths (ADR 0107): a host mints only host keys.
     StartKeyFamilyRefused,
@@ -746,6 +748,7 @@ impl RuntimeErrorCode {
             Self::ProcessCancelConflict => "process_cancel_conflict",
             Self::DurableIdentityConflict => "durable_identity_conflict",
             Self::ProcessStartKeyConflict => "process_start_key_conflict",
+            Self::MissingRecordedProcessConfig => "missing_recorded_process_config",
             Self::StartKeyFamilyRefused => "start_key_family_refused",
             Self::TriggerDeliveryBound => "trigger_delivery_bound",
             Self::TriggerDeliveryRetired => "trigger_delivery_retired",
@@ -1010,6 +1013,7 @@ impl RuntimeErrorCode {
         Self::ProcessCancelConflict,
         Self::DurableIdentityConflict,
         Self::ProcessStartKeyConflict,
+        Self::MissingRecordedProcessConfig,
         Self::StartKeyFamilyRefused,
         Self::TriggerDeliveryBound,
         Self::TriggerDeliveryRetired,
@@ -1216,6 +1220,7 @@ impl RuntimeErrorCode {
             "process_cancel_conflict" => Self::ProcessCancelConflict,
             "durable_identity_conflict" => Self::DurableIdentityConflict,
             "process_start_key_conflict" => Self::ProcessStartKeyConflict,
+            "missing_recorded_process_config" => Self::MissingRecordedProcessConfig,
             "start_key_family_refused" => Self::StartKeyFamilyRefused,
             "trigger_delivery_bound" => Self::TriggerDeliveryBound,
             "trigger_delivery_retired" => Self::TriggerDeliveryRetired,

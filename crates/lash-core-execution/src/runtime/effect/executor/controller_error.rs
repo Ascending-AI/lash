@@ -18,6 +18,10 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::SessionHeadOwned { .. } => {
                 Self::new(RuntimeErrorCode::SessionHeadOwned, err.to_string())
             }
+            err @ PluginError::MissingRecordedProcessConfig { .. } => Self::new(
+                RuntimeErrorCode::MissingRecordedProcessConfig,
+                err.to_string(),
+            ),
             err @ PluginError::ProcessNotVisible { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNotVisible, err.to_string())
             }

@@ -2499,6 +2499,7 @@ dependencies = [
  "lash-internal-lashlang-runtime",
  "lash-internal-plugin-process-controls",
  "lash-internal-postgres-store",
+ "lash-internal-remote-protocol",
  "lash-internal-render",
  "lash-internal-restate-test",
  "lash-internal-rlm-types",

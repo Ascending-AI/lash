@@ -583,6 +583,9 @@ pub struct RemoteProcessRecord {
     pub provenance: RemoteProcessProvenance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<RemoteProcessExecutionEnvRef>,
+    /// The engine behaviour recorded at process creation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_config: Option<serde_json::Value>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]

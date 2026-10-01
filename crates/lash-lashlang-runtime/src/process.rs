@@ -537,7 +537,7 @@ async fn run_lashlang_process_scoped(
         .process_name_for_ref(&input.process_ref)
         .unwrap_or("")
         .to_owned();
-    let run_settings = engine.run_settings(&context).await?;
+    let run_settings = engine.run_settings(&context)?;
     let (tool_catalog, host_environment) = {
         let _phase = context.named_phase("rlm_process.resolve_environment");
         let tool_catalog = match context.resolved_tool_catalog() {

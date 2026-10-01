@@ -71,6 +71,9 @@ pub fn is_trigger_occurrence_reclaimed(error: &PluginError) -> bool {
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PluginError {
+    /// A process cannot run without the behaviour its creation recorded.
+    #[error("process engine `{engine_kind}` has no recorded configuration")]
+    MissingRecordedProcessConfig { engine_kind: String },
     #[error("trigger registration requires an Engine target, received `{kind}`")]
     InvalidTriggerTarget { kind: String },
     /// The process already accepted a different cancellation request.
@@ -402,6 +405,7 @@ impl PluginError {
                             | crate::RuntimeErrorCode::StoreIncompatible
                             | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
+                            | crate::RuntimeErrorCode::MissingRecordedProcessConfig
                     ) =>
             {
                 error
@@ -415,10 +419,15 @@ impl PluginError {
                             | crate::RuntimeErrorCode::StoreIncompatible
                             | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
+                            | crate::RuntimeErrorCode::MissingRecordedProcessConfig
                     ) =>
             {
                 error.into_runtime_error()
             }
+            error @ Self::MissingRecordedProcessConfig { .. } => crate::RuntimeError::new(
+                crate::RuntimeErrorCode::MissingRecordedProcessConfig,
+                error.to_string(),
+            ),
             error @ Self::SessionHeadOwned { .. } => crate::RuntimeError::new(
                 crate::RuntimeErrorCode::SessionHeadOwned,
                 error.to_string(),
@@ -517,6 +526,7 @@ impl PluginError {
             Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }
             | Self::MissingRecordedSessionConfig { .. }
+            | Self::MissingRecordedProcessConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }
             | Self::AppendOperationIdentityConflict { .. }
             | Self::AppendReceiptRequestedNodeCountCorrupt { .. }

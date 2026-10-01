@@ -567,13 +567,9 @@ async fn run_worker(
         .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
         Vec::new(),
     );
-    let process_id = crate::lib_tests::register_harness_process(
-        &harness.registry(),
-        &registration,
-        harness.env_ref(),
-    )
-    .await;
-    harness.deliver_start(&process_id).await;
+    let process_id = harness
+        .admit(registration.with_execution_env_ref(Some(harness.env_ref().clone())))
+        .await;
     let terminal = harness.await_terminal(&process_id).await;
     assert!(
         matches!(terminal, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),

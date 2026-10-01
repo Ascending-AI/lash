@@ -79,25 +79,6 @@ fn effect_group_wait_identity_uses_the_durable_group_contract() {
     );
 }
 
-/// Register the harness process and answer the id the registrar minted for
-/// it: every scope and authority the run needs names that id, so the harness
-/// registers before it builds them (ADR 0107).
-pub(crate) async fn register_harness_process(
-    registry: &Arc<dyn lash_core::ProcessRegistry>,
-    registration: &lash_core::ProcessRegistration,
-    env_ref: &lash_core::ProcessExecutionEnvRef,
-) -> lash_core::ProcessId {
-    registry
-        .register_process(
-            registration
-                .clone()
-                .with_execution_env_ref(Some(env_ref.clone())),
-        )
-        .await
-        .expect("register the harness process")
-        .id
-}
-
 /// The session policy the harness's execution env declares: the worker
 /// builds its runtime over it, so it must carry model metadata.
 /// A fresh host pin's claim: what a test publishes fixtures under
@@ -131,6 +112,7 @@ pub(crate) struct DoubleProcessHarness {
     backend: lash_core::Backend,
     wiring: lash_core::ProcessWorkWiring,
     env_ref: lash_core::ProcessExecutionEnvRef,
+    engine: std::sync::Mutex<Option<LashlangProcessEngine>>,
 }
 
 impl DoubleProcessHarness {
@@ -165,6 +147,7 @@ impl DoubleProcessHarness {
         engine: LashlangProcessEngine,
         extra_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     ) {
+        *self.engine.lock().unwrap() = Some(engine.clone());
         let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
             self.backend.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -191,8 +174,27 @@ impl DoubleProcessHarness {
     /// whose workflow runs it on the installed worker.
     pub(crate) async fn admit(
         &self,
-        registration: lash_core::ProcessRegistration,
+        mut registration: lash_core::ProcessRegistration,
     ) -> lash_core::ProcessId {
+        use lash_core::ProcessEngine as _;
+        let engine = self
+            .engine
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("install the creating engine");
+        let env_spec = lash_core::runtime::load_process_execution_env(
+            self.backend.process_env_store().as_ref(),
+            registration
+                .env_ref
+                .as_ref()
+                .expect("the start captures its environment"),
+        )
+        .await
+        .expect("load the creating environment");
+        registration.engine_config = engine
+            .creation_config(&env_spec)
+            .expect("record creation settings");
         let process_id = self
             .registry()
             .register_process(registration)
@@ -238,7 +240,7 @@ impl DoubleProcessHarness {
 
 /// A fresh double ready to admit a process: the harness execution env is
 /// published up front, its reference stamped on every registration `admit`
-/// and `register_harness_process` make.
+/// makes.
 pub(crate) async fn double_process_harness() -> DoubleProcessHarness {
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
@@ -260,6 +262,7 @@ pub(crate) async fn double_process_harness() -> DoubleProcessHarness {
         backend,
         wiring,
         env_ref,
+        engine: std::sync::Mutex::new(None),
     }
 }
 
@@ -533,13 +536,9 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
             )),
         ))],
     );
-    let process_id = crate::lib_tests::register_harness_process(
-        &harness.registry(),
-        &registration,
-        harness.env_ref(),
-    )
-    .await;
-    harness.deliver_start(&process_id).await;
+    let process_id = harness
+        .admit(registration.with_execution_env_ref(Some(harness.env_ref().clone())))
+        .await;
     let result = harness.await_terminal(&process_id).await;
     assert!(
         matches!(result, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),
@@ -585,6 +584,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
 #[path = "lib_tests/aggregate_child.rs"]
 mod aggregate_child;
 mod pre_cutover_refusal;
+mod recorded_engine_settings;
 mod second_front_end;
 
 /// `process <name>(<params>) -> <return_ty> { finish <body> }` as a one-process
@@ -1615,6 +1615,12 @@ process scan(root: str) -> str {
         .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
             input.process_identity(),
         ));
+        let engine = LashlangProcessEngine::new(
+            artifact_store.clone(),
+            LashlangSurface::default(),
+            double.lash_backend().worker_recovery(),
+        );
+        let registration = recorded_registration(&engine, registration);
         let context = lash_core::testing::process_engine_run_context_for_validation(
             &double.lash_backend(),
             registration,
@@ -1622,13 +1628,7 @@ process scan(root: str) -> str {
             registry_available,
         );
         let run_outcome = Box::pin(crate::process::run_lashlang_process(
-            LashlangProcessEngine::new(
-                artifact_store.clone(),
-                LashlangSurface::default(),
-                double.lash_backend().worker_recovery(),
-            ),
-            context,
-            payload,
+            engine, context, payload,
         ))
         .await
         .expect("admission mismatches are durable process outcomes, not infra errors");
@@ -2230,6 +2230,7 @@ async fn process_rebuild_failure_is_terminal_but_artifact_io_failure_retries() {
         .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
             input.process_identity(),
         ));
+        let registration = recorded_registration(&engine, registration);
         let make_context = || {
             lash_core::testing::process_engine_run_context_for_validation(
                 &double.lash_backend(),
@@ -2437,4 +2438,18 @@ async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms
         sqlite_memory_store_set().await.module_artifacts(),
     )
     .await;
+}
+
+fn recorded_registration(
+    engine: &LashlangProcessEngine,
+    mut registration: lash_core::ProcessRegistration,
+) -> lash_core::ProcessRegistration {
+    use lash_core::ProcessEngine as _;
+    registration.engine_config = engine
+        .creation_config(&lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::AdmittedPluginConfig::default(),
+            harness_session_policy(),
+        ))
+        .unwrap();
+    registration
 }

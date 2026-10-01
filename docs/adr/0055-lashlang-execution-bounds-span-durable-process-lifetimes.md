@@ -48,6 +48,13 @@ returned that row with what its own creation recorded. A process that
 recorded its behaviour in neither place is refused; no run reads the bounds
 of the deployment it runs on.
 
+A hand-built `LashlangProcessEngine` records its constructor surface and
+bounds with `engine_config` at creation too. Constructor setters supply
+creation defaults only. Runs use the registration reconstructed from the
+record, including after a remote round trip; `RemoteProcessRecord` carries
+the engine configuration unchanged. Missing recorded settings are a typed
+`PluginError::MissingRecordedProcessConfig` refusal (FIG-4558).
+
 ### Heap accounting
 
 The VM meters logical bytes under its registered heap-size schedule rather
