@@ -476,6 +476,57 @@ outputs. Lint/compile-only CI can use
 `--materializations none`; executable, documentation and schema consumers need
 final outputs.
 
+## Test shards
+
+A `shards = N` rule in `tools/buck2/package-policy.toml` splits one libtest
+binary into `<label>__shard_1..N`, each its own test action. Shard, do not
+raise a timeout: a longer bound hides a real hang. Every shard runs
+`tools/buck2/test_shard.py`, which lists the whole binary and derives the same
+assignment in each process from the listed names and the committed weights
+alone, so the shards are disjoint and their union is the listing.
+
+- **Balance.** `tools/buck2/test-shard-weights.json` holds each sharded test's
+  per-case milliseconds. Measured cases go longest first, each to the shard
+  with the least load so far. Cases the table does not name go round-robin in
+  name order, starting from the lightest shard; a test with no row is split
+  round-robin entirely. A name the binary no longer lists is ignored, so a
+  stale table costs balance, never coverage. A feature-lane variant uses its
+  ordinary label's row.
+- **Exclusion.** A shard runs the binary under `--exact` with one `--skip` per
+  listed case that is not its own. libtest applies `--exact` to skips, so a
+  case whose name contains another's is assigned on its own.
+- **Filters.** libtest has one `--exact` for filters and skips alike, so the
+  wrapper applies the caller's positional filters and `--skip` patterns to the
+  listing itself, by libtest's rule (a substring, or equality under the
+  caller's `--exact`), drops them from the command and skips every case
+  outside the selection by name. A case runs on the same shard whatever the
+  filter. Other arguments, `--ignored` and `--include-ignored` among them,
+  reach libtest unchanged.
+
+Refresh the weights from the JUnit reports of a run that asked libtest for
+case times, then commit the table:
+
+```sh
+kiln test --test_env RUSTC_BOOTSTRAP=1 \
+  --test_arg=-Z --test_arg=unstable-options --test_arg=--report-time \
+  --runs_per_test=3 --test-output-dir /tmp/shards <label>...
+python3 tools/buck2/shard_weights.py --refresh /tmp/shards/run-*/test-report.json
+python3 tools/buck2/shard_weights.py --plan <label> <shards>
+```
+
+`--refresh` replaces the row of each sharded test the reports measured with
+the least of every case's `time` over the reports and keeps the other rows; a
+loaded worker only inflates a time, so measure with `--runs_per_test=3`, which
+writes `<test-output-dir>/run-<k>/test-report.json`. A case's time includes
+whatever it waits on, so measure a suite whose cases contend for one service,
+such as the PostgreSQL conformance tests, one shard and one case at a time:
+add `--jobs 1 --test_arg=--test-threads=1`. `--plan` prints
+the cases and milliseconds the table puts on each shard, for choosing a shard
+count. The table is an input of every sharded test, so their next run
+re-executes; unsharded tests keep their cached verdicts. The graph contracts
+fail when a row names no sharded test or holds anything but positive
+milliseconds.
+
 ## Repeating a test
 
 Prove a concurrency, timing, crash or replay law by executing one exact case

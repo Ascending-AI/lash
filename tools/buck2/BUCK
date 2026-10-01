@@ -60,6 +60,9 @@ test_helper_bundle(
     visibility = ["PUBLIC"],
 )
 
+# Per-case durations that balance libtest shards; an input of sharded tests only.
+export_file(name = "test_shard_weights", src = "test-shard-weights.json", mode = "reference", visibility = ["PUBLIC"])
+
 # Tests read the inventory at its checkout path, so it is exported by reference.
 export_file(name = "target_inventory", src = "target-inventory.json", mode = "reference", visibility = ["PUBLIC"])
 export_file(name = "ui_fixtures_runner.py", src = "ui_fixtures_runner.py", visibility = ["PUBLIC"])

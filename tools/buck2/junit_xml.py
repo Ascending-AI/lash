@@ -14,7 +14,8 @@ Each quadruple becomes one `<testsuite>`. Its cases are read from libtest's
 stable `test <name> ... ok|FAILED|ignored` records, and a failing case carries
 its `---- <name> stdout ----` section. A record may be split by the output of
 the tests themselves; `libtest_cases` reads it across lines. Where libtest names
-its tests, the cases must add up to its own `test result:` summary. If they do
+its tests, the cases must add up to its own `test result:` summary. A case
+carries a `time` when libtest reports one (`--report-time`). If they do
 not, the suite carries an error and this exits non-zero, so the callers fail
 the test. A test's child process may print libtest output of its own into the
 same stream; `libtest_runs` and `own_cases` keep the child's cases and summary
@@ -36,7 +37,7 @@ LIBTEST = re.compile(
     r"^(?:running \d+ tests?|test result:|test .+ \.\.\. |.+: (?:test|benchmark)$|\d+ tests?, \d+ benchmarks?$)",
     re.MULTILINE,
 )
-RESULT = r"(ok|FAILED|ignored(?:, .*)?)(?: <[0-9.]+s>)?"
+RESULT = r"(ok|FAILED|ignored(?:, .*)?)(?: <([0-9.]+)s>)?"
 START = re.compile(r"^test (.+?) \.\.\. (.*)$")
 # A record that starts after another thread's unterminated output.
 LOOSE_START = re.compile(r"test ((?:(?!test ).)+?) \.\.\. (.*)$")
@@ -87,7 +88,12 @@ class Record:
         self.name = name
         self.inside = inside
         self.outcome = None
+        self.seconds = None
         self.nested = False
+
+    def settle(self, result):
+        """Take the outcome, and the time libtest reports under `--report-time`."""
+        self.outcome, self.seconds = result.groups()
 
 
 class Reader:
@@ -133,14 +139,14 @@ class Reader:
         whole = WHOLE_RESULT.match(self.last)
         self.settled = whole is not None
         if whole:
-            self.record.outcome = whole.group(1)
+            self.record.settle(whole)
             return True
         # Another process's whole record can follow a name that still waits
         # for its result: `test a ... test b ... ok`.
         glued = WHOLE_RECORD.match(self.last)
         if glued:
             other = Record(glued.group(1), self.inside)
-            other.outcome = glued.group(2)
+            other.outcome, other.seconds = glued.group(2, 3)
             self.records.append(other)
             self.last = ""
         return True
@@ -150,7 +156,7 @@ class Reader:
             return
         whole = WHOLE_RESULT.match(line)
         if whole:
-            self.record.outcome = whole.group(1)
+            self.record.settle(whole)
         if line:
             self.last = line
 
@@ -244,7 +250,7 @@ def libtest_runs(lines, loose=False):
 
 
 def own_cases(children, records):
-    """Return the binary's own `{name: outcome}` among one run's records.
+    """Return the binary's own `{name: (outcome, seconds)}` among one run's records.
 
     A record that began with no child's block open is the binary's own. Each
     child summary claims as many of the records printed inside its block as it
@@ -269,9 +275,9 @@ def own_cases(children, records):
     for record in records:
         if record.nested or record.outcome is None:
             continue
-        if record.name not in cases or not record.inside or cases[record.name][1]:
-            cases[record.name] = (record.outcome, record.inside)
-    return {name: outcome for name, (outcome, _) in cases.items()}
+        if record.name not in cases or not record.inside or cases[record.name].inside:
+            cases[record.name] = record
+    return {name: (record.outcome, record.seconds) for name, record in cases.items()}
 
 
 def tally(outcomes):
@@ -290,7 +296,7 @@ def read_cases(lines, loose):
         cases.update(own)
         if block.summary is None or not named:
             continue
-        counted = tally(own.values())
+        counted = tally(outcome for outcome, _ in own.values())
         differs = differs or counted != block.summary
         for index in range(3):
             expected[index] += block.summary[index]
@@ -300,6 +306,12 @@ def read_cases(lines, loose):
 
 def libtest_cases(text):
     """Return each of the binary's own cases' outcome, and how they contradict its own summary, if they do."""
+    cases, mismatch = timed_cases(text)
+    return {name: outcome for name, (outcome, _) in cases.items()}, mismatch
+
+
+def timed_cases(text):
+    """Like `libtest_cases`, with each case as `(outcome, seconds)`; seconds is None unless libtest reported it."""
     lines = text.splitlines()
     cases, difference = read_cases(lines, loose=False)
     mismatch = None
@@ -318,13 +330,16 @@ def libtest_cases(text):
 def add_suite(root, name, code, seconds, log_path):
     text = read_log(log_path)
     lines = text.splitlines()
-    outcomes, mismatch = libtest_cases(text)
+    outcomes, mismatch = timed_cases(text)
     details = failure_sections(lines)
 
     suite = ET.SubElement(root, "testsuite", name=name, time=seconds)
     failures = skipped = errors = 0
-    for case_name, outcome in outcomes.items():
+    for case_name, (outcome, case_seconds) in outcomes.items():
         case = ET.SubElement(suite, "testcase", name=case_name, classname=name)
+        if case_seconds is not None:
+            # `shard_weights.py --refresh` balances shards by these.
+            case.set("time", case_seconds)
         if outcome == "FAILED":
             failures += 1
             failure = ET.SubElement(case, "failure", message="test failed")

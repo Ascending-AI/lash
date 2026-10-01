@@ -853,12 +853,12 @@ def test_shard_count(package_name: str, kind: str, target_name: str) -> int:
 
     A libtest binary is a single test action, so a crate that packs hundreds of
     cases into one binary sets the partition's critical path no matter how many
-    executor slots are free. `rust_test`'s sharding wrapper lists the binary,
-    assigns each case to a shard by a stable name hash and runs only that
-    subset, so the shards execute disjoint subsets whose union is every case the
-    unsharded binary runs. Sharding is opt-in: each shard pays its own `--list`
-    execution and runfiles tree, so only a binary whose wall time dominates the
-    job earns one.
+    executor slots are free. `test_shard.py` lists the binary, balances its
+    cases across the shards by the durations in `test-shard-weights.json` and
+    runs only its own subset, so the shards execute disjoint subsets whose union
+    is every case the unsharded binary runs. Sharding is opt-in: each shard pays
+    its own `--list` execution and runfiles tree, so only a binary whose wall
+    time dominates the job earns one.
     """
     return target_policy(package_name, kind, target_name).shards
 

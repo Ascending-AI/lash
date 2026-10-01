@@ -158,6 +158,9 @@ def lash_test_wrapper(
                 "$(location //tools/buck2:test_helpers)/test_shard.py",
                 str(count),
                 str(index),
+                "--weights",
+                "$(location //tools/buck2:test_shard_weights)",
+                "//{}:{}".format(native.package_name(), name),
             ]
             wrapper_labels.append("lash.shard={}/{}".format(index + 1, count))
             shard_env = dict(run_env)

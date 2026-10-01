@@ -15,7 +15,9 @@ import xml.etree.ElementTree as ET
 TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
 import junit_xml
+import shard_weights
 import test_runner as runner
+import test_shard
 
 # `//crates/lash-sim:cross_backend_store_differential__test` under
 # `--nocapture --test-threads=1`, with its long lines cut. Six of the thirteen
@@ -669,6 +671,201 @@ class LibtestRecordTests(unittest.TestCase):
         self.assertIsNone(runner.report_mismatch(xml, FAILING_LOG, ['laws::'], True))
         xml.write_text(junit('laws::passes_quietly', 'laws::needs_a_service', 'laws::skipped'))
         self.assertIn('disagree on 2 cases', runner.report_mismatch(xml, FAILING_LOG, ['laws::'], True))
+
+
+# A libtest double: `--list`, positional filters, `--skip`, `--exact` and
+# `--ignored` behave as libtest's do. It appends the cases it ran to $SHARD_CALLS.
+FAKE_LIBTEST = '''#!/usr/bin/env python3
+import json, os, sys
+cases = json.loads(os.environ["SHARD_CASES"])
+args = sys.argv[1:]
+if args == ["--list", "--format", "terse"]:
+    print("".join(name + ": test\\n" for name in cases), end="")
+    raise SystemExit(0)
+filters, skips, position = [], [], 0
+while position < len(args):
+    argument = args[position]
+    if argument in ("--skip", "--format", "--color", "--test-threads", "-Z"):
+        position += 1
+        if argument == "--skip":
+            skips.append(args[position])
+    elif argument.startswith("--skip="):
+        skips.append(argument[len("--skip="):])
+    elif not argument.startswith("-"):
+        filters.append(argument)
+    position += 1
+exact = "--exact" in args
+if args.count("--exact") > 1:
+    raise SystemExit("Option 'exact' given more than once")
+match = lambda name, value: name == value if exact else value in name
+ran = [
+    name for name, ignored in cases.items()
+    if (not filters or any(match(name, value) for value in filters))
+    and not any(match(name, value) for value in skips)
+    and ignored == ("--ignored" in args)
+]
+with open(os.environ["SHARD_CALLS"], "a", encoding="utf-8") as output:
+    output.write(json.dumps({"args": args, "ran": ran}) + "\\n")
+'''
+
+
+class ShardTests(unittest.TestCase):
+    # The always-replay parts' names contain one another, and the plain
+    # matrix's name is a prefix of them all.
+    CASES = {
+        'matrix': False,
+        'matrix_always_replay': False,
+        'matrix_always_replay_part_0': False,
+        'matrix_always_replay_part_0_of_4': False,
+        'other::law': False,
+        'other::law_needs_service': True,
+    }
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.binary = self.root / 'fake-libtest'
+        self.binary.write_text(FAKE_LIBTEST)
+        self.binary.chmod(0o755)
+        self.calls = self.root / 'calls.jsonl'
+        self.env = dict(os.environ, SHARD_CALLS=str(self.calls), SHARD_CASES=json.dumps(self.CASES))
+
+    def shard(self, count, index, *arguments, weights=()):
+        return subprocess.run(
+            [sys.executable, str(TOOLS / 'test_shard.py'), str(count), str(index), *weights, str(self.binary), *arguments],
+            env=self.env, capture_output=True, text=True, timeout=30,
+        )
+
+    def shards(self, count, *arguments, weights=()):
+        """Run every shard; return the cases each ran."""
+        self.calls.unlink(missing_ok=True)
+        for index in range(count):
+            result = self.shard(count, index, *arguments, weights=weights)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        return [json.loads(line)['ran'] for line in self.calls.read_text().splitlines()]
+
+    def unsharded(self, *arguments):
+        self.calls.unlink(missing_ok=True)
+        subprocess.run([str(self.binary), *arguments], env=self.env, check=True, timeout=30)
+        return json.loads(self.calls.read_text())['ran']
+
+    def table(self, rows):
+        path = self.root / 'weights.json'
+        path.write_text(json.dumps(rows))
+        return path
+
+    def test_names_that_contain_one_another_run_once_each_on_their_own_shards(self):
+        ran = self.shards(4)
+        arguments = json.loads(self.calls.read_text().splitlines()[0])['args']
+        self.assertEqual(sorted(name for shard in ran for name in shard), self.unsharded())
+        self.assertEqual(ran, [
+            ['matrix', 'other::law'],
+            ['matrix_always_replay'],
+            ['matrix_always_replay_part_0'],
+            ['matrix_always_replay_part_0_of_4'],
+        ])
+        self.assertEqual(arguments.count('--exact'), 1)
+        self.assertEqual(arguments.count('--skip'), 4)
+
+    def test_the_callers_filters_select_what_they_select_unsharded(self):
+        for arguments in (
+            ['matrix_always'],
+            ['matrix', '--exact'],
+            ['matrix', 'other', '--skip', 'part_0'],
+            ['--skip=matrix'],
+            ['--skip', 'matrix_always_replay', '--exact'],
+            ['--ignored'],
+            ['--ignored', 'other::law'],
+            ['-Z', 'unstable-options', '--report-time', 'law'],
+            ['no_such_case'],
+        ):
+            with self.subTest(arguments=arguments):
+                ran = self.shards(3, *arguments)
+                kept = json.loads(self.calls.read_text().splitlines()[0])['args']
+                self.assertEqual(sorted(name for shard in ran for name in shard), sorted(self.unsharded(*arguments)))
+                # Only the selection is rewritten; libtest's other arguments pass through.
+                passed = [argument for argument in arguments if argument in ('-Z', 'unstable-options', '--report-time', '--ignored')]
+                self.assertEqual(kept[:len(passed)], passed)
+        # A case keeps its shard whatever the filter.
+        self.assertEqual(self.shards(3, 'matrix_always'), [[name for name in shard if 'matrix_always' in name] for shard in self.shards(3)])
+
+    def test_weighted_cases_are_balanced_longest_first(self):
+        weights = {'a': 100, 'b': 90, 'c': 50, 'd': 40, 'e': 10, 'f': 10}
+        assignments = test_shard.shard_assignments(list(reversed(weights)), 3, weights)
+        self.assertEqual(assignments, {'a': 0, 'b': 1, 'c': 2, 'd': 2, 'e': 1, 'f': 2})
+        loads = [sum(weights[name] for name in weights if assignments[name] == index) for index in range(3)]
+        self.assertEqual(loads, [100, 100, 100])
+        # The three heavy matrices no longer share a shard, and no shard is empty.
+        row = {'matrix': 90000, 'matrix_always_replay': 80000, 'matrix_always_replay_part_0': 85000,
+               'matrix_always_replay_part_0_of_4': 70000, 'other::law': 500, 'other::law_needs_service': 1}
+        ran = self.shards(4, weights=['--weights', str(self.table({'//pkg:t': row})), '//pkg:t__fv_0873c7ac'])
+        self.assertEqual(ran, [['matrix'], ['matrix_always_replay_part_0'], ['matrix_always_replay'], ['matrix_always_replay_part_0_of_4', 'other::law']])
+
+    def test_unweighted_cases_go_round_robin_in_name_order(self):
+        names = ['d', 'b', 'a', 'c', 'e']
+        self.assertEqual(test_shard.shard_assignments(names, 2), {'a': 0, 'b': 1, 'c': 0, 'd': 1, 'e': 0})
+        self.assertEqual(test_shard.shard_assignments(names, 2), test_shard.shard_assignments(sorted(names), 2, {}))
+        # Beside weighted cases the round starts at the lightest shard.
+        self.assertEqual(test_shard.shard_assignments(names, 3, {'e': 50, 'd': 20}), {'e': 0, 'd': 1, 'a': 2, 'b': 1, 'c': 0})
+
+    def test_a_missing_or_stale_table_costs_balance_and_never_coverage(self):
+        plain = self.shards(4)
+        # No row for the test: the round-robin split.
+        unmeasured = ['--weights', str(self.table({'//pkg:other': {'matrix': 5}})), '//pkg:t']
+        self.assertEqual(self.shards(4, weights=unmeasured), plain)
+        # A stale row names a case the binary dropped and misses the others.
+        stale = ['--weights', str(self.table({'//pkg:t': {'removed::case': 9000, 'other::law': 400}})), '//pkg:t']
+        ran = self.shards(4, weights=stale)
+        self.assertEqual(sorted(name for shard in ran for name in shard), self.unsharded())
+        self.assertEqual(ran, [
+            ['matrix_always_replay_part_0_of_4', 'other::law'],
+            ['matrix'],
+            ['matrix_always_replay'],
+            ['matrix_always_replay_part_0'],
+        ])
+        # A table that was declared but cannot be read stops the shard before it runs anything.
+        self.calls.unlink(missing_ok=True)
+        for weights in (
+            ['--weights', str(self.root / 'absent.json'), '//pkg:t'],
+            ['--weights', str(self.table({'//pkg:t': {'matrix': '5'}})), '//pkg:t'],
+            ['--weights', str(self.table({'//pkg:t': ['matrix']})), '//pkg:t'],
+        ):
+            self.assertNotEqual(self.shard(4, 0, weights=weights).returncode, 0)
+        self.assertFalse(self.calls.exists())
+
+    def test_reported_case_times_refresh_the_table(self):
+        def report(name, runs):
+            results = {}
+            for label, cases in runs.items():
+                log = self.root / f'{name}-{len(results)}.log'
+                log.write_text(
+                    f'running {len(cases)} tests\n' + ''.join(f'test {case} ... {result}\n' for case, result in cases.items())
+                    + f'\ntest result: ok. {len(cases)} passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n'
+                )
+                xml = log.with_suffix('.xml')
+                subprocess.run([sys.executable, str(TOOLS / 'junit_xml.py'), str(xml), label, '0', '9.000', str(log)], check=True)
+                results[label] = {'outputs': {'junit_xml': str(xml)}}
+            path = self.root / f'{name}.json'
+            path.write_text(json.dumps({'results': results}))
+            return path
+
+        first = report('first', {
+            'root//pkg:t__shard_1': {'a::slow': 'ok <12.345s>', 'a::untimed': 'ok'},
+            'root//pkg:t__shard_2': {'a::quick': 'ok <0.0001s>'},
+            'root//pkg:t__fv_0873c7ac__shard_1': {'a::slow': 'ok <30.000s>'},
+            'root//pkg:whole': {'b::case': 'ok <1.000s>'},
+        })
+        second = report('second', {'root//pkg:t__shard_1': {'a::slow': 'ok <10.000s>'}})
+        xml = ET.parse(self.root / 'first-0.xml').getroot()
+        self.assertEqual({case.get('name'): case.get('time') for case in xml.iter('testcase')}, {'a::slow': '12.345', 'a::untimed': None})
+        times = shard_weights.measured([first, second])
+        self.assertEqual(times, {'//pkg:t': {'a::slow': [12.345, 30.0, 10.0], 'a::quick': [0.0001]}})
+        table = shard_weights.refreshed({'//pkg:kept': {'x': 7}, '//pkg:t': {'gone': 3}}, times)
+        self.assertEqual(table, {'//pkg:kept': {'x': 7}, '//pkg:t': {'a::slow': 10000, 'a::quick': 1}})
+        self.assertEqual(shard_weights.plan(table, '//pkg:t', 2), ['shard 1/2: 1 cases, 10000 ms', 'shard 2/2: 1 cases, 1 ms'])
+        with self.assertRaisesRegex(SystemExit, '--report-time: //pkg:t$'):
+            shard_weights.refreshed({}, shard_weights.measured([report('untimed', {'root//pkg:t__shard_1': {'a::slow': 'ok'}})]))
 
 
 if __name__ == '__main__':

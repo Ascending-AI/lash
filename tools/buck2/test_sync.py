@@ -1439,6 +1439,46 @@ def check_feature_lane_test_policy() -> None:
     assert "for index in range(count):" in wrapper and "args = args," in wrapper
 
 
+def check_shard_weights() -> None:
+    """The committed shard weights name sharded tests and reach their wrappers.
+
+    `test_shard.py` balances a test's shards by `test-shard-weights.json`. Each
+    row belongs to an ordinary sharded label, which its feature-lane variants
+    share; a row for anything else balances nothing and still looks like policy.
+    The table is `shard_weights.py --refresh`'s rendering, so a refresh is the
+    only diff, and every shard wrapper is handed the table and its own label.
+    """
+    sys.path.insert(0, str(HERE))
+    import shard_weights
+
+    table = load_json("test-shard-weights.json")
+    assert (HERE / "test-shard-weights.json").read_text(encoding="utf-8") == shard_weights.render(table), (
+        "test-shard-weights.json is not shard_weights.py's rendering"
+    )
+    inventory = load_json("target-inventory.json")
+    sharded = {
+        target["label"]
+        for package in inventory["packages"]
+        for target in package["targets"]
+        if target.get("label") and target.get("shard_count", 0) > 1
+    }
+    assert sharded, "no sharded test in the inventory"
+    assert set(table) <= sharded, f"shard weights name no sharded test: {sorted(set(table) - sharded)}"
+    for label, row in table.items():
+        assert row, f"{label} has an empty shard-weights row"
+        for name, weight in row.items():
+            assert type(weight) is int and weight > 0, f"{label} {name} weighs {weight!r}, not positive milliseconds"
+    assert 'export_file(name = "test_shard_weights", src = "test-shard-weights.json"' in (HERE / "BUCK").read_text(encoding="utf-8")
+    rules = (HERE / "test_rules.bzl").read_text(encoding="utf-8")
+    wrapper = rules[rules.index("def lash_test_wrapper("):]
+    for argument in (
+        '"--weights"',
+        '"$(location //tools/buck2:test_shard_weights)"',
+        '"//{}:{}".format(native.package_name(), name)',
+    ):
+        assert argument in wrapper, f"shard wrappers no longer pass {argument}"
+
+
 def check_no_first_party_build_dependency() -> None:
     """No first-party package is a build-dependency of another.
 
@@ -1535,6 +1575,7 @@ def main() -> int:
         check_documentation_targets_are_not_tests,
         check_feature_lane_dependency_edges,
         check_feature_lane_test_policy,
+        check_shard_weights,
         check_no_first_party_build_dependency,
         check_facade_completeness,
     ]

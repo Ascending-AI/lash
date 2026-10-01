@@ -48542,7 +48542,7 @@
           "clippy_label": "//crates/lash-restate-test:process_crash_replay__test[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-restate-test:process_crash_replay__test",
-          "shard_count": 6,
+          "shard_count": 4,
           "tags": []
         },
         {
