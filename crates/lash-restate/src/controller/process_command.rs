@@ -503,6 +503,10 @@ where
                         session_turn_default: lash_core::runtime::HostStartAdmission::default_mint(
                             host_start.as_deref(),
                         ),
+                        session_turn_admission:
+                            lash_core::runtime::HostStartAdmission::session_turn_admission(
+                                host_start.as_deref(),
+                            ),
                         trigger_route: trigger_route.as_ref(),
                     };
                     match lash_core::runtime::register_process_start(

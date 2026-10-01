@@ -327,7 +327,7 @@ impl Processes {
         command: lash_core::ProcessCommand,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEffectOutcome> {
-        self.execute_command(command, scoped_effect_controller)
+        self.execute_command(command, scoped_effect_controller, None)
             .await
             .map_err(|err| EmbedError::Plugin(err.into()))
     }
@@ -336,6 +336,7 @@ impl Processes {
         &self,
         command: lash_core::ProcessCommand,
         scoped_effect_controller: ScopedEffectController<'_>,
+        session_turn_admission: Option<lash_core::runtime::SessionTurnAdmission>,
     ) -> std::result::Result<lash_core::ProcessEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
         let registry = self.registry();
@@ -362,6 +363,7 @@ impl Processes {
                     ))
                     .with_process_session_catalog(Arc::clone(&self.core.store_factory) as _)
                     .with_session_turn_default(self.session_turn_default())
+                    .with_session_turn_admission(session_turn_admission)
                     .with_process_engines(self.core.host_process_engines.clone()),
             )
             .await?;
@@ -485,6 +487,84 @@ impl Processes {
         Ok(environment)
     }
 
+    fn host_session_turn_admission(
+        &self,
+        request: lash_core::SessionCreateRequest,
+        environment: Option<lash_core::ProcessExecutionEnvSpec>,
+        env_ref: Option<lash_core::ProcessExecutionEnvRef>,
+        claim: lash_core::ReferrerClaim,
+    ) -> lash_core::runtime::SessionTurnAdmission {
+        let core = self.core.clone();
+        Arc::new(move |fresh| {
+            let core = core.clone();
+            let request = request.clone();
+            let environment = environment.clone();
+            let env_ref = env_ref.clone();
+            let claim = claim.clone();
+            Box::pin(async move {
+                let env_store = core.env.core.durability.process_env_store.as_ref();
+                if fresh && let Some(key) = request.model.as_ref() {
+                    let policy = match request.policy {
+                        Some(policy) => policy,
+                        None => match environment.as_ref() {
+                            Some(environment) => environment.policy.clone(),
+                            None => match env_ref.as_ref() {
+                                Some(env_ref) => {
+                                    lash_core::runtime::load_process_execution_env(
+                                        env_store, env_ref,
+                                    )
+                                    .await
+                                    .map_err(lash_core::PluginError::from)?
+                                    .policy
+                                }
+                                None => core.policy.clone(),
+                            },
+                        },
+                    };
+                    let model =
+                        lash_core::ModelConfig {
+                            model: core.env.core.providers.models.snapshot(key).map_err(
+                                |error| {
+                                    lash_core::RuntimeEffectControllerError::new(
+                                        lash_core::RuntimeErrorCode::ModelUnknown,
+                                        error.to_string(),
+                                    )
+                                },
+                            )?,
+                            reasoning: policy
+                                .model
+                                .map(|model| model.reasoning)
+                                .unwrap_or_default(),
+                        };
+                    model.validate_reasoning().map_err(|refused| {
+                        lash_core::RuntimeEffectControllerError::new(
+                            lash_core::RuntimeErrorCode::ReasoningRefused,
+                            format!("process start refused: {refused}"),
+                        )
+                    })?;
+                }
+                match environment {
+                    Some(environment) => {
+                        lash_core::publish_process_execution_env(env_store, &claim, &environment)
+                            .await?;
+                    }
+                    None => {
+                        if let Some(env_ref) = env_ref {
+                            env_store
+                                .acquire_process_execution_env(&claim, &env_ref)
+                                .await
+                                .map_err(lash_core::PluginError::from)?;
+                        }
+                    }
+                }
+                Ok(())
+            })
+        })
+    }
+
+    /// Start a process, refusing a session-turn child's model key whose
+    /// inherited reasoning is unsupported before any environment or process
+    /// is written. The refusal retains `RuntimeErrorCode::ReasoningRefused`.
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
@@ -523,6 +603,7 @@ impl Processes {
             }
             _ => None,
         };
+        let mut session_turn_admission = None;
         if registration.env_ref.is_some() || host_session_turn_environment.is_some() {
             let claim = lash_core::ReferrerClaim::guarded(
                 lash_core::ArtifactReferrer::Execution(
@@ -534,26 +615,32 @@ impl Processes {
                 lash_core::ArtifactCleanupPlan::AwaitJournal,
             )
             .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-            let process_env_store = &self.core.env.core.durability.process_env_store;
-            match host_session_turn_environment {
-                Some(environment) => {
-                    let env_ref = lash_core::publish_process_execution_env(
-                        process_env_store.as_ref(),
-                        &claim,
-                        &environment,
-                    )
+            if let lash_core::ProcessInput::SessionTurn { create_request, .. } =
+                registration.input.as_ref()
+            {
+                if let Some(environment) = host_session_turn_environment.as_ref() {
+                    let env_ref = environment.stable_ref().map_err(|error| {
+                        lash_core::PluginError::Session(format!(
+                            "failed to encode process execution env: {error}"
+                        ))
+                    })?;
+                    registration.env_ref = Some(env_ref);
+                }
+                session_turn_admission = Some(self.host_session_turn_admission(
+                    create_request.as_ref().clone(),
+                    host_session_turn_environment,
+                    registration.env_ref.clone(),
+                    claim,
+                ));
+            } else if let Some(env_ref) = registration.env_ref.as_ref() {
+                self.core
+                    .env
+                    .core
+                    .durability
+                    .process_env_store
+                    .acquire_process_execution_env(&claim, env_ref)
                     .await
-                    .map_err(EmbedError::Plugin)?;
-                    registration = registration.with_execution_env_ref(Some(env_ref));
-                }
-                None => {
-                    if let Some(env_ref) = registration.env_ref.as_ref() {
-                        process_env_store
-                            .acquire_process_execution_env(&claim, env_ref)
-                            .await
-                            .map_err(lash_core::PluginError::from)?;
-                    }
-                }
+                    .map_err(lash_core::PluginError::from)?;
             }
         }
         let start_key = registration.start_key.clone();
@@ -563,7 +650,11 @@ impl Processes {
             execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
         };
         let outcome = self
-            .execute_command(command, scoped_effect_controller.clone())
+            .execute_command(
+                command,
+                scoped_effect_controller.clone(),
+                session_turn_admission,
+            )
             .await
             .map_err(|error| match host_session {
                 Some(session_id)
@@ -1141,6 +1232,14 @@ pub(crate) fn host_start_refusal(
             lash_core::PluginError::StartKeyConflict {
                 start_key: start_key.clone(),
             }
+        }
+        _ if matches!(
+            code,
+            lash_core::RuntimeErrorCode::ReasoningRefused
+                | lash_core::RuntimeErrorCode::ModelUnknown
+        ) =>
+        {
+            lash_core::PluginError::Runtime(lash_core::RuntimeError::new(code, message))
         }
         _ => lash_core::PluginError::Session(message),
     }

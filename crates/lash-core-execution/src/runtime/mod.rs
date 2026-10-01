@@ -154,7 +154,7 @@ pub use process::{
 };
 pub use process::{
     ArtifactReferrerPorts, HostStartAdmission, ProcessStartStores, ReferrerAcquisition,
-    RegisteredProcessStart, SessionTurnDefaultMint, register_process_start,
+    RegisteredProcessStart, SessionTurnAdmission, SessionTurnDefaultMint, register_process_start,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{

@@ -22,6 +22,7 @@
 
 use std::sync::Arc;
 
+use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -247,6 +248,11 @@ fn held_or_ended(
 pub type SessionTurnDefaultMint =
     Arc<dyn Fn() -> Result<crate::ModelConfig, RuntimeEffectControllerError> + Send + Sync>;
 
+/// Admit a host session-turn start before staging writes. `fresh` is false
+/// when its key already retains a process, whose model is never revalidated.
+pub type SessionTurnAdmission =
+    Arc<dyn Fn(bool) -> BoxFuture<'static, Result<(), RuntimeEffectControllerError>> + Send + Sync>;
+
 /// What a host start's recorded admission consults beyond the stores every
 /// start writes through. Held boxed by the executors that carry it: most
 /// process commands are not host starts.
@@ -259,6 +265,9 @@ pub struct HostStartAdmission {
     /// Mints the default binding of a host session-turn start that names no
     /// model (FIG-4531). `None` records none.
     pub session_turn_default: Option<SessionTurnDefaultMint>,
+    /// Validates the child's inherited reasoning before publishing or
+    /// acquiring its environment, inside the recorded start admission.
+    pub session_turn_admission: Option<SessionTurnAdmission>,
 }
 
 impl HostStartAdmission {
@@ -270,6 +279,11 @@ impl HostStartAdmission {
     /// The default mint of the admission `host_start` carries, if any.
     pub fn default_mint(host_start: Option<&Self>) -> Option<&SessionTurnDefaultMint> {
         host_start.and_then(|host_start| host_start.session_turn_default.as_ref())
+    }
+
+    /// The host session-turn admission, if this executor carries one.
+    pub fn session_turn_admission(host_start: Option<&Self>) -> Option<&SessionTurnAdmission> {
+        host_start.and_then(|host_start| host_start.session_turn_admission.as_ref())
     }
 }
 
@@ -292,6 +306,9 @@ pub struct ProcessStartStores<'a> {
     /// model, inside the recorded admission this registration runs in
     /// (FIG-4531). `None` records none.
     pub session_turn_default: Option<&'a SessionTurnDefaultMint>,
+    /// A host's child validation and environment publication, executed
+    /// before staging and skipped by journal replay.
+    pub session_turn_admission: Option<&'a SessionTurnAdmission>,
     /// Names the executor in a refusal, e.g. "Restate process start".
     pub executor: &'static str,
     /// The journal of the scope running the start: the authority of the
@@ -393,6 +410,14 @@ pub async fn register_process_start(
     };
     require_host_session_live(stores, &registration).await?;
     restore_trigger_route(stores, &start_key).await?;
+    if let Some(admit) = stores.session_turn_admission {
+        let fresh = stores
+            .registry
+            .get_process_by_start_key(&start_key)
+            .await?
+            .is_none();
+        admit(fresh).await?;
+    }
     let registration = record_session_turn_default(stores, &start_key, registration).await?;
     match stage_and_register(stores, &start_key, registration, observers).await {
         Ok(registered) => {

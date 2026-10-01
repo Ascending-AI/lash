@@ -43,7 +43,47 @@ enum Tier {
 
 struct Double {
     double: lash_restate_test::RestateTestBackend<dyn lash::StoreSet>,
+    artifacts: ArtifactProbe,
     _keep: Vec<Box<dyn std::any::Any + Send + Sync>>,
+}
+
+enum ArtifactProbe {
+    Sqlite(String),
+    Postgres(sqlx::PgPool),
+}
+
+impl ArtifactProbe {
+    async fn counts(&self) -> (i64, i64, i64, i64) {
+        match self {
+            Self::Sqlite(uri) => {
+                let connection = rusqlite::Connection::open_with_flags(
+                    uri,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+                )
+                .expect("inspect the SQLite artifacts");
+                connection
+                    .query_row(
+                        "SELECT (SELECT count(*) FROM artifact_refs),
+                                (SELECT count(*) FROM artifact_referrer_edges),
+                                (SELECT count(*) FROM artifact_cleanup_obligations),
+                                (SELECT count(*) FROM referrer_fences)",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )
+                    .expect("count SQLite artifact records")
+            }
+            Self::Postgres(pool) => sqlx::query_as(
+                "SELECT (SELECT count(*) FROM lash_lashlang_artifacts),
+                        (SELECT count(*) FROM lash_artifact_referrer_edges),
+                        (SELECT count(*) FROM lash_artifact_cleanup_obligations),
+                        (SELECT count(*) FROM lash_referrer_fences)",
+            )
+            .fetch_one(pool)
+            .await
+            .expect("count PostgreSQL artifact records"),
+        }
+    }
 }
 
 async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
@@ -54,18 +94,28 @@ async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
     let hooks = lash_restate_test::DeploymentHooks::default;
     match tier {
         Tier::SqliteMemory => {
+            let inspection = Arc::new(Mutex::new(None));
+            let captured = Arc::clone(&inspection);
             let double =
                 lash_restate_test::backend_with_store_set(seed, config, hooks(), |clock| async {
-                    Ok(Arc::new(
-                        lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-                            .await
-                            .expect("SQLite memory stores"),
-                    ) as Arc<dyn lash::StoreSet>)
+                    let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
+                        .await
+                        .expect("SQLite memory stores");
+                    *captured.lock().expect("inspection URI") =
+                        Some(stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore));
+                    Ok(Arc::new(stores) as Arc<dyn lash::StoreSet>)
                 })
                 .await
                 .expect("SQLite memory Restate double");
             Some(Double {
                 double,
+                artifacts: ArtifactProbe::Sqlite(
+                    inspection
+                        .lock()
+                        .expect("inspection URI")
+                        .take()
+                        .expect("URI captured"),
+                ),
                 _keep: Vec::new(),
             })
         }
@@ -84,6 +134,10 @@ async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
                 .expect("SQLite file Restate double");
             Some(Double {
                 double,
+                artifacts: ArtifactProbe::Sqlite(format!(
+                    "file:{}",
+                    path.join("durable-core.db").display()
+                )),
                 _keep: vec![Box::new(root)],
             })
         }
@@ -110,6 +164,7 @@ async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
                 .expect("PostgreSQL Restate double");
             Some(Double {
                 double,
+                artifacts: ArtifactProbe::Postgres(storage.pool().clone()),
                 _keep: vec![Box::new(database), Box::new(storage), Box::new(attachments)],
             })
         }
@@ -1578,6 +1633,165 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
     );
 }
 
+/// A host refuses a child's key with unsupported inherited reasoning before
+/// it publishes an environment, acquires a referrer or registers a process.
+/// The request's policy takes precedence over the captured environment.
+async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording(
+    tier: Tier,
+    replay: bool,
+    seed: u64,
+) {
+    const THINKER: &str = "host-thinker";
+    let Some(double) = double(tier, replay, seed).await else {
+        return;
+    };
+    let route = Route::new("child answers");
+    let high = lash::provider::ReasoningSelection::Effort("high".to_string());
+    let thinking = ModelMetadata::builder("thinker")
+        .context_window_tokens(64_000)
+        .capability(lash::provider::ModelCapability {
+            reasoning: Some(lash::provider::ReasoningCapability {
+                efforts: vec!["high".to_string()],
+                encoding: lash::provider::ReasoningEncoding::Effort,
+                disable: false,
+                mandatory: false,
+            }),
+            ..lash::provider::ModelCapability::default()
+        })
+        .build()
+        .expect("thinking model metadata");
+    let registry = Arc::new(
+        ModelRegistry::new()
+            .register(THINKER, RegisteredModel::new(thinking, route.handle()))
+            .and_then(|registry| {
+                registry.register(
+                    GLM,
+                    RegisteredModel::new(metadata("plain", "r1"), route.handle()),
+                )
+            })
+            .expect("registered host models"),
+    );
+    let policy = lash::runtime::SessionPolicy {
+        model: Some(
+            lash::ModelConfig::new(
+                lash::RuntimeModels::snapshot(registry.as_ref(), &ModelKey::new(THINKER))
+                    .expect("the thinking key resolves"),
+            )
+            .with_reasoning(high),
+        ),
+        ..lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded)
+    };
+    let host =
+        LashCore::standard_builder(double.double.lash_backend(), lash::TurnBudget::Unbounded)
+            .models(registry)
+            .model(THINKER)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "host-reasoning",
+                "boot",
+            ))
+            .expect("the host core builds");
+    let environment = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::default(),
+        policy.clone(),
+    );
+    let claim = lash_core::ReferrerClaim::guarded(
+        lash_core::ArtifactReferrer::Execution(
+            lash_core::ExecutionScope::runtime_operation("host-reasoning-fixture")
+                .journal_identity()
+                .expect("fixture journal"),
+        ),
+        lash_core::ArtifactCleanupPlan::AwaitJournal,
+    )
+    .expect("fixture claim");
+    let env_ref = lash_core::publish_process_execution_env(
+        double.double.stores().process_env_store().as_ref(),
+        &claim,
+        &environment,
+    )
+    .await
+    .expect("publish the captured fixture environment");
+
+    for source in ["policy", "environment"] {
+        let key = format!("host-reasoning-{source}");
+        let mut request = session_turn_start(&key, "run the child");
+        let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut request.input else {
+            panic!("session turn fixture");
+        };
+        create_request.model = Some(ModelKey::new(GLM));
+        if source == "policy" {
+            create_request.policy = Some(policy.clone());
+        } else {
+            request = request.with_env_ref(env_ref.clone());
+        }
+        let before = double.artifacts.counts().await;
+        let refused = start_on(&double, &host, &key, request).await;
+        match refused {
+            Err(lash::EmbedError::Plugin(lash_core::PluginError::Runtime(error))) => {
+                assert_eq!(
+                    error.code,
+                    lash::runtime::RuntimeErrorCode::ReasoningRefused
+                );
+            }
+            other => panic!("the host call refuses inherited reasoning typed: {other:?}"),
+        }
+        assert_eq!(
+            double.artifacts.counts().await,
+            before,
+            "the refused start wrote no artifact, edge, cleanup obligation or fence"
+        );
+        assert!(
+            host.processes()
+                .list(&lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    ..lash_core::ProcessListFilter::default()
+                })
+                .await
+                .expect("list every process")
+                .is_empty(),
+            "the refused call registered no process"
+        );
+        assert!(matches!(
+            host.session(format!("{key}-child")).open().await,
+            Err(lash::EmbedError::UnknownSession { .. })
+        ));
+    }
+    assert_eq!(route.calls(), 0, "no refused child called a provider");
+
+    // An explicit policy overrides the environment's inherited effort.
+    let mut accepted =
+        session_turn_start("host-reasoning-environment", "run the child").with_env_ref(env_ref);
+    let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut accepted.input else {
+        panic!("session turn fixture");
+    };
+    create_request.model = Some(ModelKey::new(GLM));
+    create_request.policy = Some(lash::runtime::SessionPolicy::new(
+        lash::TurnBudget::Unbounded,
+    ));
+    let first = start_on(&double, &host, "host-reasoning-repaired", accepted.clone())
+        .await
+        .expect("compatible reasoning starts under the refused key");
+    let moved = core(
+        &double,
+        &[Entry {
+            key: KIMI,
+            wire_model: "another-model",
+            revision: "r2",
+            route: &route,
+        }],
+        "host-reasoning-moved",
+    );
+    let retry = start_on(&double, &moved, "host-reasoning-retry", accepted)
+        .await
+        .expect("a retained start never revalidates its removed child key");
+    assert_eq!(retry.process_id, first.process_id);
+    assert_eq!(
+        retry.disposition,
+        lash_core::ProcessRegistrationOutcome::Existing
+    );
+}
+
 // ---- registration -----------------------------------------------------------
 
 #[test]
@@ -1692,4 +1906,8 @@ tiered!(
 tiered!(
     a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_park,
     0x4404_1300
+);
+tiered!(
+    a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording,
+    0x4603_1100
 );

@@ -1286,6 +1286,7 @@ pub mod runtime {
     };
     pub use lash_core::runtime::DirectUsage;
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
+    pub use lash_core::runtime::SessionTurnAdmission;
     pub use lash_core::runtime::{
         AdmittedHeadVerdict, CompactionBase, ToolChildAdmission, ToolChildCompletionRouting,
         ToolChildScope, ToolPresentation,

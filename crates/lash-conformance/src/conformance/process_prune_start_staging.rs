@@ -209,6 +209,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         engines_required: false,
         session_catalog: None,
         session_turn_default: None,
+        session_turn_admission: None,
         executor: "conformance process start",
         starter,
         trigger_route: None,
@@ -412,6 +413,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         engines_required: true,
         session_catalog: None,
         session_turn_default: None,
+        session_turn_admission: None,
         executor: "conformance process start",
         starter: &starter_a,
         trigger_route: None,
@@ -423,6 +425,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         engines_required: true,
         session_catalog: None,
         session_turn_default: None,
+        session_turn_admission: None,
         executor: "conformance process start",
         starter: &starter_b,
         trigger_route: None,
@@ -817,6 +820,7 @@ pub async fn two_starts_share_one_captured_environment(
         session_catalog: None,
         trigger_route: None,
         session_turn_default: None,
+        session_turn_admission: None,
     };
     let mut records = Vec::new();
     for key in ["shared-environment-first", "shared-environment-second"] {
