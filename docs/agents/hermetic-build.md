@@ -335,6 +335,10 @@ tests. Batches preserve one XML suite per member and a case per libtest result.
 A result is read even when the test's own output separates it from its name,
 as under `--nocapture`. The cases must add up to libtest's `test result:`
 summary; a report that does not is an error in its suite and fails the test.
+A test's child process that prints libtest output into the same stream, such as
+the test binary re-running one of its own tests, adds no case: only the
+binary's own block and summary are counted, and a child's record never stands
+in for a missing one of the binary's.
 Output that names no test, as under `--format terse`, is not checked.
 Arguments reach every member; a filter matching no member fails. Use a direct
 member label for a narrow filter.

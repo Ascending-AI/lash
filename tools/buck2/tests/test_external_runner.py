@@ -92,6 +92,50 @@ test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 '''
 
 
+CHILD_SUMMARY = 'test result: {}. {} passed; {} failed; 0 ignored; 0 measured; 709 filtered out; finished in 0.00s\n\n'
+
+
+def child_block(name, outcome='ok'):
+    """What a child running one test of a libtest binary writes to the parent's stdout."""
+    failed = outcome == 'FAILED'
+    details = f'failures:\n\n---- {name} stdout ----\nchild panicked\n\n\nfailures:\n    {name}\n\n' if failed else ''
+    return f'\nrunning 1 test\ntest {name} ... {outcome}\n\n{details}' + CHILD_SUMMARY.format('FAILED' if failed else 'ok', int(not failed), int(failed))
+
+
+def outer_summary(passed, failed=0):
+    return f'\ntest result: {"FAILED" if failed else "ok"}. {passed} passed; {failed} failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s\n\n'
+
+
+# Several test threads, as `//crates/lash-typescript:integration__test` prints:
+# each test re-runs itself, or a helper, in children that write to the
+# parent's stdout. One child fails as its parent expects, one prints a name
+# the binary did not run, and another test's record lands inside a child's block.
+NESTED_LOG = (
+    '\nrunning 4 tests\n'
+    'test guard::first ... ok\n'
+    + child_block('guard::reruns_itself') + child_block('guard::reruns_itself')
+    + 'test guard::reruns_itself ... ok\n'
+    + child_block('guard::expects_a_failing_child', 'FAILED')
+    + 'test guard::expects_a_failing_child ... ok\n'
+    + '\nrunning 1 test\ntest guard::uses_a_helper ... ok\ntest helper::child_only ... ok\n\n' + CHILD_SUMMARY.format('ok', 1, 0)
+    + outer_summary(4)
+)
+NESTED_CASES = {'guard::first': 'ok', 'guard::reruns_itself': 'ok', 'guard::expects_a_failing_child': 'ok', 'guard::uses_a_helper': 'ok'}
+
+# One test thread, the shape that failed `integration__test`: libtest names the
+# test before it runs, so the children's blocks sit between each name and its
+# result. The last test fails although its child, running the same name, passed.
+NESTED_MID_LINE_LOG = (
+    '\nrunning 4 tests\n'
+    'test guard::first ... ok\n'
+    'test guard::reruns_itself ... ' + child_block('guard::reruns_itself') + child_block('guard::reruns_itself') + 'ok\n'
+    'test guard::expects_a_failing_child ... ' + child_block('guard::expects_a_failing_child', 'FAILED') + 'ok\n'
+    'test guard::fails_after_its_child ... ' + child_block('guard::fails_after_its_child') + 'FAILED\n'
+    '\nfailures:\n\n---- guard::fails_after_its_child stdout ----\nparent panicked\n\n\nfailures:\n    guard::fails_after_its_child\n'
+    + outer_summary(3, 1)
+)
+
+
 class Client:
     def __init__(self, result):
         self.result = result
@@ -517,6 +561,107 @@ class LibtestRecordTests(unittest.TestCase):
         result, suite = self.run_binary(NOCAPTURE_LOG)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((suite.get('tests'), suite.get('errors')), ('13', '0'))
+
+    def suite_counts(self, suite):
+        return tuple(suite.get(key) for key in ('tests', 'failures', 'errors', 'skipped'))
+
+    def test_nested_child_blocks_add_no_case_and_no_mismatch(self):
+        self.assertEqual(junit_xml.libtest_cases(NESTED_LOG), (NESTED_CASES, None))
+        result, suite = self.write(NESTED_LOG)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.suite_counts(suite), ('4', '0', '0', '0'))
+        self.assertEqual([case.get('name') for case in suite.iter('testcase')], list(NESTED_CASES))
+        result, suite = self.run_binary(NESTED_LOG)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.suite_counts(suite), ('4', '0', '0', '0'))
+
+    def test_a_nested_block_between_a_name_and_its_result_keeps_the_outer_result(self):
+        outcomes, mismatch = junit_xml.libtest_cases(NESTED_MID_LINE_LOG)
+        self.assertIsNone(mismatch)
+        self.assertEqual(outcomes, {
+            'guard::first': 'ok', 'guard::reruns_itself': 'ok',
+            'guard::expects_a_failing_child': 'ok', 'guard::fails_after_its_child': 'FAILED',
+        })
+        result, suite = self.write(NESTED_MID_LINE_LOG, code='101')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.suite_counts(suite), ('4', '1', '0', '0'))
+        failure = next(case for case in suite.iter('testcase') if case.get('name') == 'guard::fails_after_its_child').find('failure')
+        self.assertEqual(failure.text, 'parent panicked')
+
+    def test_a_child_case_named_like_an_outer_case_never_stands_in_for_it(self):
+        # The child's outcome is not the binary's: the parent decides, and prints last.
+        for child, outer in (('FAILED', 'ok'), ('ok', 'FAILED')):
+            log = '\nrunning 2 tests\ntest a::other ... ok\n' + child_block('a::same', child) + f'test a::same ... {outer}\n' + outer_summary(1 + (outer == 'ok'), int(outer == 'FAILED'))
+            self.assertEqual(junit_xml.libtest_cases(log), ({'a::other': 'ok', 'a::same': outer}, None))
+        # Another test's record inside the child's block is still the binary's own.
+        log = '\nrunning 2 tests\n\nrunning 1 test\ntest a::same ... ok\ntest a::other ... ok\n\n' + CHILD_SUMMARY.format('ok', 1, 0) + 'test a::same ... ok\n' + outer_summary(2)
+        self.assertEqual(junit_xml.libtest_cases(log), ({'a::other': 'ok', 'a::same': 'ok'}, None))
+        # A child's name printed before its parent's whole record, on one line.
+        log = '\nrunning 2 tests\n\nrunning 1 test\ntest a::same ... test a::other ... ok\nok\n\n' + CHILD_SUMMARY.format('ok', 1, 0) + 'test a::same ... ok\n' + outer_summary(2)
+        self.assertEqual(junit_xml.libtest_cases(log), ({'a::other': 'ok', 'a::same': 'ok'}, None))
+
+    def test_one_selected_test_and_its_child_announce_the_same_count(self):
+        for threads in ('test a::same ... ' + child_block('a::same') + 'ok\n', child_block('a::same') + 'test a::same ... ok\n'):
+            log = '\nrunning 1 test\n' + threads + '\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 709 filtered out; finished in 0.10s\n\n'
+            self.assertEqual(junit_xml.libtest_cases(log), ({'a::same': 'ok'}, None))
+
+    def test_a_child_that_dies_without_a_summary_does_not_take_its_parents(self):
+        dead = '\nrunning 1 test\n'
+        log = '\nrunning 2 tests\ntest a::probes ... ' + dead + 'ok\ntest a::after ... ok\n' + outer_summary(2)
+        self.assertEqual(junit_xml.libtest_cases(log), ({'a::probes': 'ok', 'a::after': 'ok'}, None))
+        log = '\nrunning 2 tests\n' + dead + 'test a::probes ... ok\n' + child_block('a::after') + 'test a::after ... ok\n' + outer_summary(2)
+        self.assertEqual(junit_xml.libtest_cases(log), ({'a::probes': 'ok', 'a::after': 'ok'}, None))
+        log = '\nrunning 1 test\n' + dead + 'test a::probes ... ok\n' + outer_summary(1)
+        self.assertEqual(junit_xml.libtest_cases(log), ({'a::probes': 'ok'}, None))
+        log = '\nrunning 1 test\n' + dead + 'test a::probes ... swallowed\n' + outer_summary(1)
+        self.assertEqual(junit_xml.libtest_cases(log)[1], 'libtest reported 1 passed, 0 failed, 0 ignored; its output names 0 passed, 0 failed, 0 ignored')
+
+    def test_a_nested_block_does_not_hide_an_outer_summary_mismatch(self):
+        # The binary says five passed and names four; the children's five records do not make up the difference.
+        log = NESTED_LOG.replace(outer_summary(4), outer_summary(5))
+        outcomes, mismatch = junit_xml.libtest_cases(log)
+        self.assertEqual(outcomes, NESTED_CASES)
+        self.assertEqual(mismatch, 'libtest reported 5 passed, 0 failed, 0 ignored; its output names 4 passed, 0 failed, 0 ignored')
+        result, suite = self.write(log)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('does not account for every test', result.stderr)
+        self.assertEqual(self.suite_counts(suite), ('5', '0', '1', '0'))
+        result, suite = self.run_binary(log)
+        self.assertEqual(result.returncode, 1)
+        # A failure the binary's summary does not report is a mismatch too.
+        log = NESTED_LOG.replace('test guard::first ... ok', 'test guard::first ... FAILED')
+        self.assertEqual(junit_xml.libtest_cases(log)[1], 'libtest reported 4 passed, 0 failed, 0 ignored; its output names 3 passed, 1 failed, 0 ignored')
+
+    def test_a_missing_outer_case_fails_whatever_its_children_printed(self):
+        expected = 'libtest reported 4 passed, 0 failed, 0 ignored; its output names 3 passed, 0 failed, 0 ignored'
+        # Lost with children that printed the same name, and with one that printed a foreign name.
+        for lost in ('test guard::reruns_itself ... ok\n', 'test guard::uses_a_helper ... ok\n', 'test guard::first ... ok\n'):
+            # The binary's own record of a name is the last one printed.
+            before, after = NESTED_LOG.rsplit(lost, 1)
+            log = before + ('' if 'helper' in lost else lost.replace(' ... ok', ' ... output that swallowed its result')) + after
+            outcomes, mismatch = junit_xml.libtest_cases(log)
+            self.assertEqual(mismatch, expected, lost)
+            self.assertEqual(len(outcomes), 3, lost)
+            result, suite = self.write(log)
+            self.assertEqual(result.returncode, 1, lost)
+            self.assertEqual(suite.get('errors'), '1', lost)
+        log = NESTED_MID_LINE_LOG.replace(child_block('guard::reruns_itself') + 'ok\n', child_block('guard::reruns_itself') + 'no result\n')
+        self.assertEqual(junit_xml.libtest_cases(log)[1], 'libtest reported 3 passed, 1 failed, 0 ignored; its output names 2 passed, 1 failed, 0 ignored')
+
+    def test_a_childs_lost_record_is_not_the_binarys_to_account_for(self):
+        log = NESTED_LOG.replace('test guard::reruns_itself ... ok\n', 'test guard::reruns_itself ... output that swallowed its result\n', 1)
+        self.assertEqual(junit_xml.libtest_cases(log), (NESTED_CASES, None))
+
+    def test_the_selection_guard_counts_only_the_binarys_own_cases(self):
+        xml = self.root / 'guard.xml'
+        xml.write_text(junit(*NESTED_CASES))
+        for log in (NESTED_LOG, NESTED_LOG.replace(outer_summary(4), outer_summary(5))):
+            self.assertIsNone(runner.report_mismatch(xml, log, ['guard::'], True))
+        # A child's case in the report is foreign, and a missing own case is missing.
+        xml.write_text(junit(*NESTED_CASES, 'helper::child_only'))
+        self.assertIn('disagree on 1 cases, e.g. helper::child_only', runner.report_mismatch(xml, NESTED_LOG, [], True))
+        xml.write_text(junit(*list(NESTED_CASES)[:3]))
+        self.assertIn('disagree on 1 cases, e.g. guard::uses_a_helper', runner.report_mismatch(xml, NESTED_LOG, ['guard::'], True))
 
     def test_the_selection_guard_reads_split_records(self):
         xml = self.root / 'guard.xml'
