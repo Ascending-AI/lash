@@ -10,8 +10,9 @@
 //! journal:
 //!
 //! - **`LashSession/{session}`** is a virtual object keyed by the session.
-//!   Its exclusive `drive` handler loops the kernel's recorded admission
-//!   (`AdmitDrive`, ordinal 0, 1, ..) on a controller scoped to
+//!   Its exclusive `drive` handler records the leg's start, then loops the
+//!   kernel's recorded admission (`AdmitDrive`, ordinal 0, 1, ..) on a
+//!   controller scoped to
 //!   [`drive_admission_scope`], and for every admitted root calls that
 //!   root's `LashTurn` and awaits it. It returns once admission answers
 //!   anything but an admitted root, or hands the rest of the drive to a
@@ -141,15 +142,16 @@ mod asks;
 ///
 /// Generation 4 changed in place under the pre-1.0 version freeze
 /// (FIG-3980): neither handler journals a separate generation sentinel step;
-/// its generation rides the first recorded step, admission 0 or the root's
-/// start marker. It changed in place again for FIG-4035: `LashTurn`'s `run`
+/// its generation rides the handler's first command, the drive's leg start
+/// (admission 0 before FIG-4556) or the root's start marker. It changed in place again for FIG-4035: `LashTurn`'s `run`
 /// journals a send to its key's `close` handler where it recorded the root's
 /// `CloseRootScope` step, and `close` records that step. And again for
 /// FIG-4506: `LashSession`'s `drive` records a `lash.drive.boundary` step
 /// after each root it goes on from, short of its root bound. And again for
 /// FIG-4523: `drive` records a `lash.drive.leg` step after admission 0, before
 /// it calls the leg's first root, and the continuation it sends carries the
-/// stop rules' memory of the leg.
+/// stop rules' memory of the leg. And again for FIG-4556: `lash.drive.leg` is
+/// `drive`'s first command, ahead of admission 0, and carries its generation.
 ///
 /// version_guard(
 ///     shapes(cover(RestateSessionDriveRequest, RestateTurnDriveRequest)),
@@ -173,10 +175,17 @@ pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";
 
-/// The journal name of the step `drive` records before it calls a leg's first
-/// root. Its body marks the attempt that runs it fresh: an attempt served the
-/// step from the journal follows a failed attempt or a suspension.
+/// The journal name of the step `drive` records first, ahead of the leg's
+/// first admission. Its body marks the attempt that runs it fresh: an attempt
+/// served the step from the journal follows a failed attempt or a suspension.
 const LEG_START_STEP: &str = "lash.drive.leg";
+
+/// What [`LEG_START_STEP`] records: the generation sentinel, which rides the
+/// handler's first command (FIG-3980), as a recorded effect's entry names it.
+#[derive(Serialize, Deserialize)]
+struct LegStart {
+    build_generation: Option<serde_json::Value>,
+}
 
 /// The journal name of the step `drive` records at a root boundary: whether
 /// the attempt that reached the boundary was not the leg's fresh one, and so
@@ -1056,9 +1065,9 @@ impl LashTurn for LashTurnImpl {
     }
 }
 
-/// What `LashSession/{session}/drive` journals: admission `n` on the
-/// drive-admission scope, then, for an admitted root, the leg start ahead of
-/// the first one, the call to its `LashTurn`, the root boundary, then
+/// What `LashSession/{session}/drive` journals: the leg start, then
+/// admission `n` on the drive-admission scope, then, for an admitted root,
+/// the call to its `LashTurn`, the root boundary, then
 /// admission `n + 1`, until admission answers anything but an admitted root
 /// or a boundary hands the drive off. `handed_off` is what the leg before
 /// this one remembers, when this leg is a continuation.
@@ -1096,21 +1105,17 @@ async fn drive_session_journal(
         ));
     }
     let handler = route.namespace().stable(LashService::SessionDriver).name();
-    let driver = slot.driver_for(&handler)?;
-    // This attempt's admissions, and the roots it calls when they run in this
-    // process, share one runtime of the session (FIG-3825); the hold drops
-    // where the attempt ends, so a replaying attempt opens its own.
-    let _hold = driver.hold_drive(&request.session);
-    // The generation sentinel rides admission 0, the drive's first command
+    // The generation sentinel rides the leg start, the drive's first command
     // (FIG-3980): a journal of another build parks before it replays past it.
-    let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
+    let sentinel = FoldedSentinel::new(handler.clone(), generation.clone());
     let controller =
         RestateRuntimeEffectController::new(ctx, authority_id.clone(), generation.clone())
-            .in_namespace(route.namespace().clone())
-            .with_folded_sentinel(Arc::clone(&sentinel));
+            .in_namespace(route.namespace().clone());
     sentinel
         .guard(drive_admissions(
-            driver.as_ref(),
+            slot,
+            &handler,
+            &sentinel,
             &controller,
             generation,
             route,
@@ -1120,12 +1125,19 @@ async fn drive_session_journal(
         .await?
 }
 
-/// Admission `n`, then the admitted root's `LashTurn` and its boundary,
-/// until admission answers anything but an admitted root or a boundary hands
-/// the drive off. `rules` are the kernel's stop rules as the leg before this
-/// one left them, new for a drive's first leg.
+/// The leg start, then admission `n`, the admitted root's `LashTurn` and its
+/// boundary, until admission answers anything but an admitted root or a
+/// boundary hands the drive off. `rules` are the kernel's stop rules as the
+/// leg before this one left them, new for a drive's first leg.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the handler's parts, expanded in place: a helper generic over the context's \
+              lifetime fails the SDK's higher-ranked Send bound"
+)]
 async fn drive_admissions(
-    driver: &dyn SessionDriver,
+    slot: &RestateSessionDriverSlot,
+    handler: &str,
+    sentinel: &FoldedSentinel,
     controller: &RestateRuntimeEffectController<'_, ObjectContext<'_>>,
     generation: &BuildGeneration,
     route: &crate::services::ServiceRoute,
@@ -1141,6 +1153,29 @@ async fn drive_admissions(
     // Whether this attempt recorded the leg's start itself. An attempt served
     // it from the journal follows a failed attempt or a suspension.
     let fresh = Arc::new(AtomicBool::new(false));
+    // The leg starts ahead of everything an attempt can fail in, its first
+    // admission and the driver slot's read included (FIG-4556): a start
+    // stored after a failure would call the attempt that outlived it fresh.
+    // As the drive's first command it carries the sentinel (FIG-3980).
+    let Json(leg) = {
+        let fresh = Arc::clone(&fresh);
+        let build_generation = sentinel.stamp();
+        RunFuture::name(
+            ContextSideEffects::run(controller.context(), move || async move {
+                fresh.store(true, Ordering::SeqCst);
+                Ok(Json(LegStart { build_generation }))
+            }),
+            LEG_START_STEP,
+        )
+        .await?
+    };
+    sentinel.check(leg.build_generation.as_ref()).await;
+    let driver = slot.driver_for(handler)?;
+    let driver = driver.as_ref();
+    // This attempt's admissions, and the roots it calls when they run in this
+    // process, share one runtime of the session (FIG-3825); the hold drops
+    // where the attempt ends, so a replaying attempt opens its own.
+    let _hold = driver.hold_drive(&request.session);
     loop {
         let scoped = controller
             .scoped_effect_controller(admission_scope.clone())
@@ -1156,20 +1191,6 @@ async fn drive_admissions(
                 // key has run once.
                 if let Err(stop) = rules.before(&admitted) {
                     return Ok(DriveOutcome { ran, stop });
-                }
-                // The leg starts where its first root is about to be called,
-                // not ahead of admission 0: that admission is the drive's
-                // first command and carries its generation (FIG-3980).
-                if ordinal == 0 {
-                    let fresh = Arc::clone(&fresh);
-                    RunFuture::name(
-                        ContextSideEffects::run(controller.context(), move || async move {
-                            fresh.store(true, Ordering::SeqCst);
-                            Ok(())
-                        }),
-                        LEG_START_STEP,
-                    )
-                    .await?;
                 }
                 let root = admitted.root().clone();
                 let work = admitted.work().clone();

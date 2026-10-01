@@ -303,18 +303,21 @@ Restate counts a handler's failed attempts over the invocation's whole retry
 loop, which only a suspension or a new invocation restarts. A drive that
 awaits one root after another never suspends, so its eight-attempt budget
 would be spent on the sum of every root's failures. The drive therefore
-records two kinds of step. Before it calls a leg's first root it records
-`lash.drive.leg`, whose body marks the attempt that runs it as the one that
-started the leg. The step follows admission 0, which stays the drive's first
-command and carries its generation (§12). After each root it goes on from, it
+records two kinds of step. Its first command is `lash.drive.leg`, whose body
+marks the attempt that runs it as the one that started the leg. The step
+precedes admission 0 and the read of the installed driver, so a failed
+attempt inside either is seen, and as the drive's first command it carries
+the drive's generation (§12). After each root it goes on from, the drive
 records `lash.drive.boundary`: whether the attempt that reached the boundary
 was served the leg's start from the journal, which makes it a retry or a
 resume. Such an attempt hands off there, before its root bound, and its stop
 is `DriveStop::HandedOff`. One retry loop then covers the roots up to the
 first boundary a replaying attempt reaches live, the leg's first boundary
 included, never the backlog. Under always-replay every attempt past a leg's
-first await replays, and a drive runs in legs of one root. A failed attempt
-that ends before the leg's start is stored, inside admission 0, is not seen.
+first await replays, and a drive runs in legs of one root. An attempt that
+fails before the leg's start is stored journals nothing and is not seen: a
+deployment that refuses the invocation, or a request the handler cannot
+open.
 
 The continuation's request carries what the kernel's stop rules (`DriveLoop`)
 remember of the roots the handing-off leg ran, and the next leg starts from
@@ -333,7 +336,7 @@ old segment's journal in place. Durable formats follow the current freeze
 and compatibility rules of ADR 0106.
 
 Evidence: `crates/lash-core-execution/src/engine/drive.rs:1`,
-`crates/lash-restate/src/session_driver.rs:1103`,
+`crates/lash-restate/src/session_driver.rs:1113`,
 `crates/lash-restate/src/process/workflow.rs:1`,
 `crates/lash-core-execution/src/engine/contracts.rs:37`.
 

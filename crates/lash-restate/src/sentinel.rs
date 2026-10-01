@@ -24,7 +24,9 @@
 //! checks it on a replay before the step's outcome reaches the drive. The
 //! first recorded step is the handler's first command, so the check still
 //! comes before any other command replays, and a turn journals one step
-//! fewer per handler.
+//! fewer per handler. `LashSession`'s first command is its drive's leg start,
+//! a step of the handler's own, which stamps and checks the sentinel itself
+//! (FIG-4556).
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,6 +70,8 @@ pub(crate) use record_generation;
 /// The controller stamps the executing generation on the first recorded
 /// entry it journals, and checks the generation that entry carries: on a
 /// first run it is the stamp just written; on a replay, the recording build's.
+/// A handler whose first command is a step of its own stamps and checks that
+/// step the same way.
 /// A journal of another generation is refused through [`Self::guard`], the
 /// handler's wrapper around its drive: the drive's step never answers, so
 /// nothing past the entry replays and no effect runs, and the handler ends

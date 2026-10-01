@@ -97,6 +97,8 @@ struct ScriptedDriver {
     gate: Mutex<Option<Arc<AdmissionGate>>>,
     root_hold: Mutex<Option<Arc<RootHold>>>,
     scripts: Mutex<BTreeMap<String, RootScript>>,
+    /// The admissions of an item that still fail their attempt, by item.
+    admission_faults: Mutex<BTreeMap<String, usize>>,
 }
 
 /// The item a scripted root was admitted for: a ceded item's roots are
@@ -118,6 +120,25 @@ impl ScriptedDriver {
 
     fn script(&self, item: &str, script: RootScript) {
         self.scripts.lock().unwrap().insert(item.to_owned(), script);
+    }
+
+    /// The next `faults` admissions that would admit `item` fail their
+    /// attempt retryably instead, before anything is recorded.
+    fn fail_admissions(&self, item: &str, faults: usize) {
+        self.admission_faults
+            .lock()
+            .unwrap()
+            .insert(item.to_owned(), faults);
+    }
+
+    /// The admissions of `item` still owed a failure.
+    fn admission_faults_left(&self, item: &str) -> usize {
+        self.admission_faults
+            .lock()
+            .unwrap()
+            .get(item)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Another driver answered `item`: it leaves the open items, unscripted.
@@ -172,6 +193,15 @@ impl ScriptedDriver {
         ordinal: u32,
     ) -> Result<AdmitVerdict, RuntimeError> {
         let next = self.ledger(&request.session).open.front().cloned();
+        if let Some(item) = &next
+            && let Some(owed) = self.admission_faults.lock().unwrap().get_mut(item)
+            && *owed > 0
+        {
+            *owed -= 1;
+            return Err(runtime_error(format!(
+                "the admission of {item} failed its attempt"
+            )));
+        }
         if let Some(gate) = self.gate_for(request, ordinal) {
             gate.reached.notify_one();
             gate.release.notified().await;
@@ -760,6 +790,75 @@ async fn a_drive_that_failed_inside_a_legs_first_root_hands_off_at_that_roots_bo
         down_for.load(Ordering::SeqCst),
         0,
         "every refusal cost the drive an attempt"
+    );
+}
+
+/// A failed attempt inside a drive's first admission is seen at its first
+/// root's boundary (FIG-4556). The first admission of the drive fails more
+/// than half the drive handler's budget of attempts before it records
+/// anything, and so does the admission after the first root: fewer failed
+/// attempts under either than the budget, more under both. The leg's start is
+/// the drive's first command, stored before its first admission runs, so the
+/// attempt that outlived that admission's failures did not start the leg: the
+/// drive hands off at the first root's boundary and the next admission's
+/// failures are counted by a new invocation. No invocation pauses, and the
+/// first leg ran the first root alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drive_that_failed_inside_its_first_admission_hands_off_at_its_first_roots_boundary() {
+    let budget = usize::try_from(lash_restate::TURN_HANDLER_MAX_ATTEMPTS).unwrap();
+    // Under one admission, inside one retry loop; under two, past it.
+    let faults = budget / 2 + 1;
+    let items = ["item-0", "item-1", "item-2"];
+    let (backend, driver, _installation) = fixture(0x4556).await;
+    let session = SessionId::from("drive-first-admission");
+    for item in items {
+        driver.accept(&session, item);
+    }
+    driver.fail_admissions("item-0", faults);
+    driver.fail_admissions("item-1", faults);
+    backend
+        .restate()
+        .session_work_engine()
+        .schedule_drive(&session, request("first-admission"));
+    let outcome = tokio::select! {
+        outcome = whole_drive(&backend, &session, "first-admission") => outcome,
+        () = until_unpaused(&backend, "the drive past its first admission", || false) => {
+            unreachable!("the wait ends only by panicking")
+        }
+    };
+    assert_eq!(committed_roots(&outcome), items);
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    let first = attach(&backend, &session, "first-admission").await;
+    assert_eq!(
+        committed_roots(&first),
+        ["item-0"],
+        "the leg whose first admission outlived failed attempts ran its first root alone"
+    );
+    assert!(
+        matches!(first.stop, DriveStop::HandedOff { .. }),
+        "and handed off at its boundary: {first:?}"
+    );
+    assert_eq!(driver.ledger(&session).consumed, items);
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    for item in ["item-0", "item-1"] {
+        assert_eq!(
+            driver.admission_faults_left(item),
+            0,
+            "every failed admission of {item} cost the drive an attempt"
+        );
+    }
+    let attempts: Vec<_> = session_drives(&backend)
+        .iter()
+        .map(|view| view.attempts)
+        .collect();
+    assert_eq!(
+        attempts
+            .iter()
+            .filter(|attempts| usize::try_from(**attempts).unwrap() > faults)
+            .count(),
+        2,
+        "each admission's failed attempts were spent by an invocation of its own: {attempts:?}"
     );
 }
 

@@ -22,7 +22,7 @@ use crate::session_driver::{
 };
 use lash_core::SessionDriver;
 use lash_core::engine::{
-    AdmitVerdict, DriveAbort, DriveOutcome, DriveRequest, DriveRequestId, RootOutcome,
+    AdmitVerdict, DriveAbort, DriveOutcome, DriveRequest, DriveRequestId, DriveStop, RootOutcome,
     admission_body, drive_admission_replay_key,
 };
 
@@ -708,14 +708,59 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
         .attach(&session_crash, "r-crash", &gn, &session_lane("N"))
         .await;
     assert_eq!(outcome.ran.len(), 1, "the crashed drive ran: {outcome:?}");
+    // The attempt that outlived the crash did not start the leg, so the
+    // drive hands off at its first root's boundary (FIG-4556). The
+    // continuation is this lane's: a resumed drive stays under the generation
+    // its journal family belongs to, and nothing of it reaches the stable
+    // name.
+    assert!(
+        matches!(outcome.stop, DriveStop::HandedOff { .. }),
+        "the replayed drive handed off at its first boundary: {outcome:?}"
+    );
+    let continuation = lash_core::engine::drive_continuation_request(&DriveRequest {
+        session: session_crash.clone(),
+        request: DriveRequestId::new("r-crash"),
+        build_generation: gn.clone(),
+    });
+    let rest = roll
+        .attach(
+            &session_crash,
+            continuation.as_str(),
+            &gn,
+            &session_lane("N"),
+        )
+        .await;
+    assert_eq!(
+        (rest.ran.len(), &rest.stop),
+        (0, &DriveStop::Idle),
+        "the continuation found nothing left"
+    );
     let crashed = roll.invocations_of(&format!(
         "{}/{session_crash}/drive",
         session_lane("N").name()
     ));
-    assert_eq!(crashed.len(), 1, "one invocation, replayed in place");
+    assert_eq!(
+        crashed.len(),
+        2,
+        "the drive, replayed in place, and its continuation on the same lane"
+    );
     assert_eq!(
         crashed[0].attempts, 2,
         "the crash forced one replay of the unjournaled admission"
+    );
+    assert_eq!(crashed[1].attempts, 1, "the continuation ran once");
+    assert_eq!(
+        crashed[1].pinned_deployment_id,
+        roll.deployment_n.as_str(),
+        "the continuation ran on the build that serves the lane"
+    );
+    assert_eq!(
+        roll.invocations_of(&format!(
+            "{}/{session_crash}/drive",
+            stable_session().name()
+        )),
+        Vec::new(),
+        "no leg of a drive resumed on its generation's lane ran under the stable name"
     );
     assert_eq!(
         roll.driver.admission_runs("r-crash", 0),

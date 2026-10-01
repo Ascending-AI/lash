@@ -3,7 +3,9 @@
 //!
 //! A handler's journal is recorded under drain generation `G_a`: its first
 //! command is its first recorded step, whose entry carries `G_a`, and no
-//! separate sentinel step exists. The code behind the same deployment id is
+//! separate sentinel step exists. A session drive's first command is its leg
+//! start, which is ahead of its first admission so that a failed attempt
+//! inside that admission is seen (FIG-4556), and carries `G_a` itself. The code behind the same deployment id is
 //! then swapped for a build of `G_b` and the double replays the invocation
 //! there. The replay parks typed `RetiredGeneration`, naming `G_a`, at that
 //! first entry: the step's outcome never reaches the drive, no body runs
@@ -237,8 +239,10 @@ where
             .collect()
     }
 
-    /// The law, once the first attempt is held past its first recorded step.
-    async fn replays_parked_under_another_generation(&self, target: &str, first_step: &str) {
+    /// The law, once the first attempt is held past its first recorded step:
+    /// `steps` are the run commands the handler journaled up to it, the first
+    /// of which carries the generation.
+    async fn replays_parked_under_another_generation(&self, target: &str, steps: &[String]) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
         while self.driver.passes.load(Ordering::SeqCst) == 0 {
             assert!(
@@ -254,13 +258,17 @@ where
             .find(|view| view.target == target)
             .expect("the invocation");
         let journaled = self.commands(&invocation.id);
+        let expected: Vec<_> = std::iter::once((MessageType::InputCommand, None))
+            .chain(
+                steps
+                    .iter()
+                    .map(|step| (MessageType::RunCommand, Some(step.clone()))),
+            )
+            .collect();
         assert_eq!(
-            journaled,
-            vec![
-                (MessageType::InputCommand, None),
-                (MessageType::RunCommand, Some(format!("lash:{first_step}"))),
-            ],
-            "the first recorded step is the first command; no sentinel step precedes it"
+            journaled, expected,
+            "the step that carries the generation is the first command; no sentinel step \
+             precedes it"
         );
         let first_entry = self
             .server
@@ -301,7 +309,7 @@ where
         assert_eq!(
             self.commands(&invocation.id),
             journaled,
-            "no command was journaled past the first entry"
+            "no command was journaled past the held step"
         );
 
         // Back on a build of the recorded generation, the kept journal
@@ -324,7 +332,7 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_session_drive_replayed_under_another_generation_parks_at_its_first_admission() {
+async fn a_session_drive_replayed_under_another_generation_parks_at_its_leg_start() {
     let swap = Swap::start(0x3980_5e55, "drive", |slot, generation| {
         LashSessionImpl::new(
             slot,
@@ -356,7 +364,10 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_first_ad
         .expect("send the drive");
     swap.replays_parked_under_another_generation(
         &format!("LashSession/{session}/drive"),
-        &drive_admission_replay_key(&request, 0),
+        &[
+            "lash.drive.leg".to_owned(),
+            format!("lash:{}", drive_admission_replay_key(&request, 0)),
+        ],
     )
     .await;
     let outcome: crate::Reply<DriveOutcome> = swap
@@ -425,7 +436,7 @@ async fn a_root_run_replayed_under_another_generation_parks_at_its_first_step() 
         .expect("send the root run");
     swap.replays_parked_under_another_generation(
         &format!("LashTurn/{key}/run"),
-        &format!("first-step:{root}"),
+        &[format!("lash:first-step:{root}")],
     )
     .await;
 }
