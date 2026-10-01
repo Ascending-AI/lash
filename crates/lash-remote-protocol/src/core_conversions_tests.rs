@@ -67,7 +67,7 @@ fn code_block_failure_conversion_preserves_kind_and_message() {
                 lash_core::CellFailureKind::Host,
                 "artifact store unavailable",
             )),
-            success: false,
+
             duration_ms: 7,
             tool_call_ids: Vec::new(),
             graph_key: None,
@@ -89,7 +89,7 @@ fn code_block_failure_conversion_preserves_kind_and_message() {
     else {
         panic!("expected typed code-block failure");
     };
-    assert_eq!(error.kind, RemoteCellFailureKind::Host);
+    assert_eq!(error.kind, lash_sansio::CellFailureKind::Host);
     assert_eq!(error.message, "artifact store unavailable");
 }
 
@@ -1235,7 +1235,7 @@ fn remote_turn_result_maps_core_semantics() {
         }) if outcome == &intent_outcome
     ));
     assert!(matches!(
-        &remote.tool_calls[0].outcome,
+        &remote.tool_calls[0].output.outcome,
         RemoteToolCallOutcome::Success(value) if value == &serde_json::json!({ "ok": true })
     ));
 
@@ -2454,9 +2454,9 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
             assert_eq!(provider_call_id, None);
             assert_eq!(name, "test_tool");
             assert_eq!(args, serde_json::json!({ "arg": 1 }));
-            assert_eq!(output["outcome"]["status"], "success");
+            assert!(matches!(&output.outcome, RemoteToolCallOutcome::Success(_)));
             assert_eq!(
-                output["outcome"]["payload"],
+                serde_json::to_value(&output).expect("serialize typed output")["outcome"]["payload"],
                 serde_json::json!({ "result": "hello" })
             );
             assert_eq!(duration_ms, 100);

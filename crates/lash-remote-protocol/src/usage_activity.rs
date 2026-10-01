@@ -101,26 +101,12 @@ impl RemoteTurnActivity {
             RemoteTurnEvent::CodeBlockCompleted {
                 error: Some(error), ..
             } => {
-                require_non_empty("RemoteCellFailure", "message", &error.message)?;
+                require_non_empty("CellFailure", "message", &error.message)?;
             }
             _ => {}
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteCellFailureKind {
-    Policy,
-    Program,
-    Host,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteCellFailure {
-    pub kind: RemoteCellFailureKind,
-    pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -169,8 +155,7 @@ pub enum RemoteTurnEvent {
         language: String,
         output: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<RemoteCellFailure>,
-        success: bool,
+        error: Option<lash_sansio::CellFailure>,
         duration_ms: u64,
         tool_call_ids: Vec<lash_sansio::ToolCallId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -194,7 +179,7 @@ pub enum RemoteTurnEvent {
         provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
-        output: serde_json::Value,
+        output: crate::RemoteToolCallOutput,
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
@@ -255,11 +240,10 @@ mod tests {
             event: RemoteTurnEvent::CodeBlockCompleted {
                 language: "typescript".to_string(),
                 output: String::new(),
-                error: Some(RemoteCellFailure {
-                    kind: RemoteCellFailureKind::Host,
-                    message: "  ".to_string(),
-                }),
-                success: false,
+                error: Some(lash_sansio::CellFailure::new(
+                    lash_sansio::CellFailureKind::Host,
+                    "  ",
+                )),
                 duration_ms: 0,
                 tool_call_ids: Vec::new(),
                 graph_key: None,
@@ -269,7 +253,7 @@ mod tests {
         assert!(matches!(
             activity.validate(),
             Err(RemoteProtocolError::MissingRequiredField {
-                type_name: "RemoteCellFailure",
+                type_name: "CellFailure",
                 field: "message",
             })
         ));

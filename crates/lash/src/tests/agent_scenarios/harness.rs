@@ -562,12 +562,9 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
 /// scripted source that no longer parses. This names the refusal directly.
 fn assert_no_refused_cell(name: &str, events: &[TurnActivity]) {
     for activity in events {
-        let TurnEvent::CodeBlockCompleted { error, success, .. } = &activity.event else {
+        let TurnEvent::CodeBlockCompleted { error, .. } = &activity.event else {
             continue;
         };
-        if *success {
-            continue;
-        }
         let Some(failure) = error else { continue };
         assert!(
             !matches!(

@@ -37,7 +37,7 @@ function deferred() {
 const board = { cells: ['X', 'O', null, null, null, null, null, null, null], turn: 'X' };
 const tool = {
   type: 'tool_call_completed', phase: 'completed', name: 'play_move', call_id: 'move',
-  success: true, duration_ms: 1, result: { accepted: true, move: { cell: 1 }, board },
+  duration_ms: 1, output: { outcome: { status: 'success', payload: { accepted: true, move: { cell: 1 }, board } } },
 };
 const message = (text, snapshot) => ({ role: 'assistant', text, payload: snapshot ? { board: snapshot } : {} });
 
@@ -137,7 +137,7 @@ test('late A stream cannot publish text reasoning tools or board into B', async 
   await selection;
   await stream.items(
     observation({ type: 'code_block_started', code: 'A code' }), observation(tool),
-    observation({ type: 'code_block_completed', success: true, tool_call_ids: ['move'] }),
+    observation({ type: 'code_block_completed', tool_call_ids: ['move'] }),
     observation({ type: 'assistant_prose_delta', text: 'A late prose' }),
     { type: 'message', message: { kind: 'reasoning', text: 'A persisted thinking' } },
     { type: 'message', message: message('A committed prose', board) },
@@ -234,7 +234,7 @@ test('tool code linking reasoning and replay gaps preserve event order', async (
     { type: 'message', message: { kind: 'reasoning', text: 'persisted reasoning' } },
     observation({ type: 'code_block_started', code: 'play_move(1)' }),
     observation(tool), observation({ ...tool, call_id: 'unlinked', name: 'read_board' }),
-    observation({ type: 'code_block_completed', language: 'js', success: true, tool_call_ids: ['move'] }),
+    observation({ type: 'code_block_completed', language: 'js', tool_call_ids: ['move'] }),
     observation({ type: 'assistant_prose_delta', text: 'answer' }),
   );
   const children = h.elements.get('#messages').children;
@@ -252,7 +252,7 @@ test('reloaded code linked tools appear once and retain the durable board', asyn
   const selection = h.select('B');
   await h.history('B', [
     { kind: 'tool_call', payload: tool },
-    { kind: 'code_block', payload: { phase: 'completed', success: true, tool_call_ids: ['move'], code: 'saved code' } },
+    { kind: 'code_block', payload: { phase: 'completed', tool_call_ids: ['move'], code: 'saved code' } },
     message('saved answer'),
   ]);
   await selection;

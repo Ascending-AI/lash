@@ -901,11 +901,7 @@ pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_to
         .position(|event| {
             matches!(
                 &event.event,
-                TurnEvent::CodeBlockCompleted {
-                    success: false,
-                    error: Some(_),
-                    ..
-                }
+                TurnEvent::CodeBlockCompleted { error: Some(_), .. }
             )
         })
         .expect("failed code completion");

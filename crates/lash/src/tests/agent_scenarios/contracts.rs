@@ -182,7 +182,7 @@ fn assert_no_unexpected_turn_errors(events: &[TurnActivity]) {
     assert!(
         !events.iter().any(|activity| matches!(
             &activity.event,
-            TurnEvent::Error { .. } | TurnEvent::CodeBlockCompleted { success: false, .. }
+            TurnEvent::Error { .. } | TurnEvent::CodeBlockCompleted { error: Some(_), .. }
         )),
         "unexpected failed turn event: {events:#?}"
     );
@@ -221,7 +221,7 @@ fn assert_successful_lash_code_path(events: &[TurnActivity]) {
         .rposition(|activity| {
             matches!(
                 &activity.event,
-                TurnEvent::CodeBlockCompleted { language, success: true, .. } if language == "typescript"
+                TurnEvent::CodeBlockCompleted { language, error: None, .. } if language == "typescript"
             )
         })
         .unwrap_or_else(|| panic!("missing successful TypeScript code completion: {events:#?}"));
@@ -252,11 +252,7 @@ pub(super) fn assert_failed_code_block_present(events: &[TurnActivity]) {
         events.iter().any(|activity| {
             matches!(
                 &activity.event,
-                TurnEvent::CodeBlockCompleted {
-                    success: false,
-                    error: Some(_),
-                    ..
-                }
+                TurnEvent::CodeBlockCompleted { error: Some(_), .. }
             )
         }),
         "missing failed code block completion: {events:#?}"

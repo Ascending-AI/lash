@@ -201,18 +201,17 @@ async fn run_task_with_shutdown_witness(
         .iter()
         .filter_map(|activity| match &activity.event {
             TurnEvent::CodeBlockCompleted {
-                success: false,
-                error,
+                error: Some(error),
                 output,
                 ..
             } => Some(
-                error
-                    .as_ref()
-                    .map(|failure| failure.message.as_str())
-                    .filter(|message| !message.trim().is_empty())
-                    .unwrap_or(output)
-                    .trim()
-                    .to_string(),
+                if error.message.trim().is_empty() {
+                    output
+                } else {
+                    &error.message
+                }
+                .trim()
+                .to_string(),
             ),
             _ => None,
         })

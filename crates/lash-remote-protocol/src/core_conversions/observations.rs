@@ -21,96 +21,6 @@ impl RemoteTurnActivity {
     }
 }
 
-fn encode_remote_tool_call_output(
-    output: lash_core::ToolCallOutput,
-) -> Result<serde_json::Value, RemoteProtocolError> {
-    let lash_core::ToolCallOutput {
-        outcome,
-        control,
-        view,
-        projection_value,
-    } = output;
-    let (status, payload) = match outcome {
-        lash_core::ToolCallOutcome::Success(value) => ("success", value.to_json_value()),
-        lash_core::ToolCallOutcome::Failure(failure) => ("failure", failure.to_json_value()),
-        lash_core::ToolCallOutcome::Cancelled(cancellation) => {
-            ("cancelled", cancellation.to_json_value())
-        }
-    };
-    let mut encoded = serde_json::Map::from_iter([(
-        "outcome".to_string(),
-        serde_json::Value::Object(serde_json::Map::from_iter([
-            (
-                "status".to_string(),
-                serde_json::Value::String(status.to_string()),
-            ),
-            ("payload".to_string(), payload),
-        ])),
-    )]);
-    if let Some(view) = view {
-        encoded.insert(
-            "view".into(),
-            encode_remote_json(view, "RemoteTurnEvent", "output.view")?,
-        );
-    }
-    if let Some(projection_value) = projection_value {
-        encoded.insert("projection_value".into(), projection_value);
-    }
-    // Observation and turn-result wire surfaces are intentionally lossy:
-    // `RemoteTurnEvent::ToolCallCompleted.output.control` projects frame switches to kind,
-    // frame_key, seed_count, and task; `RemoteTurnOutcome::AgentFrameSwitch` keeps frame_key and
-    // task; `RemoteToolCallOutcome` drops control. The directed `RemoteProcessAwaitOutput` reply
-    // is the sole lossless carrier of `ToolControl`, including frame-switch seed bodies.
-    if let Some(control) = control {
-        let projected = match control {
-            lash_core::ToolControl::SwitchAgentFrame {
-                frame_key,
-                initial_nodes,
-                task,
-            } => {
-                let mut projected = serde_json::Map::from_iter([
-                    (
-                        "type".to_string(),
-                        serde_json::Value::String("switch_agent_frame".to_string()),
-                    ),
-                    (
-                        "frame_key".to_string(),
-                        serde_json::Value::String(frame_key.as_str().to_string()),
-                    ),
-                    (
-                        "seed_count".to_string(),
-                        serde_json::Value::from(initial_nodes.len()),
-                    ),
-                ]);
-                if let Some(task) = task {
-                    projected.insert("task".to_string(), serde_json::Value::String(task));
-                }
-                serde_json::Value::Object(projected)
-            }
-            lash_core::ToolControl::Finish { value } => {
-                serde_json::Value::Object(serde_json::Map::from_iter([
-                    (
-                        "type".to_string(),
-                        serde_json::Value::String("finish".to_string()),
-                    ),
-                    ("value".to_string(), value.to_json_value()),
-                ]))
-            }
-            lash_core::ToolControl::Fail { failure } => {
-                serde_json::Value::Object(serde_json::Map::from_iter([
-                    (
-                        "type".to_string(),
-                        serde_json::Value::String("fail".to_string()),
-                    ),
-                    ("failure".to_string(), failure.to_json_value()),
-                ]))
-            }
-        };
-        encoded.insert("control".to_string(), projected);
-    }
-    Ok(serde_json::Value::Object(encoded))
-}
-
 impl From<&lash_core::SessionCursor> for RemoteSessionCursor {
     fn from(value: &lash_core::SessionCursor) -> Self {
         Self::new(value.to_string())
@@ -195,25 +105,6 @@ impl From<lash_core::CheckpointKind> for RemoteTurnInputCheckpoint {
         match value {
             lash_core::CheckpointKind::AfterWork => Self::AfterWork,
             lash_core::CheckpointKind::BeforeCompletion => Self::BeforeCompletion,
-        }
-    }
-}
-
-impl From<lash_core::CellFailureKind> for RemoteCellFailureKind {
-    fn from(value: lash_core::CellFailureKind) -> Self {
-        match value {
-            lash_core::CellFailureKind::Policy => Self::Policy,
-            lash_core::CellFailureKind::Program => Self::Program,
-            lash_core::CellFailureKind::Host => Self::Host,
-        }
-    }
-}
-
-impl From<lash_core::CellFailure> for RemoteCellFailure {
-    fn from(value: lash_core::CellFailure) -> Self {
-        Self {
-            kind: value.kind.into(),
-            message: value.message,
         }
     }
 }
@@ -390,15 +281,13 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 language,
                 output,
                 error,
-                success,
                 duration_ms,
                 tool_call_ids,
                 graph_key,
             } => Ok(Self::CodeBlockCompleted {
                 language,
                 output,
-                error: error.map(Into::into),
-                success,
+                error,
                 duration_ms,
                 tool_call_ids,
                 graph_key,
@@ -429,7 +318,7 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 provider_call_id,
                 name,
                 args,
-                output: encode_remote_tool_call_output(output)?,
+                output: output.into(),
                 duration_ms,
                 graph_key,
             }),

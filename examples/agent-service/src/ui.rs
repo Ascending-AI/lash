@@ -357,7 +357,6 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         ?? null;
     }
     function toolSucceeded(event) {
-      if (typeof event?.success === 'boolean') return event.success;
       return event?.output?.outcome?.status === 'success';
     }
     function compactToolPayload(event) {
@@ -594,12 +593,12 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       for (const tool of linkedTools) applyToolBoard(tool, owner);
       if (!isCurrentView(owner)) return;
       const el = document.createElement('details');
-      el.className = 'code-block' + (event.success === false ? ' fail' : '');
+      el.className = 'code-block' + (Boolean(event.error) ? ' fail' : '');
       el.open = false;
       el.innerHTML = '<summary></summary><pre></pre>';
       const toolCount = linkedTools.length || (event.tool_call_ids || []).length;
       const toolLabel = toolCount ? ` · ${toolCount} tool${toolCount === 1 ? '' : 's'}` : '';
-      const label = `${event.language || 'code'} ${event.success ? 'completed' : 'failed'} in ${event.duration_ms || 0}ms${toolLabel}`;
+      const label = `${event.language || 'code'} ${event.error ? 'failed' : 'completed'} in ${event.duration_ms || 0}ms${toolLabel}`;
       el.querySelector('summary').textContent = label;
       const code = event.code || el.querySelector('pre').textContent || '';
       el.querySelector('pre').textContent = code;

@@ -139,7 +139,6 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
             Entry::new(Kind::Exec, actor(), "cell.start").attr(Attr::text("lang", language))
         }
         lash_core::TurnEvent::CodeBlockCompleted {
-            success,
             error,
             tool_call_ids,
             ..
@@ -147,7 +146,11 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
             let mut entry = Entry::new(
                 Kind::Exec,
                 actor(),
-                if *success { "cell.ok" } else { "cell.failed" },
+                if error.is_none() {
+                    "cell.ok"
+                } else {
+                    "cell.failed"
+                },
             )
             .attr(Attr::int("calls", tool_call_ids.len() as u64));
             if let Some(error) = error {

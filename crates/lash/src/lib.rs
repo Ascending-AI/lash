@@ -1115,10 +1115,11 @@ pub mod remote {
     pub mod turn_result {
         pub use lash_remote_protocol::turn_result::{
             RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef, RemoteParkedTurn,
-            RemoteSendOutcome, RemoteStalledDelivery, RemoteToolCallOutcome, RemoteToolCallRecord,
-            RemoteTurnExecutionMetrics, RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity,
-            RemoteTurnOutcome, RemoteTurnParkReason, RemoteTurnReport, RemoteTurnStatus,
-            RemoteTurnStop, RemoteTurnUsageReport,
+            RemoteSendOutcome, RemoteStalledDelivery, RemoteToolCallOutcome, RemoteToolCallOutput,
+            RemoteToolCallRecord, RemoteToolCancellation, RemoteToolControlProjection,
+            RemoteToolFailure, RemoteTurnExecutionMetrics, RemoteTurnFinish, RemoteTurnIssue,
+            RemoteTurnIssueSeverity, RemoteTurnOutcome, RemoteTurnParkReason, RemoteTurnReport,
+            RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
         };
     }
 
@@ -1126,8 +1127,7 @@ pub mod remote {
     pub mod usage {
         // The vocabulary this module's signatures name (the facade-completeness rule).
         pub use lash_remote_protocol::{
-            RemoteCellFailure, RemoteCellFailureKind, RemoteToolIntentExecutionOutcome,
-            RemoteToolIntentKind, RemoteToolIntentRefusalReason,
+            RemoteToolIntentExecutionOutcome, RemoteToolIntentKind, RemoteToolIntentRefusalReason,
         };
 
         pub use lash_remote_protocol::queued_events::{

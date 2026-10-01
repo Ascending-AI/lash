@@ -1468,7 +1468,6 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
                 language: "typescript".to_string(),
                 output: String::new(),
                 error: None,
-                success: true,
                 duration_ms: 4,
                 tool_call_ids: vec![lash_core::ToolCallId::fixture("call-1")],
                 graph_key: None,
@@ -1491,8 +1490,8 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
     assert_eq!(activities[0].correlation_id, activities[2].correlation_id);
     assert!(matches!(
         &activities[2].event,
-        TurnEvent::CodeBlockCompleted { language, success, .. }
-            if language == "typescript" && *success
+        TurnEvent::CodeBlockCompleted { language, error: None, .. }
+            if language == "typescript"
     ));
     Ok(())
 }

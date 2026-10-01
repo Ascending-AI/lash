@@ -532,7 +532,7 @@ pub struct RemoteToolCallRecord {
     pub tool_name: String,
     #[serde(default)]
     pub args: serde_json::Value,
-    pub outcome: RemoteToolCallOutcome,
+    pub output: RemoteToolCallOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -635,11 +635,71 @@ pub enum RemoteToolIntentExecutionOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "status", content = "payload", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+pub struct RemoteToolCallOutput {
+    pub outcome: RemoteToolCallOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<RemoteToolControlProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<lash_sansio::ToolView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_value: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteToolControlProjection {
+    /// Observation data omits the seed bodies. The directed process-await
+    /// reply remains the lossless carrier of a frame switch.
+    SwitchAgentFrame {
+        #[schemars(with = "String")]
+        frame_key: lash_sansio::FrameKey,
+        seed_count: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<String>,
+    },
+    Finish {
+        value: serde_json::Value,
+    },
+    Fail {
+        failure: RemoteToolFailure,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "status",
+    content = "payload",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum RemoteToolCallOutcome {
     Success(serde_json::Value),
-    Failure(serde_json::Value),
-    Cancelled(serde_json::Value),
+    Failure(RemoteToolFailure),
+    Cancelled(RemoteToolCancellation),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteToolFailure {
+    pub class: crate::RemoteToolFailureClass,
+    pub code: String,
+    pub message: String,
+    pub source: lash_sansio::ToolFailureSource,
+    pub retry: lash_sansio::ToolRetryStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteToolCancellation {
+    pub message: String,
+    pub source: lash_sansio::ToolFailureSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<lash_sansio::CancelOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
 }
 
 /// Namespaced failure code, as carried to a host.

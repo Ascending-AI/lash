@@ -504,7 +504,6 @@ impl RuntimeTurnDriver<'_> {
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
-                            success: false,
                             duration_ms: 0,
                             tool_call_ids: Vec::new(),
                             graph_key: None,
@@ -558,7 +557,6 @@ impl RuntimeTurnDriver<'_> {
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
-                            success: false,
                             duration_ms: 0,
                             tool_call_ids: Vec::new(),
                             graph_key: graph_key.clone(),
@@ -635,7 +633,6 @@ impl RuntimeTurnDriver<'_> {
                             language: language.clone(),
                             output: join_observations(&output.observations),
                             error: output.error.clone(),
-                            success: output.error.is_none(),
                             duration_ms: cell_duration_ms,
                             tool_call_ids: output
                                 .calls
@@ -660,7 +657,6 @@ impl RuntimeTurnDriver<'_> {
                                 crate::CellFailureKind::Host,
                                 error.message.clone(),
                             )),
-                            success: false,
                             duration_ms: 0,
                             tool_call_ids: Vec::new(),
                             graph_key: graph_key.clone(),

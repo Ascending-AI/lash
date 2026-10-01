@@ -292,7 +292,6 @@ pub enum TurnEvent {
         output: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<crate::CellFailure>,
-        success: bool,
         duration_ms: u64,
         tool_call_ids: Vec<crate::ToolCallId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -794,7 +794,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         language: "typescript".to_string(),
         output: "completed".to_string(),
         error: None,
-        success: true,
         duration_ms: 9,
         tool_call_ids: vec![lash::ToolCallId::fixture("tool-call-1")],
         graph_key: None,

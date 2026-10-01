@@ -1,5 +1,240 @@
 {
   "$defs": {
+    "AttachmentRef": {
+      "properties": {
+        "byte_len": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "type_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachmentTypeMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "media_type",
+        "byte_len"
+      ],
+      "type": "object"
+    },
+    "AttachmentSource": {
+      "description": "The ownership-explicit attachment source at the LLM/content seam.\n\nInline bytes are transient and must be normalized to `Stored` before a\ndurable effect is emitted. Borrowed sources are never fetched by Lash and\nnever enter the attachment manifest.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "items": {
+                "format": "uint8",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "const": "inline",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "media_type",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attachment_ref": {
+              "$ref": "#/$defs/AttachmentRef"
+            },
+            "source": {
+              "const": "stored",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "attachment_ref"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "const": "external_url",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "media_type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_scope": {
+              "$ref": "#/$defs/ProviderFileScope"
+            },
+            "source": {
+              "const": "provider_file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "provider_scope",
+            "id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AttachmentTypeMetadata": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "image",
+              "type": "string"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CancelOrigin": {
+      "description": "The runtime or actor decision that requested cancellation of a process.",
+      "enum": [
+        "turn_stopped",
+        "parent_ended",
+        "operator_requested",
+        "model_requested",
+        "start_failed"
+      ],
+      "type": "string"
+    },
+    "CellFailure": {
+      "description": "Structured failure returned by a code executor.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CellFailureKind"
+        },
+        "message": {
+          "type": "string"
+        },
+        "tool_call_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCallLimitExceeded"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session's `max_tool_calls` refusal, when that is why the cell\nfailed (FIG-4546), kept typed through the plugin and host result."
+        },
+        "worker_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkerLimit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The measured run limit, kept typed through the plugin and host result."
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "CellFailureKind": {
+      "description": "Why an executed code cell failed.",
+      "oneOf": [
+        {
+          "const": "policy",
+          "description": "The runtime refused the program because it violates a dialect or policy bound.",
+          "type": "string"
+        },
+        {
+          "const": "program",
+          "description": "The authored program failed to compile or execute correctly.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "Host infrastructure failed while preparing or executing the program.",
+          "type": "string"
+        }
+      ]
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -112,6 +347,29 @@
     },
     "FailureCode": {
       "type": "string"
+    },
+    "MaxToolCalls": {
+      "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
+      "format": "uint",
+      "minimum": 1,
+      "type": "integer"
+    },
+    "ProviderFileScope": {
+      "additionalProperties": false,
+      "description": "Provider/account boundary for a provider-owned file id.",
+      "properties": {
+        "credential_scope": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "credential_scope"
+      ],
+      "type": "object"
     },
     "RemoteAdmissionBoundary": {
       "enum": [
@@ -557,29 +815,6 @@
           "type": "object"
         }
       ]
-    },
-    "RemoteCellFailure": {
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/RemoteCellFailureKind"
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "message"
-      ],
-      "type": "object"
-    },
-    "RemoteCellFailureKind": {
-      "enum": [
-        "policy",
-        "program",
-        "host"
-      ],
-      "type": "string"
     },
     "RemoteExecutionEvidence": {
       "properties": {
@@ -1393,6 +1628,7 @@
     "RemoteToolCallOutcome": {
       "oneOf": [
         {
+          "additionalProperties": false,
           "properties": {
             "payload": true,
             "status": {
@@ -1407,8 +1643,11 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "properties": {
-            "payload": true,
+            "payload": {
+              "$ref": "#/$defs/RemoteToolFailure"
+            },
             "status": {
               "const": "failure",
               "type": "string"
@@ -1421,8 +1660,11 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "properties": {
-            "payload": true,
+            "payload": {
+              "$ref": "#/$defs/RemoteToolCancellation"
+            },
             "status": {
               "const": "cancelled",
               "type": "string"
@@ -1436,6 +1678,39 @@
         }
       ]
     },
+    "RemoteToolCallOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "control": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteToolControlProjection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "$ref": "#/$defs/RemoteToolCallOutcome"
+        },
+        "projection_value": true,
+        "view": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
     "RemoteToolCallRecord": {
       "properties": {
         "args": {
@@ -1444,8 +1719,8 @@
         "call_id": {
           "type": "string"
         },
-        "outcome": {
-          "$ref": "#/$defs/RemoteToolCallOutcome"
+        "output": {
+          "$ref": "#/$defs/RemoteToolCallOutput"
         },
         "provider_call_id": {
           "type": [
@@ -1460,9 +1735,145 @@
       "required": [
         "call_id",
         "tool_name",
-        "outcome"
+        "output"
       ],
       "type": "object"
+    },
+    "RemoteToolCancellation": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CancelOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": true,
+        "source": {
+          "$ref": "#/$defs/ToolFailureSource"
+        }
+      },
+      "required": [
+        "message",
+        "source"
+      ],
+      "type": "object"
+    },
+    "RemoteToolControlProjection": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Observation data omits the seed bodies. The directed process-await\nreply remains the lossless carrier of a frame switch.",
+          "properties": {
+            "frame_key": {
+              "type": "string"
+            },
+            "seed_count": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "task": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "switch_agent_frame",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame_key",
+            "seed_count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "finish",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "failure": {
+              "$ref": "#/$defs/RemoteToolFailure"
+            },
+            "type": {
+              "const": "fail",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "failure"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteToolFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/RemoteToolFailureClass"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "raw": true,
+        "retry": {
+          "$ref": "#/$defs/ToolRetryStatus"
+        },
+        "source": {
+          "$ref": "#/$defs/ToolFailureSource"
+        }
+      },
+      "required": [
+        "class",
+        "code",
+        "message",
+        "source",
+        "retry"
+      ],
+      "type": "object"
+    },
+    "RemoteToolFailureClass": {
+      "enum": [
+        "invalid_request",
+        "io",
+        "unavailable",
+        "permission_denied",
+        "timeout",
+        "execution",
+        "external",
+        "resource_limit",
+        "internal"
+      ],
+      "type": "string"
     },
     "RemoteToolIntentExecutionOutcome": {
       "oneOf": [
@@ -2099,7 +2510,7 @@
             "error": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/RemoteCellFailure"
+                  "$ref": "#/$defs/CellFailure"
                 },
                 {
                   "type": "null"
@@ -2118,9 +2529,6 @@
             "output": {
               "type": "string"
             },
-            "success": {
-              "type": "boolean"
-            },
             "tool_call_ids": {
               "items": {
                 "type": "string"
@@ -2136,7 +2544,6 @@
             "type",
             "language",
             "output",
-            "success",
             "duration_ms",
             "tool_call_ids"
           ],
@@ -2197,7 +2604,9 @@
             "name": {
               "type": "string"
             },
-            "output": true,
+            "output": {
+              "$ref": "#/$defs/RemoteToolCallOutput"
+            },
             "provider_call_id": {
               "type": [
                 "string",
@@ -3181,8 +3590,389 @@
         }
       ]
     },
+    "ToolCallLimitExceeded": {
+      "additionalProperties": false,
+      "description": "A tool call refused by the session's [`MaxToolCalls`]: the program asked\nfor more tool calls than its recorded limit admits.\n\nIt is the program's failure, never the host's: the limit is recorded\nconfig and the count is a fact of the program's own history, so a replay\nor a redrive refuses the same call. Nothing of the refused calls is\njournaled or dispatched.",
+      "properties": {
+        "counted": {
+          "description": "The calls counted against the limit before the refused ones: made so\nfar by a cell, held now by a process.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "limit": {
+          "$ref": "#/$defs/MaxToolCalls",
+          "description": "The recorded `max_tool_calls` the execution runs under."
+        },
+        "requested": {
+          "description": "The calls refused together: one for a single call, an aggregate's\nunique tool calls for an aggregate.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scope": {
+          "$ref": "#/$defs/ToolCallLimitScope"
+        }
+      },
+      "required": [
+        "scope",
+        "limit",
+        "counted",
+        "requested"
+      ],
+      "type": "object"
+    },
+    "ToolCallLimitScope": {
+      "description": "Which execution a [`MaxToolCalls`] limit refused.",
+      "oneOf": [
+        {
+          "const": "cell",
+          "description": "A cell: the limit is the total it may make.",
+          "type": "string"
+        },
+        {
+          "const": "process",
+          "description": "A process: the limit is what it may hold at once.",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolFailureSource": {
+      "oneOf": [
+        {
+          "enum": [
+            "runtime",
+            "tool",
+            "plugin",
+            "policy",
+            "cancellation"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "unknown_legacy",
+          "description": "Provenance was not persisted by a legacy wire or durable payload.",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolRetryStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "never",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "after_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "safe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attempts": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "exhausted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "attempts"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Retry status was not persisted by a legacy wire or durable payload.",
+          "properties": {
+            "type": {
+              "const": "unknown_legacy",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolView": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/ToolViewBlock"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "blocks"
+      ],
+      "type": "object"
+    },
+    "ToolViewBlock": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "meta": {
+              "$ref": "#/$defs/ToolViewMeta"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "meta": {
+              "$ref": "#/$defs/ToolViewMeta"
+            },
+            "source": {
+              "$ref": "#/$defs/AttachmentSource"
+            },
+            "type": {
+              "const": "attachment",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "$ref": "#/$defs/ToolViewMeta"
+            },
+            "mime_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "resource_link",
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "uri",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolViewMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "last_modified": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "TurnFailureKind": {
       "type": "string"
+    },
+    "WorkerFrameKind": {
+      "description": "The worker message an encoder refused, without its guest data.",
+      "enum": [
+        "refused",
+        "progress",
+        "limit_exceeded",
+        "ready",
+        "effect_request",
+        "observations",
+        "suspended",
+        "complete",
+        "guest_error",
+        "cancelled",
+        "reset_done",
+        "prepared"
+      ],
+      "type": "string"
+    },
+    "WorkerLimit": {
+      "description": "The VM or worker limit a run exhausted.",
+      "oneOf": [
+        {
+          "enum": [
+            "fuel",
+            "heap",
+            "depth",
+            "deadline"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "observations",
+          "description": "A step's execution observations outgrew the run's heap budget, which\nbounds the stream a worker holds and hands its parent, or a single\nobservation outgrew what one frame carries (FIG-4458).",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The encoded effect request or result exceeds its configured bound.",
+          "properties": {
+            "effect_value": {
+              "properties": {
+                "bound": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "size": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "size",
+                "bound"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect_value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A snapshot or continuation exceeds its configured bound.",
+          "properties": {
+            "vm_state": {
+              "properties": {
+                "bound": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "size": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "size",
+                "bound"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "vm_state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A worker message cannot fit in one transport frame.",
+          "properties": {
+            "frame": {
+              "properties": {
+                "bound": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "$ref": "#/$defs/WorkerFrameKind"
+                },
+                "size": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "size",
+                "bound"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "frame"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "$id": "https://lash.dev/schemas/remote-send-outcome/v100",

@@ -349,7 +349,7 @@ mod tests {
                     language: "typescript".into(),
                     output: "é".repeat(2_001),
                     error: None,
-                    success: true,
+
                     duration_ms: 1,
                     tool_call_ids: vec![],
                     graph_key: None,

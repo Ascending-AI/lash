@@ -4182,7 +4182,7 @@
     }
 
     function toolSucceeded(event) {
-      return toolOutcome(event).status === "success" || event?.success === true;
+      return toolOutcome(event).status === "success";
     }
 
     function toolRunning(event) {
@@ -4296,8 +4296,8 @@
     }
 
     function codeBlockStateLabel(event) {
-      if (event.phase === "running" || event.success === undefined) return "running";
-      return event.success ? "completed" : "failed";
+      if (event.phase === "running" || event.type === "code_block_started") return "running";
+      return event.error ? "failed" : "completed";
     }
 
     function renderCodeBlockSummary(el, event, linkedTools = []) {
@@ -4331,12 +4331,12 @@
 
     function createCodeBlockElement(event, linkedTools = []) {
       const el = document.createElement("details");
-      el.className = "code-block" + (event.success === false ? " fail" : "");
+      el.className = "code-block" + (Boolean(event.error) ? " fail" : "");
       el.open = false;
       el.innerHTML = '<summary></summary><pre class="code-source"></pre><pre class="code-output" hidden></pre>';
       renderCodeBlockSummary(el, event, linkedTools);
       el.querySelector(".code-source").textContent = event.code || "";
-      const output = [event.output, event.error].filter(Boolean).join("\n");
+      const output = [event.output, event.error?.message].filter(Boolean).join("\n");
       const outputNode = el.querySelector(".code-output");
       outputNode.hidden = !output;
       outputNode.textContent = output;
@@ -4361,11 +4361,11 @@
     }
 
     function updateCodeBlock(el, event, linkedTools = []) {
-      el.classList.toggle("fail", event.success === false);
+      el.classList.toggle("fail", Boolean(event.error));
       renderCodeBlockSummary(el, event, linkedTools);
       const pre = el.querySelector(".code-source");
       pre.textContent = event.code || pre.textContent || "";
-      const output = [event.output, event.error].filter(Boolean).join("\n");
+      const output = [event.output, event.error?.message].filter(Boolean).join("\n");
       const outputNode = el.querySelector(".code-output");
       outputNode.hidden = !output;
       outputNode.textContent = output;

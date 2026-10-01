@@ -443,10 +443,9 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
             .iter()
             .find(|event| matches!(&event.event, TurnEvent::CodeBlockCompleted { .. }))
             .expect("code completed");
-        let TurnEvent::CodeBlockCompleted { success, error, .. } = &code_completed.event else {
+        let TurnEvent::CodeBlockCompleted { error, .. } = &code_completed.event else {
             unreachable!();
         };
-        assert!(*success);
         assert!(error.is_none());
 
         let terminal_output = events
@@ -968,7 +967,7 @@ finish("done");"#,
     );
     let TurnEvent::CodeBlockCompleted {
         language,
-        success,
+
         error,
         tool_call_ids,
         graph_key: completed_graph_key,
@@ -978,7 +977,6 @@ finish("done");"#,
         unreachable!();
     };
     assert_eq!(language, "typescript");
-    assert!(*success);
     assert!(error.is_none());
     assert_eq!(Some(call_id), tool_call_ids.first());
     assert_eq!(tool_call_ids.len(), 1);

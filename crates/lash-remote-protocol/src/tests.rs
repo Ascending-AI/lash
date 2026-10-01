@@ -423,7 +423,12 @@ fn remote_turn_result_json_round_trips() {
             provider_call_id: None,
             tool_name: "demo".to_string(),
             args: serde_json::json!({"x": 1}),
-            outcome: RemoteToolCallOutcome::Success(serde_json::json!({"ok": true})),
+            output: RemoteToolCallOutput {
+                outcome: RemoteToolCallOutcome::Success(serde_json::json!({"ok": true})),
+                control: None,
+                view: None,
+                projection_value: None,
+            },
         }],
         llm_calls: vec![call_record.clone()],
         issues: Vec::new(),

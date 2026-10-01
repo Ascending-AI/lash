@@ -66,7 +66,7 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
             lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
                 frame_key, task, ..
             } => {
-                // See `observations::encode_remote_tool_call_output` for the projection boundary.
+                // Observation outputs project frame switches without seed bodies.
                 Self::AgentFrameSwitch {
                     frame_key: frame_key.as_str().to_string(),
                     task,
@@ -288,24 +288,96 @@ impl From<lash_core::ToolCallRecord> for RemoteToolCallRecord {
             provider_call_id,
             tool_name: tool,
             args,
-            outcome: output.into(),
+            output: output.into(),
         }
     }
 }
 
-impl From<lash_core::ToolCallOutput> for RemoteToolCallOutcome {
+impl From<lash_core::ToolCallOutput> for RemoteToolCallOutput {
     fn from(value: lash_core::ToolCallOutput) -> Self {
-        // See `observations::encode_remote_tool_call_output` for the projection boundary.
         let lash_core::ToolCallOutput {
             outcome,
-            control: _,
-            view: _,
-            projection_value: _,
+            control,
+            view,
+            projection_value,
         } = value;
-        match outcome {
+        Self {
+            outcome: outcome.into(),
+            control: control.map(Into::into),
+            view,
+            projection_value,
+        }
+    }
+}
+
+impl From<lash_core::ToolCallOutcome> for RemoteToolCallOutcome {
+    fn from(value: lash_core::ToolCallOutcome) -> Self {
+        match value {
             lash_core::ToolCallOutcome::Success(value) => Self::Success(value.to_json_value()),
-            lash_core::ToolCallOutcome::Failure(value) => Self::Failure(value.to_json_value()),
-            lash_core::ToolCallOutcome::Cancelled(value) => Self::Cancelled(value.to_json_value()),
+            lash_core::ToolCallOutcome::Failure(failure) => Self::Failure(failure.into()),
+            lash_core::ToolCallOutcome::Cancelled(cancellation) => {
+                Self::Cancelled(cancellation.into())
+            }
+        }
+    }
+}
+
+impl From<lash_core::ToolFailure> for RemoteToolFailure {
+    fn from(value: lash_core::ToolFailure) -> Self {
+        let lash_core::ToolFailure {
+            class,
+            code,
+            message,
+            source,
+            retry,
+            raw,
+        } = value;
+        Self {
+            class: class.into(),
+            code,
+            message,
+            source,
+            retry,
+            raw: raw.map(|value| value.to_json_value()),
+        }
+    }
+}
+
+impl From<lash_core::ToolCancellation> for RemoteToolCancellation {
+    fn from(value: lash_core::ToolCancellation) -> Self {
+        let lash_core::ToolCancellation {
+            message,
+            source,
+            origin,
+            raw,
+        } = value;
+        Self {
+            message,
+            source,
+            origin,
+            raw: raw.map(|value| value.to_json_value()),
+        }
+    }
+}
+
+impl From<lash_core::ToolControl> for RemoteToolControlProjection {
+    fn from(value: lash_core::ToolControl) -> Self {
+        match value {
+            lash_core::ToolControl::SwitchAgentFrame {
+                frame_key,
+                initial_nodes,
+                task,
+            } => Self::SwitchAgentFrame {
+                frame_key,
+                seed_count: initial_nodes.len(),
+                task,
+            },
+            lash_core::ToolControl::Finish { value } => Self::Finish {
+                value: value.to_json_value(),
+            },
+            lash_core::ToolControl::Fail { failure } => Self::Fail {
+                failure: failure.into(),
+            },
         }
     }
 }

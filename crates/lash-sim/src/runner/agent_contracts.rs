@@ -1495,9 +1495,7 @@ fn agent_failed_child_activity_facts(
     for activity in events {
         match &activity.event {
             lash::TurnEvent::CodeBlockCompleted {
-                success: false,
-                error: Some(error),
-                ..
+                error: Some(error), ..
             } => failed_code_block_errors.push(error.clone()),
             lash::TurnEvent::Error { message } => turn_error_messages.push(message.clone()),
             lash::TurnEvent::FinalValue { .. } => final_value_event_count += 1,
