@@ -60,11 +60,28 @@ pub enum TraceLashlangEventTransition {
 }
 
 /// One canonical event retained so a persisted snapshot can be folded again.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphHistoryEvent {
     pub identity: TraceLashlangEventIdentity,
     pub timestamp: DateTime<Utc>,
     pub event: TraceLanguageExecution,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static HISTORY_CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl Clone for TraceLashlangGraphHistoryEvent {
+    fn clone(&self) -> Self {
+        #[cfg(test)]
+        HISTORY_CLONES.with(|count| count.set(count.get() + 1));
+        Self {
+            identity: self.identity.clone(),
+            timestamp: self.timestamp,
+            event: self.event.clone(),
+        }
+    }
 }
 
 /// Why two records under one logical identity did not deduplicate.

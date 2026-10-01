@@ -35,8 +35,8 @@ use lash_core::{
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{PROCESS_CURSOR_UNROUTED_EPOCH, ProcessId};
 use lash_trace::{
-    TraceEvent, TraceLanguageExecutionPayload, TraceLashlangGraph, TraceLashlangGraphCompleteness,
-    TraceLashlangGraphStore, TraceRecord, TraceRuntimeSubject, TraceSink, TraceSinkError,
+    TraceEvent, TraceLanguageExecutionPayload, TraceLashlangGraph, TraceLashlangGraphAccumulator,
+    TraceLashlangGraphCompleteness, TraceRecord, TraceRuntimeSubject, TraceSink, TraceSinkError,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -373,10 +373,8 @@ enum PublishedNotification {
     Replaced(ProcessObservationGapReason),
 }
 
-/// The live records one graph fold takes at most. A fold rebuilds the whole
-/// bounded snapshot, so its cost does not depend on how many records it
-/// takes: folding each record as it arrives made a loop's observations cost
-/// one snapshot rebuild apiece, on every replay of the body (FIG-4499).
+/// The live records one accumulator update takes at most. Snapshot projection
+/// happens at capture; folding a batch updates only its occurrence indexes.
 const LIVE_FOLD_BATCH: usize = 256;
 
 struct ProcessState {
@@ -386,7 +384,7 @@ struct ProcessState {
     /// The key of the graph this route publishes, set by its first record.
     graph_key: Option<String>,
     /// The live graph through every published record but `unfolded`.
-    current_graph: Option<TraceLashlangGraph>,
+    current_graph: TraceLashlangGraphAccumulator,
     /// Published records the graph has not folded yet, at most
     /// `LIVE_FOLD_BATCH`. Folding partitions equals folding their
     /// concatenation, so the graph a capture reads is the one a fold per
@@ -410,7 +408,7 @@ impl ProcessState {
             position: 0,
             base_position: 0,
             graph_key: None,
-            current_graph: None,
+            current_graph: TraceLashlangGraphAccumulator::default(),
             unfolded: Vec::new(),
             #[cfg(test)]
             folds: 0,
@@ -463,17 +461,12 @@ impl ProcessState {
         {
             self.folds += 1;
         }
-        // Every record of a route carries the route's graph key, so the fold
-        // has no refusal left to make; a refused batch leaves the graph as
-        // it was.
-        if let Ok(graph) = TraceLashlangGraphStore::fold(self.current_graph.as_ref(), &records) {
-            self.current_graph = Some(graph);
-        }
+        let _ = self.current_graph.fold(&records);
     }
 
     fn live_projection(&mut self) -> ProcessObservationProjection {
         self.fold_unfolded();
-        let Some(graph) = self.current_graph.clone() else {
+        let Some(graph) = self.current_graph.snapshot() else {
             return ProcessObservationProjection {
                 graph: None,
                 completeness: ProcessObservationCompleteness::Incomplete {

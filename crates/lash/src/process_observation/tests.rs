@@ -9,7 +9,7 @@ use super::*;
 use lash_trace::{
     TraceContext, TraceLanguageExecution, TraceLanguageExecutionGeneration,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapNode,
-    TraceRuntimeScope,
+    TraceLashlangGraphStore, TraceRuntimeScope,
 };
 
 const TICK: &str = "fixture.tick";

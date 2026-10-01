@@ -56,12 +56,12 @@ pub use lash_sansio::{
 };
 pub use lashlang_graph::{
     DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, TraceLashlangEdgeSelection, TraceLashlangEventIdentity,
-    TraceLashlangEventTransition, TraceLashlangGraph, TraceLashlangGraphChildLink,
-    TraceLashlangGraphCompleteness, TraceLashlangGraphConflict, TraceLashlangGraphConflictKind,
-    TraceLashlangGraphEdge, TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent,
-    TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
-    TraceLashlangNodeReport, TraceLashlangNodeRetention, TraceLashlangNodeTerminalRecord,
-    TraceLashlangNodeTerminalStatus, fold_lashlang_graph,
+    TraceLashlangEventTransition, TraceLashlangGraph, TraceLashlangGraphAccumulator,
+    TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
+    TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
+    TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
+    TraceLashlangNodeObservation, TraceLashlangNodeReport, TraceLashlangNodeRetention,
+    TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus, fold_lashlang_graph,
 };
 
 /// Version of the durable trace JSONL schema, written to

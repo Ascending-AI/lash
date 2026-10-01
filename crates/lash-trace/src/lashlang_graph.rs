@@ -15,13 +15,28 @@ use crate::{
     TraceSinkError,
 };
 
+mod accumulator;
 mod model;
+use accumulator::TraceLashlangGraphAccumulator as GraphAccumulator;
+pub use accumulator::TraceLashlangGraphAccumulator;
 pub use model::*;
 
-/// Process-local graph accumulator backed by the same pure fold exposed to hosts.
+/// Process-local indexed accumulator with snapshots matching the pure fold.
 #[derive(Default)]
 pub struct TraceLashlangGraphStore {
-    inner: Mutex<BTreeMap<String, TraceLashlangGraph>>,
+    inner: Mutex<ObservedGraphs>,
+}
+
+#[derive(Default)]
+struct ObservedGraphs {
+    publication: u64,
+    graphs: BTreeMap<String, ObservedGraph>,
+}
+
+struct ObservedGraph {
+    first_publication: u64,
+    last_publication: u64,
+    accumulator: GraphAccumulator,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -39,17 +54,30 @@ pub enum TraceLashlangGraphFoldError {
 impl TraceLashlangGraphStore {
     /// Returns a snapshot for one observed Lashlang graph key.
     pub fn graph(&self, graph_key: &str) -> Option<TraceLashlangGraph> {
-        self.inner.lock_recover().get(graph_key).cloned()
+        let graphs = self.inner.lock_recover();
+        let observed = graphs.graphs.get(graph_key)?;
+        let mut graph = observed.accumulator.snapshot()?;
+        resolve_child_graph_keys(&mut graph, observed.last_publication, &graphs.graphs);
+        Some(graph)
     }
 
     /// Returns snapshots for all observed executions in stable graph-key order.
     pub fn graphs(&self) -> Vec<TraceLashlangGraph> {
-        self.inner.lock_recover().values().cloned().collect()
+        let graphs = self.inner.lock_recover();
+        graphs
+            .graphs
+            .values()
+            .filter_map(|observed| {
+                let mut graph = observed.accumulator.snapshot()?;
+                resolve_child_graph_keys(&mut graph, observed.last_publication, &graphs.graphs);
+                Some(graph)
+            })
+            .collect()
     }
 
     /// Clears all reduced graph projections and replay de-duplication keys.
     pub fn clear(&self) {
-        self.inner.lock_recover().clear();
+        *self.inner.lock_recover() = ObservedGraphs::default();
     }
 
     /// Pure deterministic bounded fold.
@@ -78,10 +106,6 @@ impl TraceLashlangGraphStore {
 }
 
 impl TraceSink for TraceLashlangGraphStore {
-    #[expect(
-        clippy::expect_used,
-        reason = "the event graph key is selected from this same single-record fold input"
-    )]
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
         let TraceEvent::LanguageExecution { language, event } = &record.event else {
             return Ok(());
@@ -95,46 +119,63 @@ impl TraceSink for TraceLashlangGraphStore {
         let _ = language;
         let graph_key = event.identity.graph_key();
         let mut graphs = self.inner.lock_recover();
-        let next = Self::fold(graphs.get(&graph_key), std::slice::from_ref(record))
-            .expect("one language-execution record always forms a valid fold input");
-        graphs.insert(graph_key, next);
-        resolve_child_graph_keys(&mut graphs);
+        graphs.publication += 1;
+        let publication = graphs.publication;
+        let observed = graphs
+            .graphs
+            .entry(graph_key)
+            .or_insert_with(|| ObservedGraph {
+                first_publication: publication,
+                last_publication: publication,
+                accumulator: GraphAccumulator::default(),
+            });
+        observed.last_publication = publication;
+        observed.accumulator.append(record.timestamp, event);
         Ok(())
     }
 }
 
-fn resolve_child_graph_keys(graphs: &mut BTreeMap<String, TraceLashlangGraph>) {
+fn resolve_child_graph_keys(
+    graph: &mut TraceLashlangGraph,
+    parent_publication: u64,
+    graphs: &BTreeMap<String, ObservedGraph>,
+) {
     let process_graphs = graphs
         .values()
-        .filter_map(|graph| {
-            let crate::TraceRuntimeSubject::Process { process_id } = &graph.subject else {
+        .filter_map(|observed| {
+            let identity = observed.accumulator.identity()?;
+            let crate::TraceRuntimeSubject::Process { process_id } = &identity.subject else {
                 return None;
             };
-            let generation = graph
-                .history
-                .first()
-                .and_then(|item| item.event.identity.generation)?;
+            let generation = identity.generation?;
             Some((
                 process_id.clone(),
                 generation.attempt(),
-                graph.graph_key.clone(),
+                identity.graph_key(),
+                observed.first_publication,
             ))
         })
         .collect::<Vec<_>>();
-    for graph in graphs.values_mut() {
-        for child in &mut graph.children {
-            let matches = process_graphs
-                .iter()
-                .filter(|(process_id, attempt, _)| {
-                    process_id == child.child_process_id
-                        && child
-                            .child_attempt
-                            .is_none_or(|expected| expected == *attempt)
-                })
-                .collect::<Vec<_>>();
-            if matches.len() == 1 {
-                child.child_graph_key = Some(matches[0].2.clone());
-            }
+    for child in &mut graph.children {
+        let mut matches = process_graphs
+            .iter()
+            .filter(|(process_id, attempt, _, _)| {
+                process_id == child.child_process_id
+                    && child
+                        .child_attempt
+                        .is_none_or(|expected| expected == *attempt)
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by_key(|entry| entry.3);
+        // Previously, a unique join stayed on the parent snapshot until
+        // its next append rebuilt it. Preserve that publication boundary
+        // when another attempt makes the child ambiguous before a read.
+        if matches.len() == 1
+            || matches
+                .get(1)
+                .is_some_and(|entry| parent_publication < entry.3)
+        {
+            child.child_graph_key = Some(matches[0].2.clone());
         }
     }
 }
