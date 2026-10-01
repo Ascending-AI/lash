@@ -194,8 +194,8 @@ async fn signal_waiting_process_registration() -> ProcessRegistration {
     .expect("store the signal-waiting process artifact");
     let worker = sole_lifted_process_name(&linked.artifact);
     let env_ref = persist_recovery_env_ref().await;
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -205,7 +205,7 @@ async fn signal_waiting_process_registration() -> ProcessRegistration {
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: worker,
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

@@ -67,8 +67,8 @@ pub(super) async fn counting_lashlang_registration() -> ProcessRegistration {
     )
     .await
     .expect("store effect-summary artifact");
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -78,7 +78,7 @@ pub(super) async fn counting_lashlang_registration() -> ProcessRegistration {
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -200,8 +200,8 @@ async fn looping_waiting_registration() -> ProcessRegistration {
     .await
     .expect("store the looping, waiting artifact");
     let worker = sole_lifted_process_name(&linked.artifact);
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -211,7 +211,7 @@ async fn looping_waiting_registration() -> ProcessRegistration {
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: worker,
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

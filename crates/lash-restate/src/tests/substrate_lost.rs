@@ -74,8 +74,8 @@ async fn two_segment_tool_registration() -> ProcessRegistration {
     )
     .await
     .expect("store the two-segment artifact");
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -85,7 +85,7 @@ async fn two_segment_tool_registration() -> ProcessRegistration {
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

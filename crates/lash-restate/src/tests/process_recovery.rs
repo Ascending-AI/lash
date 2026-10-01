@@ -311,14 +311,14 @@ pub(super) async fn trigger_lashlang_registration(resource: &str) -> ProcessRegi
     let mut args = serde_json::Map::new();
     args.insert("resource".to_string(), serde_json::json!(resource));
     let env_ref = persist_recovery_env_ref().await;
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked_module.artifact.module_ref().clone(),
             process_ref,
             host_requirements_ref: linked_module.artifact.host_requirements_ref().clone(),
             process_name: "notify".to_string(),
             args,
-        }),
+        },
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("root")).with_caused_by(
             Some(lash_core::CausalRef::SessionNode {
                 session_id: SessionId::from("root"),
@@ -386,8 +386,8 @@ pub(super) async fn typescript_process_registration() -> ProcessRegistration {
         .process(&worker)
         .expect("worker process declaration");
     let env_ref = persist_recovery_env_ref().await;
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -397,7 +397,7 @@ pub(super) async fn typescript_process_registration() -> ProcessRegistration {
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: worker.clone(),
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -436,8 +436,8 @@ pub(super) async fn sleeping_process_registration() -> ProcessRegistration {
     .expect("store sleeping process artifact");
     let worker = sole_lifted_process_name(&linked.artifact);
     let env_ref = persist_recovery_env_ref().await;
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -447,7 +447,7 @@ pub(super) async fn sleeping_process_registration() -> ProcessRegistration {
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: worker,
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
@@ -513,8 +513,8 @@ pub(super) async fn sleeping_then_tool_process_registration() -> ProcessRegistra
     .await
     .expect("store sleeping post-wake-effect artifact");
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:ok").await;
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -524,7 +524,7 @@ pub(super) async fn sleeping_then_tool_process_registration() -> ProcessRegistra
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

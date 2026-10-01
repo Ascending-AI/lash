@@ -960,8 +960,8 @@ pub(super) async fn segmented_child_await_registration(
     )
     .await
     .expect("store segmented child-await artifact");
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
@@ -971,7 +971,7 @@ pub(super) async fn segmented_child_await_registration(
             host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
             "segmented-child-await-root",
         )),
@@ -1309,14 +1309,14 @@ pub(super) async fn one_tool_engine_registration(
         .process_ref("main")
         .expect("main process ref")
         .clone();
-    ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked_module.artifact.module_ref().clone(),
             process_ref,
             host_requirements_ref: linked_module.artifact.host_requirements_ref().clone(),
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
-        }),
+        },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )

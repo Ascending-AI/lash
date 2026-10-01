@@ -90,14 +90,14 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         .clone();
     let mut args = serde_json::Map::new();
     args.insert("root".to_string(), serde_json::json!("."));
-    let registration = ProcessRegistration::new(
-        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+    let registration = lashlang_registration(
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked_module.artifact.module_ref().clone(),
             process_ref: process_ref.clone(),
             host_requirements_ref: linked_module.artifact.host_requirements_ref().clone(),
             process_name: "scan".to_string(),
             args: args.clone(),
-        }),
+        },
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
         lash_core::Lifetime::Detached,
     )

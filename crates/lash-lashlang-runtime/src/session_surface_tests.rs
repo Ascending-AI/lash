@@ -512,7 +512,6 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     )
     .await
     .expect("publish failing process env");
-    let registry: Arc<dyn ProcessRegistry> = harness.registry();
     let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
     let engine = LashlangProcessEngine::new(
         artifact_store,
@@ -542,8 +541,8 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
             args: serde_json::Map::new(),
         };
         let identity = input.process_identity();
-        let process_id = registry
-            .register_process(
+        let process_id = harness
+            .admit(
                 ProcessRegistration::new(
                     input.into_process_input().expect("process input"),
                     ProcessProvenance::host(),
@@ -552,13 +551,8 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                 .with_admitted_identity(AdmittedProcessIdentity::for_testing(identity))
                 .with_execution_env_ref(Some(env_ref.clone())),
             )
-            .await
-            .expect("register failure process")
-            .id;
+            .await;
         process_ids.insert(name, process_id);
-    }
-    for process_id in process_ids.values() {
-        harness.deliver_start(process_id).await;
     }
     for name in ["scalar", "batch"] {
         let process_id = &process_ids[name];

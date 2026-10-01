@@ -2444,12 +2444,35 @@ pub(super) fn sequential_process_stores() -> (
     )
 }
 
-pub(super) fn lashlang_process_input(
+/// A lashlang registration as its start's registration step would hand it to
+/// the registry (FIG-4527): it carries the configuration the creating engine
+/// records with the row. The laws register on the registry directly, past
+/// that step, and every worker engine they run is built over the default
+/// surface and bounds, so that is what creation records here.
+pub(super) fn lashlang_registration(
     input: lash_lashlang_runtime::LashlangProcessInput,
-) -> ProcessInput {
-    input
-        .into_process_input()
-        .expect("serialize lashlang process input")
+    provenance: lash_core::ProcessProvenance,
+    lifetime: lash_core::Lifetime,
+) -> ProcessRegistration {
+    use lash_core::ProcessEngine as _;
+    let mut registration = ProcessRegistration::new(
+        input
+            .into_process_input()
+            .expect("serialize lashlang process input"),
+        provenance,
+        lifetime,
+    );
+    registration.engine_config = lash_lashlang_runtime::LashlangProcessEngine::new(
+        recovery_artifact_store(),
+        lash_lashlang_runtime::LashlangSurface::default(),
+        RECOVERY_ARTIFACT_BACKEND.worker_recovery(),
+    )
+    .creation_config(&lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::default(),
+        super::process_workflow::recovery_session_policy(),
+    ))
+    .expect("record the creating engine's settings");
+    registration
 }
 
 /// The backend whose Lashlang artifact store the recovery laws share — this
